@@ -1,0 +1,93 @@
+
+python module _fortran ! in
+
+    usercode '''
+    #include "fortran/functionsmodule.h"
+    '''
+    interface  ! in :_fortran
+
+        module meshparams ! in :_fortran:functions.f90
+            integer :: nlocal
+            real(kind=8) :: eps
+
+            integer, allocatable,dimension(:,:) :: gnid
+            integer, allocatable,dimension(:,:) :: fvnid
+            integer, allocatable,dimension(:) :: fvnnb
+
+            real(kind=8), allocatable,dimension(:) :: fvarea
+            real(kind=8), allocatable,dimension(:,:) :: fvelgt
+            real(kind=8), allocatable,dimension(:,:) :: fvvdist
+
+        end module meshparams
+
+        subroutine euclid(p1,p2,norm) ! in :_fortran:functions.f90
+            real(kind=8) dimension(3),intent(in) :: p1
+            real(kind=8) dimension(3),intent(in) :: p2
+            real(kind=8) intent(out) :: norm
+        end subroutine euclid
+
+        subroutine quicksort(array,first,last,indices) ! in :_fortran:functions.f90
+            real(kind=8) dimension(:),intent(inout) :: array
+            integer intent(in) :: first
+            integer intent(in) :: last
+            integer dimension(:),intent(inout) :: indices
+        end subroutine quicksort
+
+        subroutine split(array,low,high,mid,indices) ! in :_fortran:functions.f90
+            real(kind=8) dimension(:),intent(inout) :: array
+            integer intent(in) :: low
+            integer intent(in) :: high
+            integer intent(out) :: mid
+            integer dimension(:),intent(inout) :: indices
+        end subroutine split
+
+        subroutine setHillslopeCoeff(nb,kd,dcoeff,maxnb) ! in :_fortran:functions.f90
+            use meshparams
+            integer :: nb
+            real(kind=8) intent(in) :: kd
+            real(kind=8) dimension(nb,8),intent(out),depend(nb) :: dcoeff
+            integer intent(out) :: maxnb
+        end subroutine setHillslopeCoeff
+
+        subroutine MFDreceivers(nrcv,inids,elev,rcv,slope,dist,wgt,nb) ! in :_fortran:functions.f90
+            use meshparams
+            integer intent(in) :: nrcv
+            integer dimension(nb),intent(in) :: inids
+            real(kind=8) dimension(nb),intent(in),depend(nb) :: elev
+            integer dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: rcv
+            real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: slope
+            real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: dist
+            real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
+            integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
+        end subroutine MFDreceivers
+
+        subroutine fillPIT(sl,elev,fillz,nb) ! in :_fortran:functions.f90
+            use meshparams
+            real(kind=8) intent(in) :: sl
+            real(kind=8) dimension(nb),intent(in) :: elev
+            real(kind=8) dimension(nb),intent(out) :: fillz
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine fillPIT
+
+        subroutine ngbGlob(nb,ngbid) ! in :_fortran:functions.f90
+            use meshparams
+            integer intent(in) :: nb
+            integer dimension(nb,6),intent(in),depend(nb) :: ngbid
+        end subroutine ngbGlob
+
+        subroutine defineTIN(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,n,nb,m) ! in :_fortran:functions.f90
+            use meshparams
+            real(kind=8) dimension(nb,3),intent(in) :: coords
+            integer dimension(n,3),intent(in) :: cells_nodes
+            integer dimension(n,3),intent(in),depend(n) :: cells_edges
+            integer dimension(m,2),intent(in) :: edges_nodes
+            real(kind=8) dimension(nb),intent(in),depend(nb) :: area
+            real(kind=8) dimension(3,n),intent(in),depend(n) :: circumcenter
+            integer dimension(nb,8),intent(out),depend(nb) :: ngbid
+            integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
+            integer, optional,check(shape(coords,0)==nb),depend(coords) :: nb=shape(coords,0)
+            integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
+        end subroutine defineTIN
+
+    end interface
+end python module _fortran
