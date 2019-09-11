@@ -94,7 +94,13 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
                 # Compute Deposition and Sediment Flux
                 _SPMesh.cptSedFlux(self)
-                
+
+                # Compute Sediment Deposition
+                _SPMesh.SedimentDeposition(self)
+
+                # Compute Fresh Sediment Diffusion
+                _SPMesh.SedimentDiffusion(self)
+
                 # Compute Hillslope Diffusion Law
                 _SPMesh.HillSlope(self)
 

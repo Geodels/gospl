@@ -86,9 +86,9 @@ class WriteMesh(object):
             f.create_dataset('erodep',shape=(len(self.lcoords[:,0]),1), dtype='float32', compression='gzip')
             f["erodep"][:,0] = self.cumEDLocal.getArray()
             f.create_dataset('sedLoad',shape=(len(self.lcoords[:,0]),1), dtype='float32', compression='gzip')
-            data = self.vSedLocal.getArray().copy()
-            data[data<1.] = 1
-            f["sedLoad"][:,0] = data
+            # data = self.vSedLocal.getArray().copy()
+            # data[data<1.] = 1
+            f["sedLoad"][:,0] = self.vSedLocal.getArray().copy()
             del data
 
         if MPIrank == 0:

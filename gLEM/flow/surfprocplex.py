@@ -11,6 +11,7 @@ from time import clock
 from gLEM._fortran import fillPIT
 from gLEM._fortran import MFDreceivers
 from gLEM._fortran import setHillslopeCoeff
+from gLEM._fortran import setDiffusionCoeff
 
 MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
@@ -27,6 +28,7 @@ class SPMesh(object):
 
         # KSP solver parameters
         self.rtol = 1.0e-8
+        self.hbot = -500.0
 
         # Identity matrix construction
         self.iMat = self._matrix_build_diag(np.ones(self.npoints))
@@ -45,30 +47,31 @@ class SPMesh(object):
         self.EbLocal = self.hLocal.duplicate()
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
+        self.tmp = self.vSed.duplicate()
+        self.tmpL = self.vSedLocal.duplicate()
 
         # Diffusion matrix construction
-        if self.Cd > 0.:
-            diffCoeffs, maxnb = setHillslopeCoeff(self.npoints,self.Cd*self.dt)
-            self.Diff = self._matrix_build_diag(diffCoeffs[:,0])
+        diffCoeffs, self.maxnb = setHillslopeCoeff(self.npoints,self.Cd*self.dt)
+        self.Diff = self._matrix_build_diag(diffCoeffs[:,0])
 
-            for k in range(0,maxnb):
-                tmpMat = self._matrix_build()
-                indptr = np.arange(0, self.npoints+1, dtype=PETSc.IntType)
-                indices = self.FVmesh_ngbID[:,k].copy()
-                data = np.zeros(self.npoints)
-                ids = np.nonzero(indices<0)
-                indices[ids] = ids
-                data = diffCoeffs[:,k+1]
-                ids = np.nonzero(data==0.)
-                indices[ids] = ids
-                tmpMat.assemblyBegin()
-                tmpMat.setValuesLocalCSR(indptr, indices.astype(PETSc.IntType), data,
-                                         PETSc.InsertMode.INSERT_VALUES)
-                tmpMat.assemblyEnd()
-                self.Diff += tmpMat
-                tmpMat.destroy()
-            del ids, indices, indptr
-            gc.collect()
+        for k in range(0,self.maxnb):
+            tmpMat = self._matrix_build()
+            indptr = np.arange(0, self.npoints+1, dtype=PETSc.IntType)
+            indices = self.FVmesh_ngbID[:,k].copy()
+            data = np.zeros(self.npoints)
+            ids = np.nonzero(indices<0)
+            indices[ids] = ids
+            data = diffCoeffs[:,k+1]
+            ids = np.nonzero(data==0.)
+            indices[ids] = ids
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(indptr, indices.astype(PETSc.IntType), data,
+                                     PETSc.InsertMode.INSERT_VALUES)
+            tmpMat.assemblyEnd()
+            self.Diff += tmpMat
+            tmpMat.destroy()
+        del ids, indices, indptr
+        gc.collect()
 
         return
 
@@ -147,13 +150,24 @@ class SPMesh(object):
 
         t0 = clock()
 
-        # Account for marine regions
-        self.seaID = np.where(h1<=self.sealevel)[0]
-
         # Define multiple flow directions
         self.rcvID, self.slpRcv, self.distRcv, self.wghtVal = MFDreceivers(self.flowDir, self.inIDs, h1)
 
-        # Set depression nodes
+        # Account for marine regions
+        self.seaID = np.where(h1<=self.sealevel)[0]
+
+        # Set deep ocean nodes
+        self.rcvID0 = self.rcvID.copy()
+        self.slpRcv0 = self.slpRcv.copy()
+        self.distRcv0 = self.distRcv.copy()
+        self.wghtVal0 = self.wghtVal.copy()
+
+        deepID = np.where(h1<=self.hbot)[0]
+        self.rcvID0[deepID,:] = np.tile(deepID,(self.flowDir,1)).T
+        self.distRcv0[deepID,:] = 0.
+        self.wghtVal0[deepID,:] = 0.
+
+        # Set marine nodes
         self.rcvID[self.seaID,:] = np.tile(self.seaID,(self.flowDir,1)).T
         self.distRcv[self.seaID,:] = 0.
         self.wghtVal[self.seaID,:] = 0.
@@ -178,7 +192,7 @@ class SPMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
 
         # Perform pit filling
-        nZ = fillPIT(self.sealevel-500.,gZ)
+        nZ = fillPIT(self.sealevel+self.hbot,gZ)
         self._buildFlowDirection(nZ[self.glIDs])
 
         # Update fill elevation
@@ -192,13 +206,17 @@ class SPMesh(object):
             print('Compute pit filling (%0.02f seconds)'% (clock() - t0))
 
         t0 = clock()
-        # Build drainage area matrix
+        # Build transport direction matrices
         WAMat = self.iMat.copy()
+        WAMat0 = self.iMat.copy()
+        indptr = np.arange(0, self.npoints+1, dtype=PETSc.IntType)
+        nodes = indptr[:-1]
+
         for k in range(0, self.flowDir):
+
+            # Drainage area matrix
             tmpMat = self._matrix_build()
             data = -self.wghtVal[:,k].copy()
-            indptr = np.arange(0, self.npoints+1, dtype=PETSc.IntType)
-            nodes = indptr[:-1]
             data[self.rcvID[:,k].astype(PETSc.IntType)==nodes] = 0.0
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(indptr, self.rcvID[:,k].astype(PETSc.IntType),
@@ -206,17 +224,29 @@ class SPMesh(object):
             tmpMat.assemblyEnd()
             WAMat += tmpMat
             tmpMat.destroy()
-        del data, indptr
+
+            # Marine sediment matrix
+            tmpMat0 = self._matrix_build()
+            data0 = -self.wghtVal0[:,k].copy()
+            data0[self.rcvID0[:,k].astype(PETSc.IntType)==nodes] = 0.0
+            tmpMat0.assemblyBegin()
+            tmpMat0.setValuesLocalCSR(indptr, self.rcvID0[:,k].astype(PETSc.IntType),
+                                     data0, PETSc.InsertMode.INSERT_VALUES)
+            tmpMat0.assemblyEnd()
+            WAMat0 += tmpMat0
+            tmpMat0.destroy()
+
+        del data, data0, indptr, nodes
 
         # Solve flow accumulation
-        WAtrans = WAMat.transpose()
-        self.WeightMat = WAtrans.copy()
+        self.wMat = WAMat.transpose().copy()
+        self.wMat0 = WAMat0.transpose().copy()
         if self.tNow == self.tStart:
-            self._solve_KSP(False, self.WeightMat, self.bG, self.FAG)
+            self._solve_KSP(False, self.wMat, self.bG, self.FAG)
         else:
-            self._solve_KSP(True, self.WeightMat, self.bG, self.FAG)
+            self._solve_KSP(True, self.wMat, self.bG, self.FAG)
         WAMat.destroy()
-        WAtrans.destroy()
+        WAMat0.destroy()
 
         self.dm.globalToLocal(self.FAG, self.FAL, 1)
         gc.collect()
@@ -325,12 +355,13 @@ class SPMesh(object):
 
         # Build sediment load matrix
         t0 = clock()
-        SLMat = self.WeightMat.copy()
+        SLMat = self.wMat.copy()
         SLMat -= self.iMat
         SLMat.scale(1.-self.wgth)
         SLMat += self.iMat
         Eb = self.Eb.getArray().copy()
         Eb = np.multiply(Eb,1.0-self.frac_fine)
+
         self.stepED.setArray(Eb)
         self.stepED.pointwiseMult(self.stepED,self.areaGlobal)
         if self.tNow == self.tStart:
@@ -345,24 +376,6 @@ class SPMesh(object):
         del Eb
         gc.collect()
 
-        # Get deposition thickness
-        if self.wgth == 0.:
-            return
-        t0 = clock()
-        self.stepED.set(0.)
-        self.stepED.axpy(-(1.0-self.frac_fine),self.Eb)
-        self.stepED.pointwiseMult(self.stepED,self.areaGlobal)
-        self.stepED.axpy(1.,self.vSed)
-        self.stepED.scale(self.wgth*self.dt/(1.-self.wgth))
-        self.stepED.pointwiseDivide(self.stepED,self.areaGlobal)
-        self.cumED.axpy(1.,self.stepED)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-
-        self.hGlobal.axpy(1.,self.stepED)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
-        if MPIrank == 0 and self.verbose:
-            print('Get River Deposition (%0.02f seconds)'% (clock() - t0))
-
         return
 
     def HillSlope(self):
@@ -376,7 +389,7 @@ class SPMesh(object):
             self.hGlobal.copy(result=self.hOld)
             self._solve_KSP(True, self.Diff, self.hOld, self.hGlobal)
 
-            # Update cumulative erosion/deposition and soil/bedrock elevation
+            # Update cumulative erosion/deposition and elevation
             self.stepED.waxpy(-1.0,self.hOld,self.hGlobal)
             self.cumED.axpy(1.,self.stepED)
             self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
@@ -387,41 +400,127 @@ class SPMesh(object):
 
         return
 
-
-    def SedimentDiffusion(self):
+    def SedimentDeposition(self):
         """
-        Perform marine diffusion from freshly deposited sediments.
+        Perform sediment deposition from incoming river flux.
         """
 
         t0 = clock()
-
         # Get the marine volumetric sediment rate (m3/yr) to diffuse during the time step...
         tmp = self.vSedLocal.getArray().copy()
         depVol = np.zeros(self.npoints)
-        depVol[self.seaID] = tmp[self.seaID]
-        del tmp, depVol
-        gc.collect()
-        # self.sedimentK
+        depVol[self.seaID] = tmp[self.seaID]*self.dt # volume m3
 
-        # self.tmp = self.vSed.duplicate()
-        # self.tmpL = self.vSedLocal.duplicate()
-        # self.tmp.scale(self.dt)
-        # self.tmp.pointwiseDivide(self.tmp,self.areaGlobal)
-        # self.dm.globalToLocal(self.tmp, self.tmpL, 1)
-        # dh = self.tmpL.getArray().copy()
-        # depo = np.zeros(self.npoints)
-        # depo[self.seaID] = dh[self.seaID]
-        # self.tmpL.setArray(depo)
-        # self.dm.localToGlobal(self.tmpL, self.tmp)
+        # Build sediment load matrix
+        h0 = self.hLocal.getArray().copy()
+        hf = self.FillL.getArray().copy()
+        Db = np.zeros(self.npoints)
+        Db[self.seaID] = -0.9*(self.sealevel-h0[self.seaID])
+        Db[Db>0] = 0.
+        Db = np.multiply(Db,self.area)
+        Db += depVol
+        self.tmpL.setArray(Db)
+        self.dm.localToGlobal(self.tmpL, self.stepED)
+        del tmp, depVol, Db
+        gc.collect()
+
+        self._solve_KSP(False, self.wMat0, self.stepED, self.tmp)
+        self.tmp.pointwiseDivide(self.tmp,self.areaGlobal)
+        self.dm.globalToLocal(self.tmp, self.tmpL, 1)
+        tmp = self.tmpL.getArray().copy()
+
+        id = tmp>=0.
+        depo = np.zeros(self.npoints)
+        depo[id] = 0.9*(self.sealevel-h0[id])
+        depo[depo<0] = 0.
+        tmp[hf>self.sealevel] = -1.e6
+        tmp[id] = -1.e6
+
+        id = 0.9*(self.sealevel-h0)+tmp>self.rtol
+        depo[id] += 0.9*(self.sealevel-h0[id])+tmp[id]
+        self.tmpL.setArray(depo)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+
         # self.cumED.axpy(1.,self.tmp)
         # self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
         # self.hGlobal.axpy(1.,self.tmp)
         # self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
-        # self.tmpL.destroy()
-        # self.tmp.destroy()
-        # if MPIrank == 0 and self.verbose:
-        #     print('Fake Marine River Deposition (%0.02f seconds)'% (clock() - t0))
+        del depo, tmp, h0, hf
+        gc.collect()
 
+
+        # Get deposition thickness
+        self.stepED.set(0.)
+        if self.wgth > 0.:
+            self.stepED.axpy(-(1.0-self.frac_fine),self.Eb)
+            self.stepED.pointwiseMult(self.stepED,self.areaGlobal)
+            self.stepED.axpy(1.,self.vSed)
+            self.stepED.scale(self.wgth*self.dt/(1.-self.wgth))
+            self.stepED.pointwiseDivide(self.stepED,self.areaGlobal)
+
+        self.stepED.axpy(1.,self.tmp)
+        self.cumED.axpy(1.,self.stepED)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
+
+        self.hGlobal.axpy(1.,self.stepED)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
-            print('Compute Sediment Diffusion (%0.02f seconds)'% (clock() - t0))
+            print('Perform Sediment Deposition (%0.02f seconds)'% (clock() - t0))
+
+        # if MPIrank == 0 and self.verbose:
+        #     print('Get River Deposition (%0.02f seconds)'% (clock() - t0))
+
+        return
+
+    def SedimentDiffusion(self):
+        """
+        Perform freshly deposited sediment diffusion.
+        """
+
+        t0 = clock()
+        limit = 1.e-1
+        h0 = self.hOldLocal.getArray().copy()
+
+        h = self.hLocal.getArray().copy()
+        dh = h-h0
+        dh[dh<0.] = 0.
+        sedCoeffs = setDiffusionCoeff(self.sedimentK*self.dt, limit, h, dh)
+        sedDiff = self._matrix_build_diag(sedCoeffs[:,0])
+        del h, dh
+        gc.collect()
+
+        for k in range(0,self.maxnb):
+            tmpMat = self._matrix_build()
+            indptr = np.arange(0, self.npoints+1, dtype=PETSc.IntType)
+            indices = self.FVmesh_ngbID[:,k].copy()
+            data = np.zeros(self.npoints)
+            ids = np.nonzero(indices<0)
+            indices[ids] = ids
+            data = sedCoeffs[:,k+1]
+            ids = np.nonzero(data==0.)
+            indices[ids] = ids
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(indptr, indices.astype(PETSc.IntType), data,
+                                     PETSc.InsertMode.INSERT_VALUES)
+            tmpMat.assemblyEnd()
+            sedDiff += tmpMat
+            tmpMat.destroy()
+        del ids, indices, indptr
+        gc.collect()
+
+        # Get erosion values for considered time step
+        self.hGlobal.copy(result=self.hOld)
+        self._solve_KSP(True, sedDiff, self.hOld, self.hGlobal)
+        sedDiff.destroy()
+
+        # Update cumulative erosion/deposition and elevation
+        self.stepED.waxpy(-1.0,self.hOld,self.hGlobal)
+        self.cumED.axpy(1.,self.stepED)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+
+        if MPIrank == 0 and self.verbose:
+            print('Diffuse Top Sediment (%0.02f seconds)'% (clock() - t0))
+
+        return

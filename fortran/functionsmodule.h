@@ -22,3 +22,8 @@
 #define  setHillslopeCoeff_   sethillslopecoeff_
 #define  _setHillslopeCoeff   _sethillslopecoeff
 #define  _setHillslopeCoeff_   _sethillslopecoeff_
+
+#define  setDiffusionCoeff  setdiffusioncoeff
+#define  setDiffusionCoeff_   setdiffusioncoeff_
+#define  _setDiffusionCoeff   _setdiffusioncoeff
+#define  _setDiffusionCoeff_   _setdiffusioncoeff_

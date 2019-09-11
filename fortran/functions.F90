@@ -243,6 +243,52 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff, maxnb)
 
 end subroutine setHillslopeCoeff
 
+subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
+!*****************************************************************************
+! Define freshly deposited sediments diffusion implicit matrix coefficients
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    real( kind=8 ), intent(in) :: Kd
+    real( kind=8 ), intent(in) :: limit
+    real( kind=8 ), intent(in) :: elev(nb)
+    real( kind=8 ), intent(in) :: dh(nb)
+
+    real( kind=8 ), intent(out) :: dcoeff(nb,13)
+
+    integer :: k, p, n
+    real( kind=8 ) :: s1, c, v, limiter
+
+    dcoeff = 0.
+    do k = 1, nb
+      s1 = 0.
+      if(FVarea(k)>0)then
+        c = Kd/FVarea(k)
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            v = c*FVvDist(k,p)/FVeLgt(k,p)
+            n = FVnID(k,p)+1
+            limiter = 0.
+            if(elev(n)>elev(k))then
+              limiter = dh(n)/(dh(n)+limit)
+            elseif(elev(n)<elev(k))then
+              limiter = dh(k)/(dh(k)+limit)
+            endif
+            s1 = s1 + v*limiter
+            dcoeff(k,p+1) = -v*limiter
+          endif
+        enddo
+        dcoeff(k,1) = 1.0 + s1
+      endif
+    enddo
+
+    return
+
+end subroutine setDiffusionCoeff
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! FLOW DIRECTION FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

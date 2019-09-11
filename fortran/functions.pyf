@@ -49,6 +49,16 @@ python module _fortran ! in
             integer intent(out) :: maxnb
         end subroutine setHillslopeCoeff
 
+        subroutine setDiffusionCoeff(kd,limit,elev,dh,dcoeff,nb) ! in :_fortran:functions.f90
+            use meshparams
+            real(kind=8) intent(in) :: kd
+            real(kind=8) intent(in) :: limit
+            real(kind=8) dimension(nb),intent(in) :: elev
+            real(kind=8) dimension(nb),intent(in),depend(nb) :: dh
+            real(kind=8) dimension(nb,13),intent(out),depend(nb) :: dcoeff
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine setDiffusionCoeff
+
         subroutine MFDreceivers(nrcv,inids,elev,rcv,slope,dist,wgt,nb) ! in :_fortran:functions.f90
             use meshparams
             integer intent(in) :: nrcv

@@ -272,12 +272,14 @@ class UnstMesh(object):
         self.hOld.destroy()
         self.hOldLocal.destroy()
         self.stepED.destroy()
-
+        self.tmpL.destroy()
+        self.tmp.destroy()
         self.Eb.destroy()
         self.EbLocal.destroy()
 
         self.iMat.destroy()
-        self.WeightMat.destroy()
+        self.wMat.destroy()
+        self.wMat0.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
         self.dm.destroy()
