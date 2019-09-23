@@ -1,5 +1,6 @@
 import gc
 import numpy as np
+import pandas as pd
 from mpi4py import MPI
 
 import sys,petsc4py
@@ -8,9 +9,8 @@ petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from time import clock
 
-# from gLEM._fortran import fillPIT
-from gLEM._fortran import ngbGlob
 from gLEM._fortran import defineTIN
+from gLEM._fortran import ngbGlob
 
 import meshplex
 from pykdtree.kdtree import KDTree
@@ -28,7 +28,6 @@ class UnstMesh(object):
     """
     def __init__(self):
 
-        self.verbose = True
         self.icosahedralSphereMesh()
 
         return
@@ -67,22 +66,23 @@ class UnstMesh(object):
 
         t0 = clock()
         loadData = np.load(self.meshFile)
-        gCoords = loadData['v']
-        self.gpoints = len(gCoords)
+        self.gCoords = loadData['v']
+        self.gpoints = len(self.gCoords)
         gZ = loadData['z']
         ngbGlob(self.gpoints,loadData['n'])
         del loadData
+        # self.gCoords = self.swarmXYZ.copy()
 
         # From global values to local ones...
-        tree = KDTree(gCoords,leafsize=10)
+        tree = KDTree(self.gCoords,leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
-        nelev = gZ[self.glIDs]
+        nelev = gZ[self.glIDs] #self.swarmZ[self.glIDs]
 
         # From local to global values...
         tree = KDTree(self.lcoords,leafsize=10)
-        distances, self.lgIDs = tree.query(gCoords, k=1)
+        distances, self.lgIDs = tree.query(self.gCoords, k=1)
         self.outIDs = np.where(distances>0.1)[0]
-        del gCoords, tree, distances
+        del tree, distances
 
         # Local/Global mapping
         self.lgmap_row = self.dm.getLGMap()
@@ -90,8 +90,6 @@ class UnstMesh(object):
         offproc = l2g < 0
         l2g[offproc] = -(l2g[offproc] + 1)
         self.lgmap_col = PETSc.LGMap().create(l2g, comm=PETSc.COMM_WORLD)
-        del l2g, offproc, gZ
-        gc.collect()
 
         # Vertex part of an unique partition
         vIS = self.dm.getVertexNumbering()
@@ -106,10 +104,13 @@ class UnstMesh(object):
 
         self.hLocal.setArray(nelev)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        del l2g, offproc, nelev #, gZ
+        gc.collect()
+
         if MPIrank == 0 and self.verbose:
             print('local/global mapping (%0.02f seconds)'% (clock() - t0))
 
-        return nelev
+        return
 
     def icosahedralSphereMesh(self):
         """Generate an icosahedral approximation to the surface of the
@@ -203,13 +204,14 @@ class UnstMesh(object):
             print('mesh coords/cells (%0.02f seconds)'% (clock() - t0))
 
         # Interpolate values from input using inverse weighting distance
-        nelev = self.readDataMesh()
+        self.readDataMesh()
 
         # Create mesh structure with meshplex
         t0 = clock()
         Tmesh = meshplex.MeshTri(self.lcoords,self.lcells)
         self.area = np.abs(Tmesh.control_volumes)
         self.area[np.isnan(self.area)] = 1.
+
         # Voronoi and simplices declaration
         Tmesh.create_edges()
         cc = Tmesh.cell_circumcenters
@@ -237,15 +239,170 @@ class UnstMesh(object):
         self.dm.localToGlobal(areaLocal, self.areaGlobal)
         areaLocal.destroy()
 
-        # Rain
+        # Forcing event number
         self.bG = self.hGlobal.duplicate()
         self.bL = self.hLocal.duplicate()
-        rainval = 1.
-        rainArea = np.full(self.npoints,rainval)
-        rainArea[nelev<self.sealevel] = 0.
-        self.bL.setArray(rainArea*self.area)
+
+        self.rainNb = -1
+        self.tecNb = -1
+
+        return
+
+    def applyForces(self):
+        """
+        Find the different values for climatic and tectonic forces that will be applied to the
+        considered time interval
+        """
+
+        t0 = clock()
+        # Sea level
+        self.sealevel = self.seafunction(self.tNow+self.dt)
+
+        # Climate
+        self._updateRain()
+
+        # Tectonic
+        self._updateTectonic()
+
+        if MPIrank == 0 and self.verbose:
+            print('Update External Forces (%0.02f seconds)'% (clock() - t0))
+
+        return
+
+    def updatePaleomap(self):
+        """
+        Find the paleomap for the considered time interval
+        """
+
+        if self.paleodata is None :
+            return
+
+        for k in range(self.paleoNb):
+            if self.tNow == self.paleodata.iloc[k,0]:
+                loadData = np.load(self.paleodata.iloc[k,1])
+                gZ = loadData['z']
+                self.hLocal.setArray(gZ[self.glIDs])
+                self.dm.localToGlobal(self.hLocal, self.hGlobal)
+                del loadData, gZ
+                gc.collect()
+
+        return
+
+    def _updateRain(self):
+        """
+        Find the current rain values for the considered time interval
+        """
+
+        nb = self.rainNb
+        if nb < len(self.raindata)-1 :
+            if self.raindata.iloc[nb+1,0] <= self.tNow+self.dt :
+                nb += 1
+
+        if nb > self.rainNb or nb == -1:
+            if nb == -1:
+                nb = 0
+
+            self.rainNb = nb
+            if pd.isnull(self.raindata['rUni'][nb]):
+                loadData = np.load(self.raindata.iloc[nb,2])
+                rainArea = loadData[self.raindata.iloc[nb,3]]
+                del loadData
+            else:
+                rainArea = np.full(self.gpoints,self.raindata.iloc[nb,1])
+            self.rainArea = rainArea[self.glIDs]*self.area
+
+        localZ = self.hLocal.getArray()
+        rainArea = self.rainArea.copy()
+        rainArea[localZ<self.sealevel] = 0.
+
+        self.bL.setArray(rainArea)
         self.dm.localToGlobal(self.bL, self.bG, 1)
-        del nelev, rainArea
+
+        del rainArea, localZ
+        gc.collect()
+
+        return
+
+    def _updateTectonic(self):
+        """
+        Find the current tectonic rates for the considered time interval
+        """
+
+        if self.tecdata is None :
+            self.tectonic = None
+            return
+
+        nb = self.tecNb
+        if nb < len(self.tecdata)-1 :
+            if self.tecdata.iloc[nb+1,0] <= self.tNow+self.dt :
+                nb += 1
+
+        if nb > self.tecNb or nb == -1:
+            if nb == -1:
+                nb = 0
+
+            self.tecNb = nb
+            mdata = np.load(self.tecdata.iloc[nb,1])
+
+            if nb < len(self.tecdata.index)-1:
+                timer = self.tecdata.iloc[nb+1,0]-self.tecdata.iloc[nb,0]
+            else:
+                timer = self.tEnd-self.tecdata.iloc[nb,0]
+
+            self._meshAdvectorSphere(mdata['xyz'], timer)
+            del mdata
+
+        return
+
+    def _meshAdvectorSphere(self, tectonic, timer):
+        """
+        Advect spherical mesh horizontally and interpolate mesh information
+        """
+
+        # Move coordinates
+        XYZ = self.gCoords + tectonic*timer
+
+        # Elevation
+        tmp = self.hLocal.getArray().copy()
+        elev = np.zeros(self.gpoints)
+        elev = tmp[self.lgIDs]
+        elev[self.outIDs] = -1.e8
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, elev, op=MPI.MAX)
+
+        # Erosion/deposition
+        tmp = self.cumEDLocal.getArray().copy()
+        erodep = np.zeros(self.gpoints)
+        erodep = tmp[self.lgIDs]
+        erodep[self.outIDs] = -1.e8
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, erodep, op=MPI.MAX)
+
+        # Build kd-tree
+        kk = 3
+        tree = KDTree(XYZ,leafsize=10)
+        distances, indices = tree.query(self.lcoords, k=kk)
+
+        # Inverse weighting distance...
+        if kk == 1:
+            nelev = elev[indices]
+            nerodep = erodep[indices]
+        else:
+            weights = 1.0 / distances**2
+            onIDs = np.where(distances[:,0] == 0)[0]
+            nelev = np.sum(weights*elev[indices],axis=1)/np.sum(weights, axis=1)
+            nerodep = np.sum(weights*erodep[indices],axis=1)/np.sum(weights, axis=1)
+            if len(onIDs)>0:
+                nelev[onIDs] = elev[indices[onIDs,0]]
+                nerodep[onIDs] = erodep[indices[onIDs,0]]
+            del weights
+
+        self.hLocal.setArray(nelev)
+        self.dm.localToGlobal(self.hLocal, self.hGlobal, 1)
+
+        self.cumEDLocal.setArray(nerodep)
+        self.dm.localToGlobal(self.cumEDLocal, self.cumED, 1)
+
+        del XYZ,  elev, nelev, erodep, nerodep
+        del tree, distances, indices
         gc.collect()
 
         return
@@ -269,6 +426,7 @@ class UnstMesh(object):
         self.vSedLocal.destroy()
         self.areaGlobal.destroy()
         self.bG.destroy()
+        self.bL.destroy()
         self.hOld.destroy()
         self.hOldLocal.destroy()
         self.stepED.destroy()

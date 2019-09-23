@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
+from operator import itemgetter
 from scipy.interpolate import interp1d
 
 from mpi4py import MPI
@@ -43,6 +44,9 @@ class ReadYaml(object):
         self._readSPL()
         self._readHillslope()
         self._readSealevel()
+        self._readTectonic()
+        self._readRain()
+        self._readPaleo()
         self._readOut()
 
         self.tNow = self.tStart
@@ -250,6 +254,205 @@ class ReadYaml(object):
             year = np.linspace(self.tStart, self.tEnd+self.dt, num=11, endpoint=True)
             seaval = np.full(len(year),sealevel)
             self.seafunction = interp1d(year, seaval, kind='linear')
+
+        return
+
+    def _readTectonic(self):
+        """
+        Parse tectonic forcing conditions.
+        """
+
+        try:
+            tecDict = self.input['tectonic']
+            tecSort = sorted(tecDict, key=itemgetter('start'))
+            for k in range(len(tecSort)):
+                tecStart = None
+                tMap = None
+                tUniform = None
+                tEnd = None
+                tStep = None
+                try:
+                    tecStart = tecSort[k]['start']
+                except:
+                    print("For each tectonic event a start time is required.")
+                    raise ValueError('Tectonic event {} has no parameter start'.format(k))
+                try:
+                    tMap = tecSort[k]['map']
+                except:
+                    pass
+                try:
+                    tStep = tecSort[k]['step']
+                except:
+                    pass
+                try:
+                    tEnd = tecSort[k]['end']
+                except:
+                    pass
+
+                if tMap is not None:
+                    if self.meshFile != tMap:
+                        try:
+                            with open(tMap) as tecfile:
+                                pass
+                        except IOError as exc:
+                            print("Unable to open tectonic file: ",tMap)
+                            raise IOError('The tectonic file {} is not found for climatic event {}.'.format(tMap,k))
+
+                if tMap is None:
+                    print("For each tectonic event a tectonic grid (map) is required.")
+                    raise ValueError('Tectonic event {} has no tectonic map (map).'.format(k))
+
+                tmpTec = []
+                tmpTec.insert(0, {'start': tecStart, 'tMap': tMap})
+
+                if k == 0:
+                    tecdata = pd.DataFrame(tmpTec, columns=['start', 'tMap'])
+                else:
+                    tecdata = pd.concat([tecdata,pd.DataFrame(tmpTec, columns=['start', 'tMap'])], ignore_index=True)
+
+                if tStep is not None:
+                    if tEnd is not None:
+                        tectime = tecStart+tStep
+                        while tectime<tEnd:
+                            tmpTec = []
+                            tmpTec.insert(0, {'start': tectime, 'tMap': tMap})
+                            tecdata = pd.concat([tecdata,pd.DataFrame(tmpTec, columns=['start', 'tMap'])], ignore_index=True)
+                            tectime = tectime+tStep
+
+            if tecdata['start'][0] > self.tStart:
+                tmpTec = []
+                tmpTec.insert(0, {'start': self.tStart, 'tMap': None})
+                tecdata = pd.concat([pd.DataFrame(tmpTec, columns=['start', 'tMap']),tecdata], ignore_index=True)
+            self.tecdata = tecdata
+
+        except KeyError as exc:
+            self.tecdata = None
+            pass
+
+        return
+
+    def _readRain(self):
+        """
+        Parse rain forcing conditions.
+        """
+        try:
+            rainDict = self.input['climate']
+            rainSort = sorted(rainDict, key=itemgetter('start'))
+            for k in range(len(rainSort)):
+                rStart = None
+                rUniform = None
+                rMap = None
+                try:
+                    rStart = rainSort[k]['start']
+                except:
+                    print("For each climate event a start time is required.")
+                    raise ValueError('Climate event {} has no parameter start'.format(k))
+                try:
+                    rUniform = rainSort[k]['uniform']
+                except:
+                    pass
+                try:
+                    rMap = rainSort[k]['map']
+                except:
+                    pass
+
+                if rMap is not None:
+                    if self.meshFile != rMap[0]:
+                        try:
+                            with open(rMap[0]) as rainfile:
+                                pass
+                        except IOError as exc:
+                            print("Unable to open rain file: ",rMap[0])
+                            raise IOError('The rain file {} is not found for climatic event {}.'.format(rMap[0],k))
+
+                        mdata = meshio.read(rMap[0])
+                        rainSet = mdata.point_data
+                    else:
+                        rainSet = self.mdata.point_data
+                    try:
+                        rainKey = rainSet[rMap[1]]
+                    except KeyError as exc:
+                        print("Field name {} is missing from rain file {}".format(rMap[1],rMap[0]))
+                        print("The following fields are available: ",rainSet.keys())
+                        print("Check your rain file fields definition...")
+                        raise KeyError('Field name for rainfall is not defined correctly or does not exist!')
+
+
+                if rMap is None and rUniform is None:
+                    print("For each climate event a rainfall value (uniform) or a rainfall grid (map) is required.")
+                    raise ValueError('Climate event {} has no rainfall value (uniform) or a rainfall map (map).'.format(k))
+
+                tmpRain = []
+                if rMap is None:
+                    tmpRain.insert(0, {'start': rStart, 'rUni': rUniform, 'rMap': None, 'rKey': None})
+                else:
+                    tmpRain.insert(0, {'start': rStart, 'rUni': None, 'rMap': rMap[0], 'rKey': rMap[1]})
+
+                if k == 0:
+                    raindata = pd.DataFrame(tmpRain, columns=['start', 'rUni', 'rMap', 'rKey'])
+                else:
+                    raindata = pd.concat([raindata,pd.DataFrame(tmpRain, columns=['start', 'rUni', 'rMap', 'rKey'])],
+                                                         ignore_index=True)
+
+            if raindata['start'][0] > self.tStart:
+                tmpRain = []
+                tmpRain.insert(0, {'start': self.tStart, 'rUni': 0., 'rMap': None, 'rKey': None})
+                raindata = pd.concat([pd.DataFrame(tmpRain, columns=['start', 'rUni', 'rMap', 'rKey']),raindata],
+                                                                              ignore_index=True)
+            self.raindata = raindata
+
+        except KeyError as exc:
+            self.raindata = None
+            pass
+
+        return
+
+    def _readPaleo(self):
+        """
+        Parse paleomap forcing conditions.
+        """
+        try:
+            paleoDict = self.input['paleomap']
+            paleoSort = sorted(paleoDict, key=itemgetter('time'))
+            for k in range(len(paleoSort)):
+                pTime = None
+                pMap = None
+                try:
+                    pTime = paleoSort[k]['time']
+                except:
+                    print("For each paleomap a given time is required.")
+                    raise ValueError('Paleomap {} has no parameter time'.format(k))
+                try:
+                    pMap = paleoSort[k]['npdata']
+                except:
+                    pass
+
+                if pMap is not None:
+
+                    try:
+                        with open(pMap+'.npz') as meshfile:
+                            pass
+                    except IOError as exc:
+                        print("Unable to open numpy dataset: ",pMap+'.npz')
+                        raise IOError('The numpy dataset is not found...')
+
+
+                tmpPaleo = []
+                tmpPaleo.insert(0, {'time': pTime, 'pMap': pMap+'.npz'})
+
+                if k == 0:
+                    paleodata = pd.DataFrame(tmpPaleo, columns=['time', 'pMap'])
+                else:
+                    paleodata = pd.concat([paleodata,pd.DataFrame(tmpPaleo, columns=['time', 'pMap'])],
+                                                         ignore_index=True)
+
+            self.paleodata = paleodata
+            self.paleoNb = len(paleodata)
+
+        except KeyError as exc:
+            self.paleodata = None
+            self.paleoNb = 0
+            pass
 
         return
 

@@ -48,15 +48,19 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
             self.modelRunTime = clock()
             self.verbose = verbose
+            self.verbose = True
 
             # Read input dataset
             _ReadYaml.__init__(self, filename)
 
+            # Initialise output mesh
+            _WriteMesh.__init__(self)
+
             # Define unstructured mesh
             _UnstMesh.__init__(self)
 
-            # Initialise output mesh
-            _WriteMesh.__init__(self)
+            # Get external forces
+            _UnstMesh.applyForces(self)
 
             # Surface processes initialisation
             _SPMesh.__init__(self,*args, **kwargs)
@@ -80,6 +84,9 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
             while(self.tNow<=self.tEnd):
                 tstep = clock()
+
+                # Check paleomap forcing
+                _UnstMesh.updatePaleomap(self)
 
                 # Compute Flow Accumulation
                 _SPMesh.FlowAccumulation(self)
@@ -108,6 +115,10 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 if self.tNow >= self.saveTime:
                     _WriteMesh.outputMesh(self)
                     self.saveTime += self.tout
+
+                # Update Tectonic, Sea-level & Climatic conditions
+                if self.tNow < self.tEnd:
+                    _UnstMesh.applyForces(self)
 
                 # Advance time
                 self.tNow += self.dt

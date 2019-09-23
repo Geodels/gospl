@@ -440,14 +440,8 @@ class SPMesh(object):
         depo[id] += 0.9*(self.sealevel-h0[id])+tmp[id]
         self.tmpL.setArray(depo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-
-        # self.cumED.axpy(1.,self.tmp)
-        # self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-        # self.hGlobal.axpy(1.,self.tmp)
-        # self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
         del depo, tmp, h0, hf
         gc.collect()
-
 
         # Get deposition thickness
         self.stepED.set(0.)
@@ -467,9 +461,6 @@ class SPMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print('Perform Sediment Deposition (%0.02f seconds)'% (clock() - t0))
-
-        # if MPIrank == 0 and self.verbose:
-        #     print('Get River Deposition (%0.02f seconds)'% (clock() - t0))
 
         return
 
