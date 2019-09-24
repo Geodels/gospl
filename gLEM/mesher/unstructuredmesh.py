@@ -71,17 +71,17 @@ class UnstMesh(object):
         gZ = loadData['z']
         ngbGlob(self.gpoints,loadData['n'])
         del loadData
-        # self.gCoords = self.swarmXYZ.copy()
 
         # From global values to local ones...
         tree = KDTree(self.gCoords,leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
-        nelev = gZ[self.glIDs] #self.swarmZ[self.glIDs]
+        nelev = gZ[self.glIDs]
 
         # From local to global values...
-        tree = KDTree(self.lcoords,leafsize=10)
-        distances, self.lgIDs = tree.query(self.gCoords, k=1)
-        self.outIDs = np.where(distances>0.1)[0]
+        self.lgIDs = -np.ones(self.gpoints,dtype=int)
+        self.lgIDs[self.glIDs] = np.arange(self.npoints)
+        self.outIDs = np.where(self.lgIDs<0)[0]
+        self.lgIDs[self.lgIDs<0] = 0
         del tree, distances
 
         # Local/Global mapping
@@ -434,10 +434,12 @@ class UnstMesh(object):
         self.tmp.destroy()
         self.Eb.destroy()
         self.EbLocal.destroy()
+        self.vGlob.destroy()
 
         self.iMat.destroy()
         self.wMat.destroy()
         self.wMat0.destroy()
+        self.Diff.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
         self.dm.destroy()

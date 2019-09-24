@@ -31,6 +31,8 @@ class SPMesh(object):
         self.hbot = -500.0
 
         # Identity matrix construction
+        self.I = np.arange(0, self.npoints+1, dtype=PETSc.IntType)
+        self.J = np.arange(0, self.npoints, dtype=PETSc.IntType)
         self.iMat = self._matrix_build_diag(np.ones(self.npoints))
 
         # Petsc vectors
@@ -41,14 +43,13 @@ class SPMesh(object):
         self.hOld = self.hGlobal.duplicate()
         self.hOldLocal = self.hLocal.duplicate()
         self.stepED = self.hGlobal.duplicate()
+        self.tmp = self.hGlobal.duplicate()
         self.tmpL = self.hLocal.duplicate()
         self.vGlob = self.hGlobal.duplicate()
         self.Eb = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
-        self.tmp = self.vSed.duplicate()
-        self.tmpL = self.vSedLocal.duplicate()
 
         # Diffusion matrix construction
         diffCoeffs, self.maxnb = setHillslopeCoeff(self.npoints,self.Cd*self.dt)
@@ -70,7 +71,7 @@ class SPMesh(object):
             tmpMat.assemblyEnd()
             self.Diff += tmpMat
             tmpMat.destroy()
-        del ids, indices, indptr
+        del ids, indices, indptr, diffCoeffs
         gc.collect()
 
         return
@@ -97,12 +98,9 @@ class SPMesh(object):
         matrix = self._matrix_build()
 
         # Define diagonal matrix
-        I = np.arange(0, self.npoints+1, dtype=PETSc.IntType)
-        J = np.arange(0, self.npoints, dtype=PETSc.IntType)
         matrix.assemblyBegin()
-        matrix.setValuesLocalCSR(I, J, V, PETSc.InsertMode.INSERT_VALUES)
+        matrix.setValuesLocalCSR(self.I, self.J, V, PETSc.InsertMode.INSERT_VALUES)
         matrix.assemblyEnd()
-        del I, J
 
         return matrix
 
@@ -237,6 +235,7 @@ class SPMesh(object):
             tmpMat0.destroy()
 
         del data, data0, indptr, nodes
+        gc.collect()
 
         # Solve flow accumulation
         self.wMat = WAMat.transpose().copy()
@@ -249,7 +248,6 @@ class SPMesh(object):
         WAMat0.destroy()
 
         self.dm.globalToLocal(self.FAG, self.FAL, 1)
-        gc.collect()
 
         if MPIrank == 0 and self.verbose:
             print('Compute Flow Accumulation (%0.02f seconds)'% (clock() - t0))
@@ -291,12 +289,11 @@ class SPMesh(object):
                                      data, PETSc.InsertMode.INSERT_VALUES)
             tmpMat.assemblyEnd()
             EbedMat += tmpMat
-            Mdiag = self._matrix_build_diag(data)
-            EbedMat -= Mdiag
+            EbedMat -= self._matrix_build_diag(data)
             tmpMat.destroy()
-            Mdiag.destroy()
-            del data
-        del dh, limiter, wght
+
+        del dh, limiter, wght, data
+        gc.collect()
 
         # Solve bedrock erosion thickness
         self._solve_KSP(True, EbedMat, self.hOld, self.vGlob)
@@ -314,7 +311,9 @@ class SPMesh(object):
         E[self.pitID] = 0.
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb, 1)
+
         del E, Kcoeff, Kbr
+        gc.collect()
 
         return
 
@@ -330,6 +329,7 @@ class SPMesh(object):
         self.hGlobal.copy(result=self.hOld)
         self.dm.globalToLocal(self.hOld, self.hOldLocal, 1)
         self.hOldArray = self.hOldLocal.getArray().copy()
+
         self._getErosionRate()
 
         # Update bedrock thicknesses due to erosion
@@ -340,9 +340,7 @@ class SPMesh(object):
 
         self.hGlobal.axpy(1.,self.stepED)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
-        del Eb
-        gc.collect()
-
+        
         if MPIrank == 0 and self.verbose:
             print('Get Erosion Thicknesses (%0.02f seconds)'% (clock() - t0))
 
@@ -369,6 +367,7 @@ class SPMesh(object):
         else :
             self._solve_KSP(True, SLMat, self.stepED, self.vSed)
         SLMat.destroy()
+
         # Update local vector
         self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
         if MPIrank == 0 and self.verbose:

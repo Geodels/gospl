@@ -47,8 +47,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 self.log.begin()
 
             self.modelRunTime = clock()
-            self.verbose = verbose
-            self.verbose = True
+            self.verbose = True #verbose
 
             # Read input dataset
             _ReadYaml.__init__(self, filename)
