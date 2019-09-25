@@ -195,10 +195,12 @@ class UnstMesh(object):
         # Define local vertex & cells
         cStart, cEnd = self.dm.getHeightStratum(0)
         self.lcells = np.zeros((cEnd-cStart,3), dtype=PETSc.IntType)
+        point_closure = None
         for c in range(cStart, cEnd):
             point_closure = self.dm.getTransitiveClosure(c)[0]
             self.lcells[c,:] = point_closure[-3:]-cEnd
-        del point_closure
+        if point_closure is not None:
+            del point_closure
         gc.collect()
         if MPIrank == 0 and self.verbose:
             print('mesh coords/cells (%0.02f seconds)'% (clock() - t0))
