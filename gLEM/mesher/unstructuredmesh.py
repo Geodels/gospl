@@ -28,7 +28,10 @@ class UnstMesh(object):
     """
     def __init__(self):
 
-        self.icosahedralSphereMesh()
+        if self.reflevel>0:
+            self.icosahedralSphereMesh()
+        else:
+            self.buildMesh()
 
         return
 
@@ -59,7 +62,6 @@ class UnstMesh(object):
                                         np.zeros(cell_shape, dtype=np.int32),
                                         np.zeros(coord_shape, dtype=np.double),
                                         comm=PETSc.COMM_WORLD)
-
         return
 
     def readDataMesh(self):
@@ -104,11 +106,40 @@ class UnstMesh(object):
 
         self.hLocal.setArray(nelev)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        del l2g, offproc, nelev #, gZ
+        del l2g, offproc, nelev, gZ
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
             print('local/global mapping (%0.02f seconds)'% (clock() - t0))
+
+        return
+
+    def meshStructure(self):
+        """
+        Define the mesh structure and the associated voronoi
+        """
+
+        # Create mesh structure with meshplex
+        t0 = clock()
+        Tmesh = meshplex.MeshTri(self.lcoords,self.lcells)
+        self.area = np.abs(Tmesh.control_volumes)
+        self.area[np.isnan(self.area)] = 1.
+
+        # Voronoi and simplices declaration
+        Tmesh.create_edges()
+        cc = Tmesh.cell_circumcenters
+        edges_nodes = Tmesh.edges['nodes']
+        cells_nodes = Tmesh.cells['nodes']
+        cells_edges = Tmesh.cells['edges']
+
+        # Finite volume discretisation
+        self.FVmesh_ngbID = defineTIN(self.lcoords, cells_nodes, cells_edges,
+                                      edges_nodes, self.area, cc.T)
+        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
+        gc.collect()
+
+        if MPIrank == 0 and self.verbose:
+            print('fv discretisation (%0.02f seconds)'% (clock() - t0))
 
         return
 
@@ -209,24 +240,142 @@ class UnstMesh(object):
         self.readDataMesh()
 
         # Create mesh structure with meshplex
-        t0 = clock()
-        Tmesh = meshplex.MeshTri(self.lcoords,self.lcells)
-        self.area = np.abs(Tmesh.control_volumes)
-        self.area[np.isnan(self.area)] = 1.
+        self.meshStructure()
 
-        # Voronoi and simplices declaration
-        Tmesh.create_edges()
-        cc = Tmesh.cell_circumcenters
-        edges_nodes = Tmesh.edges['nodes']
-        cells_nodes = Tmesh.cells['nodes']
-        cells_edges = Tmesh.cells['edges']
-        # Finite volume discretisation
-        self.FVmesh_ngbID = defineTIN(self.lcoords, cells_nodes, cells_edges,
-                                      edges_nodes, self.area, cc.T)
-        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
+        self.cumED = self.hGlobal.duplicate()
+        self.cumED.set(0.0)
+        self.cumEDLocal = self.hLocal.duplicate()
+        self.cumEDLocal.set(0.0)
+
+        self.sealevel = self.seafunction(self.tNow+self.dt)
+
+        areaLocal = self.hLocal.duplicate()
+        self.areaGlobal = self.hGlobal.duplicate()
+        areaLocal.setArray(self.area)
+        self.dm.localToGlobal(areaLocal, self.areaGlobal)
+        areaLocal.destroy()
+
+        # Forcing event number
+        self.bG = self.hGlobal.duplicate()
+        self.bL = self.hLocal.duplicate()
+
+        self.rainNb = -1
+        self.tecNb = -1
+
+        return
+
+    def buildMesh(self):
+        """
+        Construct a PETSC mesh and distribute it amongst the different processors.
+        """
+
+        # Read mesh attributes from file
+        t0 = clock()
+        loadData = np.load(self.meshFile)
+        self.gCoords = loadData['v']
+        self.gpoints = len(self.gCoords)
+        gZ = loadData['z']
+        ngbGlob(self.gpoints,loadData['n'])
+        if MPIrank == 0 and self.verbose:
+            print('reading mesh information (%0.02f seconds)' % (clock() - t0))
+
+        # Create DMPlex
+        self.meshfrom_cell_list(2, loadData['c'], self.gCoords)
+        del loadData
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print('fv discretisation (%0.02f seconds)'% (clock() - t0))
+            print('create DMPlex (%0.02f seconds)'% (clock() - t0))
+
+        # Define one DoF on the nodes
+        t0 = clock()
+        self.dm.setNumFields(1)
+        origSect = self.dm.createSection(1, [1,0,0])
+        origSect.setFieldName(0, "points")
+        origSect.setUp()
+        self.dm.setDefaultSection(origSect)
+        origVec = self.dm.createGlobalVector()
+
+        # Distribute to other processors if any
+        if MPIsize > 1:
+            sf = self.dm.distribute(overlap=1)
+            newSect, newVec = self.dm.distributeField(sf, origSect, origVec)
+            self.dm.setDefaultSection(newSect)
+            newSect.destroy()
+            newVec.destroy()
+            sf.destroy()
+        origVec.destroy()
+        origSect.destroy()
+        if MPIrank == 0 and self.verbose:
+            print('distribute DMPlex (%0.02f seconds)'% (clock() - t0))
+
+        # Define local vertex & cells
+        t0 = clock()
+        self.lcoords = self.dm.getCoordinatesLocal().array.reshape(-1, 3)
+        self.npoints = self.lcoords.shape[0]
+        cStart, cEnd = self.dm.getHeightStratum(0)
+        self.lcells = np.zeros((cEnd-cStart,3), dtype=PETSc.IntType)
+        point_closure = None
+        for c in range(cStart, cEnd):
+            point_closure = self.dm.getTransitiveClosure(c)[0]
+            self.lcells[c,:] = point_closure[-3:]-cEnd
+        if point_closure is not None:
+            del point_closure
+        gc.collect()
+        if MPIrank == 0 and self.verbose:
+            print('mesh coords/cells (%0.02f seconds)'% (clock() - t0))
+
+        # Define local vertex & cells
+        t = clock()
+        cStart, cEnd = self.dm.getHeightStratum(0)
+        # Dealing with triangular cells only
+        self.lcells = np.zeros((cEnd-cStart,3), dtype=PETSc.IntType)
+        for c in range(cStart, cEnd):
+            point_closure = self.dm.getTransitiveClosure(c)[0]
+            self.lcells[c,:] = point_closure[-3:]-cEnd
+        del point_closure
+        if MPIrank == 0 and self.verbose:
+            print('defining local DMPlex (%0.02f seconds)'% (clock() - t))
+
+        # From global values to local ones...
+        tree = KDTree(self.gCoords,leafsize=10)
+        distances, self.glIDs = tree.query(self.lcoords, k=1)
+        nelev = gZ[self.glIDs]
+
+        # From local to global values...
+        self.lgIDs = -np.ones(self.gpoints,dtype=int)
+        self.lgIDs[self.glIDs] = np.arange(self.npoints)
+        self.outIDs = np.where(self.lgIDs<0)[0]
+        self.lgIDs[self.lgIDs<0] = 0
+        del tree, distances
+
+        # Local/Global mapping
+        self.lgmap_row = self.dm.getLGMap()
+        l2g = self.lgmap_row.indices.copy()
+        offproc = l2g < 0
+        l2g[offproc] = -(l2g[offproc] + 1)
+        self.lgmap_col = PETSc.LGMap().create(l2g, comm=PETSc.COMM_WORLD)
+
+        # Vertex part of an unique partition
+        vIS = self.dm.getVertexNumbering()
+        self.inIDs = np.zeros(self.npoints,dtype=int)
+        self.inIDs[vIS.indices>=0] = 1
+        vIS.destroy()
+
+        # Local/Global vectors
+        self.hGlobal = self.dm.createGlobalVector()
+        self.hLocal = self.dm.createLocalVector()
+        self.sizes = self.hGlobal.getSizes(), self.hGlobal.getSizes()
+
+        self.hLocal.setArray(nelev)
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        del l2g, offproc, nelev, gZ
+        gc.collect()
+
+        if MPIrank == 0 and self.verbose:
+            print('local/global mapping (%0.02f seconds)'% (clock() - t0))
+
+        # Create mesh structure with meshplex
+        self.meshStructure()
 
         self.cumED = self.hGlobal.duplicate()
         self.cumED.set(0.0)

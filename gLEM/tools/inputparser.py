@@ -78,15 +78,18 @@ class ReadYaml(object):
         try:
             self.reflevel = domainDict['refinement']
         except KeyError as exc:
-            self.reflevel = 9
+            self.reflevel = 0
 
         try:
             meshFile = domainDict['npdata']
         except KeyError as exc:
             print("Key 'npdata' is required and is missing in the 'domain' declaration!")
             raise KeyError('Compressed numpy dataset definition is not defined!')
+        if self.reflevel > 0:
+            self.meshFile = meshFile+str(self.reflevel)+'.npz'
+        else:
+            self.meshFile = meshFile+'.npz'
 
-        self.meshFile = meshFile+str(self.reflevel)+'.npz'
         try:
             with open(self.meshFile) as meshfile:
                 pass
