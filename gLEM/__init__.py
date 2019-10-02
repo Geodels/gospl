@@ -12,11 +12,6 @@ from petsc4py import PETSc as _PETSc
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
-# refinement = 8 dist = 32606. npoints   664578
-# refinement = 9 dist = 15794. npoints  2639874
-# refinement = 10 dist = 7625. npoints 10522626
-
-
 def LandscapeEvolutionModel(filename, *args, **kwargs):
     """
     Instantiates eSCAPE model object and performs surface processes evolution.
