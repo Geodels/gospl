@@ -2,7 +2,7 @@
 
 > This repo is a specific branch of **eSCAPE** tuned for HPC of global scale models
 
-#### Artemis HPC sydney
+#### Artemis HPC Sydney
 
 ```bash
 module load gcc/4.9.3  python/3.6.5 petsc-gcc-mpich/3.11.1
@@ -32,4 +32,5 @@ python3 setup.py install --user
 | 17004184 | 128 | 05:29:51 | 6 |
 | 17004184 | 128 | 05:30:29 | 6 |
 | 17004184 | 144 | 04:59:49 | 6 |
-| 17004184 | 168 | 07:18:30 | 4 |
+| 17004184 | 168 | 04:31:14 | 7 |
+| 17004184 | 192 | 06:23:02 | 7 |
