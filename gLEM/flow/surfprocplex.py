@@ -240,7 +240,7 @@ class SPMesh(object):
         # Solve flow accumulation
         self.wMat = WAMat.transpose().copy()
         self.wMat0 = WAMat0.transpose().copy()
-        if self.tNow == self.tStart:
+        if self.tNow == self.rStart:
             self._solve_KSP(False, self.wMat, self.bG, self.FAG)
         else:
             self._solve_KSP(True, self.wMat, self.bG, self.FAG)
@@ -340,7 +340,7 @@ class SPMesh(object):
 
         self.hGlobal.axpy(1.,self.stepED)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
-        
+
         if MPIrank == 0 and self.verbose:
             print('Get Erosion Thicknesses (%0.02f seconds)'% (clock() - t0))
 
@@ -362,7 +362,7 @@ class SPMesh(object):
 
         self.stepED.setArray(Eb)
         self.stepED.pointwiseMult(self.stepED,self.areaGlobal)
-        if self.tNow == self.tStart:
+        if self.tNow == self.rStart:
             self._solve_KSP(False, SLMat, self.stepED, self.vSed)
         else :
             self._solve_KSP(True, SLMat, self.stepED, self.vSed)

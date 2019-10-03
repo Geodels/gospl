@@ -1,6 +1,7 @@
 import gc
 import h5py
 
+import numpy as np
 from mpi4py import MPI
 import sys,petsc4py
 petsc4py.init(sys.argv)
@@ -28,6 +29,14 @@ class WriteMesh(object):
         # Sync the chosen output dir to all processors
         self.outputDir = MPIcomm.bcast(self.outputDir, root=0)
 
+        if self.rStep > 0:
+            self.step = self.rStep+1
+            self.tNow = self.tStart+self.rStep*self.tout
+            self.rStart = self.tStart+self.rStep*self.tout
+            self.saveTime = self.tNow+self.tout
+        else:
+            self.rStart = self.tStart
+
         return
 
     def create_OutputDir(self):
@@ -44,16 +53,17 @@ class WriteMesh(object):
         else:
             self.outputDir = os.getcwd()+'/output'
 
-        if self.makedir:
-            if os.path.exists(self.outputDir):
-                self.outputDir += '_'+str(len(glob.glob(self.outputDir+str('*')))-1)
-        else:
-            if os.path.exists(self.outputDir):
-                shutil.rmtree(self.outputDir, ignore_errors=True)
+        if self.rStep == 0:
+            if self.makedir:
+                if os.path.exists(self.outputDir):
+                    self.outputDir += '_'+str(len(glob.glob(self.outputDir+str('*')))-1)
+            else:
+                if os.path.exists(self.outputDir):
+                    shutil.rmtree(self.outputDir, ignore_errors=True)
 
-        os.makedirs(self.outputDir)
-        os.makedirs(self.outputDir+'/h5')
-        os.makedirs(self.outputDir+'/xmf')
+            os.makedirs(self.outputDir)
+            os.makedirs(self.outputDir+'/h5')
+            os.makedirs(self.outputDir+'/xmf')
 
         return
 
@@ -65,13 +75,12 @@ class WriteMesh(object):
 
         t = clock()
         if self.step == 0:
-            topology = self.outputDir+'/h5/topology.'+str(self.step)+'.p'+str(MPIrank)+'.h5'
+            topology = self.outputDir+'/h5/topology.p'+str(MPIrank)+'.h5'
             with h5py.File(topology, "w") as f:
                 f.create_dataset('coords',shape=(len(self.lcoords[:,0]),3), dtype='float32', compression='gzip')
                 f["coords"][:,:] = self.lcoords
                 f.create_dataset('cells',shape=(len(self.lcells[:,0]),3), dtype='int32', compression='gzip')
                 f["cells"][:,:] = self.lcells+1
-            self.topology = self.step
             self.elems = MPIcomm.gather(len(self.lcells[:,0]),root = 0)
             self.nodes = MPIcomm.gather(len(self.lcoords[:,0]),root = 0)
 
@@ -107,6 +116,35 @@ class WriteMesh(object):
 
         return
 
+    def readData(self):
+        """
+        For restarted simulations, this model reads the previous dataset.
+        """
+        import os
+
+        h5file = self.outputDir+'/h5/'+self.file+'.'+str(self.step)+'.p'+str(MPIrank)+'.h5'
+        if os.path.exists(h5file):
+            hf = h5py.File(h5file, 'r')
+        else:
+            raise ValueError('Restart file is missing...')
+
+        self.hLocal.setArray(np.array((hf['/elev'])))
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        self.cumEDLocal.setArray(np.array((hf['/erodep'])))
+        self.dm.localToGlobal(self.cumEDLocal, self.cumED)
+
+        self.elems = MPIcomm.gather(len(self.lcells[:,0]),root = 0)
+        self.nodes = MPIcomm.gather(len(self.lcoords[:,0]),root = 0)
+
+        # self.FAL.setArray(np.array((hf['/flowAcc'])))
+        # self.vSedLocal.setArray(np.array((hf['/sedLoad'])))
+
+        hf.close()
+
+
+
+        return
+
     def _save_DMPlex_XMF(self):
         """
         Saves mesh local information stored in the HDF5 to XMF file
@@ -127,7 +165,7 @@ class WriteMesh(object):
 
         for p in range(MPIsize):
             pfile = 'h5/'+str(self.file)+'.'+str(self.step)+'.p'+str(p)+'.h5'
-            tfile = 'h5/topology.'+str(self.topology)+'.p'+str(p)+'.h5'
+            tfile = 'h5/topology.p'+str(p)+'.h5'
             f.write('      <Grid Name="Block.%s">\n' %(str(p)))
             f.write('         <Topology Type="Triangle" NumberOfElements="%d" BaseOffset="1">\n'%self.elems[p])
             f.write('          <DataItem Format="HDF" DataType="Int" ')

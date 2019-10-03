@@ -123,6 +123,11 @@ class ReadYaml(object):
             raise KeyError('Simulation end time needs to be declared.')
 
         try:
+            self.rStep = timeDict['rstep']
+        except KeyError as exc:
+            self.rStep = 0
+
+        try:
             self.dt = timeDict['dt']
         except KeyError as exc:
             print("Key 'dt' is required and is missing in the 'time' declaration!")

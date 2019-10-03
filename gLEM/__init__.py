@@ -42,7 +42,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 self.log.begin()
 
             self.modelRunTime = clock()
-            self.verbose = True #verbose
+            self.verbose = verbose
 
             # Read input dataset
             _ReadYaml.__init__(self, filename)
@@ -52,6 +52,10 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
             # Define unstructured mesh
             _UnstMesh.__init__(self)
+
+            # Check if simulations just restarted
+            if self.rStep > 0:
+                _WriteMesh.readData(self)
 
             # Get external forces
             _UnstMesh.applyForces(self)
