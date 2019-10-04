@@ -24,6 +24,7 @@ python3 setup.py install --user
 | 10612062 | 32 | 04:57:58 | 4 |
 | 10612062 | 64 | 03:32:15 | 6 |
 | 10612062 | 96 | 02:41:17 | 6 |
+| 10612062 | 128 | 02:40:57 | 7 |
 
 + Resolution distribution for 17 million points (min:4.8 km, max:7.6 km, mean: 6.0 km)
 
