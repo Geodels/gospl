@@ -51,6 +51,10 @@ class ReadYaml(object):
 
         self.tNow = self.tStart
         self.saveTime = self.tNow
+        if self.strat>0:
+            self.saveStrat = self.tNow + self.strat
+        else:
+            self.saveStrat = self.tEnd + self.tout
 
         return
 
@@ -145,6 +149,11 @@ class ReadYaml(object):
         if self.tout < self.dt:
             self.tout = self.dt
             print("Output time interval was changed to {} years to match the time step dt".format(self.dt))
+
+        try:
+            self.strat = timeDict['strat']
+        except KeyError as exc:
+            self.strat = 0
 
         return
 

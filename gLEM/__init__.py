@@ -109,6 +109,11 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 # Compute Hillslope Diffusion Law
                 _SPMesh.HillSlope(self)
 
+                # Output stratal evolution
+                if self.tNow >= self.saveStrat:
+                    _WriteMesh.outputStrat(self)
+                    self.saveStrat += self.strat
+
                 # Output time step
                 if self.tNow >= self.saveTime:
                     _WriteMesh.outputMesh(self)
