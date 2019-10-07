@@ -38,6 +38,7 @@ class WriteMesh(object):
             self.tNow = self.tStart+self.rStep*self.tout
             self.rStart = self.tStart+self.rStep*self.tout
             self.saveTime = self.tNow+self.tout
+            self.saveStrat = self.tNow+self.strat
         else:
             self.rStart = self.tStart
 
