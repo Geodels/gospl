@@ -112,7 +112,7 @@ class SPMesh(object):
         """
         Set PETSC KSP solver.
 
-        Args
+        Args:
             guess: Boolean specifying if the iterative KSP solver initial guess is nonzero
             matrix: PETSC matrix used by the KSP solver
             vector1: PETSC vector corresponding to the initial values
@@ -156,13 +156,13 @@ class SPMesh(object):
 
         # Set deep ocean nodes
         self.rcvID0 = self.rcvID.copy()
-        self.slpRcv0 = self.slpRcv.copy()
-        self.distRcv0 = self.distRcv.copy()
+        # self.slpRcv0 = self.slpRcv.copy()
+        # self.distRcv0 = self.distRcv.copy()
         self.wghtVal0 = self.wghtVal.copy()
 
         deepID = np.where(h1<=self.hbot)[0]
         self.rcvID0[deepID,:] = np.tile(deepID,(self.flowDir,1)).T
-        self.distRcv0[deepID,:] = 0.
+        # self.distRcv0[deepID,:] = 0.
         self.wghtVal0[deepID,:] = 0.
 
         # Set marine nodes

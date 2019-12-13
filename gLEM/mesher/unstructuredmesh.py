@@ -13,7 +13,7 @@ from gLEM._fortran import defineTIN
 from gLEM._fortran import ngbGlob
 
 import meshplex
-from pykdtree.kdtree import KDTree
+from scipy import spatial
 
 MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
@@ -27,6 +27,8 @@ class UnstMesh(object):
     Creating a distributed DMPlex and global vector from it based on triangulated mesh
     """
     def __init__(self):
+        self.hdisp = None
+        self.uplift = None
 
         if self.reflevel>0:
             self.icosahedralSphereMesh()
@@ -75,9 +77,14 @@ class UnstMesh(object):
         del loadData
 
         # From global values to local ones...
-        tree = KDTree(self.gCoords,leafsize=10)
+        tree = spatial.cKDTree(self.gCoords,leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
         nelev = gZ[self.glIDs]
+        if self.flexure:
+            fdist, fids = tree.query(self.lcoords, k=self.fpts)
+            self.fdist = fdist[:,1:]
+            self.fids = fids[:,1:]
+            del fdist, fids
 
         # From local to global values...
         self.lgIDs = -np.ones(self.gpoints,dtype=int)
@@ -261,6 +268,7 @@ class UnstMesh(object):
 
         self.rainNb = -1
         self.tecNb = -1
+        self.flexNb = -1
 
         return
 
@@ -337,9 +345,14 @@ class UnstMesh(object):
             print('defining local DMPlex (%0.02f seconds)'% (clock() - t))
 
         # From global values to local ones...
-        tree = KDTree(self.gCoords,leafsize=10)
+        tree = spatial.cKDTree(self.gCoords,leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
         nelev = gZ[self.glIDs]
+        if self.flexure:
+            fdist, fids = tree.query(self.lcoords, k=self.fpts)
+            self.fdist = fdist[:,1:]
+            self.fids = fids[:,1:]
+            del fdist, fids
 
         # From local to global values...
         self.lgIDs = -np.ones(self.gpoints,dtype=int)
@@ -396,6 +409,7 @@ class UnstMesh(object):
 
         self.rainNb = -1
         self.tecNb = -1
+        self.flexNb = -1
 
         return
 
@@ -436,6 +450,62 @@ class UnstMesh(object):
                 self.dm.localToGlobal(self.hLocal, self.hGlobal)
                 del loadData, gZ
                 gc.collect()
+
+        return
+
+    def applyFlexure(self):
+        """
+        Analytical solution estimating the deflexion induced by point load
+        assuming the flexure of a thin elastic plate
+        """
+
+        if not self.flexure:
+            return
+
+        nb = self.flexNb
+        if nb < len(self.flexdata)-1 :
+            if self.flexdata.iloc[nb+1,0] <= self.tNow+self.dt :
+                nb += 1
+
+        if nb > self.flexNb or nb == -1:
+            if nb == -1:
+                nb = 0
+            self.flexNb = nb
+
+            # Loading elastic thickness
+            loadData = np.load(self.flexdata.iloc[nb,1])
+            Te = loadData[self.flexdata.iloc[nb,2]]
+
+            # Flexural rigidity
+            D = self.young*np.power(Te,3)/11.25
+
+            # Flexural parameters
+            fsed = (self.dmantle-self.dfill)*self.gravity
+            Bsed = np.power(D/fsed,0.25)
+            fwat = (self.dmantle-1027.)*self.gravity
+            Bwat = np.power(D/fwat,0.25)
+
+            # Define coefficients
+            dsed = self.fdist/Bsed[self.glIDs]
+            dwat = self.fdist/Bwat[self.glIDs]
+
+            self.wwato = 1./(8.0*fwat*Bwat[self.glIDs]**2)
+            self.wsedo = 1./(8.0*fsed*Bsed[self.glIDs]**2)
+
+            tmpc1 = 1./(2.0*np.pi*fsed*Bsed**2)
+
+            del loadData
+            gc.collect()
+
+        # Get global erosion/deposition ...
+        ed = self.cumEDLocal.getArray().copy()
+        ged = np.zeros(self.gpoints)
+        ged = ed[self.lgIDs]
+        ged[self.outIDs] = -1.e8
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, ged, op=MPI.MAX)
+
+        np.where(ged>0.)[0]
+        self.gravity
 
         return
 
@@ -493,15 +563,47 @@ class UnstMesh(object):
                 nb = 0
 
             self.tecNb = nb
-            mdata = np.load(self.tecdata.iloc[nb,1])
-
+            self.upsubs = False
             if nb < len(self.tecdata.index)-1:
                 timer = self.tecdata.iloc[nb+1,0]-self.tecdata.iloc[nb,0]
             else:
                 timer = self.tEnd-self.tecdata.iloc[nb,0]
 
-            self._meshAdvectorSphere(mdata['xyz'], timer)
-            del mdata
+            mdata = None
+            if self.tecdata.iloc[nb,1] != 'empty':
+                mdata = np.load(self.tecdata.iloc[nb,1])
+                self.hdisp = mdata['xyz'][self.glIDs,:]
+                self._meshAdvectorSphere(mdata['xyz'], timer)
+
+            if self.tecdata.iloc[nb,2] != 'empty':
+                mdata = np.load(self.tecdata.iloc[nb,2])
+                self._meshUpliftSubsidence(mdata['z'], timer)
+                self.upsubs = True
+
+            if mdata is not None:
+                del mdata
+
+        elif self.upsubs and self.tNow+self.dt < self.tEnd:
+            tmp = self.hLocal.getArray().copy()
+            self.hLocal.setArray(tmp+self.uplift*self.dt)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            del tmp
+            gc.collect()
+
+        return
+
+    def _meshUpliftSubsidence(self, tectonic, timer):
+        """
+        Move elevation up and down
+        """
+
+        # Define vertical displacements
+        tmp = self.hLocal.getArray().copy()
+        self.uplift = tectonic[self.glIDs]
+        self.hLocal.setArray(tmp+self.uplift*self.dt)
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        del tmp
+        gc.collect()
 
         return
 
@@ -529,7 +631,7 @@ class UnstMesh(object):
 
         # Build kd-tree
         kk = 3
-        tree = KDTree(XYZ,leafsize=10)
+        tree = spatial.cKDTree(XYZ,leafsize=10)
         distances, indices = tree.query(self.lcoords, k=kk)
 
         # Inverse weighting distance...
@@ -588,8 +690,9 @@ class UnstMesh(object):
         self.vGlob.destroy()
 
         self.iMat.destroy()
-        self.wMat.destroy()
-        self.wMat0.destroy()
+        if not self.fast:
+            self.wMat.destroy()
+            self.wMat0.destroy()
         self.Diff.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
@@ -598,9 +701,15 @@ class UnstMesh(object):
         del self.lcoords
         del self.lcells
         del self.inIDs
-        del self.distRcv
-        del self.wghtVal
-        del self.rcvID
+
+        if not self.fast:
+            del self.distRcv
+            del self.wghtVal
+            del self.wghtVal0
+            del self.rcvID
+            del self.rcvID0
+            del self.slpRcv
+
         gc.collect()
 
         if MPIrank == 0 and self.verbose:

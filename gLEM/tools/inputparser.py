@@ -1,3 +1,4 @@
+import os, errno
 import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
@@ -47,8 +48,11 @@ class ReadYaml(object):
         self._readTectonic()
         self._readRain()
         self._readPaleo()
+        self._readFlex()
         self._readOut()
+        self._paleoFit()
 
+        self.gravity = 9.81
         self.tNow = self.tStart
         self.saveTime = self.tNow
         if self.strat>0:
@@ -89,6 +93,7 @@ class ReadYaml(object):
         except KeyError as exc:
             print("Key 'npdata' is required and is missing in the 'domain' declaration!")
             raise KeyError('Compressed numpy dataset definition is not defined!')
+
         if self.reflevel > 0:
             self.meshFile = meshFile+str(self.reflevel)+'.npz'
         else:
@@ -100,6 +105,11 @@ class ReadYaml(object):
         except IOError as exc:
             print("Unable to open numpy dataset: ",self.meshFile)
             raise IOError('The numpy dataset is not found...')
+
+        try:
+            self.fast = domainDict['fast']
+        except KeyError as exc:
+            self.fast = False
 
         return
 
@@ -149,6 +159,11 @@ class ReadYaml(object):
         if self.tout < self.dt:
             self.tout = self.dt
             print("Output time interval was changed to {} years to match the time step dt".format(self.dt))
+
+        try:
+            self.tecStep = timeDict['tec']
+        except KeyError as exc:
+            self.tecStep = self.tout
 
         try:
             self.strat = timeDict['strat']
@@ -285,6 +300,7 @@ class ReadYaml(object):
             for k in range(len(tecSort)):
                 tecStart = None
                 tMap = None
+                zMap = None
                 tUniform = None
                 tEnd = None
                 tStep = None
@@ -294,11 +310,15 @@ class ReadYaml(object):
                     print("For each tectonic event a start time is required.")
                     raise ValueError('Tectonic event {} has no parameter start'.format(k))
                 try:
-                    tMap = tecSort[k]['map']
+                    tMap = tecSort[k]['mapH']+'.npz'
                 except:
                     pass
                 try:
-                    tStep = tecSort[k]['step']
+                    zMap = tecSort[k]['mapV']+'.npz'
+                except:
+                    pass
+                try:
+                    tStep = self.tecStep
                 except:
                     pass
                 try:
@@ -314,32 +334,45 @@ class ReadYaml(object):
                         except IOError as exc:
                             print("Unable to open tectonic file: ",tMap)
                             raise IOError('The tectonic file {} is not found for climatic event {}.'.format(tMap,k))
+                else:
+                    tMap = 'empty'
 
-                if tMap is None:
-                    print("For each tectonic event a tectonic grid (map) is required.")
+                if zMap is not None:
+                    if self.meshFile != zMap:
+                        try:
+                            with open(zMap) as tecfile:
+                                pass
+                        except IOError as exc:
+                            print("Unable to open tectonic file: ",zMap)
+                            raise IOError('The tectonic file {} is not found for climatic event {}.'.format(zMap,k))
+                else:
+                    zMap = 'empty'
+
+                if tMap == 'empty' and zMap == 'empty':
+                    print("For each tectonic event a tectonic grid (mapH or mapV) is required.")
                     raise ValueError('Tectonic event {} has no tectonic map (map).'.format(k))
 
                 tmpTec = []
-                tmpTec.insert(0, {'start': tecStart, 'tMap': tMap})
+                tmpTec.insert(0, {'start': tecStart, 'tMap': tMap, 'zMap': zMap})
 
                 if k == 0:
-                    tecdata = pd.DataFrame(tmpTec, columns=['start', 'tMap'])
+                    tecdata = pd.DataFrame(tmpTec, columns=['start', 'tMap', 'zMap'])
                 else:
-                    tecdata = pd.concat([tecdata,pd.DataFrame(tmpTec, columns=['start', 'tMap'])], ignore_index=True)
+                    tecdata = pd.concat([tecdata,pd.DataFrame(tmpTec, columns=['start', 'tMap', 'zMap'])], ignore_index=True)
 
                 if tStep is not None:
                     if tEnd is not None:
                         tectime = tecStart+tStep
                         while tectime<tEnd:
                             tmpTec = []
-                            tmpTec.insert(0, {'start': tectime, 'tMap': tMap})
-                            tecdata = pd.concat([tecdata,pd.DataFrame(tmpTec, columns=['start', 'tMap'])], ignore_index=True)
+                            tmpTec.insert(0, {'start': tectime, 'tMap': tMap, 'zMap': zMap})
+                            tecdata = pd.concat([tecdata,pd.DataFrame(tmpTec, columns=['start', 'tMap', 'zMap'])], ignore_index=True)
                             tectime = tectime+tStep
 
             if tecdata['start'][0] > self.tStart:
                 tmpTec = []
-                tmpTec.insert(0, {'start': self.tStart, 'tMap': None})
-                tecdata = pd.concat([pd.DataFrame(tmpTec, columns=['start', 'tMap']),tecdata], ignore_index=True)
+                tmpTec.insert(0, {'start': self.tStart, 'tMap': 'empty', 'zMap': 'empty'})
+                tecdata = pd.concat([pd.DataFrame(tmpTec, columns=['start', 'tMap', 'zMap']),tecdata], ignore_index=True)
             self.tecdata = tecdata
 
         except KeyError as exc:
@@ -374,23 +407,24 @@ class ReadYaml(object):
                     pass
 
                 if rMap is not None:
-                    if self.meshFile != rMap[0]:
+                    if self.meshFile != rMap[0]+'.npz':
                         try:
-                            with open(rMap[0]) as rainfile:
+                            with open(rMap[0]+'.npz') as rainfile:
                                 pass
                         except IOError as exc:
-                            print("Unable to open rain file: ",rMap[0])
-                            raise IOError('The rain file {} is not found for climatic event {}.'.format(rMap[0],k))
+                            print("Unable to open rain file: ",rMap[0]+'.npz')
+                            raise IOError('The rain file {} is not found for climatic event {}.'.format(rMap[0]+'.npz',k))
 
-                        mdata = meshio.read(rMap[0])
-                        rainSet = mdata.point_data
+                        mdata = np.load(rMap[0]+'.npz')
+                        rainSet = mdata.files
                     else:
-                        rainSet = self.mdata.point_data
+                        mdata = np.load(self.meshFile)
+                        rainSet = mdata.files
                     try:
-                        rainKey = rainSet[rMap[1]]
+                        rainKey = mdata[rMap[1]]
                     except KeyError as exc:
-                        print("Field name {} is missing from rain file {}".format(rMap[1],rMap[0]))
-                        print("The following fields are available: ",rainSet.keys())
+                        print("Field name {} is missing from rain file {}".format(rMap[1],rMap[0]+'.npz'))
+                        print("The following fields are available: ",rainSet)
                         print("Check your rain file fields definition...")
                         raise KeyError('Field name for rainfall is not defined correctly or does not exist!')
 
@@ -403,7 +437,7 @@ class ReadYaml(object):
                 if rMap is None:
                     tmpRain.insert(0, {'start': rStart, 'rUni': rUniform, 'rMap': None, 'rKey': None})
                 else:
-                    tmpRain.insert(0, {'start': rStart, 'rUni': None, 'rMap': rMap[0], 'rKey': rMap[1]})
+                    tmpRain.insert(0, {'start': rStart, 'rUni': None, 'rMap': rMap[0]+'.npz', 'rKey': rMap[1]})
 
                 if k == 0:
                     raindata = pd.DataFrame(tmpRain, columns=['start', 'rUni', 'rMap', 'rKey'])
@@ -473,6 +507,79 @@ class ReadYaml(object):
 
         return
 
+    def _readFlex(self):
+        """
+        Parse isostatic flexure conditions.
+        """
+        try:
+            flexDict = self.input['flexure']
+            self.flexure = True
+
+            try:
+                self.dmantle = flexDict['dmantle']
+            except KeyError as exc:
+                self.dmantle = 3350.0
+
+            try:
+                self.dfill = flexDict['dfill']
+            except KeyError as exc:
+                self.dfill = 2750.0
+
+            try:
+                self.young = flexDict['young']
+            except KeyError as exc:
+                self.young = 1.e11
+
+            try:
+                self.fpts = flexDict['npts']
+            except KeyError as exc:
+                print("The number of points under the influence of a given point load is required.")
+                raise ValueError('The nbPts parameter needs to be be defined')
+
+            flexSort = sorted(flexDict, key=itemgetter('time'))
+            for k in range(len(flexSort)):
+                fTime = None
+                fMap = None
+                fKey = None
+                try:
+                    fTime = flexSort[k]['time']
+                except:
+                    print("For each elastic thickness map a given time is required.")
+                    raise ValueError('elastic thickness {} has no parameter time'.format(k))
+                try:
+                    fMap = flexSort[k]['npdata']
+                except:
+                    pass
+
+                if fMap is not None:
+                    try:
+                        with open(fMap+'.npz') as meshfile:
+                            pass
+                    except IOError as exc:
+                        print("Unable to open numpy dataset: ",fMap+'.npz')
+                        raise IOError('The numpy dataset is not found...')
+
+                try:
+                    fKey = flexSort[k]['key']
+                except:
+                    pass
+
+                tmpFlex = []
+                tmpFlex.insert(0, {'time': fTime, 'fMap': fMap+'.npz', 'fKey': fKey})
+
+                if k == 0:
+                    flexdata = pd.DataFrame(tmpFlex, columns=['time', 'fMap', 'fKey'])
+                else:
+                    flexdata = pd.concat([flexdata,pd.DataFrame(tmpFlex, columns=['time', 'fMap', 'fKey'])],
+                                                         ignore_index=True)
+            self.flexdata = flexdata
+
+        except KeyError as exc:
+            self.flexure = False
+            pass
+
+        return
+
     def _readOut(self):
         """
         Parse output directory.
@@ -491,5 +598,70 @@ class ReadYaml(object):
         except KeyError as exc:
             self.outputDir = 'output'
             self.makedir = True
+
+        if self.rStep>0:
+            self.makedir = False
+
+        return
+
+    def _paleoFit(self):
+        """
+        Parse paleotopography convergence parameters.
+        """
+
+        try:
+            paleoDict = self.input['paleofit']
+            try:
+                self.paleostep = paleoDict['step']
+            except KeyError as exc:
+                self.paleostep = 10
+            try:
+                self.cvglimit = paleoDict['cvglimit']
+            except KeyError as exc:
+                self.paleoDict = 5.
+
+            try:
+                self.paleoTopo = paleoDict['paleotopo']
+                self.paleoTopo = self.paleoTopo +'.npz'
+            except KeyError as exc:
+                print("Key 'paleotopo' is required and is missing in the 'paleofit' declaration!")
+                raise KeyError('NPZ paleotopography file is not defined!')
+            try:
+                with open(self.paleoTopo) as paleonpz:
+                    pass
+            except IOError as exc:
+                print("Unable to open NPZ paleo file: ",self.paleoTopo)
+                raise IOError('The NPZ paleotopography file is not found...')
+
+            try:
+                self.lonlat = paleoDict['lonlat']
+                self.lonlat = self.lonlat +'.npz'
+            except KeyError as exc:
+                print("Key 'lonlat' is required and is missing in the 'paleofit' declaration!")
+                raise KeyError('Longitude/latitude coordinates file is not defined!')
+            try:
+                with open(self.paleoTopo) as paleonpz:
+                    pass
+            except IOError as exc:
+                print("Unable to open lonlat file: ",self.lonlat)
+                raise IOError('The lonlat paleotopography file is not found...')
+
+            try:
+                self.paleoDir = paleoDict['vdispdir']
+            except KeyError as exc:
+                print("Key 'vdispdir' is required and is missing in the 'paleofit' declaration!")
+                raise KeyError('Paleo-tectonic directory to store vertical displacement is not defined!')
+
+            try:
+                os.makedirs(self.paleoDir, exist_ok=True)
+            except FileExistsError:
+                # Directory already exists
+                pass
+
+        except KeyError as exc:
+            self.paleostep = 0
+            self.cvglimit = 0.
+            self.paleoTopo = None
+            self.paleoDir = None
 
         return

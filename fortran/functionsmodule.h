@@ -3,6 +3,11 @@
 #define  _defineTIN  _definetin
 #define  _defineTIN_   _definetin_
 
+#define  defineGTIN   definegtin
+#define  defineGTIN_   definegtin_
+#define  _defineGTIN  _definegtin
+#define  _defineGTIN_   _definegtin_
+
 #define  fillPIT   fillpit
 #define  fillPIT_   fillpit_
 #define  _fillPIT  _fillpit

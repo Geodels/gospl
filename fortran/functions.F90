@@ -619,3 +619,98 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   FVnID = ngbID
 
 end subroutine defineTIN
+
+subroutine defineGTIN( nb, cells_nodes, edges_nodes, ngbNb, ngbID, n, m)
+!*****************************************************************************
+! Compute for global triangulation the characteristics of each node
+
+  use meshparams
+  implicit none
+
+  integer :: m, n
+  integer, intent(in) :: nb
+  integer, intent(in) :: cells_nodes(n, 3)
+  integer, intent(in) :: edges_nodes(m, 2)
+
+  integer, intent(out) :: ngbID(nb, 12)
+  integer, intent(out) :: ngbNb(nb)
+
+  integer :: i, n1, n2, k, l, eid, p
+  integer :: nid(2), nc(3), edge(nb, 12)
+  integer :: cell_ids(nb, 12)
+
+  logical :: inside
+
+  cell_ids(:,:) = -1
+  edge(:,:) = -1
+  ngbNb(:) = 0
+  ngbID(:,:) = -1
+
+  ! Find all cells surrounding a given vertice
+  do i = 1, n
+    nc = cells_nodes(i,1:3)+1
+    do p = 1, 3
+      inside = .False.
+      lp: do k = 1, 12
+        if( cell_ids(nc(p),k) == i-1 )then
+          exit lp
+        elseif( cell_ids(nc(p),k) == -1 )then
+          inside = .True.
+          exit lp
+        endif
+      enddo lp
+      if( inside )then
+        cell_ids(nc(p),k)  = i-1
+      endif
+    enddo
+  enddo
+
+  ! Find all edges connected to a given vertice
+  do i = 1, m
+    n1 = edges_nodes(i,1)+1
+    n2 = edges_nodes(i,2)+1
+    inside = .False.
+    lp0: do k = 1, 12
+      if(edge(n1,k) == i-1)then
+        exit lp0
+      elseif(edge(n1,k) == -1)then
+        inside = .True.
+        exit lp0
+      endif
+    enddo lp0
+    if( inside )then
+      edge(n1,k)  = i-1
+      ngbNb(n1) = ngbNb(n1) + 1
+    endif
+    inside = .False.
+    lp1: do k = 1, 12
+      if(edge(n2,k) == i-1)then
+        exit lp1
+      elseif(edge(n2,k) == -1)then
+        inside = .True.
+        exit lp1
+      endif
+    enddo lp1
+    if( inside )then
+      edge(n2,k)  = i-1
+      ngbNb(n2) = ngbNb(n2) + 1
+    endif
+  enddo
+
+  do k = 1, nb
+    ! Get triangulation edge lengths
+    l = 0
+    do eid = 1, ngbNb(k)
+      nid = edges_nodes(edge(k,eid)+1,1:2)
+      if( nid(1) == k-1)then
+        l = l + 1
+        ngbID(k,l) = nid(2)
+      else
+        l = l + 1
+        ngbID(k,l) = nid(1)
+      endif
+    enddo
+
+  enddo
+
+end subroutine defineGTIN

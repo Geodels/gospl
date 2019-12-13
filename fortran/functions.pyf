@@ -99,5 +99,17 @@ python module _fortran ! in
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
         end subroutine defineTIN
 
+
+        subroutine defineGTIN(nb,cells_nodes,edges_nodes,ngbnb,ngbid,n,m) ! in :_fortran:functions.f90
+            use meshparams
+            integer intent(in) :: nb
+            integer dimension(n,3),intent(in) :: cells_nodes
+            integer dimension(m,2),intent(in) :: edges_nodes
+            integer dimension(nb),intent(out),depend(nb) :: ngbnb
+            integer dimension(nb,12),intent(out),depend(nb) :: ngbid
+            integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
+            integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
+        end subroutine defineGTIN
+
     end interface
 end python module _fortran
