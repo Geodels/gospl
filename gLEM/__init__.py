@@ -196,6 +196,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
             # Output time step
             self.step -= 1
+            self.saveTime = self.tEnd
             _WriteMesh.outputMesh(self)
 
             return

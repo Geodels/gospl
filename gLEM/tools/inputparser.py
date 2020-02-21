@@ -618,7 +618,7 @@ class ReadYaml(object):
             try:
                 self.cvglimit = paleoDict['cvglimit']
             except KeyError as exc:
-                self.paleoDict = 5.
+                self.cvglimit = 5.
 
             try:
                 self.paleoTopo = paleoDict['paleotopo']

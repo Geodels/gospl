@@ -218,7 +218,6 @@ class PFit(object):
                     nzdisp += disp0['z']
 
                 # Write vertical displacement at previous time:
-                print(outfile[k],k,nbdisp,p)
                 if p == nbdisp-1 and self.force_diff is not None:
                     np.savez_compressed(outfile[k],z=nzdisp+self.force_diff*self.simtime/dt)
                 else:
