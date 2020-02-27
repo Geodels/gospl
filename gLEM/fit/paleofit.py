@@ -9,7 +9,6 @@ from mpi4py import MPI
 from scipy import sparse
 from scipy import spatial
 
-from netCDF4 import Dataset
 from scipy import ndimage
 from scipy.interpolate import griddata
 from scipy.ndimage import gaussian_filter
@@ -152,12 +151,20 @@ class PFit(object):
                 print('')
 
         if disk:
-            simDF = pd.concat(self.similarity[:-2])
-            simDF.to_pickle('similarity')
-            accDF = pd.concat(self.accuracy[:-2])
-            accDF.to_pickle('accuracy')
-            impDF = pd.concat(self.improvement[:-2])
-            impDF.to_pickle('improvement')
+            if len(self.similarity)>2:
+                simDF = pd.concat(self.similarity[:-2])
+                simDF.to_pickle('similarity')
+                accDF = pd.concat(self.accuracy[:-2])
+                accDF.to_pickle('accuracy')
+                impDF = pd.concat(self.improvement[:-2])
+                impDF.to_pickle('improvement')
+            else:
+                simDF = pd.concat(self.similarity)
+                simDF.to_pickle('similarity')
+                accDF = pd.concat(self.accuracy)
+                accDF.to_pickle('accuracy')
+                impDF = pd.concat(self.improvement)
+                impDF.to_pickle('improvement')
 
         return
 
