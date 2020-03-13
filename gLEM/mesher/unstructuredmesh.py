@@ -29,6 +29,7 @@ class UnstMesh(object):
     def __init__(self):
         self.hdisp = None
         self.uplift = None
+        self.rainVal = None
 
         if self.reflevel>0:
             self.icosahedralSphereMesh()
@@ -415,8 +416,8 @@ class UnstMesh(object):
 
     def applyForces(self):
         """
-        Find the different values for climatic and tectonic forces that will be applied to the
-        considered time interval
+        Find the different values for climatic and sea-level forces that will
+        be applied to the considered time interval
         """
 
         t0 = clock()
@@ -426,11 +427,22 @@ class UnstMesh(object):
         # Climate
         self._updateRain()
 
-        # Tectonic
+        if MPIrank == 0 and self.verbose:
+            print('Update Climatic Forces (%0.02f seconds)'% (clock() - t0))
+
+        return
+
+    def applyTectonics(self):
+        """
+        Find the different values for tectonic forces that will be applied to
+        the considered time interval
+        """
+
+        t0 = clock()
         self._updateTectonic()
 
         if MPIrank == 0 and self.verbose:
-            print('Update External Forces (%0.02f seconds)'% (clock() - t0))
+            print('Update Tectonic Forces (%0.02f seconds)'% (clock() - t0))
 
         return
 
@@ -532,6 +544,7 @@ class UnstMesh(object):
                 rainArea = np.full(self.gpoints,self.raindata.iloc[nb,1])
             self.rainArea = rainArea[self.glIDs]*self.area
 
+        self.rainVal = self.rainArea[self.glIDs]/self.area
         localZ = self.hLocal.getArray()
         rainArea = self.rainArea.copy()
         rainArea[localZ<self.sealevel] = 0.
@@ -555,7 +568,7 @@ class UnstMesh(object):
 
         nb = self.tecNb
         if nb < len(self.tecdata)-1 :
-            if self.tecdata.iloc[nb+1,0] <= self.tNow+self.dt :
+            if self.tecdata.iloc[nb+1,0] < self.tNow+self.dt :
                 nb += 1
 
         if nb > self.tecNb or nb == -1:
@@ -577,7 +590,7 @@ class UnstMesh(object):
 
             if self.tecdata.iloc[nb,2] != 'empty':
                 mdata = np.load(self.tecdata.iloc[nb,2])
-                self._meshUpliftSubsidence(mdata['z'], timer)
+                self._meshUpliftSubsidence(mdata['z'])
                 self.upsubs = True
 
             if mdata is not None:
@@ -592,7 +605,7 @@ class UnstMesh(object):
 
         return
 
-    def _meshUpliftSubsidence(self, tectonic, timer):
+    def _meshUpliftSubsidence(self, tectonic):
         """
         Move elevation up and down
         """
@@ -600,6 +613,20 @@ class UnstMesh(object):
         # Define vertical displacements
         tmp = self.hLocal.getArray().copy()
         self.uplift = tectonic[self.glIDs]
+        self.hLocal.setArray(tmp+self.uplift*self.dt)
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        del tmp
+        gc.collect()
+
+        return
+
+    def forceUpliftSubsidence(self):
+        """
+        Move elevation up and down to fit backward model
+        """
+
+        # Define vertical displacements
+        tmp = self.hLocal.getArray().copy()
         self.hLocal.setArray(tmp+self.uplift*self.dt)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
         del tmp

@@ -50,6 +50,7 @@ class ReadYaml(object):
         self._readPaleo()
         self._readFlex()
         self._readOut()
+        self._readForcePaleo()
         self._paleoFit()
 
         self.gravity = 9.81
@@ -110,6 +111,11 @@ class ReadYaml(object):
             self.fast = domainDict['fast']
         except KeyError as exc:
             self.fast = False
+
+        try:
+            self.backward = domainDict['backward']
+        except KeyError as exc:
+            self.backward = False
 
         return
 
@@ -460,7 +466,7 @@ class ReadYaml(object):
 
     def _readPaleo(self):
         """
-        Parse paleomap forcing conditions.
+        Parse paleomap conditions.
         """
         try:
             paleoDict = self.input['paleomap']
@@ -503,6 +509,45 @@ class ReadYaml(object):
         except KeyError as exc:
             self.paleodata = None
             self.paleoNb = 0
+            pass
+
+        return
+
+    def _readForcePaleo(self):
+        """
+        Parse paleomap forcing.
+        """
+
+        try:
+            fpaleoDict = self.input['forcepaleo']
+
+            try:
+                self.forceDir = fpaleoDict['dir']
+                if not os.path.exists(self.forceDir):
+                    print('Forcing paleo directory does not exist!')
+                    raise ValueError('Forcing paleo directory does not exist!')
+
+                if self.tout > self.tecStep :
+                    self.tout = self.tecStep
+                    print('Output time interval and tectonic forcing time step \
+                          have been adjusted to match each others.')
+                elif self.tout < self.tecStep :
+                    self.tecStep = self.tout
+                    print('Output time interval and tectonic forcing time step \
+                          have been adjusted to match each others.')
+
+                out_nb = int((self.tEnd-self.tStart)/self.tout)+1
+                stepf = np.arange(1,out_nb,dtype=int)
+                self.stepb = np.flip(np.arange(0,out_nb-1,dtype=int))
+                self.alpha = stepf.astype(float)/(out_nb-1)
+                self.forceStep = 0
+            except:
+                print("A directory is required to force the model with paleodata.")
+                raise ValueError('forcepaleo key requires a directory')
+
+        except KeyError as exc:
+            self.forceDir = None
+            self.forceStep = -1
             pass
 
         return
@@ -618,7 +663,12 @@ class ReadYaml(object):
             try:
                 self.cvglimit = paleoDict['cvglimit']
             except KeyError as exc:
-                self.cvglimit = 5.
+                self.cvglimit = 0.1
+
+            try:
+                self.erange = paleoDict['erange']
+            except KeyError as exc:
+                self.erange = 100.
 
             try:
                 self.paleoTopo = paleoDict['paleotopo']
@@ -661,6 +711,7 @@ class ReadYaml(object):
         except KeyError as exc:
             self.paleostep = 0
             self.cvglimit = 0.
+            self.erange = 100.
             self.paleoTopo = None
             self.paleoDir = None
 

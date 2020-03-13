@@ -1,3 +1,4 @@
+import os
 import gc
 import h5py
 
@@ -133,6 +134,9 @@ class WriteMesh(object):
             if self.hdisp is not None:
                 f.create_dataset('hdisp',shape=(len(self.lcoords[:,0]),3), dtype='float32', compression='gzip')
                 f["hdisp"][:,:] = self.hdisp
+            if self.rainVal is not None:
+                f.create_dataset('rain',shape=(len(self.lcoords[:,0]),1), dtype='float32', compression='gzip')
+                f["rain"][:,0] = self.rainVal
 
             del data
 
@@ -156,26 +160,112 @@ class WriteMesh(object):
         """
         For restarted simulations, this model reads the previous dataset.
         """
-        import os
 
         if self.stratStep == 0:
             h5file = self.outputDir+'/h5/'+self.file+'.'+str(self.step)+'.p'+str(MPIrank)+'.h5'
+            if os.path.exists(h5file):
+                hf = h5py.File(h5file, 'r')
+            else:
+                raise ValueError('Restart file is missing...')
+
+            self.hLocal.setArray(np.array((hf['/elev'])))
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            self.cumEDLocal.setArray(np.array((hf['/erodep'])))
+            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
+            self.vSedLocal.setArray(np.array((hf['/sedLoad'])))
+            self.dm.localToGlobal(self.vSedLocal, self.vSed)
+            self.FAL.setArray(np.array((hf['/flowAcc'])))
+            self.dm.localToGlobal(self.FAG, self.FAL)
+
+            self.elems = MPIcomm.gather(len(self.lcells[:,0]),root = 0)
+            self.nodes = MPIcomm.gather(len(self.lcoords[:,0]),root = 0)
+
+            hf.close()
+
         else:
             h5file = self.outputDir+'/h5/stratal.'+str(self.stratStep-1)+'.p'+str(MPIrank)+'.h5'
+            if os.path.exists(h5file):
+                hf = h5py.File(h5file, 'r')
+            else:
+                raise ValueError('Restart file is missing...')
 
+            self.hLocal.setArray(np.array((hf['/elev'])))
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            self.cumEDLocal.setArray(np.array((hf['/erodep'])))
+            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
+
+            self.elems = MPIcomm.gather(len(self.lcells[:,0]),root = 0)
+            self.nodes = MPIcomm.gather(len(self.lcoords[:,0]),root = 0)
+
+            hf.close()
+
+            h5file = self.outputDir+'/h5/'+self.file+'.'+str(self.step)+'.p'+str(MPIrank)+'.h5'
+            if os.path.exists(h5file):
+                hf = h5py.File(h5file, 'r')
+            else:
+                raise ValueError('Restart file is missing...')
+
+            self.vSedLocal.setArray(np.array((hf['/sedLoad'])))
+            self.dm.localToGlobal(self.vSedLocal, self.vSed)
+            self.FAL.setArray(np.array((hf['/flowAcc'])))
+            self.dm.localToGlobal(self.FAG, self.FAL)
+
+            hf.close()
+
+        return
+
+    def forcePaleo(self):
+        """
+        Forcing the model based on backward simulation results.
+        """
+
+        # Compute difference between backward model elevation and current one
+        # Store the vertical displacement in the uplift variable
+        self._upliftBF(self.alpha[self.forceStep], self.stepb[self.forceStep])
+
+        # Update model parameters to the former tectonic time step
+        self.tNow -= self.tecStep
+        self.step -= 1
+
+        if self.strat > 0:
+            n = int(self.tout/self.strat)
+            self.stratStep = (self.step-1)*n
+        self.saveTime = self.tNow+self.tout
+
+        if self.saveStrat <= self.tEnd:
+            self.saveStrat = self.tNow+self.strat
+
+        # Getting PETSc vectors values
+        if self.step == 0:
+            loadData = np.load(self.meshFile)
+            gZ = loadData['z']
+            self.hLocal.setArray(gZ[self.glIDs])
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            self.vSed.set(0.0)
+            self.vSedLocal.set(0.0)
+            self.cumED.set(0.0)
+            self.cumEDLocal.set(0.0)
+        else:
+            self.readData()
+
+        return
+
+    def _upliftBF(self, alpha, step):
+        """
+        Reads locally the backward model elevation at any given step.
+        Compute elevation difference between backward and forward models.
+        """
+        import os
+
+        h5file = self.forceDir+'/h5/gLEM.'+str(step)+'.p'+str(MPIrank)+'.h5'
         if os.path.exists(h5file):
             hf = h5py.File(h5file, 'r')
         else:
-            raise ValueError('Restart file is missing...')
+            print("Backward file: ",h5file," is missing!")
+            raise ValueError('Backward file is missing...')
 
-        self.hLocal.setArray(np.array((hf['/elev'])))
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        self.cumEDLocal.setArray(np.array((hf['/erodep'])))
-        self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-
-        self.elems = MPIcomm.gather(len(self.lcells[:,0]),root = 0)
-        self.nodes = MPIcomm.gather(len(self.lcoords[:,0]),root = 0)
-
+        self.uplift = np.array(hf['/elev'])[:,0]-self.hLocal.getArray()
+        self.uplift *= alpha/self.tecStep
         hf.close()
 
         return
@@ -244,6 +334,11 @@ class WriteMesh(object):
                 f.write('         <Attribute Type="Scalar" Center="Node" Name="vTec">\n')
                 f.write('          <DataItem Format="HDF" NumberType="Float" Precision="4" ')
                 f.write('Dimensions="%d 1">%s:/uplift</DataItem>\n'%(self.nodes[p],pfile))
+                f.write('         </Attribute>\n')
+            if self.rainVal is not None:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="Rain">\n')
+                f.write('          <DataItem Format="HDF" NumberType="Float" Precision="4" ')
+                f.write('Dimensions="%d 1">%s:/rain</DataItem>\n'%(self.nodes[p],pfile))
                 f.write('         </Attribute>\n')
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="sea">\n')

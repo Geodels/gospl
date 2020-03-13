@@ -28,7 +28,7 @@ class SPMesh(object):
 
         # KSP solver parameters
         self.rtol = 1.0e-8
-        self.hbot = -500.0
+        self.hbot = -50.0
 
         # Identity matrix construction
         self.I = np.arange(0, self.npoints+1, dtype=PETSc.IntType)

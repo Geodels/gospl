@@ -109,6 +109,9 @@ class PFit(object):
         Compare local differences between modelled and reference paleomaps
         """
 
+        # Compute the difference between paleo and simulated elevation:
+        #   + positive: paleo elevation is above simulated one
+        #   + negative: paleo elevation is below simulated one
         self.diffZ.waxpy(-1.0,self.hLocal,self.paleoLocal)
 
         # Define differences to reference paleomap in vertical displacement rates (m/yr)
@@ -127,7 +130,7 @@ class PFit(object):
         del tmp
         gc.collect()
 
-        self._accuracyScores(elevrange=100.)
+        self._accuracyScores()
 
         # Improvement compared to previous model
         self.force_diff = None
@@ -135,7 +138,8 @@ class PFit(object):
             self.updated_diff = diff.copy()
         else:
             self._improvementModels()
-            if int(self.improvement[-1].values[0][1]) >= self.cvglimit and self.runNb <= self.paleostep:
+            if self.accuracy[-2].values[0][4] >= self.cvglimit and self.runNb <= self.paleostep:
+            # if int(self.improvement[-1].values[0][1]) >= self.cvglimit and self.runNb <= self.paleostep:
                 self.updated_diff += diff
             else:
                 self.force_diff = diff.copy()
@@ -151,20 +155,26 @@ class PFit(object):
                 print('')
 
         if disk:
-            if len(self.similarity)>2:
-                simDF = pd.concat(self.similarity[:-2])
-                simDF.to_pickle('similarity')
-                accDF = pd.concat(self.accuracy[:-2])
-                accDF.to_pickle('accuracy')
-                impDF = pd.concat(self.improvement[:-2])
-                impDF.to_pickle('improvement')
-            else:
-                simDF = pd.concat(self.similarity)
-                simDF.to_pickle('similarity')
-                accDF = pd.concat(self.accuracy)
-                accDF.to_pickle('accuracy')
-                impDF = pd.concat(self.improvement)
-                impDF.to_pickle('improvement')
+            simDF = pd.concat(self.similarity)
+            simDF.to_pickle('similarity')
+            accDF = pd.concat(self.accuracy)
+            accDF.to_pickle('accuracy')
+            impDF = pd.concat(self.improvement)
+            impDF.to_pickle('improvement')
+            # if len(self.similarity)>2:
+            #     simDF = pd.concat(self.similarity[:-2])
+            #     simDF.to_pickle('similarity')
+            #     accDF = pd.concat(self.accuracy[:-2])
+            #     accDF.to_pickle('accuracy')
+            #     impDF = pd.concat(self.improvement[:-2])
+            #     impDF.to_pickle('improvement')
+            # else:
+            #     simDF = pd.concat(self.similarity)
+            #     simDF.to_pickle('similarity')
+            #     accDF = pd.concat(self.accuracy)
+            #     accDF.to_pickle('accuracy')
+            #     impDF = pd.concat(self.improvement)
+            #     impDF.to_pickle('improvement')
 
         return
 
@@ -377,12 +387,12 @@ class PFit(object):
 
         return numerator/denominator
 
-    def _nonMatching(self, diff, elevrange = 100.):
+    def _nonMatching(self, diff):
         """
         Find non matching nodes.
         """
 
-        return len(np.where(abs(diff)>elevrange)[0])/diff.size
+        return len(np.where(abs(diff)>self.erange)[0])/diff.size
 
     def _improvementModels(self):
         """
@@ -398,7 +408,7 @@ class PFit(object):
 
         return
 
-    def _accuracyScores(self, elevrange=100.):
+    def _accuracyScores(self):
 
         obs = self.paleoZ.copy()
         sim = obs - self.ll_diff*self.simtime
@@ -429,7 +439,7 @@ class PFit(object):
         MAE.append(mean_absolute_error(obs.ravel(), sim.ravel(), multioutput='uniform_average'))
         RMSE.append(np.sqrt(mean_squared_error(obs.ravel(), sim.ravel())))
         LCC.append(self._concordance_correlation_coefficient(obs.ravel(), sim.ravel()))
-        NN.append(self._nonMatching(sim-obs, elevrange=100.))
+        NN.append(self._nonMatching(sim-obs))
 
         # Land
         Lobs = obs.copy()
@@ -449,7 +459,7 @@ class PFit(object):
         MAE.append(mean_absolute_error(land_obs, land_sim, multioutput='uniform_average'))
         RMSE.append(np.sqrt(mean_squared_error(land_obs, land_sim)))
         LCC.append(self._concordance_correlation_coefficient(land_obs, land_sim))
-        NN.append(self._nonMatching(land_sim-land_obs, elevrange=100.))
+        NN.append(self._nonMatching(land_sim-land_obs))
 
         # Shelf
         Sobs = obs.copy()
@@ -471,7 +481,7 @@ class PFit(object):
         MAE.append(mean_absolute_error(shelf_obs, shelf_sim, multioutput='uniform_average'))
         RMSE.append(np.sqrt(mean_squared_error(shelf_obs, shelf_sim)))
         LCC.append(self._concordance_correlation_coefficient(shelf_obs, shelf_sim))
-        NN.append(self._nonMatching(shelf_sim-shelf_obs, elevrange=100.))
+        NN.append(self._nonMatching(shelf_sim-shelf_obs))
 
         # Ocean
         Oobs = obs.copy()
@@ -491,7 +501,7 @@ class PFit(object):
         MAE.append(mean_absolute_error(ocean_obs.ravel(), ocean_sim.ravel(), multioutput='uniform_average'))
         RMSE.append(np.sqrt(mean_squared_error(ocean_obs.ravel(), ocean_sim.ravel())))
         LCC.append(self._concordance_correlation_coefficient(ocean_obs.ravel(), ocean_sim.ravel()))
-        NN.append(self._nonMatching(ocean_sim-ocean_obs, elevrange=100.))
+        NN.append(self._nonMatching(ocean_sim-ocean_obs))
 
         self.similarity.append(pd.DataFrame({'region':regions, 'covariance': CV, 'corrcoef': CR,
                                  'dotproduct': DP, 'cosine': CS,

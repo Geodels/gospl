@@ -1,5 +1,7 @@
 import os
 import gc
+import glob
+import h5py
 import shutil
 import numpy as np
 import petsc4py,sys
@@ -65,6 +67,8 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
             # Get external forces
             _UnstMesh.applyForces(self)
+            if self.backward:
+                _UnstMesh.applyTectonics(self)
 
             # Surface processes initialisation
             _SPMesh.__init__(self,*args, **kwargs)
@@ -89,6 +93,9 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
              - stream induced deposition diffusion
              - hillslope diffusion
             """
+
+            self.newForcing = True
+            steppaleo = 0
 
             while(self.tNow<=self.tEnd):
                 tstep = clock()
@@ -123,14 +130,33 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                     _WriteMesh.outputStrat(self)
                     self.saveStrat += self.strat
 
+                # Update Tectonic, Sea-level & Climatic conditions
+                if self.backward and self.tNow < self.tEnd:
+                    _UnstMesh.applyTectonics(self)
+
                 # Output time step
                 if self.tNow >= self.saveTime:
                     _WriteMesh.outputMesh(self)
                     self.saveTime += self.tout
 
+                    # Forcing with backward model
+                    if self.forceStep >= 0 and self.newForcing:
+                        print('Forcing ',steppaleo)
+                        _WriteMesh.forcePaleo(self)
+                        steppaleo += 1
+
+                    if steppaleo == 1:
+                        steppaleo = 0
+                        self.newForcing = False
+                        self.forceStep += 1
+                    else:
+                        self.newForcing = True
+
                 # Update Tectonic, Sea-level & Climatic conditions
                 if self.tNow < self.tEnd:
                     _UnstMesh.applyForces(self)
+                    if not self.backward:
+                        _UnstMesh.applyTectonics(self)
 
                 # Advance time
                 self.tNow += self.dt
@@ -175,6 +201,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
             # Update external forces
             _UnstMesh.applyForces(self)
+            _UnstMesh.applyTectonics(self)
 
             del gZ, loadData
             gc.collect()
