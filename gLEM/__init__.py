@@ -4,7 +4,8 @@ import glob
 import h5py
 import shutil
 import numpy as np
-import petsc4py,sys
+import petsc4py, sys
+
 petsc4py.init(sys.argv)
 from time import clock
 from mpi4py import MPI
@@ -19,6 +20,7 @@ from .fit import PFit as _PFit
 from petsc4py import PETSc as _PETSc
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
+
 
 def LandscapeEvolutionModel(filename, *args, **kwargs):
     """
@@ -40,8 +42,9 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
         LandscapeEvolutionModel : object
     """
 
-    class LandscapeEvolutionModelClass(_ReadYaml, _WriteMesh, _UnstMesh, _SPMesh, _PFit):
-
+    class LandscapeEvolutionModelClass(
+        _ReadYaml, _WriteMesh, _UnstMesh, _SPMesh, _PFit
+    ):
         def __init__(self, filename, verbose=True, showlog=False, *args, **kwargs):
 
             self.showlog = showlog
@@ -71,14 +74,17 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 _UnstMesh.applyTectonics(self)
 
             # Surface processes initialisation
-            _SPMesh.__init__(self,*args, **kwargs)
+            _SPMesh.__init__(self, *args, **kwargs)
 
             # Paleotopography convergence initialisation
             if self.paleostep > 0:
                 _PFit.__init__(self)
 
             if MPIrank == 0:
-                print('--- Initialisation Phase (%0.02f seconds)'% (clock() - self.modelRunTime))
+                print(
+                    "--- Initialisation Phase (%0.02f seconds)"
+                    % (clock() - self.modelRunTime)
+                )
 
             return
 
@@ -97,7 +103,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
             self.newForcing = True
             steppaleo = 0
 
-            while(self.tNow<=self.tEnd):
+            while self.tNow <= self.tEnd:
                 tstep = clock()
 
                 if not self.fast:
@@ -141,7 +147,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
                     # Forcing with backward model
                     if self.forceStep >= 0 and self.newForcing:
-                        print('Forcing ',steppaleo)
+                        print("Forcing ", steppaleo)
                         _WriteMesh.forcePaleo(self)
                         steppaleo += 1
 
@@ -162,7 +168,11 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 self.tNow += self.dt
 
                 if MPIrank == 0:
-                    print('--- Computational Step (%0.02f seconds)'% (clock() - tstep))
+                    print(
+                        "--- Computational Step \
+                          (%0.02f seconds)"
+                        % (clock() - tstep)
+                    )
 
             return
 
@@ -179,7 +189,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
             self.stratStep = 0
             self.rStart = self.tStart
             self.saveTime = self.tNow
-            if self.strat>0:
+            if self.strat > 0:
                 self.saveStrat = self.tNow + self.strat
             else:
                 self.saveStrat = self.tEnd + self.tout
@@ -191,7 +201,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
             # Getting PETSc vectors values
             loadData = np.load(self.meshFile)
-            gZ = loadData['z']
+            gZ = loadData["z"]
             self.hLocal.setArray(gZ[self.glIDs])
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
             self.vSed.set(0.0)
@@ -207,7 +217,11 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
             gc.collect()
 
             if MPIrank == 0:
-                print('--- Reinitialise Phase (%0.02f seconds)\n+++'% (clock() - t0step))
+                print(
+                    "--- Reinitialise Phase \
+                      (%0.02f seconds)\n+++"
+                    % (clock() - t0step)
+                )
 
             return
 
@@ -217,7 +231,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
             self.saveStrat = self.tEnd
 
             # Output stratal evolution
-            if self.strat>0:
+            if self.strat > 0:
                 self.stratStep -= 1
                 _WriteMesh.outputStrat(self)
 
@@ -230,7 +244,9 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
         def destroy(self):
             """
-            Destroy PETSc DMPlex objects and associated Petsc local/global Vectors and Matrices.
+            Destroy PETSc DMPlex objects and associated Petsc local/global
+            Vectors and Matrices.
+
             Safely quit eSCAPE model.
             """
 
@@ -240,7 +256,10 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 self.log.view()
 
             if MPIrank == 0:
-                print('\n+++\n+++ Total run time (%0.02f seconds)\n+++'% (clock() - self.modelRunTime))
+                print(
+                    "\n+++\n+++ Total run time (%0.02f seconds)\n+++"
+                    % (clock() - self.modelRunTime)
+                )
 
             return
 

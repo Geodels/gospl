@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 from mpi4py import MPI
 
-import sys,petsc4py
+import sys, petsc4py
+
 petsc4py.init(sys.argv)
 
 from petsc4py import PETSc
@@ -19,19 +20,24 @@ MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
-try: range = xrange
-except: pass
+try:
+    range = xrange
+except:
+    pass
+
 
 class UnstMesh(object):
     """
-    Creating a distributed DMPlex and global vector from it based on triangulated mesh
+    Creating a distributed DMPlex and global vector from it based on
+    triangulated mesh
     """
+
     def __init__(self):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
 
-        if self.reflevel>0:
+        if self.reflevel > 0:
             self.icosahedralSphereMesh()
         else:
             self.buildMesh()
@@ -54,44 +60,48 @@ class UnstMesh(object):
             MPIcomm.bcast(cells.shape, root=0)
             MPIcomm.bcast(coords.shape, root=0)
             # Provide the actual data on rank 0.
-            self.dm = PETSc.DMPlex().createFromCellList(dim, cells, coords, comm=PETSc.COMM_WORLD)
+            self.dm = PETSc.DMPlex().createFromCellList(
+                dim, cells, coords, comm=PETSc.COMM_WORLD
+            )
             del cells, coords
         else:
             cell_shape = list(MPIcomm.bcast(None, root=0))
             coord_shape = list(MPIcomm.bcast(None, root=0))
             cell_shape[0] = 0
             coord_shape[0] = 0
-            self.dm = PETSc.DMPlex().createFromCellList(dim,
-                                        np.zeros(cell_shape, dtype=np.int32),
-                                        np.zeros(coord_shape, dtype=np.double),
-                                        comm=PETSc.COMM_WORLD)
+            self.dm = PETSc.DMPlex().createFromCellList(
+                dim,
+                np.zeros(cell_shape, dtype=np.int32),
+                np.zeros(coord_shape, dtype=np.double),
+                comm=PETSc.COMM_WORLD,
+            )
         return
 
     def readDataMesh(self):
 
         t0 = clock()
         loadData = np.load(self.meshFile)
-        self.gCoords = loadData['v']
+        self.gCoords = loadData["v"]
         self.gpoints = len(self.gCoords)
-        gZ = loadData['z']
-        ngbGlob(self.gpoints,loadData['n'])
+        gZ = loadData["z"]
+        ngbGlob(self.gpoints, loadData["n"])
         del loadData
 
         # From global values to local ones...
-        tree = spatial.cKDTree(self.gCoords,leafsize=10)
+        tree = spatial.cKDTree(self.gCoords, leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
         nelev = gZ[self.glIDs]
         if self.flexure:
             fdist, fids = tree.query(self.lcoords, k=self.fpts)
-            self.fdist = fdist[:,1:]
-            self.fids = fids[:,1:]
+            self.fdist = fdist[:, 1:]
+            self.fids = fids[:, 1:]
             del fdist, fids
 
         # From local to global values...
-        self.lgIDs = -np.ones(self.gpoints,dtype=int)
+        self.lgIDs = -np.ones(self.gpoints, dtype=int)
         self.lgIDs[self.glIDs] = np.arange(self.npoints)
-        self.outIDs = np.where(self.lgIDs<0)[0]
-        self.lgIDs[self.lgIDs<0] = 0
+        self.outIDs = np.where(self.lgIDs < 0)[0]
+        self.lgIDs[self.lgIDs < 0] = 0
         del tree, distances
 
         # Local/Global mapping
@@ -103,8 +113,8 @@ class UnstMesh(object):
 
         # Vertex part of an unique partition
         vIS = self.dm.getVertexNumbering()
-        self.inIDs = np.zeros(self.npoints,dtype=int)
-        self.inIDs[vIS.indices>=0] = 1
+        self.inIDs = np.zeros(self.npoints, dtype=int)
+        self.inIDs[vIS.indices >= 0] = 1
         vIS.destroy()
 
         # Local/Global vectors
@@ -118,7 +128,7 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print('local/global mapping (%0.02f seconds)'% (clock() - t0))
+            print("local/global mapping (%0.02f seconds)" % (clock() - t0))
 
         return
 
@@ -129,25 +139,26 @@ class UnstMesh(object):
 
         # Create mesh structure with meshplex
         t0 = clock()
-        Tmesh = meshplex.MeshTri(self.lcoords,self.lcells)
+        Tmesh = meshplex.MeshTri(self.lcoords, self.lcells)
         self.area = np.abs(Tmesh.control_volumes)
-        self.area[np.isnan(self.area)] = 1.
+        self.area[np.isnan(self.area)] = 1.0
 
         # Voronoi and simplices declaration
         Tmesh.create_edges()
         cc = Tmesh.cell_circumcenters
-        edges_nodes = Tmesh.edges['nodes']
-        cells_nodes = Tmesh.cells['nodes']
-        cells_edges = Tmesh.cells['edges']
+        edges_nodes = Tmesh.edges["nodes"]
+        cells_nodes = Tmesh.cells["nodes"]
+        cells_edges = Tmesh.cells["edges"]
 
         # Finite volume discretisation
-        self.FVmesh_ngbID = defineTIN(self.lcoords, cells_nodes, cells_edges,
-                                      edges_nodes, self.area, cc.T)
+        self.FVmesh_ngbID = defineTIN(
+            self.lcoords, cells_nodes, cells_edges, edges_nodes, self.area, cc.T
+        )
         del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print('fv discretisation (%0.02f seconds)'% (clock() - t0))
+            print("fv discretisation (%0.02f seconds)" % (clock() - t0))
 
         return
 
@@ -158,47 +169,60 @@ class UnstMesh(object):
 
         t0 = clock()
         if self.reflevel < 0 or self.reflevel % 1:
-            raise RuntimeError("Number of refinements must be a non-negative integer")
+            raise RuntimeError(
+                "Number of refinements must be \
+                               a non-negative integer"
+            )
 
         from math import sqrt
+
         phi = (1 + sqrt(5)) / 2
 
         # vertices of an icosahedron with an edge length of 2
-        vertices = np.array([[-1, phi, 0],
-                             [1, phi, 0],
-                             [-1, -phi, 0],
-                             [1, -phi, 0],
-                             [0, -1, phi],
-                             [0, 1, phi],
-                             [0, -1, -phi],
-                             [0, 1, -phi],
-                             [phi, 0, -1],
-                             [phi, 0, 1],
-                             [-phi, 0, -1],
-                             [-phi, 0, 1]],
-                            dtype=np.double)
+        vertices = np.array(
+            [
+                [-1, phi, 0],
+                [1, phi, 0],
+                [-1, -phi, 0],
+                [1, -phi, 0],
+                [0, -1, phi],
+                [0, 1, phi],
+                [0, -1, -phi],
+                [0, 1, -phi],
+                [phi, 0, -1],
+                [phi, 0, 1],
+                [-phi, 0, -1],
+                [-phi, 0, 1],
+            ],
+            dtype=np.double,
+        )
 
         # faces of the base icosahedron
-        faces = np.array([[0, 11, 5],
-                          [0, 5, 1],
-                          [0, 1, 7],
-                          [0, 7, 10],
-                          [0, 10, 11],
-                          [1, 5, 9],
-                          [5, 11, 4],
-                          [11, 10, 2],
-                          [10, 7, 6],
-                          [7, 1, 8],
-                          [3, 9, 4],
-                          [3, 4, 2],
-                          [3, 2, 6],
-                          [3, 6, 8],
-                          [3, 8, 9],
-                          [4, 9, 5],
-                          [2, 4, 11],
-                          [6, 2, 10],
-                          [8, 6, 7],
-                          [9, 8, 1]], dtype=np.int32)
+        faces = np.array(
+            [
+                [0, 11, 5],
+                [0, 5, 1],
+                [0, 1, 7],
+                [0, 7, 10],
+                [0, 10, 11],
+                [1, 5, 9],
+                [5, 11, 4],
+                [11, 10, 2],
+                [10, 7, 6],
+                [7, 1, 8],
+                [3, 9, 4],
+                [3, 4, 2],
+                [3, 2, 6],
+                [3, 6, 8],
+                [3, 8, 9],
+                [4, 9, 5],
+                [2, 4, 11],
+                [6, 2, 10],
+                [8, 6, 7],
+                [9, 8, 1],
+            ],
+            dtype=np.int32,
+        )
 
         self.meshfrom_cell_list(2, faces, vertices)
         del faces, vertices
@@ -215,12 +239,12 @@ class UnstMesh(object):
         if MPIsize > 1:
             self.dm.distributeOverlap(1)
             if MPIrank == 0 and self.verbose:
-                print('create mesh (%0.02f seconds)'% (clock() - t0))
+                print("create mesh (%0.02f seconds)" % (clock() - t0))
 
         # Define one DoF on the nodes
         t0 = clock()
         self.dm.setNumFields(1)
-        origSect = self.dm.createSection(1, [1,0,0])
+        origSect = self.dm.createSection(1, [1, 0, 0])
         origSect.setFieldName(0, "points")
         origSect.setUp()
         self.dm.setDefaultSection(origSect)
@@ -233,16 +257,16 @@ class UnstMesh(object):
 
         # Define local vertex & cells
         cStart, cEnd = self.dm.getHeightStratum(0)
-        self.lcells = np.zeros((cEnd-cStart,3), dtype=PETSc.IntType)
+        self.lcells = np.zeros((cEnd - cStart, 3), dtype=PETSc.IntType)
         point_closure = None
         for c in range(cStart, cEnd):
             point_closure = self.dm.getTransitiveClosure(c)[0]
-            self.lcells[c,:] = point_closure[-3:]-cEnd
+            self.lcells[c, :] = point_closure[-3:] - cEnd
         if point_closure is not None:
             del point_closure
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print('mesh coords/cells (%0.02f seconds)'% (clock() - t0))
+            print("mesh coords/cells (%0.02f seconds)" % (clock() - t0))
 
         # Interpolate values from input using inverse weighting distance
         self.readDataMesh()
@@ -255,7 +279,7 @@ class UnstMesh(object):
         self.cumEDLocal = self.hLocal.duplicate()
         self.cumEDLocal.set(0.0)
 
-        self.sealevel = self.seafunction(self.tNow+self.dt)
+        self.sealevel = self.seafunction(self.tNow + self.dt)
 
         areaLocal = self.hLocal.duplicate()
         self.areaGlobal = self.hGlobal.duplicate()
@@ -275,30 +299,31 @@ class UnstMesh(object):
 
     def buildMesh(self):
         """
-        Construct a PETSC mesh and distribute it amongst the different processors.
+        Construct a PETSC mesh and distribute it amongst the different
+        processors.
         """
 
         # Read mesh attributes from file
         t0 = clock()
         loadData = np.load(self.meshFile)
-        self.gCoords = loadData['v']
+        self.gCoords = loadData["v"]
         self.gpoints = len(self.gCoords)
-        gZ = loadData['z']
-        ngbGlob(self.gpoints,loadData['n'])
+        gZ = loadData["z"]
+        ngbGlob(self.gpoints, loadData["n"])
         if MPIrank == 0 and self.verbose:
-            print('reading mesh information (%0.02f seconds)' % (clock() - t0))
+            print("reading mesh information (%0.02f seconds)" % (clock() - t0))
 
         # Create DMPlex
-        self.meshfrom_cell_list(2, loadData['c'], self.gCoords)
+        self.meshfrom_cell_list(2, loadData["c"], self.gCoords)
         del loadData
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print('create DMPlex (%0.02f seconds)'% (clock() - t0))
+            print("create DMPlex (%0.02f seconds)" % (clock() - t0))
 
         # Define one DoF on the nodes
         t0 = clock()
         self.dm.setNumFields(1)
-        origSect = self.dm.createSection(1, [1,0,0])
+        origSect = self.dm.createSection(1, [1, 0, 0])
         origSect.setFieldName(0, "points")
         origSect.setUp()
         self.dm.setDefaultSection(origSect)
@@ -315,51 +340,51 @@ class UnstMesh(object):
         origVec.destroy()
         origSect.destroy()
         if MPIrank == 0 and self.verbose:
-            print('distribute DMPlex (%0.02f seconds)'% (clock() - t0))
+            print("distribute DMPlex (%0.02f seconds)" % (clock() - t0))
 
         # Define local vertex & cells
         t0 = clock()
         self.lcoords = self.dm.getCoordinatesLocal().array.reshape(-1, 3)
         self.npoints = self.lcoords.shape[0]
         cStart, cEnd = self.dm.getHeightStratum(0)
-        self.lcells = np.zeros((cEnd-cStart,3), dtype=PETSc.IntType)
+        self.lcells = np.zeros((cEnd - cStart, 3), dtype=PETSc.IntType)
         point_closure = None
         for c in range(cStart, cEnd):
             point_closure = self.dm.getTransitiveClosure(c)[0]
-            self.lcells[c,:] = point_closure[-3:]-cEnd
+            self.lcells[c, :] = point_closure[-3:] - cEnd
         if point_closure is not None:
             del point_closure
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print('mesh coords/cells (%0.02f seconds)'% (clock() - t0))
+            print("mesh coords/cells (%0.02f seconds)" % (clock() - t0))
 
         # Define local vertex & cells
         t = clock()
         cStart, cEnd = self.dm.getHeightStratum(0)
         # Dealing with triangular cells only
-        self.lcells = np.zeros((cEnd-cStart,3), dtype=PETSc.IntType)
+        self.lcells = np.zeros((cEnd - cStart, 3), dtype=PETSc.IntType)
         for c in range(cStart, cEnd):
             point_closure = self.dm.getTransitiveClosure(c)[0]
-            self.lcells[c,:] = point_closure[-3:]-cEnd
+            self.lcells[c, :] = point_closure[-3:] - cEnd
         del point_closure
         if MPIrank == 0 and self.verbose:
-            print('defining local DMPlex (%0.02f seconds)'% (clock() - t))
+            print("defining local DMPlex (%0.02f seconds)" % (clock() - t))
 
         # From global values to local ones...
-        tree = spatial.cKDTree(self.gCoords,leafsize=10)
+        tree = spatial.cKDTree(self.gCoords, leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
         nelev = gZ[self.glIDs]
         if self.flexure:
             fdist, fids = tree.query(self.lcoords, k=self.fpts)
-            self.fdist = fdist[:,1:]
-            self.fids = fids[:,1:]
+            self.fdist = fdist[:, 1:]
+            self.fids = fids[:, 1:]
             del fdist, fids
 
         # From local to global values...
-        self.lgIDs = -np.ones(self.gpoints,dtype=int)
+        self.lgIDs = -np.ones(self.gpoints, dtype=int)
         self.lgIDs[self.glIDs] = np.arange(self.npoints)
-        self.outIDs = np.where(self.lgIDs<0)[0]
-        self.lgIDs[self.lgIDs<0] = 0
+        self.outIDs = np.where(self.lgIDs < 0)[0]
+        self.lgIDs[self.lgIDs < 0] = 0
         del tree, distances
 
         # Local/Global mapping
@@ -371,8 +396,8 @@ class UnstMesh(object):
 
         # Vertex part of an unique partition
         vIS = self.dm.getVertexNumbering()
-        self.inIDs = np.zeros(self.npoints,dtype=int)
-        self.inIDs[vIS.indices>=0] = 1
+        self.inIDs = np.zeros(self.npoints, dtype=int)
+        self.inIDs[vIS.indices >= 0] = 1
         vIS.destroy()
 
         # Local/Global vectors
@@ -386,7 +411,7 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print('local/global mapping (%0.02f seconds)'% (clock() - t0))
+            print("local/global mapping (%0.02f seconds)" % (clock() - t0))
 
         # Create mesh structure with meshplex
         self.meshStructure()
@@ -396,7 +421,7 @@ class UnstMesh(object):
         self.cumEDLocal = self.hLocal.duplicate()
         self.cumEDLocal.set(0.0)
 
-        self.sealevel = self.seafunction(self.tNow+self.dt)
+        self.sealevel = self.seafunction(self.tNow + self.dt)
 
         areaLocal = self.hLocal.duplicate()
         self.areaGlobal = self.hGlobal.duplicate()
@@ -422,13 +447,13 @@ class UnstMesh(object):
 
         t0 = clock()
         # Sea level
-        self.sealevel = self.seafunction(self.tNow+self.dt)
+        self.sealevel = self.seafunction(self.tNow + self.dt)
 
         # Climate
         self._updateRain()
 
         if MPIrank == 0 and self.verbose:
-            print('Update Climatic Forces (%0.02f seconds)'% (clock() - t0))
+            print("Update Climatic Forces (%0.02f seconds)" % (clock() - t0))
 
         return
 
@@ -442,7 +467,7 @@ class UnstMesh(object):
         self._updateTectonic()
 
         if MPIrank == 0 and self.verbose:
-            print('Update Tectonic Forces (%0.02f seconds)'% (clock() - t0))
+            print("Update Tectonic Forces (%0.02f seconds)" % (clock() - t0))
 
         return
 
@@ -451,13 +476,13 @@ class UnstMesh(object):
         Find the paleomap for the considered time interval
         """
 
-        if self.paleodata is None :
+        if self.paleodata is None:
             return
 
         for k in range(self.paleoNb):
-            if self.tNow == self.paleodata.iloc[k,0]:
-                loadData = np.load(self.paleodata.iloc[k,1])
-                gZ = loadData['z']
+            if self.tNow == self.paleodata.iloc[k, 0]:
+                loadData = np.load(self.paleodata.iloc[k, 1])
+                gZ = loadData["z"]
                 self.hLocal.setArray(gZ[self.glIDs])
                 self.dm.localToGlobal(self.hLocal, self.hGlobal)
                 del loadData, gZ
@@ -475,8 +500,8 @@ class UnstMesh(object):
             return
 
         nb = self.flexNb
-        if nb < len(self.flexdata)-1 :
-            if self.flexdata.iloc[nb+1,0] <= self.tNow+self.dt :
+        if nb < len(self.flexdata) - 1:
+            if self.flexdata.iloc[nb + 1, 0] <= self.tNow + self.dt:
                 nb += 1
 
         if nb > self.flexNb or nb == -1:
@@ -485,26 +510,26 @@ class UnstMesh(object):
             self.flexNb = nb
 
             # Loading elastic thickness
-            loadData = np.load(self.flexdata.iloc[nb,1])
-            Te = loadData[self.flexdata.iloc[nb,2]]
+            loadData = np.load(self.flexdata.iloc[nb, 1])
+            Te = loadData[self.flexdata.iloc[nb, 2]]
 
             # Flexural rigidity
-            D = self.young*np.power(Te,3)/11.25
+            D = self.young * np.power(Te, 3) / 11.25
 
             # Flexural parameters
-            fsed = (self.dmantle-self.dfill)*self.gravity
-            Bsed = np.power(D/fsed,0.25)
-            fwat = (self.dmantle-1027.)*self.gravity
-            Bwat = np.power(D/fwat,0.25)
+            fsed = (self.dmantle - self.dfill) * self.gravity
+            Bsed = np.power(D / fsed, 0.25)
+            fwat = (self.dmantle - 1027.0) * self.gravity
+            Bwat = np.power(D / fwat, 0.25)
 
             # Define coefficients
-            dsed = self.fdist/Bsed[self.glIDs]
-            dwat = self.fdist/Bwat[self.glIDs]
+            dsed = self.fdist / Bsed[self.glIDs]
+            dwat = self.fdist / Bwat[self.glIDs]
 
-            self.wwato = 1./(8.0*fwat*Bwat[self.glIDs]**2)
-            self.wsedo = 1./(8.0*fsed*Bsed[self.glIDs]**2)
+            self.wwato = 1.0 / (8.0 * fwat * Bwat[self.glIDs] ** 2)
+            self.wsedo = 1.0 / (8.0 * fsed * Bsed[self.glIDs] ** 2)
 
-            tmpc1 = 1./(2.0*np.pi*fsed*Bsed**2)
+            tmpc1 = 1.0 / (2.0 * np.pi * fsed * Bsed ** 2)
 
             del loadData
             gc.collect()
@@ -513,10 +538,10 @@ class UnstMesh(object):
         ed = self.cumEDLocal.getArray().copy()
         ged = np.zeros(self.gpoints)
         ged = ed[self.lgIDs]
-        ged[self.outIDs] = -1.e8
+        ged[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, ged, op=MPI.MAX)
 
-        np.where(ged>0.)[0]
+        np.where(ged > 0.0)[0]
         self.gravity
 
         return
@@ -527,8 +552,8 @@ class UnstMesh(object):
         """
 
         nb = self.rainNb
-        if nb < len(self.raindata)-1 :
-            if self.raindata.iloc[nb+1,0] <= self.tNow+self.dt :
+        if nb < len(self.raindata) - 1:
+            if self.raindata.iloc[nb + 1, 0] <= self.tNow + self.dt:
                 nb += 1
 
         if nb > self.rainNb or nb == -1:
@@ -536,18 +561,18 @@ class UnstMesh(object):
                 nb = 0
 
             self.rainNb = nb
-            if pd.isnull(self.raindata['rUni'][nb]):
-                loadData = np.load(self.raindata.iloc[nb,2])
-                rainArea = loadData[self.raindata.iloc[nb,3]]
+            if pd.isnull(self.raindata["rUni"][nb]):
+                loadData = np.load(self.raindata.iloc[nb, 2])
+                rainArea = loadData[self.raindata.iloc[nb, 3]]
                 del loadData
             else:
-                rainArea = np.full(self.gpoints,self.raindata.iloc[nb,1])
-            self.rainArea = rainArea[self.glIDs]*self.area
+                rainArea = np.full(self.gpoints, self.raindata.iloc[nb, 1])
+            self.rainArea = rainArea[self.glIDs] * self.area
 
-        self.rainVal = self.rainArea[self.glIDs]/self.area
+        self.rainVal = self.rainArea[self.glIDs] / self.area
         localZ = self.hLocal.getArray()
         rainArea = self.rainArea.copy()
-        rainArea[localZ<self.sealevel] = 0.
+        rainArea[localZ < self.sealevel] = 0.0
 
         self.bL.setArray(rainArea)
         self.dm.localToGlobal(self.bL, self.bG, 1)
@@ -562,13 +587,13 @@ class UnstMesh(object):
         Find the current tectonic rates for the considered time interval
         """
 
-        if self.tecdata is None :
+        if self.tecdata is None:
             self.tectonic = None
             return
 
         nb = self.tecNb
-        if nb < len(self.tecdata)-1 :
-            if self.tecdata.iloc[nb+1,0] < self.tNow+self.dt :
+        if nb < len(self.tecdata) - 1:
+            if self.tecdata.iloc[nb + 1, 0] < self.tNow + self.dt:
                 nb += 1
 
         if nb > self.tecNb or nb == -1:
@@ -577,28 +602,28 @@ class UnstMesh(object):
 
             self.tecNb = nb
             self.upsubs = False
-            if nb < len(self.tecdata.index)-1:
-                timer = self.tecdata.iloc[nb+1,0]-self.tecdata.iloc[nb,0]
+            if nb < len(self.tecdata.index) - 1:
+                timer = self.tecdata.iloc[nb + 1, 0] - self.tecdata.iloc[nb, 0]
             else:
-                timer = self.tEnd-self.tecdata.iloc[nb,0]
+                timer = self.tEnd - self.tecdata.iloc[nb, 0]
 
             mdata = None
-            if self.tecdata.iloc[nb,1] != 'empty':
-                mdata = np.load(self.tecdata.iloc[nb,1])
-                self.hdisp = mdata['xyz'][self.glIDs,:]
-                self._meshAdvectorSphere(mdata['xyz'], timer)
+            if self.tecdata.iloc[nb, 1] != "empty":
+                mdata = np.load(self.tecdata.iloc[nb, 1])
+                self.hdisp = mdata["xyz"][self.glIDs, :]
+                self._meshAdvectorSphere(mdata["xyz"], timer)
 
-            if self.tecdata.iloc[nb,2] != 'empty':
-                mdata = np.load(self.tecdata.iloc[nb,2])
-                self._meshUpliftSubsidence(mdata['z'])
+            if self.tecdata.iloc[nb, 2] != "empty":
+                mdata = np.load(self.tecdata.iloc[nb, 2])
+                self._meshUpliftSubsidence(mdata["z"])
                 self.upsubs = True
 
             if mdata is not None:
                 del mdata
 
-        elif self.upsubs and self.tNow+self.dt < self.tEnd:
+        elif self.upsubs and self.tNow + self.dt < self.tEnd:
             tmp = self.hLocal.getArray().copy()
-            self.hLocal.setArray(tmp+self.uplift*self.dt)
+            self.hLocal.setArray(tmp + self.uplift * self.dt)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
             del tmp
             gc.collect()
@@ -613,7 +638,7 @@ class UnstMesh(object):
         # Define vertical displacements
         tmp = self.hLocal.getArray().copy()
         self.uplift = tectonic[self.glIDs]
-        self.hLocal.setArray(tmp+self.uplift*self.dt)
+        self.hLocal.setArray(tmp + self.uplift * self.dt)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
         del tmp
         gc.collect()
@@ -627,7 +652,7 @@ class UnstMesh(object):
 
         # Define vertical displacements
         tmp = self.hLocal.getArray().copy()
-        self.hLocal.setArray(tmp+self.uplift*self.dt)
+        self.hLocal.setArray(tmp + self.uplift * self.dt)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
         del tmp
         gc.collect()
@@ -640,25 +665,25 @@ class UnstMesh(object):
         """
 
         # Move coordinates
-        XYZ = self.gCoords + tectonic*timer
+        XYZ = self.gCoords + tectonic * timer
 
         # Elevation
         tmp = self.hLocal.getArray().copy()
         elev = np.zeros(self.gpoints)
         elev = tmp[self.lgIDs]
-        elev[self.outIDs] = -1.e8
+        elev[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, elev, op=MPI.MAX)
 
         # Erosion/deposition
         tmp = self.cumEDLocal.getArray().copy()
         erodep = np.zeros(self.gpoints)
         erodep = tmp[self.lgIDs]
-        erodep[self.outIDs] = -1.e8
+        erodep[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, erodep, op=MPI.MAX)
 
         # Build kd-tree
         kk = 3
-        tree = spatial.cKDTree(XYZ,leafsize=10)
+        tree = spatial.cKDTree(XYZ, leafsize=10)
         distances, indices = tree.query(self.lcoords, k=kk)
 
         # Inverse weighting distance...
@@ -666,13 +691,15 @@ class UnstMesh(object):
             nelev = elev[indices]
             nerodep = erodep[indices]
         else:
-            weights = 1.0 / distances**2
-            onIDs = np.where(distances[:,0] == 0)[0]
-            nelev = np.sum(weights*elev[indices],axis=1)/np.sum(weights, axis=1)
-            nerodep = np.sum(weights*erodep[indices],axis=1)/np.sum(weights, axis=1)
-            if len(onIDs)>0:
-                nelev[onIDs] = elev[indices[onIDs,0]]
-                nerodep[onIDs] = erodep[indices[onIDs,0]]
+            weights = 1.0 / distances ** 2
+            onIDs = np.where(distances[:, 0] == 0)[0]
+            nelev = np.sum(weights * elev[indices], axis=1) / np.sum(weights, axis=1)
+            nerodep = np.sum(weights * erodep[indices], axis=1) / np.sum(
+                weights, axis=1
+            )
+            if len(onIDs) > 0:
+                nelev[onIDs] = elev[indices[onIDs, 0]]
+                nerodep[onIDs] = erodep[indices[onIDs, 0]]
             del weights
 
         self.hLocal.setArray(nelev)
@@ -681,7 +708,7 @@ class UnstMesh(object):
         self.cumEDLocal.setArray(nerodep)
         self.dm.localToGlobal(self.cumEDLocal, self.cumED, 1)
 
-        del XYZ,  elev, nelev, erodep, nerodep
+        del XYZ, elev, nelev, erodep, nerodep
         del tree, distances, indices
         gc.collect()
 
@@ -689,7 +716,8 @@ class UnstMesh(object):
 
     def destroy_DMPlex(self):
         """
-        Destroy PETSc DMPlex objects and associated Petsc local/global Vectors and Matrices.
+        Destroy PETSc DMPlex objects and associated Petsc local/global
+        Vectors and Matrices.
         """
 
         t0 = clock()
@@ -740,6 +768,6 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print('Cleaning Model Dataset (%0.02f seconds)'% (clock() - t0))
+            print("Cleaning Model Dataset (%0.02f seconds)" % (clock() - t0))
 
         return
