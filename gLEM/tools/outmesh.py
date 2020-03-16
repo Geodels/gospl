@@ -4,20 +4,21 @@ import h5py
 
 import numpy as np
 from mpi4py import MPI
-import sys, petsc4py
-
-petsc4py.init(sys.argv)
+import sys
+import petsc4py
 from petsc4py import PETSc
 from time import clock
+
+petsc4py.init(sys.argv)
 
 MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
-try:
-    range = xrange
-except:
-    pass
+# try:
+#     range = xrange
+# except:
+#     pass
 
 
 class WriteMesh(object):
@@ -47,6 +48,55 @@ class WriteMesh(object):
             self.saveStrat = self.tNow + self.strat
         else:
             self.rStart = self.tStart
+
+        return
+
+    def visModel(self):
+        """
+        Visualise model outputs.
+        """
+
+        # Output time step for first step
+        if self.saveTime == self.tStart:
+            self.outputMesh()
+            self.saveTime += self.tout
+
+        # Output time step
+        elif self.tNow >= self.saveTime:
+            self.outputMesh()
+            self.saveTime += self.tout
+
+            # Forcing with backward model
+            if self.forceStep >= 0 and self.newForcing:
+                self.forcePaleo()
+                self.steppaleo += 1
+
+            if self.steppaleo == 1:
+                self.steppaleo = 0
+                self.newForcing = False
+                self.forceStep += 1
+            else:
+                self.newForcing = True
+
+        return
+
+    def forceFit(self):
+        """
+        Forcing paleotopography fitting.
+        """
+
+        self.tNow = self.tEnd
+        self.saveStrat = self.tEnd
+
+        # Output stratal evolution
+        if self.strat > 0:
+            self.stratStep -= 1
+            self.outputStrat()
+
+        # Output time step
+        self.step -= 1
+        self.saveTime = self.tEnd
+        self.outputMesh()
 
         return
 

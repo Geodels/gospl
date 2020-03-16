@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 from mpi4py import MPI
 
-import sys, petsc4py
+import sys
+import petsc4py
 
-petsc4py.init(sys.argv)
 
 from petsc4py import PETSc
 from time import clock
@@ -16,14 +16,15 @@ from gLEM._fortran import ngbGlob
 import meshplex
 from scipy import spatial
 
+petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
-try:
-    range = xrange
-except:
-    pass
+# try:
+#     range = xrange
+# except:
+#     pass
 
 
 class UnstMesh(object):
@@ -295,6 +296,58 @@ class UnstMesh(object):
         self.tecNb = -1
         self.flexNb = -1
 
+        if MPIsize > 1:
+            sf.destroy()
+
+        return
+
+    def reInitialiseModel(self):
+        """
+        Reinitialise eSCAPE model for paleo-fitting experiments.
+        """
+
+        t0step = clock()
+
+        # Restart time
+        self.tNow = self.tStart
+        self.step = 0
+        self.stratStep = 0
+        self.rStart = self.tStart
+        self.saveTime = self.tNow
+        if self.strat > 0:
+            self.saveStrat = self.tNow + self.strat
+        else:
+            self.saveStrat = self.tEnd + self.tout
+
+        # Forcing functions
+        self.rainNb = -1
+        self.tecNb = -1
+        self.flexNb = -1
+
+        # Getting PETSc vectors values
+        loadData = np.load(self.meshFile)
+        gZ = loadData["z"]
+        self.hLocal.setArray(gZ[self.glIDs])
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        self.vSed.set(0.0)
+        self.vSedLocal.set(0.0)
+        self.cumED.set(0.0)
+        self.cumEDLocal.set(0.0)
+
+        # Update external forces
+        self.applyForces()
+        self.applyTectonics()
+
+        del gZ, loadData
+        gc.collect()
+
+        if MPIrank == 0:
+            print(
+                "--- Reinitialise Phase \
+                  (%0.02f seconds)\n+++"
+                % (clock() - t0step)
+            )
+
         return
 
     def buildMesh(self):
@@ -439,6 +492,17 @@ class UnstMesh(object):
 
         return
 
+    def initExForce(self):
+        """
+        Initialise external forces.
+        """
+
+        self.applyForces()
+        if self.backward:
+            self.applyTectonics()
+
+        return
+
     def applyForces(self):
         """
         Find the different values for climatic and sea-level forces that will
@@ -499,40 +563,40 @@ class UnstMesh(object):
         if not self.flexure:
             return
 
-        nb = self.flexNb
-        if nb < len(self.flexdata) - 1:
-            if self.flexdata.iloc[nb + 1, 0] <= self.tNow + self.dt:
-                nb += 1
-
-        if nb > self.flexNb or nb == -1:
-            if nb == -1:
-                nb = 0
-            self.flexNb = nb
-
-            # Loading elastic thickness
-            loadData = np.load(self.flexdata.iloc[nb, 1])
-            Te = loadData[self.flexdata.iloc[nb, 2]]
-
-            # Flexural rigidity
-            D = self.young * np.power(Te, 3) / 11.25
-
-            # Flexural parameters
-            fsed = (self.dmantle - self.dfill) * self.gravity
-            Bsed = np.power(D / fsed, 0.25)
-            fwat = (self.dmantle - 1027.0) * self.gravity
-            Bwat = np.power(D / fwat, 0.25)
-
-            # Define coefficients
-            dsed = self.fdist / Bsed[self.glIDs]
-            dwat = self.fdist / Bwat[self.glIDs]
-
-            self.wwato = 1.0 / (8.0 * fwat * Bwat[self.glIDs] ** 2)
-            self.wsedo = 1.0 / (8.0 * fsed * Bsed[self.glIDs] ** 2)
-
-            tmpc1 = 1.0 / (2.0 * np.pi * fsed * Bsed ** 2)
-
-            del loadData
-            gc.collect()
+        # nb = self.flexNb
+        # if nb < len(self.flexdata) - 1:
+        #     if self.flexdata.iloc[nb + 1, 0] <= self.tNow + self.dt:
+        #         nb += 1
+        #
+        # if nb > self.flexNb or nb == -1:
+        #     if nb == -1:
+        #         nb = 0
+        #     self.flexNb = nb
+        #
+        #     # Loading elastic thickness
+        #     loadData = np.load(self.flexdata.iloc[nb, 1])
+        #     Te = loadData[self.flexdata.iloc[nb, 2]]
+        #
+        #     # Flexural rigidity
+        #     D = self.young * np.power(Te, 3) / 11.25
+        #
+        #     # Flexural parameters
+        #     fsed = (self.dmantle - self.dfill) * self.gravity
+        #     Bsed = np.power(D / fsed, 0.25)
+        #     fwat = (self.dmantle - 1027.0) * self.gravity
+        #     Bwat = np.power(D / fwat, 0.25)
+        #
+        #     # Define coefficients
+        #     dsed = self.fdist / Bsed[self.glIDs]
+        #     dwat = self.fdist / Bwat[self.glIDs]
+        #
+        #     self.wwato = 1.0 / (8.0 * fwat * Bwat[self.glIDs] ** 2)
+        #     self.wsedo = 1.0 / (8.0 * fsed * Bsed[self.glIDs] ** 2)
+        #
+        #     tmpc1 = 1.0 / (2.0 * np.pi * fsed * Bsed ** 2)
+        #
+        #     del loadData
+        #     gc.collect()
 
         # Get global erosion/deposition ...
         ed = self.cumEDLocal.getArray().copy()
@@ -769,5 +833,14 @@ class UnstMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print("Cleaning Model Dataset (%0.02f seconds)" % (clock() - t0))
+
+        if self.showlog:
+            self.log.view()
+
+        if MPIrank == 0:
+            print(
+                "\n+++\n+++ Total run time (%0.02f seconds)\n+++"
+                % (clock() - self.modelRunTime)
+            )
 
         return

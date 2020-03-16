@@ -3,9 +3,9 @@ import numpy as np
 from mpi4py import MPI
 from scipy import sparse
 
-import sys, petsc4py
+import sys
+import petsc4py
 
-petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from time import clock
 
@@ -14,14 +14,15 @@ from gLEM._fortran import MFDreceivers
 from gLEM._fortran import setHillslopeCoeff
 from gLEM._fortran import setDiffusionCoeff
 
+petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = PETSc.COMM_WORLD
 
-try:
-    range = xrange
-except:
-    pass
+# try:
+#     range = xrange
+# except:
+#     pass
 
 
 class SPMesh(object):
@@ -36,8 +37,8 @@ class SPMesh(object):
         self.hbot = -500.0
 
         # Identity matrix construction
-        self.I = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
-        self.J = np.arange(0, self.npoints, dtype=PETSc.IntType)
+        self.II = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
+        self.JJ = np.arange(0, self.npoints, dtype=PETSc.IntType)
         self.iMat = self._matrix_build_diag(np.ones(self.npoints))
 
         # Petsc vectors
@@ -108,7 +109,7 @@ class SPMesh(object):
 
         # Define diagonal matrix
         matrix.assemblyBegin()
-        matrix.setValuesLocalCSR(self.I, self.J, V, PETSc.InsertMode.INSERT_VALUES)
+        matrix.setValuesLocalCSR(self.II, self.JJ, V, PETSc.InsertMode.INSERT_VALUES)
         matrix.assemblyEnd()
 
         return matrix
@@ -189,6 +190,32 @@ class SPMesh(object):
             print("Flow Direction declaration (%0.02f seconds)" % (clock() - t0))
 
         return
+
+    def sedChange(self):
+        """
+        Perform erosion deposition changes.
+
+        This function contains methods for the following operations:
+         - erosion/deposition induced by stream power law
+         - depression identification and pit filling
+         - stream induced deposition diffusion
+         - hillslope diffusion
+        """
+
+        # Compute Erosion using Stream Power Law
+        self.cptErosion()
+
+        # Compute Deposition and Sediment Flux
+        self.cptSedFlux()
+
+        # Compute Sediment Deposition
+        self.SedimentDeposition()
+
+        # Compute Fresh Sediment Diffusion
+        self.SedimentDiffusion()
+
+        # Compute Hillslope Diffusion Law
+        self.HillSlope()
 
     def FlowAccumulation(self):
         """

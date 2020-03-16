@@ -18,9 +18,9 @@ from scipy import sum, average
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
-import sys, petsc4py
+import sys
+import petsc4py
 
-petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from time import clock
 
@@ -29,14 +29,15 @@ from gLEM._fortran import MFDreceivers
 from gLEM._fortran import setHillslopeCoeff
 from gLEM._fortran import setDiffusionCoeff
 
+petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = PETSc.COMM_WORLD
 
-try:
-    range = xrange
-except:
-    pass
+# try:
+#     range = xrange
+# except:
+#     pass
 
 
 class PFit(object):
@@ -220,6 +221,7 @@ class PFit(object):
             outfile.append(outf)
 
         if MPIrank == 0:
+            nadvect = None
             advectXYZ = self.gCoords.copy()
             p = nbdisp - 1
             for k in range(nbdisp):
