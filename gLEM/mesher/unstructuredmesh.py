@@ -21,11 +21,6 @@ MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
-# try:
-#     range = xrange
-# except:
-#     pass
-
 
 class UnstMesh(object):
     """
@@ -633,7 +628,7 @@ class UnstMesh(object):
                 rainArea = np.full(self.gpoints, self.raindata.iloc[nb, 1])
             self.rainArea = rainArea[self.glIDs] * self.area
 
-        self.rainVal = self.rainArea[self.glIDs] / self.area
+        self.rainVal = self.rainArea / self.area
         localZ = self.hLocal.getArray()
         rainArea = self.rainArea.copy()
         rainArea[localZ < self.sealevel] = 0.0

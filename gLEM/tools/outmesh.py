@@ -15,11 +15,6 @@ MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
-# try:
-#     range = xrange
-# except:
-#     pass
-
 
 class WriteMesh(object):
     """

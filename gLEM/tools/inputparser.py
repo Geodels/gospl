@@ -473,10 +473,12 @@ class ReadYaml(object):
 
         if rMap is None and rUniform is None:
             print(
-                "For each climate event a rainfall value (uniform) or a rainfall grid (map) is required."
+                "For each climate event a rainfall value (uniform) or a rainfall \
+                grid (map) is required."
             )
             raise ValueError(
-                "Climate event {} has no rainfall value (uniform) or a rainfall map (map).".format(
+                "Climate event {} has no rainfall value (uniform) or a rainfall \
+                map (map).".format(
                     k
                 )
             )

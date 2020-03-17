@@ -34,11 +34,6 @@ MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = PETSc.COMM_WORLD
 
-# try:
-#     range = xrange
-# except:
-#     pass
-
 
 class PFit(object):
     """
@@ -382,7 +377,8 @@ class PFit(object):
         RV coefficient (and related variants) between 2D matrices, columnwise
         Check: https://en.wikipedia.org/wiki/RV_coefficient
 
-        RV normally defined in terms of corrcoefs, but any of the above similarity metrics will work
+        RV normally defined in terms of corrcoefs, but any of the above similarity
+        metrics will work
         """
 
         # Calculate correlations
@@ -406,16 +402,21 @@ class PFit(object):
         Concordance correlation coefficient.
 
         The concordance correlation coefficient is a measure of inter-rater agreement.
-        It measures the deviation of the relationship between predicted and true values from the 45 degree angle.
+        It measures the deviation of the relationship between predicted and true values from
+        the 45 degree angle.
 
         Read more: https://en.wikipedia.org/wiki/Concordance_correlation_coefficient
-        Original paper: Lawrence, I., and Kuei Lin. "A concordance correlation coefficient to evaluate reproducibility." Biometrics (1989): 255-268.
+        Original paper: Lawrence, I., and Kuei Lin. "A concordance correlation coefficient to
+        evaluate reproducibility." Biometrics (1989): 255-268.
 
-        - y_true : array-like of shape = (n_samples) or (n_samples, n_outputs). Ground truth (correct) target values.
-        - y_pred : array-like of shape = (n_samples) or (n_samples, n_outputs). Estimated target values.
+        - y_true : array-like of shape = (n_samples) or (n_samples, n_outputs).
+                Ground truth (correct) target values.
+        - y_pred : array-like of shape = (n_samples) or (n_samples, n_outputs).
+                Estimated target values.
 
         Returns
-        - loss : A float in the range [-1,1]. A value of 1 indicates perfect agreement between the true and the predicted values.
+        - loss : A float in the range [-1,1]. A value of 1 indicates perfect agreement
+                between the true and the predicted values.
         """
 
         cor = np.corrcoef(y_true, y_pred)[0][1]

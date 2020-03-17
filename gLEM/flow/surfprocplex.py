@@ -19,11 +19,6 @@ MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = PETSc.COMM_WORLD
 
-# try:
-#     range = xrange
-# except:
-#     pass
-
 
 class SPMesh(object):
     """
@@ -463,7 +458,8 @@ class SPMesh(object):
         """
 
         t0 = clock()
-        # Get the marine volumetric sediment rate (m3/yr) to diffuse during the time step...
+        # Get the marine volumetric sediment rate (m3/yr) to diffuse
+        # during the time step...
         tmp = self.vSedLocal.getArray().copy()
         depVol = np.zeros(self.npoints)
         depVol[self.seaID] = tmp[self.seaID] * self.dt  # volume m3
