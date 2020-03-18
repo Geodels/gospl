@@ -27,7 +27,7 @@ class WriteMesh(object):
         self.stratStep = 0
         self.file = "gLEM"
         if MPIrank == 0:
-            self.create_OutputDir()
+            self.createOutputDir()
 
         # Sync the chosen output dir to all processors
         self.outputDir = MPIcomm.bcast(self.outputDir, root=0)
@@ -95,7 +95,7 @@ class WriteMesh(object):
 
         return
 
-    def create_OutputDir(self):
+    def createOutputDir(self):
         """
         Create a directory to store outputs.
         """
@@ -305,14 +305,14 @@ class WriteMesh(object):
             else:
                 raise ValueError("Restart file is missing...")
 
-            self.hLocal.setArray(np.array((hf["/elev"])))
+            self.hLocal.setArray(np.array(hf["/elev"])[:, 0])
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
-            self.cumEDLocal.setArray(np.array((hf["/erodep"])))
+            self.cumEDLocal.setArray(np.array(hf["/erodep"])[:, 0])
             self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-            self.vSedLocal.setArray(np.array((hf["/sedLoad"])))
+            self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
             self.dm.localToGlobal(self.vSedLocal, self.vSed)
-            self.FAL.setArray(np.array((hf["/flowAcc"])))
-            self.dm.localToGlobal(self.FAG, self.FAL)
+            self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
+            self.dm.localToGlobal(self.FAL, self.FAG)
 
             self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
             self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
@@ -333,9 +333,9 @@ class WriteMesh(object):
             else:
                 raise ValueError("Restart file is missing...")
 
-            self.hLocal.setArray(np.array((hf["/elev"])))
+            self.hLocal.setArray(np.array(hf["/elev"])[:, 0])
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
-            self.cumEDLocal.setArray(np.array((hf["/erodep"])))
+            self.cumEDLocal.setArray(np.array(hf["/erodep"])[:, 0])
             self.dm.localToGlobal(self.cumEDLocal, self.cumED)
 
             self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
@@ -358,10 +358,10 @@ class WriteMesh(object):
             else:
                 raise ValueError("Restart file is missing...")
 
-            self.vSedLocal.setArray(np.array((hf["/sedLoad"])))
+            self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
             self.dm.localToGlobal(self.vSedLocal, self.vSed)
-            self.FAL.setArray(np.array((hf["/flowAcc"])))
-            self.dm.localToGlobal(self.FAG, self.FAL)
+            self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
+            self.dm.localToGlobal(self.FAL, self.FAG)
 
             hf.close()
 
