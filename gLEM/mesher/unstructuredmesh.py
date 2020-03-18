@@ -750,16 +750,19 @@ class UnstMesh(object):
             nelev = elev[indices]
             nerodep = erodep[indices]
         else:
-            weights = 1.0 / distances ** 2
-            onIDs = np.where(distances[:, 0] == 0)[0]
-            nelev = np.sum(weights * elev[indices], axis=1) / np.sum(weights, axis=1)
-            nerodep = np.sum(weights * erodep[indices], axis=1) / np.sum(
-                weights, axis=1
+            weights = np.divide(
+                1.0, distances, out=np.zeros_like(distances), where=distances != 0
             )
+            onIDs = np.where(distances[:, 0] == 0)[0]
+            tmp = np.sum(weights * elev[indices], axis=1)
+            tmp2 = np.sum(weights, axis=1)
+            nelev = np.divide(tmp, tmp2, out=np.zeros_like(tmp2), where=tmp2 != 0)
+            tmp = np.sum(weights * erodep[indices], axis=1)
+            nerodep = np.divide(tmp, tmp2, out=np.zeros_like(tmp2), where=tmp2 != 0)
             if len(onIDs) > 0:
                 nelev[onIDs] = elev[indices[onIDs, 0]]
                 nerodep[onIDs] = erodep[indices[onIDs, 0]]
-            del weights
+            del weights, tmp, tmp2
 
         self.hLocal.setArray(nelev)
         self.dm.localToGlobal(self.hLocal, self.hGlobal, 1)
