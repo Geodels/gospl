@@ -56,7 +56,7 @@ def configuration(parent_package="", top_path=None):
         library_dirs=LIBRARY_DIRS,
         extra_f90_compile_args=["-fPIC", "-O3"],
         # extra_f90_compile_args = ['-fPIC', '-O0', '-g', '-fbacktrace','-fcheck=all'],
-        # extra_link_args=["-shared"],
+        extra_link_args=["-shared"],
         runtime_library_dirs=LIBRARY_DIRS,
     )
 
