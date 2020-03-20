@@ -687,6 +687,9 @@ class UnstMesh(object):
             del tmp
             gc.collect()
 
+        elif self.forceStep >= 0 and not self.newForcing:
+            self.forceUpliftSubsidence()
+
         return
 
     def _meshUpliftSubsidence(self, tectonic):
