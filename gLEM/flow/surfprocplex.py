@@ -167,8 +167,6 @@ class SPMesh(object):
 
         # Set deep ocean nodes
         self.rcvID0 = self.rcvID.copy()
-        # self.slpRcv0 = self.slpRcv.copy()
-        # self.distRcv0 = self.distRcv.copy()
         self.wghtVal0 = self.wghtVal.copy()
 
         deepID = np.where(h1 <= self.hbot)[0]
