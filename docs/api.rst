@@ -9,12 +9,6 @@ API Documentation
   It is worth mentioning that a set of **fortran** functions are part of **gLEM** code but are not described in this API...
 
 
-Model class
------------
-
-.. automodule:: model
-    :members:
-
 Flow Model
 ------------
 

@@ -10,19 +10,13 @@ gLEM - *Global Landscape Evolution Model*
   :target: https://glem.readthedocs.io/en/latest/?badge=latest
   :alt: Documentation Status
 
-Contents
---------
+
+What's in the box?
+------------------
 
 .. toctree::
    :maxdepth: 3
    :name: Code Source
    :caption: Code Source
 
-    api.rst
-
-Indices and tables
-------------------
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   api.rst
