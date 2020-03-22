@@ -33,7 +33,8 @@ class Model(parentModel):
     Instantiates model object and performs surface processes evolution.
 
     This object contains methods for the following operations:
-     - initialisation of gLEM mesh based on input file options.
+
+     - initialisation of gLEM mesh based on input file options
      - computation of surface processes
      - cleaning/destruction of PETSC objects
 
@@ -82,6 +83,7 @@ class Model(parentModel):
         Run simulation.
 
         This function contains methods for the following operations:
+
          - get flow accumulation
          - apply surface evolution
         """
