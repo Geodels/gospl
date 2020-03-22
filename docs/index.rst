@@ -3,13 +3,12 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-gLEM - *Global Landscape Evolution Model*
+gLEM - Global Landscape Evolution Model
 =============================================
 
 .. image:: https://readthedocs.org/projects/glem/badge/?version=latest
   :target: https://glem.readthedocs.io/en/latest/?badge=latest
   :alt: Documentation Status
-
 
 What's in the box?
 ------------------

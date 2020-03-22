@@ -2,6 +2,10 @@
 API Documentation
 ##################
 
+.. image:: https://img.shields.io/badge/code%20style-black-000000.svg
+  :target: https://github.com/psf/black
+
+  
 **gLEM** is a global-scale surface evolution model built to simulate landscape development, sediment transport over Earth surface.
 
 
