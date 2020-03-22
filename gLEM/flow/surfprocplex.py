@@ -1,13 +1,12 @@
 import gc
-import numpy as np
-from mpi4py import MPI
-from scipy import sparse
-
 import sys
 import petsc4py
+import numpy as np
 
-from petsc4py import PETSc
 from time import clock
+from mpi4py import MPI
+from scipy import sparse
+from petsc4py import PETSc
 
 from gLEM._fortran import fillPIT
 from gLEM._fortran import MFDreceivers
@@ -16,7 +15,6 @@ from gLEM._fortran import setDiffusionCoeff
 
 petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
-MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = PETSc.COMM_WORLD
 
 
@@ -143,8 +141,9 @@ class SPMesh(object):
             print(
                 "LinearSolver failed to converge after %d iterations",
                 ksp.getIterationNumber(),
+                flush=True,
             )
-            print("with reason: %s", KSPReasons[r])
+            print("with reason: %s", KSPReasons[r], flush=True)
             raise RuntimeError("LinearSolver failed to converge!")
         ksp.destroy()
 
@@ -180,7 +179,10 @@ class SPMesh(object):
         self.wghtVal[self.seaID, :] = 0.0
 
         if MPIrank == 0 and self.verbose:
-            print("Flow Direction declaration (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Flow Direction declaration (%0.02f seconds)" % (clock() - t0),
+                flush=True,
+            )
 
         return
 
@@ -236,7 +238,7 @@ class SPMesh(object):
         self.dm.localToGlobal(self.FillL, self.FillG)
         del hl, nZ, gZ, id
         if MPIrank == 0 and self.verbose:
-            print("Compute pit filling (%0.02f seconds)" % (clock() - t0))
+            print("Compute pit filling (%0.02f seconds)" % (clock() - t0), flush=True)
 
         t0 = clock()
         # Build transport direction matrices
@@ -293,7 +295,10 @@ class SPMesh(object):
         self.dm.globalToLocal(self.FAG, self.FAL, 1)
 
         if MPIrank == 0 and self.verbose:
-            print("Compute Flow Accumulation (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Compute Flow Accumulation (%0.02f seconds)" % (clock() - t0),
+                flush=True,
+            )
 
         return
 
@@ -393,7 +398,9 @@ class SPMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
-            print("Get Erosion Thicknesses (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Get Erosion Thicknesses (%0.02f seconds)" % (clock() - t0), flush=True
+            )
 
         return
 
@@ -422,7 +429,7 @@ class SPMesh(object):
         # Update local vector
         self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
         if MPIrank == 0 and self.verbose:
-            print("Update Sediment Load (%0.02f seconds)" % (clock() - t0))
+            print("Update Sediment Load (%0.02f seconds)" % (clock() - t0), flush=True)
         del Eb
         gc.collect()
 
@@ -446,7 +453,10 @@ class SPMesh(object):
             self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
-            print("Compute Hillslope Processes (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Compute Hillslope Processes (%0.02f seconds)" % (clock() - t0),
+                flush=True,
+            )
 
         return
 
@@ -511,7 +521,10 @@ class SPMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
-            print("Perform Sediment Deposition (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Perform Sediment Deposition (%0.02f seconds)" % (clock() - t0),
+                flush=True,
+            )
 
         return
 
@@ -567,6 +580,6 @@ class SPMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
-            print("Diffuse Top Sediment (%0.02f seconds)" % (clock() - t0))
+            print("Diffuse Top Sediment (%0.02f seconds)" % (clock() - t0), flush=True)
 
         return

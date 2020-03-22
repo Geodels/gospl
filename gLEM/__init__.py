@@ -5,19 +5,15 @@ import glob
 import h5py
 import shutil
 import numpy as np
-import petsc4py
+
 from time import clock
 from mpi4py import MPI
 
-from .mesher import UnstMesh as _UnstMesh
-from .tools import ReadYaml as _ReadYaml
-from .tools import WriteMesh as _WriteMesh
 from .flow import SPMesh as _SPMesh
-from .fit import PFit as _PFit
+from .tools import ReadYaml as _ReadYaml
+from .mesher import UnstMesh as _UnstMesh
+from .tools import WriteMesh as _WriteMesh
 
-from petsc4py import PETSc
-
-petsc4py.init(sys.argv)
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
@@ -41,9 +37,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
         LandscapeEvolutionModel : object
     """
 
-    class LandscapeEvolutionModelClass(
-        _ReadYaml, _WriteMesh, _UnstMesh, _SPMesh, _PFit
-    ):
+    class LandscapeEvolutionModelClass(_ReadYaml, _WriteMesh, _UnstMesh, _SPMesh):
         def __init__(self, filename, verbose=True, showlog=False, *args, **kwargs):
 
             self.showlog = showlog
@@ -70,14 +64,11 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
             # Surface processes initialisation
             _SPMesh.__init__(self, *args, **kwargs)
 
-            # Paleotopography convergence initialisation
-            if self.paleostep > 0:
-                _PFit.__init__(self)
-
             if MPIrank == 0:
                 print(
                     "--- Initialisation Phase (%0.02f seconds)"
-                    % (clock() - self.modelRunTime)
+                    % (clock() - self.modelRunTime),
+                    flush=True,
                 )
 
             return
@@ -133,7 +124,8 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                     print(
                         "--- Computational Step \
                           (%0.02f seconds)"
-                        % (clock() - tstep)
+                        % (clock() - tstep),
+                        flush=True,
                     )
 
             return

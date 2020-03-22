@@ -1,20 +1,16 @@
 import gc
+import sys
+import meshplex
+import petsc4py
 import numpy as np
 import pandas as pd
-from mpi4py import MPI
 
-import sys
-import petsc4py
-
-
-from petsc4py import PETSc
 from time import clock
-
+from mpi4py import MPI
+from scipy import spatial
+from petsc4py import PETSc
 from gLEM._fortran import defineTIN
 from gLEM._fortran import ngbGlob
-
-import meshplex
-from scipy import spatial
 
 petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
@@ -33,10 +29,7 @@ class UnstMesh(object):
         self.uplift = None
         self.rainVal = None
 
-        if self.reflevel > 0:
-            self.icosahedralSphereMesh()
-        else:
-            self.buildMesh()
+        self.buildMesh()
 
         return
 
@@ -73,61 +66,6 @@ class UnstMesh(object):
             )
         return
 
-    def readDataMesh(self):
-
-        t0 = clock()
-        loadData = np.load(self.meshFile)
-        self.gCoords = loadData["v"]
-        self.gpoints = len(self.gCoords)
-        gZ = loadData["z"]
-        ngbGlob(self.gpoints, loadData["n"])
-        del loadData
-
-        # From global values to local ones...
-        tree = spatial.cKDTree(self.gCoords, leafsize=10)
-        distances, self.glIDs = tree.query(self.lcoords, k=1)
-        nelev = gZ[self.glIDs]
-        if self.flexure:
-            fdist, fids = tree.query(self.lcoords, k=self.fpts)
-            self.fdist = fdist[:, 1:]
-            self.fids = fids[:, 1:]
-            del fdist, fids
-
-        # From local to global values...
-        self.lgIDs = -np.ones(self.gpoints, dtype=int)
-        self.lgIDs[self.glIDs] = np.arange(self.npoints)
-        self.outIDs = np.where(self.lgIDs < 0)[0]
-        self.lgIDs[self.lgIDs < 0] = 0
-        del tree, distances
-
-        # Local/Global mapping
-        self.lgmap_row = self.dm.getLGMap()
-        l2g = self.lgmap_row.indices.copy()
-        offproc = l2g < 0
-        l2g[offproc] = -(l2g[offproc] + 1)
-        self.lgmap_col = PETSc.LGMap().create(l2g, comm=PETSc.COMM_WORLD)
-
-        # Vertex part of an unique partition
-        vIS = self.dm.getVertexNumbering()
-        self.inIDs = np.zeros(self.npoints, dtype=int)
-        self.inIDs[vIS.indices >= 0] = 1
-        vIS.destroy()
-
-        # Local/Global vectors
-        self.hGlobal = self.dm.createGlobalVector()
-        self.hLocal = self.dm.createLocalVector()
-        self.sizes = self.hGlobal.getSizes(), self.hGlobal.getSizes()
-
-        self.hLocal.setArray(nelev)
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        del l2g, offproc, nelev, gZ
-        gc.collect()
-
-        if MPIrank == 0 and self.verbose:
-            print("local/global mapping (%0.02f seconds)" % (clock() - t0))
-
-        return
-
     def meshStructure(self):
         """
         Define the mesh structure and the associated voronoi
@@ -154,145 +92,7 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print("fv discretisation (%0.02f seconds)" % (clock() - t0))
-
-        return
-
-    def icosahedralSphereMesh(self):
-        """Generate an icosahedral approximation to the surface of the
-        sphere.
-        """
-
-        t0 = clock()
-        if self.reflevel < 0 or self.reflevel % 1:
-            raise RuntimeError(
-                "Number of refinements must be \
-                               a non-negative integer"
-            )
-
-        from math import sqrt
-
-        phi = (1 + sqrt(5)) / 2
-
-        # vertices of an icosahedron with an edge length of 2
-        vertices = np.array(
-            [
-                [-1, phi, 0],
-                [1, phi, 0],
-                [-1, -phi, 0],
-                [1, -phi, 0],
-                [0, -1, phi],
-                [0, 1, phi],
-                [0, -1, -phi],
-                [0, 1, -phi],
-                [phi, 0, -1],
-                [phi, 0, 1],
-                [-phi, 0, -1],
-                [-phi, 0, 1],
-            ],
-            dtype=np.double,
-        )
-
-        # faces of the base icosahedron
-        faces = np.array(
-            [
-                [0, 11, 5],
-                [0, 5, 1],
-                [0, 1, 7],
-                [0, 7, 10],
-                [0, 10, 11],
-                [1, 5, 9],
-                [5, 11, 4],
-                [11, 10, 2],
-                [10, 7, 6],
-                [7, 1, 8],
-                [3, 9, 4],
-                [3, 4, 2],
-                [3, 2, 6],
-                [3, 6, 8],
-                [3, 8, 9],
-                [4, 9, 5],
-                [2, 4, 11],
-                [6, 2, 10],
-                [8, 6, 7],
-                [9, 8, 1],
-            ],
-            dtype=np.int32,
-        )
-
-        self.meshfrom_cell_list(2, faces, vertices)
-        del faces, vertices
-
-        # Distribute to other processors if any
-        if MPIsize > 1:
-            t0 = clock()
-            sf = self.dm.distribute(overlap=0)
-
-        for i in range(self.reflevel):
-            self.dm.setRefinementUniform(True)
-            self.dm = self.dm.refine()
-
-        if MPIsize > 1:
-            self.dm.distributeOverlap(1)
-            if MPIrank == 0 and self.verbose:
-                print("create mesh (%0.02f seconds)" % (clock() - t0))
-
-        # Define one DoF on the nodes
-        t0 = clock()
-        self.dm.setNumFields(1)
-        origSect = self.dm.createSection(1, [1, 0, 0])
-        origSect.setFieldName(0, "points")
-        origSect.setUp()
-        self.dm.setDefaultSection(origSect)
-        origSect.destroy()
-
-        self.lcoords = self.dm.getCoordinatesLocal().array.reshape(-1, 3)
-        scale = (self.radius / np.linalg.norm(self.lcoords, axis=1)).reshape(-1, 1)
-        self.lcoords *= scale
-        self.npoints = self.lcoords.shape[0]
-
-        # Define local vertex & cells
-        cStart, cEnd = self.dm.getHeightStratum(0)
-        self.lcells = np.zeros((cEnd - cStart, 3), dtype=PETSc.IntType)
-        point_closure = None
-        for c in range(cStart, cEnd):
-            point_closure = self.dm.getTransitiveClosure(c)[0]
-            self.lcells[c, :] = point_closure[-3:] - cEnd
-        if point_closure is not None:
-            del point_closure
-        gc.collect()
-        if MPIrank == 0 and self.verbose:
-            print("mesh coords/cells (%0.02f seconds)" % (clock() - t0))
-
-        # Interpolate values from input using inverse weighting distance
-        self.readDataMesh()
-
-        # Create mesh structure with meshplex
-        self.meshStructure()
-
-        self.cumED = self.hGlobal.duplicate()
-        self.cumED.set(0.0)
-        self.cumEDLocal = self.hLocal.duplicate()
-        self.cumEDLocal.set(0.0)
-
-        self.sealevel = self.seafunction(self.tNow + self.dt)
-
-        areaLocal = self.hLocal.duplicate()
-        self.areaGlobal = self.hGlobal.duplicate()
-        areaLocal.setArray(self.area)
-        self.dm.localToGlobal(areaLocal, self.areaGlobal)
-        areaLocal.destroy()
-
-        # Forcing event number
-        self.bG = self.hGlobal.duplicate()
-        self.bL = self.hLocal.duplicate()
-
-        self.rainNb = -1
-        self.tecNb = -1
-        self.flexNb = -1
-
-        if MPIsize > 1:
-            sf.destroy()
+            print("FV discretisation (%0.02f seconds)" % (clock() - t0), flush=True)
 
         return
 
@@ -340,7 +140,8 @@ class UnstMesh(object):
             print(
                 "--- Reinitialise Phase \
                   (%0.02f seconds)\n+++"
-                % (clock() - t0step)
+                % (clock() - t0step),
+                flush=True,
             )
 
         return
@@ -359,14 +160,16 @@ class UnstMesh(object):
         gZ = loadData["z"]
         ngbGlob(self.gpoints, loadData["n"])
         if MPIrank == 0 and self.verbose:
-            print("reading mesh information (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Reading mesh information (%0.02f seconds)" % (clock() - t0), flush=True
+            )
 
         # Create DMPlex
         self.meshfrom_cell_list(2, loadData["c"], self.gCoords)
         del loadData
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print("create DMPlex (%0.02f seconds)" % (clock() - t0))
+            print("Create DMPlex (%0.02f seconds)" % (clock() - t0), flush=True)
 
         # Define one DoF on the nodes
         t0 = clock()
@@ -376,10 +179,24 @@ class UnstMesh(object):
         origSect.setUp()
         self.dm.setDefaultSection(origSect)
         origVec = self.dm.createGlobalVector()
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define one DoF on the nodes (%0.02f seconds)" % (clock() - t0),
+                flush=True,
+            )
 
         # Distribute to other processors if any
+        t0 = clock()
         if MPIsize > 1:
+            if MPIrank == 1 and self.verbose:
+                print(
+                    "Start distribute {}".format(MPIrank), flush=True,
+                )
             sf = self.dm.distribute(overlap=1)
+            if MPIrank == 1 and self.verbose:
+                print(
+                    "End distribute {}".format(MPIrank), flush=True,
+                )
             newSect, newVec = self.dm.distributeField(sf, origSect, origVec)
             self.dm.setDefaultSection(newSect)
             newSect.destroy()
@@ -388,7 +205,7 @@ class UnstMesh(object):
         origVec.destroy()
         origSect.destroy()
         if MPIrank == 0 and self.verbose:
-            print("distribute DMPlex (%0.02f seconds)" % (clock() - t0))
+            print("Distribute DMPlex (%0.02f seconds)" % (clock() - t0), flush=True)
 
         # Define local vertex & cells
         t0 = clock()
@@ -404,7 +221,7 @@ class UnstMesh(object):
             del point_closure
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print("mesh coords/cells (%0.02f seconds)" % (clock() - t0))
+            print("Mesh coords/cells (%0.02f seconds)" % (clock() - t0), flush=True)
 
         # Define local vertex & cells
         t = clock()
@@ -416,7 +233,7 @@ class UnstMesh(object):
             self.lcells[c, :] = point_closure[-3:] - cEnd
         del point_closure
         if MPIrank == 0 and self.verbose:
-            print("defining local DMPlex (%0.02f seconds)" % (clock() - t))
+            print("Defining local DMPlex (%0.02f seconds)" % (clock() - t), flush=True)
 
         # From global values to local ones...
         tree = spatial.cKDTree(self.gCoords, leafsize=10)
@@ -459,7 +276,7 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print("local/global mapping (%0.02f seconds)" % (clock() - t0))
+            print("Local/global mapping (%0.02f seconds)" % (clock() - t0), flush=True)
 
         # Create mesh structure with meshplex
         self.meshStructure()
@@ -512,7 +329,9 @@ class UnstMesh(object):
         self._updateRain()
 
         if MPIrank == 0 and self.verbose:
-            print("Update Climatic Forces (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Update Climatic Forces (%0.02f seconds)" % (clock() - t0), flush=True
+            )
 
         return
 
@@ -526,7 +345,9 @@ class UnstMesh(object):
         self._updateTectonic()
 
         if MPIrank == 0 and self.verbose:
-            print("Update Tectonic Forces (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Update Tectonic Forces (%0.02f seconds)" % (clock() - t0), flush=True
+            )
 
         return
 
@@ -546,62 +367,6 @@ class UnstMesh(object):
                 self.dm.localToGlobal(self.hLocal, self.hGlobal)
                 del loadData, gZ
                 gc.collect()
-
-        return
-
-    def applyFlexure(self):
-        """
-        Analytical solution estimating the deflexion induced by point load
-        assuming the flexure of a thin elastic plate
-        """
-
-        if not self.flexure:
-            return
-
-        # nb = self.flexNb
-        # if nb < len(self.flexdata) - 1:
-        #     if self.flexdata.iloc[nb + 1, 0] <= self.tNow + self.dt:
-        #         nb += 1
-        #
-        # if nb > self.flexNb or nb == -1:
-        #     if nb == -1:
-        #         nb = 0
-        #     self.flexNb = nb
-        #
-        #     # Loading elastic thickness
-        #     loadData = np.load(self.flexdata.iloc[nb, 1])
-        #     Te = loadData[self.flexdata.iloc[nb, 2]]
-        #
-        #     # Flexural rigidity
-        #     D = self.young * np.power(Te, 3) / 11.25
-        #
-        #     # Flexural parameters
-        #     fsed = (self.dmantle - self.dfill) * self.gravity
-        #     Bsed = np.power(D / fsed, 0.25)
-        #     fwat = (self.dmantle - 1027.0) * self.gravity
-        #     Bwat = np.power(D / fwat, 0.25)
-        #
-        #     # Define coefficients
-        #     dsed = self.fdist / Bsed[self.glIDs]
-        #     dwat = self.fdist / Bwat[self.glIDs]
-        #
-        #     self.wwato = 1.0 / (8.0 * fwat * Bwat[self.glIDs] ** 2)
-        #     self.wsedo = 1.0 / (8.0 * fsed * Bsed[self.glIDs] ** 2)
-        #
-        #     tmpc1 = 1.0 / (2.0 * np.pi * fsed * Bsed ** 2)
-        #
-        #     del loadData
-        #     gc.collect()
-
-        # Get global erosion/deposition ...
-        ed = self.cumEDLocal.getArray().copy()
-        ged = np.zeros(self.gpoints)
-        ged = ed[self.lgIDs]
-        ged[self.outIDs] = -1.0e8
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, ged, op=MPI.MAX)
-
-        np.where(ged > 0.0)[0]
-        self.gravity
 
         return
 
@@ -833,7 +598,9 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print("Cleaning Model Dataset (%0.02f seconds)" % (clock() - t0))
+            print(
+                "Cleaning Model Dataset (%0.02f seconds)" % (clock() - t0), flush=True
+            )
 
         if self.showlog:
             self.log.view()
@@ -841,7 +608,8 @@ class UnstMesh(object):
         if MPIrank == 0:
             print(
                 "\n+++\n+++ Total run time (%0.02f seconds)\n+++"
-                % (clock() - self.modelRunTime)
+                % (clock() - self.modelRunTime),
+                flush=True,
             )
 
         return

@@ -1,21 +1,17 @@
 import os
+import sys
 import errno
+import petsc4py
 import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
+
+from petsc4py import PETSc
 from operator import itemgetter
 from scipy.interpolate import interp1d
 
-from mpi4py import MPI
-import sys
-import petsc4py
-
-from petsc4py import PETSc
-
 petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
-MPIsize = PETSc.COMM_WORLD.Get_size()
-MPIcomm = MPI.COMM_WORLD
 
 
 class ReadYaml(object):
@@ -37,7 +33,7 @@ class ReadYaml(object):
             with open(filename) as finput:
                 pass
         except IOError:
-            print("Unable to open file: ", filename)
+            print("Unable to open file: ", filename, flush=True)
             raise IOError("The input file is not found...")
 
         # Open YAML file
@@ -45,7 +41,10 @@ class ReadYaml(object):
             self.input = yaml.load(finput, Loader=yaml.Loader)
 
         if MPIrank == 0 and "name" in self.input.keys() and self.verbose:
-            print("The following model will be run:     {}".format(self.input["name"]))
+            print(
+                "The following model will be run:     {}".format(self.input["name"]),
+                flush=True,
+            )
 
         # Read simulation parameters
         self._readDomain()
@@ -59,7 +58,6 @@ class ReadYaml(object):
         self._readFlex()
         self._readOut()
         self._readForcePaleo()
-        self._paleoFit()
 
         self.gravity = 9.81
         self.tNow = self.tStart
@@ -79,7 +77,9 @@ class ReadYaml(object):
         try:
             domainDict = self.input["domain"]
         except KeyError:
-            print("Key 'domain' is required and is missing in the input file!")
+            print(
+                "Key 'domain' is required and is missing in the input file!", flush=True
+            )
             raise KeyError("Key domain is required in the input file!")
 
         try:
@@ -93,29 +93,22 @@ class ReadYaml(object):
             self.flowDir = 6
 
         try:
-            self.reflevel = domainDict["refinement"]
-        except KeyError:
-            self.reflevel = 0
-
-        try:
             meshFile = domainDict["npdata"]
         except KeyError:
             print(
-                "Key 'npdata' is required and is missing in the 'domain' declaration!"
+                "Key 'npdata' is required and is missing in the 'domain' declaration!",
+                flush=True,
             )
             raise KeyError("Compressed numpy dataset definition is not defined!")
 
-        if self.reflevel > 0:
-            self.meshFile = meshFile + str(self.reflevel) + ".npz"
-        else:
-            self.meshFile = meshFile + ".npz"
+        self.meshFile = meshFile + ".npz"
 
         try:
             with open(self.meshFile) as meshfile:
                 meshfile.close()
                 pass
         except IOError:
-            print("Unable to open numpy dataset: ", self.meshFile)
+            print("Unable to open numpy dataset: {}".format(self.meshFile), flush=True)
             raise IOError("The numpy dataset is not found...")
 
         try:
@@ -138,19 +131,27 @@ class ReadYaml(object):
         try:
             timeDict = self.input["time"]
         except KeyError:
-            print("Key 'time' is required and is missing in the input file!")
+            print(
+                "Key 'time' is required and is missing in the input file!", flush=True
+            )
             raise KeyError("Key time is required in the input file!")
 
         try:
             self.tStart = timeDict["start"]
         except KeyError:
-            print("Key 'start' is required and is missing in the 'time' declaration!")
+            print(
+                "Key 'start' is required and is missing in the 'time' declaration!",
+                flush=True,
+            )
             raise KeyError("Simulation start time needs to be declared.")
 
         try:
             self.tEnd = timeDict["end"]
         except KeyError:
-            print("Key 'end' is required and is missing in the 'time' declaration!")
+            print(
+                "Key 'end' is required and is missing in the 'time' declaration!",
+                flush=True,
+            )
             raise KeyError("Simulation end time needs to be declared.")
 
         if self.tEnd <= self.tStart:
@@ -159,7 +160,10 @@ class ReadYaml(object):
         try:
             self.dt = timeDict["dt"]
         except KeyError:
-            print("Key 'dt' is required and is missing in the 'time' declaration!")
+            print(
+                "Key 'dt' is required and is missing in the 'time' declaration!",
+                flush=True,
+            )
             raise KeyError("Simulation discretisation time step needs to be declared.")
 
         try:
@@ -167,7 +171,10 @@ class ReadYaml(object):
         except KeyError:
             self.tout = self.tEnd - self.tStart
             print(
-                "Output time interval 'tout' has been set to {} years".format(self.tout)
+                "Output time interval 'tout' has been set to {} years".format(
+                    self.tout
+                ),
+                flush=True,
             )
 
         self._addTime(timeDict)
@@ -189,7 +196,8 @@ class ReadYaml(object):
             print(
                 "Output time interval was changed to {} years to match the time step dt".format(
                     self.dt
-                )
+                ),
+                flush=True,
             )
 
         try:
@@ -215,7 +223,8 @@ class ReadYaml(object):
                 self.K = splDict["K"]
             except KeyError:
                 print(
-                    "When using the Surface Process Model definition of coefficient Kb is required."
+                    "When using the Surface Process Model definition of coefficient Kb is required.",
+                    flush=True,
                 )
                 raise ValueError("Surface Process Model: Kb coefficient not found.")
             try:
@@ -248,7 +257,8 @@ class ReadYaml(object):
                 self.Cd = hillDict["hillslopeK"]
             except KeyError:
                 print(
-                    "When declaring diffusion processes, the coefficient hillslopeK is required."
+                    "When declaring diffusion processes, the coefficient hillslopeK is required.",
+                    flush=True,
                 )
                 raise ValueError("Hillslope: Cd coefficient not found.")
             try:
@@ -314,7 +324,8 @@ class ReadYaml(object):
                             pass
                         except ValueError:
                             print(
-                                "The sea-level file is not well formed: it should be comma or tab separated"
+                                "The sea-level file is not well formed: it should be comma or tab separated",
+                                flush=True,
                             )
                             raise ValueError("Wrong formating of sea-level file.")
             except IOError:
@@ -349,7 +360,7 @@ class ReadYaml(object):
                         tecfile.close()
                         pass
                 except IOError:
-                    print("Unable to open tectonic file: ", tMap)
+                    print("Unable to open tectonic file: {}".format(tMap), flush=True)
                     raise IOError(
                         "The tectonic file {} is not found for climatic event {}.".format(
                             tMap, k
@@ -365,7 +376,7 @@ class ReadYaml(object):
                         tecfile.close()
                         pass
                 except IOError:
-                    print("Unable to open tectonic file: ", zMap)
+                    print("Unable to open tectonic file: {}".format(zMap), flush=True)
                     raise IOError(
                         "The tectonic file {} is not found for climatic event {}.".format(
                             zMap, k
@@ -375,7 +386,10 @@ class ReadYaml(object):
             zMap = "empty"
 
         if tMap == "empty" and zMap == "empty":
-            print("For each tectonic event a tectonic grid (mapH or mapV) is required.")
+            print(
+                "For each tectonic event a tectonic grid (mapH or mapV) is required.",
+                flush=True,
+            )
             raise ValueError("Tectonic event {} has no tectonic map (map).".format(k))
 
         tmpTec = []
@@ -417,7 +431,7 @@ class ReadYaml(object):
         try:
             tecStart = tecSort[k]["start"]
         except Exception:
-            print("For each tectonic event a start time is required.")
+            print("For each tectonic event a start time is required.", flush=True)
             raise ValueError("Tectonic event {} has no parameter start".format(k))
         try:
             tMap = tecSort[k]["mapH"] + ".npz"
@@ -474,7 +488,8 @@ class ReadYaml(object):
         if rMap is None and rUniform is None:
             print(
                 "For each climate event a rainfall value (uniform) or a rainfall \
-                grid (map) is required."
+                grid (map) is required.",
+                flush=True,
             )
             raise ValueError(
                 "Climate event {} has no rainfall value (uniform) or a rainfall \
@@ -528,7 +543,9 @@ class ReadYaml(object):
                 try:
                     rStart = rainSort[k]["start"]
                 except Exception:
-                    print("For each climate event a start time is required.")
+                    print(
+                        "For each climate event a start time is required.", flush=True
+                    )
                     raise ValueError(
                         "Climate event {} has no parameter start".format(k)
                     )
@@ -548,7 +565,10 @@ class ReadYaml(object):
                                 rainfile.close()
                                 pass
                         except IOError:
-                            print("Unable to open rain file: ", rMap[0] + ".npz")
+                            print(
+                                "Unable to open rain file: {}.npz".format(rMap[0]),
+                                flush=True,
+                            )
                             raise IOError(
                                 "The rain file {} is not found for climatic event {}.".format(
                                     rMap[0] + ".npz", k
@@ -565,12 +585,16 @@ class ReadYaml(object):
                             pass
                     except KeyError:
                         print(
-                            "Field name {} is missing from rain file {}".format(
-                                rMap[1], rMap[0] + ".npz"
-                            )
+                            "Field name {} is missing from rain file {}.npz".format(
+                                rMap[1], rMap[0]
+                            ),
+                            flush=True,
                         )
-                        print("The following fields are available: ", rainSet)
-                        print("Check your rain file fields definition...")
+                        print(
+                            "The following fields are available: {}".format(rainSet),
+                            flush=True,
+                        )
+                        print("Check your rain file fields definition...", flush=True)
                         raise KeyError(
                             "Field name for rainfall is not defined correctly or does not exist!"
                         )
@@ -612,7 +636,7 @@ class ReadYaml(object):
                 try:
                     pTime = paleoSort[k]["time"]
                 except Exception:
-                    print("For each paleomap a given time is required.")
+                    print("For each paleomap a given time is required.", flush=True)
                     raise ValueError("Paleomap {} has no parameter time".format(k))
                 try:
                     pMap = paleoSort[k]["npdata"]
@@ -626,7 +650,10 @@ class ReadYaml(object):
                             meshfile.close()
                             pass
                     except IOError:
-                        print("Unable to open numpy dataset: ", pMap + ".npz")
+                        print(
+                            "Unable to open numpy dataset: {}.npz".format(pMap),
+                            flush=True,
+                        )
                         raise IOError("The numpy dataset is not found...")
 
                 tmpPaleo = []
@@ -661,20 +688,22 @@ class ReadYaml(object):
             try:
                 self.forceDir = fpaleoDict["dir"]
                 if not os.path.exists(self.forceDir):
-                    print("Forcing paleo directory does not exist!")
+                    print("Forcing paleo directory does not exist!", flush=True)
                     raise ValueError("Forcing paleo directory does not exist!")
 
                 if self.tout > self.tecStep:
                     self.tout = self.tecStep
                     print(
                         "Output time interval and tectonic forcing time step \
-                          have been adjusted to match each others."
+                         have been adjusted to match each others.",
+                        flush=True,
                     )
                 elif self.tout < self.tecStep:
                     self.tecStep = self.tout
                     print(
                         "Output time interval and tectonic forcing time step \
-                          have been adjusted to match each others."
+                         have been adjusted to match each others.",
+                        flush=True,
                     )
 
                 out_nb = int((self.tEnd - self.tStart) / self.tout) + 1
@@ -683,7 +712,10 @@ class ReadYaml(object):
                 self.alpha = stepf.astype(float) / (out_nb - 1)
                 self.forceStep = 0
             except Exception:
-                print("A directory is required to force the model with paleodata.")
+                print(
+                    "A directory is required to force the model with paleodata.",
+                    flush=True,
+                )
                 raise ValueError("forcepaleo key requires a directory")
 
         except KeyError:
@@ -706,7 +738,10 @@ class ReadYaml(object):
             try:
                 fTime = flexSort[k]["time"]
             except Exception:
-                print("For each elastic thickness map a given time is required.")
+                print(
+                    "For each elastic thickness map a given time is required.",
+                    flush=True,
+                )
                 raise ValueError("elastic thickness {} has no parameter time".format(k))
             try:
                 fMap = flexSort[k]["npdata"]
@@ -719,7 +754,9 @@ class ReadYaml(object):
                         meshfile.close()
                         pass
                 except IOError:
-                    print("Unable to open numpy dataset: ", fMap + ".npz")
+                    print(
+                        "Unable to open numpy dataset: {}.npz".format(fMap), flush=True
+                    )
                     raise IOError("The numpy dataset is not found...")
 
             try:
@@ -771,7 +808,8 @@ class ReadYaml(object):
                 self.fpts = flexDict["npts"]
             except KeyError:
                 print(
-                    "The number of points under the influence of a given point load is required."
+                    "The number of points under the influence of a given point load is required.",
+                    flush=True,
                 )
                 raise ValueError("The nbPts parameter needs to be be defined")
 
@@ -817,7 +855,8 @@ class ReadYaml(object):
             self.paleoTopo = self.paleoTopo + ".npz"
         except KeyError:
             print(
-                "Key 'paleotopo' is required and is missing in the 'paleofit' declaration!"
+                "Key 'paleotopo' is required and is missing in the 'paleofit' declaration!",
+                flush=True,
             )
             raise KeyError("NPZ paleotopography file is not defined!")
         try:
@@ -825,7 +864,9 @@ class ReadYaml(object):
                 paleonpz.close()
                 pass
         except IOError:
-            print("Unable to open NPZ paleo file: ", self.paleoTopo)
+            print(
+                "Unable to open NPZ paleo file: {}".format(self.paleoTopo), flush=True
+            )
             raise IOError("The NPZ paleotopography file is not found...")
 
         try:
@@ -833,7 +874,8 @@ class ReadYaml(object):
             self.lonlat = self.lonlat + ".npz"
         except KeyError:
             print(
-                "Key 'lonlat' is required and is missing in the 'paleofit' declaration!"
+                "Key 'lonlat' is required and is missing in the 'paleofit' declaration!",
+                flush=True,
             )
             raise KeyError("Longitude/latitude coordinates file is not defined!")
         try:
@@ -841,14 +883,15 @@ class ReadYaml(object):
                 paleonpz.close()
                 pass
         except IOError:
-            print("Unable to open lonlat file: ", self.lonlat)
+            print("Unable to open lonlat file: {}".format(self.lonlat), flush=True)
             raise IOError("The lonlat paleotopography file is not found...")
 
         try:
             self.paleoDir = paleoDict["vdispdir"]
         except KeyError:
             print(
-                "Key 'vdispdir' is required and is missing in the 'paleofit' declaration!"
+                "Key 'vdispdir' is required and is missing in the 'paleofit' declaration!",
+                flush=True,
             )
             raise KeyError(
                 "Paleo-tectonic directory to store vertical displacement is not defined!"
@@ -859,36 +902,5 @@ class ReadYaml(object):
         except FileExistsError:
             # Directory already exists
             pass
-
-        return
-
-    def _paleoFit(self):
-        """
-        Parse paleotopography convergence parameters.
-        """
-
-        try:
-            paleoDict = self.input["paleofit"]
-            try:
-                self.paleostep = paleoDict["step"]
-            except KeyError:
-                self.paleostep = 10
-            try:
-                self.cvglimit = paleoDict["cvglimit"]
-            except KeyError:
-                self.cvglimit = 0.1
-            try:
-                self.erange = paleoDict["erange"]
-            except KeyError:
-                self.erange = 100.0
-
-            self._defineFit(paleoDict)
-
-        except KeyError:
-            self.paleostep = 0
-            self.cvglimit = 0.0
-            self.erange = 100.0
-            self.paleoTopo = None
-            self.paleoDir = None
 
         return

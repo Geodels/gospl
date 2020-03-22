@@ -75,7 +75,7 @@ if __name__ == "__main__":
         version="0.1",
         description="Scalable Parallelised Landscape Evolution Model",
         configuration=configuration,
-        packages=["gLEM", "gLEM.tools", "gLEM.mesher", "gLEM.flow", "gLEM.fit"],
+        packages=["gLEM", "gLEM.tools", "gLEM.mesher", "gLEM.flow"],
         classifiers=[
             "Programming Language :: Python :: 3.5",
             "Programming Language :: Python :: 3.6",

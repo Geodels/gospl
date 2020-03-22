@@ -1,16 +1,15 @@
 import os
 import gc
-import h5py
-
-import numpy as np
-from mpi4py import MPI
 import sys
+import h5py
 import petsc4py
+import numpy as np
+
+from mpi4py import MPI
 from petsc4py import PETSc
 from time import clock
 
 petsc4py.init(sys.argv)
-
 MPIrank = PETSc.COMM_WORLD.Get_rank()
 MPIsize = PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
@@ -163,7 +162,8 @@ class WriteMesh(object):
             print(
                 "Creating stratal outputfile \
                   (%0.02f seconds)"
-                % (clock() - t)
+                % (clock() - t),
+                flush=True,
             )
 
         self.stratStep += 1
@@ -274,10 +274,10 @@ class WriteMesh(object):
 
         MPIcomm.Barrier()
         if MPIrank == 0 and self.verbose:
-            print("Creating outputfile (%0.02f seconds)" % (clock() - t))
+            print("Creating outputfile (%0.02f seconds)" % (clock() - t), flush=True)
 
         if MPIrank == 0:
-            print("+++ Output Simulation Time: %0.02f years" % (self.tNow))
+            print("+++ Output Simulation Time: %0.02f years" % (self.tNow), flush=True)
 
         self.step += 1
         gc.collect()
@@ -414,7 +414,7 @@ class WriteMesh(object):
         if os.path.exists(h5file):
             hf = h5py.File(h5file, "r")
         else:
-            print("Backward file: ", h5file, " is missing!")
+            print("Backward file: {} is missing!".format(h5file), flush=True)
             raise ValueError("Backward file is missing...")
 
         self.uplift = np.array(hf["/elev"])[:, 0] - self.hLocal.getArray()
@@ -593,52 +593,3 @@ class WriteMesh(object):
         f.close()
 
         return
-
-    # def outputMesh(self):
-    #     """
-    #     Saves mesh local information stored in the DMPlex to HDF5 file
-    #     If the file already exists, it is overwritten.
-    #     """
-    #
-    #     t = clock()
-    #     if self.step == 0:
-    #         topology = self.outputDir+'/h5/topology.p'+str(MPIrank)+'.h5'
-    #         with h5py.File(topology, "w") as f:
-    #             f.create_dataset('coords',shape=(len(self.lcoords[:,0]),3), dtype='float32', compression='gzip')
-    #             f["coords"][:,:] = self.lcoords
-    #             f.create_dataset('cells',shape=(len(self.lcells[:,0]),3), dtype='int32', compression='gzip')
-    #             f["cells"][:,:] = self.lcells+1
-    #         self.elems = MPIcomm.gather(len(self.lcells[:,0]),root = 0)
-    #         self.nodes = MPIcomm.gather(len(self.lcoords[:,0]),root = 0)
-    #
-    #     h5file = self.outputDir+'/h5/'+self.file+'.'+str(self.step)+'.p'+str(MPIrank)+'.h5'
-    #     with h5py.File(h5file, "w") as f:
-    #         f.create_dataset('elev',shape=(len(self.lcoords[:,0]),1), dtype='float32', compression='gzip')
-    #         f["elev"][:,0] = self.hLocal.getArray()
-    #         f.create_dataset('flowAcc',shape=(len(self.lcoords[:,0]),1), dtype='float32', compression='gzip')
-    #         data = self.FAL.getArray().copy()
-    #         data[data<=0.] = 1.
-    #         f["flowAcc"][:,0] = data
-    #         f.create_dataset('erodep',shape=(len(self.lcoords[:,0]),1), dtype='float32', compression='gzip')
-    #         f["erodep"][:,0] = self.cumEDLocal.getArray()
-    #         f.create_dataset('sedLoad',shape=(len(self.lcoords[:,0]),1), dtype='float32', compression='gzip')
-    #         # data = self.vSedLocal.getArray().copy()
-    #         # data[data<1.] = 1
-    #         f["sedLoad"][:,0] = self.vSedLocal.getArray().copy()
-    #         del data
-    #
-    #     if MPIrank == 0:
-    #         self._save_DMPlex_XMF()
-    #         self._save_XDMF()
-    #
-    #     MPIcomm.Barrier()
-    #     if MPIrank == 0 and self.verbose:
-    #         print('Creating outputfile (%0.02f seconds)'% (clock() - t))
-    #
-    #     if MPIrank == 0:
-    #         print('+++ Output Simulation Time: %0.02f years'% (self.tNow))
-    #
-    #     self.step += 1
-    #     gc.collect()
-    #
-    #     return
