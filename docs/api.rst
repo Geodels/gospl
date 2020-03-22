@@ -12,13 +12,11 @@ API Documentation
 Main Class
 ------------
 
-.. automodule:: gLEM
-    :members:
 
 Flow Model
 ------------
 
-.. automodule:: flow
+.. automodule:: model
     :members:
 
 Surface Processes
