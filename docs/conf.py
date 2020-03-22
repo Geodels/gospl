@@ -26,7 +26,9 @@ from sphinx.builders.html import (
 
 # sys.path.insert(0, os.path.abspath("."))
 # sys.path.insert(0, os.path.abspath("../"))
+sys.path.insert(0, os.path.abspath("../../"))
 sys.path.insert(0, os.path.abspath("../gLEM"))
+sys.path.insert(0, os.path.abspath("gLEM"))
 # sys.path.insert(0, os.path.abspath("gLEM/flow"))
 # sys.path.insert(0, os.path.abspath("gLEM/mesher"))
 # sys.path.insert(0, os.path.abspath("gLEM/tools"))
