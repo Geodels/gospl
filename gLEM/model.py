@@ -9,10 +9,10 @@ import numpy as np
 from time import clock
 from mpi4py import MPI
 
-from .flow import SPMesh as _SPMesh
-from .tools import ReadYaml as _ReadYaml
-from .mesher import UnstMesh as _UnstMesh
-from .tools import WriteMesh as _WriteMesh
+from gLEM import SPMesh as _SPMesh
+from gLEM import ReadYaml as _ReadYaml
+from gLEM import UnstMesh as _UnstMesh
+from gLEM import WriteMesh as _WriteMesh
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
 

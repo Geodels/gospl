@@ -9,14 +9,16 @@ API Documentation
   It is worth mentioning that a set of **fortran** functions are part of **gLEM** code but are not described in this API...
 
 
-Main Class
+Model Class
 ------------
 
+.. automodule:: model
+    :members:
 
 Flow Model
 ------------
 
-.. automodule:: model
+.. automodule:: flow
     :members:
 
 Surface Processes
