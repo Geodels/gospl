@@ -20,7 +20,10 @@ MPIcomm = PETSc.COMM_WORLD
 
 class SPMesh(object):
     """
-    Building the surface processes based on different neighbour conditions
+    Performing surface evolution induced by considered processes:
+
+     - hillslope processes
+     - rivers using stream power law
     """
 
     def __init__(self, *args, **kwargs):
@@ -81,7 +84,9 @@ class SPMesh(object):
 
     def _matrix_build(self, nnz=(1, 1)):
         """
-        Define PETSC Matrix
+        Define PETSC Matrix.
+
+        :arg nnz: array containing the number of nonzero blocks
         """
 
         matrix = PETSc.Mat().create(comm=MPIcomm)
@@ -95,7 +100,10 @@ class SPMesh(object):
 
     def _matrix_build_diag(self, V, nnz=(1, 1)):
         """
-        Define PETSC Diagonal Matrix
+        Define PETSC Diagonal Matrix.
+
+        :arg V: diagonal data array
+        :arg nnz: array containing the number of nonzero blocks
         """
 
         matrix = self._matrix_build()
@@ -108,6 +116,10 @@ class SPMesh(object):
         return matrix
 
     def _make_reasons(self, reasons):
+        """
+        Provide reasons for PETSC error if possible...
+        """
+
         return dict(
             [(getattr(reasons, r), r) for r in dir(reasons) if not r.startswith("_")]
         )
@@ -116,14 +128,11 @@ class SPMesh(object):
         """
         Set PETSC KSP solver.
 
-        Args:
-            guess: Boolean specifying if the iterative KSP solver initial guess is nonzero
-            matrix: PETSC matrix used by the KSP solver
-            vector1: PETSC vector corresponding to the initial values
-            vector2: PETSC vector corresponding to the new values
-
-        Returns:
-            vector2: PETSC vector of the new values
+        :arg guess: Boolean specifying if the iterative KSP solver initial guess is nonzero
+        :arg matrix: PETSC matrix used by the KSP solver
+        :arg vector1: PETSC vector corresponding to the initial values
+        :arg vector2: PETSC vector corresponding to the new values
+        :return vector2: PETSC vector of the new values
         """
 
         ksp = PETSc.KSP().create(PETSc.COMM_WORLD)
@@ -152,6 +161,8 @@ class SPMesh(object):
     def _buildFlowDirection(self, h1):
         """
         Build multiple flow direction based on neighbouring slopes.
+
+        :arg h1: elevation array
         """
 
         t0 = clock()
@@ -191,6 +202,7 @@ class SPMesh(object):
         Perform erosion deposition changes.
 
         This function contains methods for the following operations:
+
          - erosion/deposition induced by stream power law
          - depression identification and pit filling
          - stream induced deposition diffusion
@@ -198,19 +210,19 @@ class SPMesh(object):
         """
 
         # Compute Erosion using Stream Power Law
-        self.cptErosion()
+        self._cptErosion()
 
         # Compute Deposition and Sediment Flux
-        self.cptSedFlux()
+        self._cptSedFlux()
 
         # Compute Sediment Deposition
-        self.SedimentDeposition()
+        self._sedimentDeposition()
 
         # Compute Fresh Sediment Diffusion
-        self.SedimentDiffusion()
+        self._sedimentDiffusion()
 
         # Compute Hillslope Diffusion Law
-        self.HillSlope()
+        self._hillSlope()
 
     def FlowAccumulation(self):
         """
@@ -373,7 +385,7 @@ class SPMesh(object):
 
         return
 
-    def cptErosion(self):
+    def _cptErosion(self):
         """
         Compute erosion using stream power law.
         """
@@ -404,7 +416,7 @@ class SPMesh(object):
 
         return
 
-    def cptSedFlux(self):
+    def _cptSedFlux(self):
         """
         Compute sediment flux.
         """
@@ -435,7 +447,7 @@ class SPMesh(object):
 
         return
 
-    def HillSlope(self):
+    def _hillSlope(self):
         """
         Perform hillslope diffusion.
         """
@@ -460,7 +472,7 @@ class SPMesh(object):
 
         return
 
-    def SedimentDeposition(self):
+    def _sedimentDeposition(self):
         """
         Perform sediment deposition from incoming river flux.
         """
@@ -528,7 +540,7 @@ class SPMesh(object):
 
         return
 
-    def SedimentDiffusion(self):
+    def _sedimentDiffusion(self):
         """
         Perform freshly deposited sediment diffusion.
         """

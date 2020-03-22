@@ -19,7 +19,7 @@ MPIrank = MPI.COMM_WORLD.Get_rank()
 
 def LandscapeEvolutionModel(filename, *args, **kwargs):
     """
-    Instantiates eSCAPE model object and performs surface processes evolution.
+    Instantiates model object and performs surface processes evolution.
 
     This object contains methods for the following operations:
      - initialisation of eSCAPE mesh based on input file options.
@@ -59,7 +59,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
                 _WriteMesh.readData(self)
 
             # Get external forces
-            _UnstMesh.initExForce(self)
+            _UnstMesh.initExtForce(self)
 
             # Surface processes initialisation
             _SPMesh.__init__(self, *args, **kwargs)
@@ -110,6 +110,8 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
 
                 # Output time step
                 _WriteMesh.visModel(self)
+                if self.newForcing and self.paleodata is not None:
+                    _UnstMesh.updatePaleomap()
 
                 # Update Tectonic, Sea-level & Climatic conditions
                 if self.tNow < self.tEnd:

@@ -20,27 +20,30 @@ MPIcomm = MPI.COMM_WORLD
 
 class UnstMesh(object):
     """
-    Creating a distributed DMPlex and global vector from it based on
-    triangulated mesh
+    Creating a distributed DMPlex and global vector based on imported triangulated mesh.
     """
 
     def __init__(self):
+        """
+        Build the DMPlex.
+        """
+
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
 
-        self.buildMesh()
+        self._buildMesh()
 
         return
 
-    def meshfrom_cell_list(self, dim, cells, coords):
+    def _meshfrom_cell_list(self, dim, cells, coords):
         """
         Create a DMPlex from a list of cells and coords.
 
         :arg dim: The topological dimension of the mesh
         :arg cells: The vertices of each cell
         :arg coords: The coordinates of each vertex
-        :arg comm: communicator to build the mesh on.
+        :arg comm: communicator to build the mesh on
         """
 
         if MPIrank == 0:
@@ -66,7 +69,7 @@ class UnstMesh(object):
             )
         return
 
-    def meshStructure(self):
+    def _meshStructure(self):
         """
         Define the mesh structure and the associated voronoi
         """
@@ -146,7 +149,7 @@ class UnstMesh(object):
 
         return
 
-    def buildMesh(self):
+    def _buildMesh(self):
         """
         Construct a PETSC mesh and distribute it amongst the different
         processors.
@@ -165,7 +168,7 @@ class UnstMesh(object):
             )
 
         # Create DMPlex
-        self.meshfrom_cell_list(2, loadData["c"], self.gCoords)
+        self._meshfrom_cell_list(2, loadData["c"], self.gCoords)
         del loadData
         gc.collect()
         if MPIrank == 0 and self.verbose:
@@ -188,6 +191,9 @@ class UnstMesh(object):
         # Distribute to other processors if any
         t0 = clock()
         if MPIsize > 1:
+            partitioner = self.dm.getPartitioner()
+            partitioner.setType(partitioner.Type.PARMETIS)
+            partitioner.setFromOptions()
             sf = self.dm.distribute(overlap=1)
             newSect, newVec = self.dm.distributeField(sf, origSect, origVec)
             self.dm.setDefaultSection(newSect)
@@ -232,11 +238,6 @@ class UnstMesh(object):
         tree = spatial.cKDTree(self.gCoords, leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
         nelev = gZ[self.glIDs]
-        if self.flexure:
-            fdist, fids = tree.query(self.lcoords, k=self.fpts)
-            self.fdist = fdist[:, 1:]
-            self.fids = fids[:, 1:]
-            del fdist, fids
 
         # From local to global values...
         self.lgIDs = -np.ones(self.gpoints, dtype=int)
@@ -272,7 +273,7 @@ class UnstMesh(object):
             print("Local/global mapping (%0.02f seconds)" % (clock() - t0), flush=True)
 
         # Create mesh structure with meshplex
-        self.meshStructure()
+        self._meshStructure()
 
         self.cumED = self.hGlobal.duplicate()
         self.cumED.set(0.0)
@@ -297,7 +298,7 @@ class UnstMesh(object):
 
         return
 
-    def initExForce(self):
+    def initExtForce(self):
         """
         Initialise external forces.
         """
@@ -346,11 +347,8 @@ class UnstMesh(object):
 
     def updatePaleomap(self):
         """
-        Find the paleomap for the considered time interval
+        Force model to match paleomaps at given time interval
         """
-
-        if self.paleodata is None:
-            return
 
         for k in range(self.paleoNb):
             if self.tNow == self.paleodata.iloc[k, 0]:
@@ -365,7 +363,7 @@ class UnstMesh(object):
 
     def _updateRain(self):
         """
-        Find the current rain values for the considered time interval
+        Find current rain values for the considered time interval.
         """
 
         nb = self.rainNb
@@ -401,7 +399,7 @@ class UnstMesh(object):
 
     def _updateTectonic(self):
         """
-        Find the current tectonic rates for the considered time interval
+        Find the current tectonic rates for the considered time interval.
         """
 
         if self.tecdata is None:
@@ -446,13 +444,15 @@ class UnstMesh(object):
             gc.collect()
 
         elif self.forceStep >= 0 and not self.newForcing:
-            self.forceUpliftSubsidence()
+            self._forceUpliftSubsidence()
 
         return
 
     def _meshUpliftSubsidence(self, tectonic):
         """
-        Move elevation up and down
+        Apply vertical displacements based on tectonic rates.
+
+        :arg tectonic: local tectonic rates
         """
 
         # Define vertical displacements
@@ -465,9 +465,9 @@ class UnstMesh(object):
 
         return
 
-    def forceUpliftSubsidence(self):
+    def _forceUpliftSubsidence(self):
         """
-        Move elevation up and down to fit backward model
+        Perform tectonic uplift at given tectonic interval.
         """
 
         # Define vertical displacements
@@ -481,7 +481,10 @@ class UnstMesh(object):
 
     def _meshAdvectorSphere(self, tectonic, timer):
         """
-        Advect spherical mesh horizontally and interpolate mesh information
+        Advect spherical mesh horizontally and interpolate mesh information.
+
+        :arg tectonic: local tectonic rates
+        :arg timer: tectonic time step in years
         """
 
         # Move coordinates

@@ -16,13 +16,15 @@ MPIrank = PETSc.COMM_WORLD.Get_rank()
 
 class ReadYaml(object):
     """
-    Parsing YAML input file
-
-    Args:
-        filename: input filename (.yml YAML file)
+    Reading simulation input file.
     """
 
     def __init__(self, filename):
+        """
+        Parsing YAML file.
+
+        :arg filename: input filename (.yml YAML file)
+        """
 
         if self.showlog:
             self.log = PETSc.Log()
@@ -54,8 +56,7 @@ class ReadYaml(object):
         self._readSealevel()
         self._readTectonic()
         self._readRain()
-        self._readPaleo()
-        self._readFlex()
+        self._readBackwardPaleo()
         self._readOut()
         self._readForcePaleo()
 
@@ -249,7 +250,7 @@ class ReadYaml(object):
     def _readHillslope(self):
         """
         Read hillslope parameters.
-        # """
+        """
 
         try:
             hillDict = self.input["diffusion"]
@@ -352,6 +353,19 @@ class ReadYaml(object):
         return
 
     def _storeTectonic(self, k, tecStart, zMap, tMap, tStep, tEnd, tecdata):
+        """
+        Record tectonic conditions.
+
+        :arg k: tectonic event number
+        :arg tecStart: tectonic event start time
+        :arg zMap: horizontal tectonic displacement file
+        :arg tMap: vertical tectonic displacement file
+        :arg tStep: tectonic time step
+        :arg tEnd: tectonic event end time
+        :arg tecdata: pandas dataframe storing each tectonic event
+
+        :return: appended tecdata
+        """
 
         if tMap is not None:
             if self.meshFile != tMap:
@@ -421,6 +435,14 @@ class ReadYaml(object):
         return tecdata
 
     def _defineTectonic(self, k, tecSort, tecdata):
+        """
+        Define tectonic conditions.
+
+        :arg k: tectonic event number
+        :arg tecSort: sorted tectonic event
+        :arg tecdata: pandas dataframe storing each tectonic event
+        :return: appended tecdata
+        """
 
         tecStart = None
         tEnd = None
@@ -484,6 +506,16 @@ class ReadYaml(object):
         return
 
     def _defineRain(self, k, rStart, rMap, rUniform, raindata):
+        """
+        Define precipitation conditions.
+
+        :arg k: precipitation event number
+        :arg rStart: precipitation event start time
+        :arg rMap: precipitation map file event
+        :arg rUniform: precipitation uniform value event
+        :arg raindata: pandas dataframe storing each precipitation event
+        :return: appended raindata
+        """
 
         if rMap is None and rUniform is None:
             print(
@@ -623,9 +655,9 @@ class ReadYaml(object):
 
         return
 
-    def _readPaleo(self):
+    def _readBackwardPaleo(self):
         """
-        Parse paleomap conditions.
+        Force model with backward paleomaps.
         """
         try:
             paleoDict = self.input["paleomap"]
@@ -679,7 +711,7 @@ class ReadYaml(object):
 
     def _readForcePaleo(self):
         """
-        Parse paleomap forcing.
+        Get series of paleomaps to force the model through time.
         """
 
         try:
@@ -725,102 +757,6 @@ class ReadYaml(object):
 
         return
 
-    def _defineFlex(self, flexDict):
-        """
-        Define isostatic flexure conditions.
-        """
-
-        flexSort = sorted(flexDict, key=itemgetter("time"))
-        for k in range(len(flexSort)):
-            fTime = None
-            fMap = None
-            fKey = None
-            try:
-                fTime = flexSort[k]["time"]
-            except Exception:
-                print(
-                    "For each elastic thickness map a given time is required.",
-                    flush=True,
-                )
-                raise ValueError("elastic thickness {} has no parameter time".format(k))
-            try:
-                fMap = flexSort[k]["npdata"]
-            except Exception:
-                pass
-
-            if fMap is not None:
-                try:
-                    with open(fMap + ".npz") as meshfile:
-                        meshfile.close()
-                        pass
-                except IOError:
-                    print(
-                        "Unable to open numpy dataset: {}.npz".format(fMap), flush=True
-                    )
-                    raise IOError("The numpy dataset is not found...")
-
-            try:
-                fKey = flexSort[k]["key"]
-            except Exception:
-                pass
-
-            tmpFlex = []
-            tmpFlex.insert(0, {"time": fTime, "fMap": fMap + ".npz", "fKey": fKey})
-
-            if k == 0:
-                flexdata = pd.DataFrame(tmpFlex, columns=["time", "fMap", "fKey"])
-            else:
-                flexdata = pd.concat(
-                    [
-                        flexdata,
-                        pd.DataFrame(tmpFlex, columns=["time", "fMap", "fKey"]),
-                    ],
-                    ignore_index=True,
-                )
-        self.flexdata = flexdata
-
-        return
-
-    def _readFlex(self):
-        """
-        Parse isostatic flexure conditions.
-        """
-        try:
-            flexDict = self.input["flexure"]
-            self.flexure = True
-
-            try:
-                self.dmantle = flexDict["dmantle"]
-            except KeyError:
-                self.dmantle = 3350.0
-
-            try:
-                self.dfill = flexDict["dfill"]
-            except KeyError:
-                self.dfill = 2750.0
-
-            try:
-                self.young = flexDict["young"]
-            except KeyError:
-                self.young = 1.0e11
-
-            try:
-                self.fpts = flexDict["npts"]
-            except KeyError:
-                print(
-                    "The number of points under the influence of a given point load is required.",
-                    flush=True,
-                )
-                raise ValueError("The nbPts parameter needs to be be defined")
-
-            self._defineFlex(flexDict)
-
-        except KeyError:
-            self.flexure = False
-            pass
-
-        return
-
     def _readOut(self):
         """
         Parse output directory.
@@ -842,65 +778,5 @@ class ReadYaml(object):
 
         if self.rStep > 0:
             self.makedir = False
-
-        return
-
-    def _defineFit(self, paleoDict):
-        """
-        Define paleotopography files parameters.
-        """
-
-        try:
-            self.paleoTopo = paleoDict["paleotopo"]
-            self.paleoTopo = self.paleoTopo + ".npz"
-        except KeyError:
-            print(
-                "Key 'paleotopo' is required and is missing in the 'paleofit' declaration!",
-                flush=True,
-            )
-            raise KeyError("NPZ paleotopography file is not defined!")
-        try:
-            with open(self.paleoTopo) as paleonpz:
-                paleonpz.close()
-                pass
-        except IOError:
-            print(
-                "Unable to open NPZ paleo file: {}".format(self.paleoTopo), flush=True
-            )
-            raise IOError("The NPZ paleotopography file is not found...")
-
-        try:
-            self.lonlat = paleoDict["lonlat"]
-            self.lonlat = self.lonlat + ".npz"
-        except KeyError:
-            print(
-                "Key 'lonlat' is required and is missing in the 'paleofit' declaration!",
-                flush=True,
-            )
-            raise KeyError("Longitude/latitude coordinates file is not defined!")
-        try:
-            with open(self.paleoTopo) as paleonpz:
-                paleonpz.close()
-                pass
-        except IOError:
-            print("Unable to open lonlat file: {}".format(self.lonlat), flush=True)
-            raise IOError("The lonlat paleotopography file is not found...")
-
-        try:
-            self.paleoDir = paleoDict["vdispdir"]
-        except KeyError:
-            print(
-                "Key 'vdispdir' is required and is missing in the 'paleofit' declaration!",
-                flush=True,
-            )
-            raise KeyError(
-                "Paleo-tectonic directory to store vertical displacement is not defined!"
-            )
-
-        try:
-            os.makedirs(self.paleoDir, exist_ok=True)
-        except FileExistsError:
-            # Directory already exists
-            pass
 
         return

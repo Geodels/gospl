@@ -2,6 +2,8 @@ import os
 import gc
 import sys
 import h5py
+import glob
+import shutil
 import petsc4py
 import numpy as np
 
@@ -26,7 +28,7 @@ class WriteMesh(object):
         self.stratStep = 0
         self.file = "gLEM"
         if MPIrank == 0:
-            self.createOutputDir()
+            self._createOutputDir()
 
         # Sync the chosen output dir to all processors
         self.outputDir = MPIcomm.bcast(self.outputDir, root=0)
@@ -52,17 +54,17 @@ class WriteMesh(object):
 
         # Output time step for first step
         if self.saveTime == self.tStart:
-            self.outputMesh()
+            self._outputMesh()
             self.saveTime += self.tout
 
         # Output time step
         elif self.tNow >= self.saveTime:
-            self.outputMesh()
+            self._outputMesh()
             self.saveTime += self.tout
 
             # Forcing with backward model
             if self.forceStep >= 0 and self.newForcing:
-                self.forcePaleo()
+                self._forcePaleo()
                 self.steppaleo += 1
 
             if self.steppaleo == 1:
@@ -90,17 +92,14 @@ class WriteMesh(object):
         # Output time step
         self.step -= 1
         self.saveTime = self.tEnd
-        self.outputMesh()
+        self._outputMesh()
 
         return
 
-    def createOutputDir(self):
+    def _createOutputDir(self):
         """
         Create a directory to store outputs.
         """
-        import os
-        import glob
-        import shutil
 
         # Get output directory
         if self.outputDir is not None:
@@ -170,7 +169,7 @@ class WriteMesh(object):
 
         return
 
-    def outputMesh(self):
+    def _outputMesh(self):
         """
         Saves mesh local information stored in the DMPlex to HDF5 file
         If the file already exists, it is overwritten.
@@ -286,7 +285,7 @@ class WriteMesh(object):
 
     def readData(self):
         """
-        For restarted simulations, this model reads the previous dataset.
+        For restarted simulations, this function reads the previous dataset.
         """
 
         if self.stratStep == 0:
@@ -367,12 +366,12 @@ class WriteMesh(object):
 
         return
 
-    def forcePaleo(self):
+    def _forcePaleo(self):
         """
-        Forcing the model based on backward simulation results.
+        Forcing the model based on backward simulation results. This function computes
+        difference between backward model elevation and current one
         """
 
-        # Compute difference between backward model elevation and current one
         # Store the vertical displacement in the uplift variable
         self._upliftBF(self.alpha[self.forceStep], self.stepb[self.forceStep])
 
@@ -407,8 +406,10 @@ class WriteMesh(object):
         """
         Reads locally the backward model elevation at any given step.
         Compute elevation difference between backward and forward models.
+
+        :arg alpha: fitting coefficient for backward uplift differences
+        :arg step: backward model time step to use
         """
-        import os
 
         h5file = self.forceDir + "/h5/gLEM." + str(step) + ".p" + str(MPIrank) + ".h5"
         if os.path.exists(h5file):
