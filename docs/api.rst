@@ -12,49 +12,47 @@ API Documentation
 Main Class
 ------------
 
-.. automodule:: gLEM
-    :members:
 
 Flow Model
 ------------
 
-.. automodule:: gLEM.flow
+.. automodule:: flow
     :members:
 
 Surface Processes
 ^^^^^^^^^^^^^^^^^^
 
-.. automodule:: gLEM.flow.surfprocplex
+.. automodule:: flow.surfprocplex
     :members:
 
 
 Mesher Model
 ------------
 
-.. automodule:: gLEM.mesher
+.. automodule:: mesher
     :members:
 
 Unstructured Mesh
 ^^^^^^^^^^^^^^^^^^^^
 
-.. automodule:: gLEM.mesher.unstructuredmesh
+.. automodule:: mesher.unstructuredmesh
     :members:
 
 
 Tools
 ---------
 
-.. automodule:: gLEM.tools
+.. automodule:: tools
     :members:
 
 Input Parser
 ^^^^^^^^^^^^^^^^^
 
-.. automodule:: gLEM.tools.inputparser
+.. automodule:: tools.inputparser
     :members:
 
 Output Mesh
 ^^^^^^^^^^^^^^^^^
 
-.. automodule:: gLEM.tools.outmesh
+.. automodule:: tools.outmesh
     :members:
