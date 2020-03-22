@@ -12,6 +12,8 @@ API Documentation
 Main Class
 ------------
 
+.. automodule:: model
+    :members:
 
 Flow Model
 ------------
