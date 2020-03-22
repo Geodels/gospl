@@ -12,6 +12,9 @@ API Documentation
 Main Class
 ------------
 
+.. automodule:: gLEM
+    :members:
+
 Flow Model
 ------------
 

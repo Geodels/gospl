@@ -104,7 +104,7 @@ class UnstMesh(object):
 
     def reInitialiseModel(self):
         """
-        Reinitialise eSCAPE model for paleo-fitting experiments.
+        Reinitialise gLEM model for paleo-fitting experiments.
         """
 
         t0step = clock()

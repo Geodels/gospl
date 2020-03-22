@@ -1,6 +1,6 @@
 ## Global Scale LEM
 
-> This repo is a specific branch of **eSCAPE** tuned for HPC of global scale models.
+> This repo is a specific branch of **gLEM** tuned for HPC of global scale models.
 
 #### Artemis HPC Sydney
 
@@ -36,16 +36,3 @@ python3 setup.py install --user
 | 17004184 | 144 | 04:59:49 | 6 |
 | 17004184 | 168 | 04:31:14 | 7 |
 | 17004184 | 192 | 06:23:02 | 7 |
-
-
-#### Flexural response parameters
-
-Here is an approximate number of nodes under the influence of a given point load for different global meshes resolution.
-
-| Refinement level/Resolution | Radius extent 100km | Radius extent 250km | Radius extent 500km |
-| --- | --- | --- | --- |
-| 8 km | 700 | 4350 | 17400 |
-| 6 km | 1350 | 8250 | 32800 |
-| ref lvl 8 | 70 | 400 | 1550 |
-| ref lvl 9 | 260 | 1600 | 6000 |
-| ref lvl 10 | 1000 | 6300 | 24000 |

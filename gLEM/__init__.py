@@ -22,7 +22,7 @@ def LandscapeEvolutionModel(filename, *args, **kwargs):
     Instantiates model object and performs surface processes evolution.
 
     This object contains methods for the following operations:
-     - initialisation of eSCAPE mesh based on input file options.
+     - initialisation of gLEM mesh based on input file options.
      - computation of surface processes
      - cleaning/destruction of PETSC objects
 
