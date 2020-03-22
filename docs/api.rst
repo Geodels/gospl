@@ -12,7 +12,7 @@ API Documentation
 Main Class
 ------------
 
-.. automodule:: model
+.. automodule:: gLEM
     :members:
 
 Flow Model
