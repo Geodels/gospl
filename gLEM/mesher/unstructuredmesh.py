@@ -1,3 +1,4 @@
+import os
 import gc
 import sys
 import meshplex
@@ -9,8 +10,10 @@ from time import clock
 from mpi4py import MPI
 from scipy import spatial
 from petsc4py import PETSc
-from gLEM._fortran import defineTIN
-from gLEM._fortran import ngbGlob
+
+if "READTHEDOCS" not in os.environ:
+    from gLEM._fortran import defineTIN
+    from gLEM._fortran import ngbGlob
 
 petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()

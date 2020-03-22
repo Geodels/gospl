@@ -9,6 +9,12 @@ API Documentation
   It is worth mentioning that a set of **fortran** functions are part of **gLEM** code but are not described in this API...
 
 
+Main Class
+------------
+
+.. automodule:: gLEM
+    :members:
+
 Flow Model
 ------------
 
@@ -16,7 +22,7 @@ Flow Model
     :members:
 
 Surface Processes
-^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^
 
 .. automodule:: flow.surfprocplex
     :members:
@@ -29,7 +35,7 @@ Mesher Model
     :members:
 
 Unstructured Mesh
-^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
 
 .. automodule:: mesher.unstructuredmesh
     :members:
@@ -42,13 +48,13 @@ Tools
     :members:
 
 Input Parser
-^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 .. automodule:: tools.inputparser
     :members:
 
 Output Mesh
-^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 .. automodule:: tools.outmesh
     :members:
