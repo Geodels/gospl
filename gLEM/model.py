@@ -9,15 +9,26 @@ import numpy as np
 from time import clock
 from mpi4py import MPI
 
-from gLEM import SPMesh as _SPMesh
-from gLEM import ReadYaml as _ReadYaml
-from gLEM import UnstMesh as _UnstMesh
-from gLEM import WriteMesh as _WriteMesh
+if "READTHEDOCS" not in os.environ:
+    from .flow import SPMesh as _SPMesh
+    from .tools import ReadYaml as _ReadYaml
+    from .mesher import UnstMesh as _UnstMesh
+    from .tools import WriteMesh as _WriteMesh
+
+    class parentModel(_ReadYaml, _WriteMesh, _UnstMesh, _SPMesh):
+        pass
+
+
+else:
+
+    class parentModel(object):
+        pass
+
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
-class Model(_ReadYaml, _WriteMesh, _UnstMesh, _SPMesh):
+class Model(parentModel):
     """
     Instantiates model object and performs surface processes evolution.
 
@@ -151,6 +162,3 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _SPMesh):
         _UnstMesh.destroy_DMPlex(self)
 
         return
-
-
-# return LandscapeEvolutionModelClass(filename, *args, **kwargs)

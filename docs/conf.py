@@ -63,6 +63,9 @@ extensions = [
 ]
 numfig = True
 
+# Add any paths that contain templates here, relative to this directory.
+templates_path = ["_templates"]
+
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
@@ -165,7 +168,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "glem", u"gLEM Documentation", [author], 1)]
+man_pages = [(master_doc, "gLEM", u"gLEM Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
