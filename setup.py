@@ -1,4 +1,6 @@
+import io
 import numpy
+from os import path
 
 try:
     from numpy.distutils.fcompiler import FCompiler
@@ -9,6 +11,10 @@ try:
     FCompiler.runtime_library_dir_option = runtime_library_dir_option
 except Exception:
     pass
+
+this_directory = path.abspath(path.dirname(__file__))
+with io.open(path.join(this_directory, "README.md"), encoding="utf-8") as f:
+    long_description = f.read()
 
 
 def configuration(parent_package="", top_path=None):
@@ -71,11 +77,26 @@ if __name__ == "__main__":
         name="gLEM",
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
-        url="https://github.com/Geodels/eSCAPE",
+        url="https://github.com/Geodels/gLEM",
         version="0.1",
-        description="Scalable Parallelised Landscape Evolution Model",
+        description="A Python interface to perform Global Landscape Evolution Model",
+        long_description=long_description,
+        long_description_content_type="text/markdown",
         configuration=configuration,
         packages=["gLEM", "gLEM.tools", "gLEM.mesher", "gLEM.flow"],
+        install_requires=[
+            "Cython>=0.28.5",
+            "numpy>=1.15.1",
+            "scipy>=1.1.0",
+            "h5py>=2.8.0",
+            "pandas>=0.17.1",
+            "ruamel.yaml>=0.15.64",
+            "meshplex==0.11.6",
+            "mpi4py>=3.0.0",
+            "petsc4py>=3.8.1",
+            "pre-commit",
+        ],
+        python_requires=">=3.3",
         classifiers=[
             "Programming Language :: Python :: 3.5",
             "Programming Language :: Python :: 3.6",
