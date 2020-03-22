@@ -228,6 +228,7 @@ MOCK_MODULES = [
     "h5py",
     "mpi4py",
     "Cython",
+    "ruamel",
     "ruamel.yaml",
     "pandas",
     "scipy",

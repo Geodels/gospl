@@ -1,5 +1,6 @@
 numpy
 pandas
+ruamel.yaml
 scikit-image
 sphinx_rtd_theme
 sphinxcontrib-napoleon
