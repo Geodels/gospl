@@ -188,15 +188,7 @@ class UnstMesh(object):
         # Distribute to other processors if any
         t0 = clock()
         if MPIsize > 1:
-            if MPIrank == 1 and self.verbose:
-                print(
-                    "Start distribute {}".format(MPIrank), flush=True,
-                )
             sf = self.dm.distribute(overlap=1)
-            if MPIrank == 1 and self.verbose:
-                print(
-                    "End distribute {}".format(MPIrank), flush=True,
-                )
             newSect, newVec = self.dm.distributeField(sf, origSect, origVec)
             self.dm.setDefaultSection(newSect)
             newSect.destroy()
