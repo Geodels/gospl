@@ -82,7 +82,7 @@ class Model(parentModel):
         Run simulation.
 
         This function contains methods for the following operations:
-         - calculating flow accumulation
+         - get flow accumulation
          - apply surface evolution
         """
 
