@@ -15,6 +15,10 @@ Contents
 
 .. toctree::
    :maxdepth: 3
+   :name: Code Source
+   :caption: Code Source
+
+    api.rst
 
 Indices and tables
 ------------------
