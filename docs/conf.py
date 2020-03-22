@@ -17,18 +17,19 @@ import sys
 
 import sphinx_rtd_theme
 
+from mock import Mock as MagicMock
 from sphinx.builders.html import (
     StandaloneHTMLBuilder,
     DirectoryHTMLBuilder,
     SingleFileHTMLBuilder,
 )
 
-sys.path.insert(0, os.path.abspath("."))
-sys.path.insert(0, os.path.abspath("../"))
-sys.path.insert(0, os.path.abspath("gLEM"))
-sys.path.insert(0, os.path.abspath("gLEM/flow"))
-sys.path.insert(0, os.path.abspath("gLEM/mesher"))
-sys.path.insert(0, os.path.abspath("gLEM/tools"))
+# sys.path.insert(0, os.path.abspath("."))
+# sys.path.insert(0, os.path.abspath("../"))
+sys.path.insert(0, os.path.abspath("../gLEM"))
+# sys.path.insert(0, os.path.abspath("gLEM/flow"))
+# sys.path.insert(0, os.path.abspath("gLEM/mesher"))
+# sys.path.insert(0, os.path.abspath("gLEM/tools"))
 
 # Redefine supported_image_types for the HTML builder
 html_img_types = ["image/gif", "image/svg+xml", "image/png", "image/jpeg"]
@@ -206,3 +207,31 @@ epub_title = project
 
 # A list of files that should not be packed into the epub file.
 epub_exclude_files = ["search.html"]
+
+
+# -- Mock utils
+# utils contains binary (FORTRAN and C) code for the performance-sensitive
+# parts of Badlands. readthedocs can't compile or load this, so we mock it
+# out.
+# See also http://docs.readthedocs.io/en/latest/faq.html#i-get-import-errors-on-libraries-that-depend-on-c-modules
+
+
+class Mock(MagicMock):
+    @classmethod
+    def __getattr__(cls, name):
+        return MagicMock()
+
+
+MOCK_MODULES = [
+    "h5py",
+    "mpi4py",
+    "Cython",
+    "ruamel.yaml",
+    "pandas",
+    "scipy",
+    "petsc4py",
+    "meshplex",
+]
+
+for m in MOCK_MODULES:
+    sys.modules[m] = Mock()
