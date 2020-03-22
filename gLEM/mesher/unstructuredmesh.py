@@ -194,6 +194,7 @@ class UnstMesh(object):
             newSect.destroy()
             newVec.destroy()
             sf.destroy()
+        MPIcomm.Barrier()
         origVec.destroy()
         origSect.destroy()
         if MPIrank == 0 and self.verbose:
