@@ -1,10 +1,12 @@
 numpy>=1.15.1
-scipy>=1.1.0
+scipy>=1.4.1
 Cython>=0.28.5
 mpi4py>=3.0.0
 petsc4py>=3.8.1
 h5py>=2.8.0
 pandas>=0.17.1
 ruamel.yaml>=0.15.64
-meshplex==0.11.6
+fastfunc>=0.2.2
+meshio>=4.0.10
+meshplex>=0.12.3
 pre-commit

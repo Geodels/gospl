@@ -6,6 +6,8 @@
 Global Scalable Paleo Landscape Evolution / gospl
 ==================================================
 
+[![PyPI](https://img.shields.io/pypi/v/gospl)](https://pypi.org/project/gospl/) [![Documentation Status](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/?badge=latest)
+
 **gospl** (IPA: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a Global Scalable Paleo Landscape Evolution Model built to simulate landscape development, sediment transport over Earth surface.
 
 

@@ -1,6 +1,12 @@
 ## Global Scale LEM
 
-> This repo is a specific branch of **gospl** tuned for HPC of global scale models.
+
+[![PyPI](https://img.shields.io/pypi/v/gospl)](https://pypi.org/project/gospl/) [![Documentation Status](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/?badge=latest)
+
+
+**gospl** (IPA: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a Global Scalable Paleo Landscape Evolution Model built to simulate landscape development, sediment transport over paleo-Earth surface.
+
+
 
 #### Artemis HPC Sydney
 
