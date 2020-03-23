@@ -3,7 +3,7 @@
 # You can set these variables from the command line.
 SPHINXOPTS    =
 SPHINXBUILD   = sphinx-build
-SPHINXPROJ    = glem
+SPHINXPROJ    = gospl
 SOURCEDIR     = .
 BUILDDIR      = _build
 

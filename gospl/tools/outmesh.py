@@ -26,7 +26,7 @@ class WriteMesh(object):
 
         self.step = 0
         self.stratStep = 0
-        self.file = "gLEM"
+        self.file = "gospl"
         if MPIrank == 0:
             self._createOutputDir()
 
@@ -411,7 +411,7 @@ class WriteMesh(object):
         :arg step: backward model time step to use
         """
 
-        h5file = self.forceDir + "/h5/gLEM." + str(step) + ".p" + str(MPIrank) + ".h5"
+        h5file = self.forceDir + "/h5/gospl." + str(step) + ".p" + str(MPIrank) + ".h5"
         if os.path.exists(h5file):
             hf = h5py.File(h5file, "r")
         else:

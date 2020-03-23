@@ -12,8 +12,8 @@ from scipy import spatial
 from petsc4py import PETSc
 
 if "READTHEDOCS" not in os.environ:
-    from gLEM._fortran import defineTIN
-    from gLEM._fortran import ngbGlob
+    from gospl._fortran import defineTIN
+    from gospl._fortran import ngbGlob
 
 petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
@@ -104,7 +104,7 @@ class UnstMesh(object):
 
     def reInitialiseModel(self):
         """
-        Reinitialise gLEM model for paleo-fitting experiments.
+        Reinitialise gospl model for paleo-fitting experiments.
         """
 
         t0step = clock()

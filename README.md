@@ -1,6 +1,6 @@
 ## Global Scale LEM
 
-> This repo is a specific branch of **gLEM** tuned for HPC of global scale models.
+> This repo is a specific branch of **gospl** tuned for HPC of global scale models.
 
 #### Artemis HPC Sydney
 

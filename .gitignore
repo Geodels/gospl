@@ -4,4 +4,4 @@ docs/_build/*
 *.pyc
 tests/output/*
 dist
-gLEM.egg-info
+gospl.egg-info

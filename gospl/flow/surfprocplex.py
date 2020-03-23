@@ -10,10 +10,10 @@ from scipy import sparse
 from petsc4py import PETSc
 
 if "READTHEDOCS" not in os.environ:
-    from gLEM._fortran import fillPIT
-    from gLEM._fortran import MFDreceivers
-    from gLEM._fortran import setHillslopeCoeff
-    from gLEM._fortran import setDiffusionCoeff
+    from gospl._fortran import fillPIT
+    from gospl._fortran import MFDreceivers
+    from gospl._fortran import setHillslopeCoeff
+    from gospl._fortran import setDiffusionCoeff
 
 petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()

@@ -6,11 +6,11 @@ API Documentation
   :target: https://github.com/psf/black
 
   
-**gLEM** is a global-scale surface evolution model built to simulate landscape development, sediment transport over Earth surface.
+**gospl** is a global-scale surface evolution model built to simulate landscape development, sediment transport over Earth surface.
 
 
 .. warning::
-  It is worth mentioning that a set of **fortran** functions are part of **gLEM** code but are not described in this API...
+  It is worth mentioning that a set of **fortran** functions are part of **gospl** code but are not described in this API...
 
 
 Model Class

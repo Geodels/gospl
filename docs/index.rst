@@ -1,13 +1,13 @@
-.. gLEM documentation master file, created by
+.. gospl documentation master file, created by
    sphinx-quickstart on Fri May 10 16:22:41 2019.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-A Global Landscape Evolution Model / gLEM
+A Global Landscape Evolution Model / gospl
 =============================================
 
-.. image:: https://readthedocs.org/projects/glem/badge/?version=latest
-  :target: https://glem.readthedocs.io/en/latest/?badge=latest
+.. image:: https://readthedocs.org/projects/gospl/badge/?version=latest
+  :target: https://gospl.readthedocs.io/en/latest/?badge=latest
   :alt: Documentation Status
 
 What's in the box?

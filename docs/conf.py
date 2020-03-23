@@ -24,7 +24,7 @@ from sphinx.builders.html import (
     SingleFileHTMLBuilder,
 )
 
-sys.path.insert(0, os.path.abspath("../gLEM/"))
+sys.path.insert(0, os.path.abspath("../gospl/"))
 
 # Redefine supported_image_types for the HTML builder
 html_img_types = ["image/gif", "image/svg+xml", "image/png", "image/jpeg"]
@@ -35,7 +35,7 @@ SingleFileHTMLBuilder.supported_image_types = html_img_types
 
 # -- Project information -----------------------------------------------------
 
-project = u"gLEM"
+project = u"gospl"
 copyright = u"2020, Tristan Salles"
 author = u"Tristan Salles"
 
@@ -136,7 +136,7 @@ html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = "gLEMdoc"
+htmlhelp_basename = "gospldoc"
 
 
 # -- Options for LaTeX output ------------------------------------------------
@@ -160,7 +160,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, "gLEM.tex", u"gLEM Documentation", u"Tristan Salles", "manual"),
+    (master_doc, "gospl.tex", u"gospl Documentation", u"Tristan Salles", "manual"),
 ]
 
 
@@ -168,7 +168,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "gLEM", u"gLEM Documentation", [author], 1)]
+man_pages = [(master_doc, "gospl", u"gospl Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -179,10 +179,10 @@ man_pages = [(master_doc, "gLEM", u"gLEM Documentation", [author], 1)]
 texinfo_documents = [
     (
         master_doc,
-        "gLEM",
-        u"gLEM Documentation",
+        "gospl",
+        u"gospl Documentation",
         author,
-        "gLEM",
+        "gospl",
         "Global Landscape Evolution Model.",
         "Miscellaneous",
     ),

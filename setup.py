@@ -54,7 +54,7 @@ def configuration(parent_package="", top_path=None):
     config = Configuration("", parent_package, top_path)
 
     config.add_extension(
-        "gLEM._fortran",
+        "gospl._fortran",
         sources=["fortran/functions.pyf", "fortran/functions.F90"],
         depends=["fortran/functionsmodule.h"],
         define_macros=[],  # [('F2PY_REPORT_ON_ARRAY_COPY',0)],
@@ -75,16 +75,16 @@ if __name__ == "__main__":
     from numpy.distutils.core import setup
 
     setup(
-        name="gLEM",
+        name="gospl",
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
-        url="https://github.com/Geodels/gLEM",
+        url="https://github.com/Geodels/gospl",
         version="0.1",
         description="A Python interface to perform Global Landscape Evolution Model",
         long_description=long_description,
         long_description_content_type="text/markdown",
         configuration=configuration,
-        packages=["gLEM", "gLEM.tools", "gLEM.mesher", "gLEM.flow"],
+        packages=["gospl", "gospl.tools", "gospl.mesher", "gospl.flow"],
         install_requires=[
             "pytest",
             "Cython>=0.28.5",

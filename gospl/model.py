@@ -34,7 +34,7 @@ class Model(parentModel):
 
     This object contains methods for the following operations:
 
-     - initialisation of gLEM mesh based on input file options
+     - initialisation of gospl mesh based on input file options
      - computation of surface processes
      - cleaning/destruction of PETSC objects
 

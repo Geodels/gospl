@@ -1,4 +1,4 @@
-from gLEM.model import Model as sim
+from gospl.model import Model as sim
 
 input = "input/forward.yml"
 
