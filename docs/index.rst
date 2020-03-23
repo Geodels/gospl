@@ -19,7 +19,7 @@ Global Scalable Paleo Landscape Evolution / gospl
 What's in the box?
 ------------------
 
-**gospl** (IPA: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
+**gospl** (pronounced: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
 
 **gospl** is a parallel TIN-based landscape evolution model, built to simulate topography dynamic of the Earth over millions of years.
 
