@@ -1,0 +1,56 @@
+name: Testing model forward
+
+domain:
+    npdata: 'data/elev/elev20Ma'
+    flowdir: 3
+    fast: False
+    backward: False
+
+time:
+    start: -20000000.
+    end: -15000000.
+    tout: 1000000.
+    dt: 1000000.
+    tec: 1000000.
+
+spl:
+    K: 3.e-9
+    Ff: 0.2
+    wgth: 5.e-3
+
+diffusion:
+    hillslopeK: 0.01
+    sedimentK: 1000.
+
+sea:
+    position: 0.
+
+tectonic:
+  - start: -20000000.
+    end: -19000000.
+    mapH: 'data/disp/disp20Ma'
+  - start: -19000000.
+    end: -18000000.
+    mapH: 'data/disp/disp19Ma'
+  - start: -18000000.
+    end: -17000000.
+    mapH: 'data/disp/disp18Ma'
+  - start: -17000000.
+    end: -16000000.
+    mapH: 'data/disp/disp17Ma'
+  - start: -16000000.
+    end: -15000000.
+    mapH: 'data/disp/disp16Ma'
+
+climate:
+  - start: -20000000.
+    map: ['data/rain/rain20Ma','r']
+  - start: -15000000.
+    map: ['data/rain/rain15Ma','r']
+
+forcepaleo:
+    dir: 'output/backward'
+
+output:
+    dir: 'output/forward'
+    makedir: False
