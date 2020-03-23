@@ -1,4 +1,4 @@
-## Global Scale LEM
+## gospl / Global Scalable Paleo Landscape Evolution 
 
 
 [![PyPI](https://img.shields.io/pypi/v/gospl)](https://pypi.org/project/gospl/) [![Documentation Status](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/?badge=latest)
