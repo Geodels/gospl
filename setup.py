@@ -1,5 +1,6 @@
 import io
 import numpy
+import setuptools
 from os import path
 
 try:

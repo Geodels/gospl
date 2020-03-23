@@ -3,3 +3,5 @@ build/*
 docs/_build/*
 *.pyc
 tests/output/*
+dist
+gLEM.egg-info
