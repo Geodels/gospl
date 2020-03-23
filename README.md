@@ -1,11 +1,40 @@
-## gospl / Global Scalable Paleo Landscape Evolution 
+## Global Scalable Paleo Landscape Evolution  / gospl
 
 
 [![PyPI](https://img.shields.io/pypi/v/gospl)](https://pypi.org/project/gospl/) [![Documentation Status](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/?badge=latest)
 
 
-**gospl** (IPA: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a Global Scalable Paleo Landscape Evolution Model built to simulate landscape development, sediment transport over paleo-Earth surface.
+### What's in the box?
 
+**gospl** (IPA: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
+
+
+**gospl** is a parallel TIN-based landscape evolution model, built to simulate topography dynamic of the Earth over millions of years.
+
+The model accounts for hillslope processes (soil creep using linear diffusion), fluvial incision (stream power law), spatially and temporally varying tectonics (horizontal and vertical displacements) and climatic forces (temporal and spatial precipitation changes and/or sea-level fluctuations).
+
+
+### Specs
+
+
+The model is based on the following approaches:
+
++ an adaptation of the implicit, parallelisable method for calculating drainage area for both single (D8) and multiple flow direction (Dinf) from [Richardson et al., 2014],
++ the methods developed in _badlands_ [Salles et al., 2018] for marine sediment distribution,
++ a _PETSc_ layer similar to the one in _eSCAPE_ [Salles, 2019] for mash partitioning and solvers.
+
+
+### License
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along with this program. If not, see _http://www.gnu.org/licenses/lgpl-3.0.en.html_.
+
+### Documentation & Installation
+
+_https://gospl.readthedocs.io/_
 
 
 #### Artemis HPC Sydney
