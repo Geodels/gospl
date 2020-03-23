@@ -23,6 +23,11 @@
 #define  _MFDreceivers  _mfdreceivers
 #define  _MFDreceivers_  _mfdreceivers_
 
+#define  setMaxNb  setmaxnb
+#define  setMaxNb_   setmaxnb_
+#define  _setMaxNb   _setmaxnb
+#define  _setMaxNb_   _setmaxnb_
+
 #define  setHillslopeCoeff  sethillslopecoeff
 #define  setHillslopeCoeff_   sethillslopecoeff_
 #define  _setHillslopeCoeff   _sethillslopecoeff

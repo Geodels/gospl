@@ -19,7 +19,8 @@ spl:
     wgth: 5.e-3
 
 diffusion:
-    hillslopeK: 0.01
+    hillslopeKa: 0.01
+    hillslopeKm: 0.1
     sedimentK: 1000.
 
 sea:

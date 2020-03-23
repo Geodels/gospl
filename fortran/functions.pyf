@@ -41,12 +41,17 @@ python module _fortran ! in
             integer dimension(:),intent(inout) :: indices
         end subroutine split
 
-        subroutine setHillslopeCoeff(nb,kd,dcoeff,maxnb) ! in :_fortran:functions.f90
+        subroutine setMaxNb(nb,maxnb) ! in :_fortran:functions.f90
             use meshparams
             integer :: nb
-            real(kind=8) intent(in) :: kd
-            real(kind=8) dimension(nb,8),intent(out),depend(nb) :: dcoeff
             integer intent(out) :: maxnb
+        end subroutine setMaxNb
+
+        subroutine setHillslopeCoeff(nb,kd,dcoeff) ! in :_fortran:functions.f90
+            use meshparams
+            integer :: nb
+            real(kind=8) dimension(nb),intent(in),depend(nb) :: kd
+            real(kind=8) dimension(nb,8),intent(out),depend(nb) :: dcoeff
         end subroutine setHillslopeCoeff
 
         subroutine setDiffusionCoeff(kd,limit,elev,dh,dcoeff,nb) ! in :_fortran:functions.f90

@@ -205,7 +205,7 @@ end subroutine split
 !! HILLSLOPE PROCESSES FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine setHillslopeCoeff(nb, Kd, dcoeff, maxnb)
+subroutine setMaxNb(nb, maxnb)
 !*****************************************************************************
 ! Define hillslope coefficients
 
@@ -214,20 +214,41 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff, maxnb)
 
     integer :: nb
 
-    real( kind=8 ), intent(in) :: Kd
     integer, intent(out) :: maxnb
+
+    integer :: k
+
+    maxnb  = 0
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        maxnb = max(maxnb,FVnNb(k))
+      endif
+    enddo
+
+    return
+
+end subroutine setMaxNb
+
+subroutine setHillslopeCoeff(nb, Kd, dcoeff)
+!*****************************************************************************
+! Define hillslope coefficients
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    real( kind=8 ), intent(in) :: Kd(nb)
     real( kind=8 ), intent(out) :: dcoeff(nb,8)
 
     integer :: k, p
     real( kind=8 ) :: s1, c, v
 
     dcoeff = 0.
-    maxnb  = 0
     do k = 1, nb
       s1 = 0.
       if(FVarea(k)>0)then
-        c = Kd/FVarea(k)
-        maxnb = max(maxnb,FVnNb(k))
+        c = Kd(k)/FVarea(k)
         do p = 1, FVnNb(k)
           if(FVvDist(k,p)>0.)then
             v = c*FVvDist(k,p)/FVeLgt(k,p)

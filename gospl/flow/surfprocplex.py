@@ -11,6 +11,7 @@ from petsc4py import PETSc
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fillPIT
+    from gospl._fortran import setMaxNb
     from gospl._fortran import MFDreceivers
     from gospl._fortran import setHillslopeCoeff
     from gospl._fortran import setDiffusionCoeff
@@ -55,32 +56,7 @@ class SPMesh(object):
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
 
-        # Diffusion matrix construction
-        diffCoeffs, self.maxnb = setHillslopeCoeff(self.npoints, self.Cd * self.dt)
-        self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
-
-        for k in range(0, self.maxnb):
-            tmpMat = self._matrix_build()
-            indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
-            indices = self.FVmesh_ngbID[:, k].copy()
-            data = np.zeros(self.npoints)
-            ids = np.nonzero(indices < 0)
-            indices[ids] = ids
-            data = diffCoeffs[:, k + 1]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(PETSc.IntType),
-                data,
-                PETSc.InsertMode.INSERT_VALUES,
-            )
-            tmpMat.assemblyEnd()
-            self.Diff += tmpMat
-            tmpMat.destroy()
-        del ids, indices, indptr, diffCoeffs
-        gc.collect()
+        self.maxnb = setMaxNb(self.npoints)
 
         return
 
@@ -454,8 +430,38 @@ class SPMesh(object):
         Perform hillslope diffusion.
         """
 
+        # Diffusion matrix construction
+        Cd = np.full(self.npoints, self.Cda)
+        Cd[self.seaID] = self.Cdm
+
+        diffCoeffs = setHillslopeCoeff(self.npoints, Cd * self.dt)
+        self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
+
+        for k in range(0, self.maxnb):
+            tmpMat = self._matrix_build()
+            indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
+            indices = self.FVmesh_ngbID[:, k].copy()
+            data = np.zeros(self.npoints)
+            ids = np.nonzero(indices < 0)
+            indices[ids] = ids
+            data = diffCoeffs[:, k + 1]
+            ids = np.nonzero(data == 0.0)
+            indices[ids] = ids
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(
+                indptr,
+                indices.astype(PETSc.IntType),
+                data,
+                PETSc.InsertMode.INSERT_VALUES,
+            )
+            tmpMat.assemblyEnd()
+            self.Diff += tmpMat
+            tmpMat.destroy()
+        del ids, indices, indptr, diffCoeffs, Cd
+        gc.collect()
+
         t0 = clock()
-        if self.Cd > 0.0:
+        if self.Cda > 0.0 or self.Cdm > 0.0:
             # Get erosion values for considered time step
             self.hGlobal.copy(result=self.hOld)
             self._solve_KSP(True, self.Diff, self.hOld, self.hGlobal)

@@ -255,19 +255,32 @@ class ReadYaml(object):
         try:
             hillDict = self.input["diffusion"]
             try:
-                self.Cd = hillDict["hillslopeK"]
+                self.Cda = hillDict["hillslopeKa"]
             except KeyError:
                 print(
-                    "When declaring diffusion processes, the coefficient hillslopeK is required.",
+                    "When declaring diffusion processes, the coefficient hillslopeKa is required.",
                     flush=True,
                 )
-                raise ValueError("Hillslope: Cd coefficient not found.")
+                raise ValueError(
+                    "Hillslope: Cd coefficient for aerial environment not found."
+                )
+            try:
+                self.Cdm = hillDict["hillslopeKm"]
+            except KeyError:
+                print(
+                    "When declaring diffusion processes, the coefficient hillslopeKm is required.",
+                    flush=True,
+                )
+                raise ValueError(
+                    "Hillslope: Cd coefficient for marine environment not found."
+                )
             try:
                 self.sedimentK = hillDict["sedimentK"]
             except KeyError:
                 self.sedimentK = 10.0
         except KeyError:
-            self.Cd = 0.0
+            self.Cda = 0.0
+            self.Cdm = 0.0
             self.sedimentK = 10.0
 
         return
