@@ -3,8 +3,11 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-A Global Landscape Evolution Model / gospl
-=============================================
+Global Scalable Paleo Landscape Evolution / gospl
+==================================================
+
+**gospl** (IPA: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a Global Scalable Paleo Landscape Evolution Model built to simulate landscape development, sediment transport over Earth surface.
+
 
 .. image:: https://readthedocs.org/projects/gospl/badge/?version=latest
   :target: https://gospl.readthedocs.io/en/latest/?badge=latest
