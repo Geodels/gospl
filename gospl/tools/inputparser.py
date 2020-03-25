@@ -689,7 +689,6 @@ class ReadYaml(object):
                     pass
 
                 if pMap is not None:
-
                     try:
                         with open(pMap + ".npz") as meshfile:
                             meshfile.close()
@@ -703,7 +702,6 @@ class ReadYaml(object):
 
                 tmpPaleo = []
                 tmpPaleo.insert(0, {"time": pTime, "pMap": pMap + ".npz"})
-
                 if k == 0:
                     paleodata = pd.DataFrame(tmpPaleo, columns=["time", "pMap"])
                 else:
@@ -735,7 +733,6 @@ class ReadYaml(object):
                 if not os.path.exists(self.forceDir):
                     print("Forcing paleo directory does not exist!", flush=True)
                     raise ValueError("Forcing paleo directory does not exist!")
-
                 if self.tout > self.tecStep:
                     self.tout = self.tecStep
                     print(
@@ -750,8 +747,13 @@ class ReadYaml(object):
                          have been adjusted to match each others.",
                         flush=True,
                     )
-
-                out_nb = int((self.tEnd - self.tStart) / self.tout) + 1
+                try:
+                    self.forceNb = fpaleoDict["freq"]
+                except KeyError:
+                    print(
+                        "New Paleomap loading frequency 'freq' is required", flush=True,
+                    )
+                out_nb = self.forceNb + 1
                 stepf = np.arange(1, out_nb, dtype=int)
                 self.stepb = np.flip(np.arange(0, out_nb - 1, dtype=int))
                 self.alpha = stepf.astype(float) / (out_nb - 1)
@@ -766,6 +768,7 @@ class ReadYaml(object):
         except KeyError:
             self.forceDir = None
             self.forceStep = -1
+            self.forceNb = 0
             pass
 
         return
