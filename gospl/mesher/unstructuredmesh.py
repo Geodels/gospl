@@ -580,7 +580,8 @@ class UnstMesh(object):
         if not self.fast:
             self.wMat.destroy()
             self.wMat0.destroy()
-        self.Diff.destroy()
+        if not self.fast:
+            self.Diff.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
         self.dm.destroy()
