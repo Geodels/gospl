@@ -1,38 +1,36 @@
-python module _fortran ! in
+python module _fortran
 
     usercode '''
     #include "fortran/functionsmodule.h"
     '''
-    interface  ! in :_fortran
 
-        module meshparams ! in :_fortran:functions.f90
+    interface
+
+        module meshparams
             integer :: nlocal
             real(kind=8) :: eps
-
             integer, allocatable,dimension(:,:) :: gnid
             integer, allocatable,dimension(:,:) :: fvnid
             integer, allocatable,dimension(:) :: fvnnb
-
             real(kind=8), allocatable,dimension(:) :: fvarea
             real(kind=8), allocatable,dimension(:,:) :: fvelgt
             real(kind=8), allocatable,dimension(:,:) :: fvvdist
-
         end module meshparams
 
-        subroutine euclid(p1,p2,norm) ! in :_fortran:functions.f90
+        subroutine euclid(p1,p2,norm)
             real(kind=8) dimension(3),intent(in) :: p1
             real(kind=8) dimension(3),intent(in) :: p2
             real(kind=8) intent(out) :: norm
         end subroutine euclid
 
-        subroutine quicksort(array,first,last,indices) ! in :_fortran:functions.f90
+        subroutine quicksort(array,first,last,indices)
             real(kind=8) dimension(:),intent(inout) :: array
             integer intent(in) :: first
             integer intent(in) :: last
             integer dimension(:),intent(inout) :: indices
         end subroutine quicksort
 
-        subroutine split(array,low,high,mid,indices) ! in :_fortran:functions.f90
+        subroutine split(array,low,high,mid,indices)
             real(kind=8) dimension(:),intent(inout) :: array
             integer intent(in) :: low
             integer intent(in) :: high
@@ -46,14 +44,14 @@ python module _fortran ! in
             integer intent(out) :: maxnb
         end subroutine setMaxNb
 
-        subroutine setHillslopeCoeff(nb,kd,dcoeff) ! in :_fortran:functions.f90
+        subroutine setHillslopeCoeff(nb,kd,dcoeff)
             use meshparams
             integer :: nb
             real(kind=8) dimension(nb),intent(in),depend(nb) :: kd
             real(kind=8) dimension(nb,8),intent(out),depend(nb) :: dcoeff
         end subroutine setHillslopeCoeff
 
-        subroutine setDiffusionCoeff(kd,limit,elev,dh,dcoeff,nb) ! in :_fortran:functions.f90
+        subroutine setDiffusionCoeff(kd,limit,elev,dh,dcoeff,nb)
             use meshparams
             real(kind=8) intent(in) :: kd
             real(kind=8) intent(in) :: limit
@@ -63,7 +61,7 @@ python module _fortran ! in
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine setDiffusionCoeff
 
-        subroutine MFDreceivers(nrcv,inids,elev,rcv,slope,dist,wgt,nb) ! in :_fortran:functions.f90
+        subroutine MFDreceivers(nrcv,inids,elev,rcv,slope,dist,wgt,nb)
             use meshparams
             integer intent(in) :: nrcv
             integer dimension(nb),intent(in) :: inids
@@ -75,7 +73,7 @@ python module _fortran ! in
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
         end subroutine MFDreceivers
 
-        subroutine fillPIT(sl,elev,fillz,nb) ! in :_fortran:functions.f90
+        subroutine fillPIT(sl,elev,fillz,nb)
             use meshparams
             real(kind=8) intent(in) :: sl
             real(kind=8) dimension(nb),intent(in) :: elev
@@ -83,13 +81,13 @@ python module _fortran ! in
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine fillPIT
 
-        subroutine ngbGlob(nb,ngbid) ! in :_fortran:functions.f90
+        subroutine ngbGlob(nb,ngbid)
             use meshparams
             integer intent(in) :: nb
             integer dimension(nb,6),intent(in),depend(nb) :: ngbid
         end subroutine ngbGlob
 
-        subroutine defineTIN(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,n,nb,m) ! in :_fortran:functions.f90
+        subroutine defineTIN(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,n,nb,m)
             use meshparams
             real(kind=8) dimension(nb,3),intent(in) :: coords
             integer dimension(n,3),intent(in) :: cells_nodes
@@ -103,8 +101,7 @@ python module _fortran ! in
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
         end subroutine defineTIN
 
-
-        subroutine defineGTIN(nb,cells_nodes,edges_nodes,ngbnb,ngbid,n,m) ! in :_fortran:functions.f90
+        subroutine defineGTIN(nb,cells_nodes,edges_nodes,ngbnb,ngbid,n,m)
             use meshparams
             integer intent(in) :: nb
             integer dimension(n,3),intent(in) :: cells_nodes
@@ -116,4 +113,5 @@ python module _fortran ! in
         end subroutine defineGTIN
 
     end interface
+    
 end python module _fortran
