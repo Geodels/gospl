@@ -216,8 +216,18 @@ class SPMesh(object):
         gZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
 
-        # Perform pit filling
-        nZ = fillPIT(self.sealevel + self.hbot, gZ)
+        # Perform pit filling on process rank 0
+        if MPIrank == 0:
+            nZ = fillPIT(self.sealevel + self.hbot, gZ)
+        else:
+            nZ = np.zeros(self.gpoints)
+        nZ = MPI.COMM_WORLD.bcast(nZ, root=0)
+
+        if MPIrank == 0 and self.verbose:
+            print("Compute pit filling (%0.02f seconds)" % (clock() - t0), flush=True)
+
+        # Build flow direction
+        t0 = clock()
         self._buildFlowDirection(nZ[self.glIDs])
 
         # Update fill elevation
@@ -228,7 +238,7 @@ class SPMesh(object):
         self.dm.localToGlobal(self.FillL, self.FillG)
         del hl, nZ, gZ, id
         if MPIrank == 0 and self.verbose:
-            print("Compute pit filling (%0.02f seconds)" % (clock() - t0), flush=True)
+            print("Build flow directions (%0.02f seconds)" % (clock() - t0), flush=True)
 
         t0 = clock()
         # Build transport direction matrices

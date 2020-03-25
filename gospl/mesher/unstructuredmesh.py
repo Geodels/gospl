@@ -164,7 +164,10 @@ class UnstMesh(object):
         self.gCoords = loadData["v"]
         self.gpoints = len(self.gCoords)
         gZ = loadData["z"]
-        ngbGlob(self.gpoints, loadData["n"])
+
+        # Store global neighbouring on process rank 0
+        if MPIrank == 0:
+            ngbGlob(self.gpoints, loadData["n"])
         if MPIrank == 0 and self.verbose:
             print(
                 "Reading mesh information (%0.02f seconds)" % (clock() - t0), flush=True

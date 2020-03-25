@@ -1,14 +1,14 @@
 #include "petsc/finclude/petsc.h"
 #include "petsc/finclude/petscmat.h"
-
 #include "petscversion.h"
 
 #undef  CHKERRQ
 #define CHKERRQ(n) if ((n) .ne. 0) return;
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! INTERNAL FUNCTIONS                       !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!
+!! INTERNAL FUNCTIONS !!
+!!!!!!!!!!!!!!!!!!!!!!!!
+
 module meshparams
 
   implicit none
@@ -66,6 +66,7 @@ module meshparams
       end do
       end associate
     end subroutine shiftdown
+
     function PQpop(this) result (res)
       class(pqueue) :: this
       type(node)   :: res
@@ -74,6 +75,7 @@ module meshparams
       this%n = this%n - 1
       call this%shiftdown(1)
     end function PQpop
+
     subroutine PQpush(this, Z, id)
       class(pqueue), intent(inout) :: this
       real(kind=8) :: Z
@@ -201,9 +203,9 @@ subroutine split(array, low, high, mid, indices)
 
 end subroutine split
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! HILLSLOPE PROCESSES FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine setMaxNb(nb, maxnb)
 !*****************************************************************************
@@ -310,9 +312,9 @@ subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
 
 end subroutine setDiffusionCoeff
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! FLOW DIRECTION FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine MFDreceivers( nRcv, inIDs, elev, rcv, slope, dist, wgt, nb)
 !*****************************************************************************
@@ -405,6 +407,10 @@ subroutine MFDreceivers( nRcv, inIDs, elev, rcv, slope, dist, wgt, nb)
 
 end subroutine MFDreceivers
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! PIT FILLING FUNCTIONS !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 subroutine fillPIT(sl, elev, fillz, nb)
   use meshparams
   implicit none
@@ -460,9 +466,9 @@ subroutine fillPIT(sl, elev, fillz, nb)
 
 end subroutine fillPIT
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! MESH DECLARATION FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine ngbGlob( nb, ngbIDs )
 
