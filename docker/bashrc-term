@@ -1,0 +1,14 @@
+export PATH=$PATH:/opt/mpich/bin/:/opt/petsc/bin
+export PS1='\[\e[32mgospl\]\e[0m-\[$(tput setaf 3)\]usyd \[\e[36m\w\] \[\e[33m\]\[\e[1m\]$ \[\e[0m\]'
+
+# You may uncomment the following lines if you want `ls' to be colorized:
+export LS_OPTIONS='--color=auto'
+eval "`dircolors`"
+alias ls='ls $LS_OPTIONS'
+alias ll='ls $LS_OPTIONS -l'
+alias l='ls $LS_OPTIONS -lA'
+
+# Some more alias to avoid making mistakes:
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'

@@ -1,0 +1,35 @@
+FROM geodels/gospl-base:latest
+MAINTAINER Tristan Salles
+
+ENV PETSC_DIR=/opt/petsc
+ENV PETSC_ARCH=arch-linux-c-opt
+
+# install gopspl
+WORKDIR /live/lib
+RUN git clone https://github.com/Geodels/gospl.git && \
+    cd gospl && \
+    export F90=gfortran && \
+    export PETSC_DIR=/opt/petsc && \
+    export PETSC_ARCH=arch-linux-c-opt && \
+    python3 setup.py install
+
+# setup space for working in
+VOLUME /live/share
+WORKDIR /live
+
+ENV LD_LIBRARY_PATH "$LD_LIBRARY_PATH:/live/lib/:/live/share"
+
+EXPOSE 8888
+ENV TINI_VERSION v0.18.0
+ENTRYPOINT ["/usr/local/bin/tini", "--"]
+
+EXPOSE 9999
+
+# note we use xvfb which to mimic the X display
+ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
+
+# launch notebook
+ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
+RUN chmod +x /usr/local/bin/run-jupyter.sh
+ADD bashrc-term /root/.bashrc
+CMD /usr/local/bin/run-jupyter.sh
