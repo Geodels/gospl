@@ -3,20 +3,14 @@ language: python
 services:
   - docker
 
-# python:
-#   - "3.6"
-#   - "3.7"
-#   - "3.8"
-
 before_install:
   - docker --version
 
 install:
     - docker build -t gospl .
-    # - "python -m pip install coveralls"
 
 script:
-  - docker run -it --entrypoint /bin/bash gospl -c "pip3 install pytest-cov coveralls; cd lib/gospl; ls; python3 -m pytest --cov=.; coveralls --data_file=.coverage"
+  - docker run -it --entrypoint /bin/bash gospl -c "cd /live/lib/gospl; python3 -m pytest --cov=."
 
 # after_success:
 #   - coveralls --data_file=.coverage
