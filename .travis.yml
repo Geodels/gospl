@@ -10,7 +10,7 @@ install:
     - docker build -t gospl .
 
 script:
-  - docker run -it --entrypoint /bin/bash gospl -c "cd /live/lib/gospl; python3 -m pytest --cov=."
+  - docker run -it --entrypoint /bin/bash gospl -c "cd /live/lib/gospl; python3 -m pytest --cov=.; coveralls --data_file=.coverage"
 
 # after_success:
 #   - coveralls --data_file=.coverage
