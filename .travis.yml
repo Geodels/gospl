@@ -13,9 +13,10 @@ before_install:
 
 install:
     - docker build -t gospl .
+    # - "python -m pip install coveralls"
 
 script:
-  - docker run -it --entrypoint /bin/bash gospl -c "pip3 install pytest-cov; cd lib/gospl; ls; python3 -m pytest --cov=."
+  - docker run -it --entrypoint /bin/bash gospl -c "pip3 install pytest-cov coveralls; cd lib/gospl; ls; python3 -m pytest --cov=.; coveralls --data_file=.coverage"
 
-after_success:
-  - coveralls --data_file=.coverage
+# after_success:
+#   - coveralls --data_file=.coverage
