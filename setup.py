@@ -1,3 +1,4 @@
+import os
 import io
 import numpy
 import setuptools
@@ -16,6 +17,49 @@ except Exception:
 this_directory = path.abspath(path.dirname(__file__))
 with io.open(path.join(this_directory, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
+
+# get F90 environment variable
+# ----------------------------------------
+F90 = os.getenv("F90")
+
+
+# raise error if F90 not defined
+# !! comment out this if statement for manual install !!
+# ------------------------------------------------------------
+if F90 is None or F90 == "":
+    l1 = "gospl requires environment variable F90 to be set. \n "
+    l2 = 'Please set to one of {"ifort", "gfortran"}'
+    raise RuntimeError(l1 + l2)
+
+
+# specialize for different compilers
+# ------------------------------------------------------------
+if F90 == "ifort":
+    f90_flags = [
+        "-fPIC",
+        "-xHost",
+        "-O3",
+        "-ipo",
+        "-funroll-loops",
+        "-heap-arrays",
+        "-mcmodel=medium",
+    ]
+
+elif F90 == "gfortran":
+    f90_flags = [
+        "-fPIC",
+        "-O3",
+        "-fbounds-check",
+        "-mtune=native",
+    ]
+
+elif F90 in ["pgfortran", "pgf90", "pgf95"]:
+    f90_flags = ["-mp"]
+
+else:
+    l1 = "F90 = " + F90 + ". \n"
+    l2 = "Environment variable F90 not recognized.  \n"
+    raise RuntimeError(l1 + l2)
 
 
 def configuration(parent_package="", top_path=None):
@@ -61,7 +105,16 @@ def configuration(parent_package="", top_path=None):
         include_dirs=INCLUDE_DIRS + [os.curdir],
         libraries=LIBRARIES,
         library_dirs=LIBRARY_DIRS,
-        extra_f90_compile_args=["-fPIC", "-O3"],
+        extra_f90_compile_args=f90_flags,
+        # extra_f77_compile_args=["-fPIC", "-O3", "-Wunused-variable"],
+        # extra_f90_compile_args=[
+        #     "-fPIC",
+        #     "-O3",
+        #     "-Wunused-variable",
+        #     "-Wincompatible-pointer-types",
+        #     "-Wcpp",
+        #     "-Wunused-function",
+        # ],
         # extra_f90_compile_args = ['-fPIC', '-O0', '-g', '-fbacktrace','-fcheck=all'],
         extra_link_args=["-shared"],
         runtime_library_dirs=LIBRARY_DIRS,

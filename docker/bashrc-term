@@ -1,5 +1,5 @@
 export PATH=$PATH:/opt/mpich/bin/:/opt/petsc/bin
-export PS1='\[\e[32mgospl\]\e[0m-\[$(tput setaf 3)\]usyd \[\e[36m\w\] \[\e[33m\]\[\e[1m\]$ \[\e[0m\]'
+export PS1='\[\e[32mgospl\] \[\e[36m\w\] \[\e[33m\]\[\e[1m\]$ \[\e[0m\]'
 
 # You may uncomment the following lines if you want `ls' to be colorized:
 export LS_OPTIONS='--color=auto'

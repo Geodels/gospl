@@ -316,7 +316,7 @@ end subroutine setDiffusionCoeff
 !! FLOW DIRECTION FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine MFDreceivers( nRcv, inIDs, elev, rcv, slope, dist, wgt, nb)
+subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction algorithm
 
@@ -335,70 +335,73 @@ subroutine MFDreceivers( nRcv, inIDs, elev, rcv, slope, dist, wgt, nb)
 
   integer, intent(in) :: nRcv
   integer, intent(in) :: inIDs(nb)
+  real(kind=8),intent(in) :: sl
   real( kind=8 ), intent(in) :: elev(nb)
 
   integer, intent(out) :: rcv(nb,nRcv)
-  real( kind=8 ), intent(out) :: slope(nb,nRcv)
   real( kind=8 ), intent(out) :: dist(nb,nRcv)
   real( kind=8 ), intent(out) :: wgt(nb,nRcv)
 
   integer :: k, n, p, kk
-  real( kind=8 ) :: slp(8),dst(8),val
+  real( kind=8 ) :: slp(8),dst(8),val,slope(8)
   integer :: id(8)
 
   rcv = -1
-  slope = 0.
   dist = 0.
   wgt = 0.
 
   do k = 1, nb
     if(inIDs(k)>0)then
-      slp = 0.
-      id = 0
-      val = 0.
-      kk = 0
-      do p = 1, FVnNb(k)
-        n = FVnID(k,p)+1
-        if(n>0 .and. FVeLgt(k,p)>0.)then
-          val = (elev(k) - elev(n))/FVeLgt(k,p)
-          if(val>0.)then
-            kk = kk + 1
-            slp(kk) = val
-            id(kk) = n-1
-            dst(kk) = FVeLgt(k,p)
-          endif
-        endif
-      enddo
-
-      if(kk == 0)then
-        rcv(k,1:nRcv) = k-1
-      elseif(kk <= nRcv)then
-        val = 0.
-        rcv(k,1:nRcv) = k-1
-        do p = 1, kk
-          rcv(k,p) = id(p)
-          slope(k,p) = slp(p)
-          dist(k,p) = dst(p)
-          val = val + slp(p)
-        enddo
-        do p = 1, nRcv
-          wgt(k,p) = slp(p)/val
-        enddo
+      if(elev(k)<=sl)then
+        rcv(k,1:nRcv) = k-1 
       else
-        rcv(k,1:nRcv) = k-1
-        call quicksort(slp,1,kk,id)
-        n = 0
+        slp = 0.
+        id = 0
         val = 0.
-        do p = kk,kk-nRcv+1,-1
-          n = n + 1
-          rcv(k,n) = id(p)
-          slope(k,n) = slp(p)
-          dist(k,n) = dst(p)
-          val = val + slp(p)
+        kk = 0
+        do p = 1, FVnNb(k)
+          n = FVnID(k,p)+1
+          if(n>0 .and. FVeLgt(k,p)>0.)then
+            val = (elev(k) - elev(n))/FVeLgt(k,p)
+            if(val>0.)then
+              kk = kk + 1
+              slp(kk) = val
+              id(kk) = n-1
+              dst(kk) = FVeLgt(k,p)
+            endif
+          endif
         enddo
-        do p = 1, nRcv
-          wgt(k,p) = slope(k,p)/val
-        enddo
+
+        if(kk == 0)then
+          rcv(k,1:nRcv) = k-1
+        elseif(kk <= nRcv)then
+          val = 0.
+          rcv(k,1:nRcv) = k-1
+          do p = 1, kk
+            rcv(k,p) = id(p)
+            dist(k,p) = dst(p)
+            val = val + slp(p)
+          enddo
+          do p = 1, nRcv
+            wgt(k,p) = slp(p)/val
+          enddo
+        else
+          rcv(k,1:nRcv) = k-1
+          call quicksort(slp,1,kk,id)
+          n = 0
+          val = 0.
+          slope = 0.
+          do p = kk,kk-nRcv+1,-1
+            n = n + 1
+            slope(n) = slp(p)
+            rcv(k,n) = id(p)
+            dist(k,n) = dst(p)
+            val = val + slp(p)
+          enddo
+          do p = 1, nRcv
+            wgt(k,p) = slope(p)/val
+          enddo
+        endif
       endif
     endif
   enddo

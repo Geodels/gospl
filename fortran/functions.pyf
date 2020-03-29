@@ -61,13 +61,13 @@ python module _fortran
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine setDiffusionCoeff
 
-        subroutine MFDreceivers(nrcv,inids,elev,rcv,slope,dist,wgt,nb)
+        subroutine MFDreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)
             use meshparams
             integer intent(in) :: nrcv
+            real(kind=8) intent(in) :: sl
             integer dimension(nb),intent(in) :: inids
             real(kind=8) dimension(nb),intent(in),depend(nb) :: elev
             integer dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: rcv
-            real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: slope
             real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: dist
             real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
@@ -113,5 +113,5 @@ python module _fortran
         end subroutine defineGTIN
 
     end interface
-    
+
 end python module _fortran

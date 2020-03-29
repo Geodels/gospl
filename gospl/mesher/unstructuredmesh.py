@@ -596,7 +596,6 @@ class UnstMesh(object):
             del self.wghtVal0
             del self.rcvID
             del self.rcvID0
-            del self.slpRcv
 
         gc.collect()
 

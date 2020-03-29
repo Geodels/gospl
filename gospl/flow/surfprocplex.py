@@ -146,8 +146,8 @@ class SPMesh(object):
         t0 = clock()
 
         # Define multiple flow directions
-        self.rcvID, self.slpRcv, self.distRcv, self.wghtVal = MFDreceivers(
-            self.flowDir, self.inIDs, h1
+        self.rcvID, self.distRcv, self.wghtVal = MFDreceivers(
+            self.flowDir, self.inIDs, h1, self.sealevel + self.hbot
         )
 
         # Account for marine regions
@@ -156,11 +156,9 @@ class SPMesh(object):
         # Set deep ocean nodes
         self.rcvID0 = self.rcvID.copy()
         self.wghtVal0 = self.wghtVal.copy()
-
-        deepID = np.where(h1 <= self.hbot)[0]
-        self.rcvID0[deepID, :] = np.tile(deepID, (self.flowDir, 1)).T
-        # self.distRcv0[deepID,:] = 0.
-        self.wghtVal0[deepID, :] = 0.0
+        # deepID = np.where(h1 <= self.sealevel + self.hbot)[0]
+        # self.rcvID0[deepID, :] = np.tile(deepID, (self.flowDir, 1)).T
+        # self.wghtVal0[deepID, :] = 0.0
 
         # Set marine nodes
         self.rcvID[self.seaID, :] = np.tile(self.seaID, (self.flowDir, 1)).T
