@@ -9,6 +9,7 @@ before_install:
   - docker --version
 
 install:
+  - docker pull carlad/sinatra
   - docker build -t geodels/gospl .
 
 script:
