@@ -1,0 +1,15 @@
+language: python
+
+os: debian
+
+services:
+  - docker
+
+before_install:
+  - docker --version
+
+install:
+  - docker build -t geodels/gospl .
+
+script:
+  - docker run geodels/gospl /bin/bash -c "cd /live/lib/gospl; python3 -m pytest -v"
