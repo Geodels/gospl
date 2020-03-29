@@ -4,6 +4,6 @@ ruamel.yaml==0.16.10
 scikit-image==0.16.2
 sphinx_rtd_theme==0.4.3
 sphinxcontrib-napoleon==0.7
-sphinxcontrib-inlinesyntaxhighlight
+sphinxcontrib-inlinesyntaxhighlight==0.2
 sphinxemoji
 mock
