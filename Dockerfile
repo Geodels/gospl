@@ -15,6 +15,7 @@ RUN git clone https://github.com/Geodels/gospl.git && \
     python3 setup.py install
 
 WORKDIR /live/lib
-RUN pip3 install -e .
+RUN cd /live/lib/gospl && \
+    pip3 install -e .
 
 CMD ["jupyter", "notebook", "--ip='0.0.0.0'", "--no-browser"]
