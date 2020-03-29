@@ -17,5 +17,5 @@ install:
 script:
   - docker run -it --entrypoint /bin/bash gospl -c "pip3 install pytest-cov; cd lib/gospl; ls; python3 -m pytest --cov=."
 
-# after_success:
-#   - coveralls --data_file=.coverage
+after_success:
+  - coveralls --data_file=.coverage
