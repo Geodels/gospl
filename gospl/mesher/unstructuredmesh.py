@@ -325,7 +325,7 @@ class UnstMesh(object):
         # Sea level
         self.sealevel = self.seafunction(self.tNow + self.dt)
 
-        # Climate
+        # Climate information
         self._updateRain()
 
         if MPIrank == 0 and self.verbose:
@@ -574,7 +574,6 @@ class UnstMesh(object):
         self.tmp.destroy()
         self.Eb.destroy()
         self.EbLocal.destroy()
-        self.vGlob.destroy()
 
         self.iMat.destroy()
         if not self.fast:

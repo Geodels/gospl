@@ -50,7 +50,6 @@ class SPMesh(object):
         self.stepED = self.hGlobal.duplicate()
         self.tmp = self.hGlobal.duplicate()
         self.tmpL = self.hLocal.duplicate()
-        self.vGlob = self.hGlobal.duplicate()
         self.Eb = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
         self.vSed = self.hGlobal.duplicate()
@@ -156,9 +155,6 @@ class SPMesh(object):
         # Set deep ocean nodes
         self.rcvID0 = self.rcvID.copy()
         self.wghtVal0 = self.wghtVal.copy()
-        # deepID = np.where(h1 <= self.sealevel + self.hbot)[0]
-        # self.rcvID0[deepID, :] = np.tile(deepID, (self.flowDir, 1)).T
-        # self.wghtVal0[deepID, :] = 0.0
 
         # Set marine nodes
         self.rcvID[self.seaID, :] = np.tile(self.seaID, (self.flowDir, 1)).T
@@ -350,9 +346,9 @@ class SPMesh(object):
         gc.collect()
 
         # Solve bedrock erosion thickness
-        self._solve_KSP(True, EbedMat, self.hOld, self.vGlob)
+        self._solve_KSP(True, EbedMat, self.hOld, self.tmp)
         EbedMat.destroy()
-        self.stepED.waxpy(-1.0, self.hOld, self.vGlob)
+        self.stepED.waxpy(-1.0, self.hOld, self.tmp)
 
         # Define erosion rate (positive for incision)
         E = -self.stepED.getArray().copy()
