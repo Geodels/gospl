@@ -1,15 +1,23 @@
-language: python
+services:
+  - docker
 
 os: debian
 
-services:
-  - docker
+language: python
+
+python:
+  - "3.6"
+  - "3.7"
+  - "3.8"
 
 before_install:
   - docker --version
 
 install:
-  - docker pull geodels/gospl
+    - docker build -t gospl .
 
 script:
-  - docker run geodels/gospl /bin/bash -c "cd /live/lib/gospl; python3 -m pytest -v"
+  - docker run -it --entrypoint /bin/bash gospl -c "pip3 install pytest-cov; cd lib/gospl; ls; python3 -m pytest --cov=."
+
+# after_success:
+#   - coveralls --data_file=.coverage
