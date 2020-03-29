@@ -10,7 +10,6 @@ before_install:
 
 install:
   - docker pull geodels/gospl
-  - docker build -t geodels/gospl .
 
 script:
   - docker run geodels/gospl /bin/bash -c "cd /live/lib/gospl; python3 -m pytest -v"
