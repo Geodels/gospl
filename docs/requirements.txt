@@ -1,7 +1,7 @@
 numpy==1.18.2
 pandas==1.0.3
 ruamel.yaml==0.16.10
-scikit-image
+scikit-image==0.16.2
 sphinx_rtd_theme
 sphinxcontrib-napoleon
 sphinxcontrib-inlinesyntaxhighlight
