@@ -1,5 +1,5 @@
 numpy==1.18.2
-pandas
+pandas==1.0.3
 ruamel.yaml
 scikit-image
 sphinx_rtd_theme
