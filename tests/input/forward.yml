@@ -53,5 +53,5 @@ forcepaleo:
     dir: '/live/lib/gospl/tests/output/backward'
 
 output:
-    dir: 'output/forward'
+    dir: '/live/lib/gospl/tests/output/forward'
     makedir: False

@@ -12,12 +12,14 @@ RUN python3 -m pip install --no-cache-dir \
 
 # install gopspl
 WORKDIR /live/lib
-RUN git clone https://github.com/Geodels/gospl.git && \
+
+RUN git clone https://github.com/Geodels/gospl.git  && \
     cd gospl && \
     export F90=gfortran && \
     export PETSC_DIR=/opt/petsc && \
     export PETSC_ARCH=arch-linux-c-opt && \
     python3 setup.py install && \
-    pip3 install -e .
+    pip3 install -e . && \
+    mkdir /live/lib/gospl/tests/output
 
 CMD ["jupyter", "notebook", "--ip='0.0.0.0'", "--no-browser"]
