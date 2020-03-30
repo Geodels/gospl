@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd">
+<Xdmf Version="2.0" xmlns:xi="http://www.w3.org/2001/XInclude">
+ <Domain>
+    <Grid GridType="Collection" CollectionType="Spatial">
+      <Time Type="Single" Value="-19000000.00"/>
+      <Grid Name="Block.0">
+         <Topology Type="Triangle" NumberOfElements="21234" BaseOffset="1">
+          <DataItem Format="HDF" DataType="Int" Dimensions="21234 3">h5/topology.p0.h5:/cells</DataItem>
+         </Topology>
+         <Geometry Type="XYZ">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 3">h5/topology.p0.h5:/coords</DataItem>
+         </Geometry>
+         <Attribute Type="Scalar" Center="Node" Name="Z">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 1">h5/gospl.1.p0.h5:/elev</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="ED">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 1">h5/gospl.1.p0.h5:/erodep</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="FA">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 1">h5/gospl.1.p0.h5:/flowAcc</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="SL">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 1">h5/gospl.1.p0.h5:/sedLoad</DataItem>
+         </Attribute>
+         <Attribute Type="Vector" Center="Node" Name="hTec">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 3">h5/gospl.1.p0.h5:/hdisp</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="Rain">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 1">h5/gospl.1.p0.h5:/rain</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="sea">
+          <DataItem ItemType="Function" Function="$0 * 0.00000000001 + 0.000000" Dimensions="10806 1">
+           <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10806 1">h5/gospl.1.p0.h5:/erodep</DataItem>
+          </DataItem>
+         </Attribute>
+      </Grid>
+      <Grid Name="Block.1">
+         <Topology Type="Triangle" NumberOfElements="21232" BaseOffset="1">
+          <DataItem Format="HDF" DataType="Int" Dimensions="21232 3">h5/topology.p1.h5:/cells</DataItem>
+         </Topology>
+         <Geometry Type="XYZ">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 3">h5/topology.p1.h5:/coords</DataItem>
+         </Geometry>
+         <Attribute Type="Scalar" Center="Node" Name="Z">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 1">h5/gospl.1.p1.h5:/elev</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="ED">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 1">h5/gospl.1.p1.h5:/erodep</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="FA">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 1">h5/gospl.1.p1.h5:/flowAcc</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="SL">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 1">h5/gospl.1.p1.h5:/sedLoad</DataItem>
+         </Attribute>
+         <Attribute Type="Vector" Center="Node" Name="hTec">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 3">h5/gospl.1.p1.h5:/hdisp</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="Rain">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 1">h5/gospl.1.p1.h5:/rain</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="sea">
+          <DataItem ItemType="Function" Function="$0 * 0.00000000001 + 0.000000" Dimensions="10810 1">
+           <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10810 1">h5/gospl.1.p1.h5:/erodep</DataItem>
+          </DataItem>
+         </Attribute>
+      </Grid>
+      <Grid Name="Block.2">
+         <Topology Type="Triangle" NumberOfElements="21291" BaseOffset="1">
+          <DataItem Format="HDF" DataType="Int" Dimensions="21291 3">h5/topology.p2.h5:/cells</DataItem>
+         </Topology>
+         <Geometry Type="XYZ">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 3">h5/topology.p2.h5:/coords</DataItem>
+         </Geometry>
+         <Attribute Type="Scalar" Center="Node" Name="Z">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 1">h5/gospl.1.p2.h5:/elev</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="ED">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 1">h5/gospl.1.p2.h5:/erodep</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="FA">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 1">h5/gospl.1.p2.h5:/flowAcc</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="SL">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 1">h5/gospl.1.p2.h5:/sedLoad</DataItem>
+         </Attribute>
+         <Attribute Type="Vector" Center="Node" Name="hTec">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 3">h5/gospl.1.p2.h5:/hdisp</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="Rain">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 1">h5/gospl.1.p2.h5:/rain</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="sea">
+          <DataItem ItemType="Function" Function="$0 * 0.00000000001 + 0.000000" Dimensions="10848 1">
+           <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10848 1">h5/gospl.1.p2.h5:/erodep</DataItem>
+          </DataItem>
+         </Attribute>
+      </Grid>
+      <Grid Name="Block.3">
+         <Topology Type="Triangle" NumberOfElements="21227" BaseOffset="1">
+          <DataItem Format="HDF" DataType="Int" Dimensions="21227 3">h5/topology.p3.h5:/cells</DataItem>
+         </Topology>
+         <Geometry Type="XYZ">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 3">h5/topology.p3.h5:/coords</DataItem>
+         </Geometry>
+         <Attribute Type="Scalar" Center="Node" Name="Z">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 1">h5/gospl.1.p3.h5:/elev</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="ED">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 1">h5/gospl.1.p3.h5:/erodep</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="FA">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 1">h5/gospl.1.p3.h5:/flowAcc</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="SL">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 1">h5/gospl.1.p3.h5:/sedLoad</DataItem>
+         </Attribute>
+         <Attribute Type="Vector" Center="Node" Name="hTec">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 3">h5/gospl.1.p3.h5:/hdisp</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="Rain">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 1">h5/gospl.1.p3.h5:/rain</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="sea">
+          <DataItem ItemType="Function" Function="$0 * 0.00000000001 + 0.000000" Dimensions="10801 1">
+           <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="10801 1">h5/gospl.1.p3.h5:/erodep</DataItem>
+          </DataItem>
+         </Attribute>
+      </Grid>
+    </Grid>
+ </Domain>
+</Xdmf>

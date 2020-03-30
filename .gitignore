@@ -2,7 +2,8 @@
 build
 docs/_build/*
 *.pyc
-tests/output/*
+tests/output/forward/*
+tests/output/normal/*
 dist
 gospl.egg-info
 fortran/_fortran-f2pywrappers.f
