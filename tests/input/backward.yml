@@ -1,7 +1,7 @@
 name: Testing model forward
 
 domain:
-    npdata: 'data/elev/elev15Ma'
+    npdata: '/live/lib/gospl/tests/data/elev/elev15Ma'
     flowdir: 3
     fast: True
     backward: True
@@ -29,26 +29,26 @@ sea:
 tectonic:
   - start: -20000000.
     end: -19000000.
-    mapH: 'data/backdisp/backdisp16Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp16Ma'
   - start: -19000000.
     end: -18000000.
-    mapH: 'data/backdisp/backdisp17Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp17Ma'
   - start: -18000000.
     end: -17000000.
-    mapH: 'data/backdisp/backdisp18Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp18Ma'
   - start: -17000000.
     end: -16000000.
-    mapH: 'data/backdisp/backdisp19Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp19Ma'
   - start: -16000000.
     end: -15000000.
-    mapH: 'data/backdisp/backdisp20Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp20Ma'
 
 climate:
   - start: -20000000.
-    map: ['data/rain/rain15Ma','r']
+    map: ['/live/lib/gospl/tests/data/rain/rain15Ma','r']
   - start: -15000000.
-    map: ['data/rain/rain20Ma','r']
+    map: ['/live/lib/gospl/tests/data/rain/rain20Ma','r']
 
 output:
-    dir: 'output/backward'
+    dir: '/live/lib/gospl/tests/output/backward'
     makedir: False
