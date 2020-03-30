@@ -551,7 +551,7 @@ class WriteMesh(object):
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="sea">\n')
             f.write(
-                '          <DataItem ItemType="Function" Function="$0 * 0.00000000001 + %f" Dimensions="%d 1">\n'
+                '          <DataItem ItemType="Function" Function="$0 * 0.00000000000000001 + %f" Dimensions="%d 1">\n'
                 % (self.sealevel, self.nodes[p])
             )
             f.write(

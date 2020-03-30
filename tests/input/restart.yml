@@ -1,18 +1,18 @@
-name: Testing model
+name: Testing model backward
 
 domain:
-    npdata: '/live/lib/gospl/tests/data/elev/elev20Ma'
+    npdata: '/live/lib/gospl/tests/data/elev/elev15Ma'
     flowdir: 3
-    fast: False
-    backward: False
+    fast: True
+    backward: True
 
 time:
     start: -20000000.
     end: -15000000.
     tout: 1000000.
-    dt: 500000.
+    dt: 1000000.
     tec: 1000000.
-    strat: 500000.
+    rstep: 2
 
 spl:
     K: 3.e-9
@@ -25,31 +25,31 @@ diffusion:
     sedimentK: 1000.
 
 sea:
-    curve: /live/lib/gospl/tests/data/sealevel.csv
+    position: 0.
 
 tectonic:
   - start: -20000000.
     end: -19000000.
-    mapH: '/live/lib/gospl/tests/data/disp/disp20Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp16Ma'
   - start: -19000000.
     end: -18000000.
-    mapH: '/live/lib/gospl/tests/data/disp/disp19Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp17Ma'
   - start: -18000000.
     end: -17000000.
-    mapH: '/live/lib/gospl/tests/data/disp/disp18Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp18Ma'
   - start: -17000000.
     end: -16000000.
-    mapH: '/live/lib/gospl/tests/data/disp/disp17Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp19Ma'
   - start: -16000000.
     end: -15000000.
-    mapH: '/live/lib/gospl/tests/data/disp/disp16Ma'
+    mapH: '/live/lib/gospl/tests/data/backdisp/backdisp20Ma'
 
 climate:
   - start: -20000000.
-    map: ['/live/lib/gospl/tests/data/rain/rain20Ma','r']
-  - start: -15000000.
     map: ['/live/lib/gospl/tests/data/rain/rain15Ma','r']
+  - start: -15000000.
+    map: ['/live/lib/gospl/tests/data/rain/rain20Ma','r']
 
 output:
-    dir: 'output/normal'
+    dir: 'output/backward'
     makedir: False

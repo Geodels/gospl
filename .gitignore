@@ -10,3 +10,5 @@ fortran/_fortranmodule.c
 gospl/_fortran.cpython-37m-x86_64-linux-gnu.so
 tests/.coverage
 .coverage
+tests/output/normal
+tests/output/forward

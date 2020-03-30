@@ -59,15 +59,15 @@ class Model(parentModel):
         # Define unstructured mesh
         _UnstMesh.__init__(self)
 
+        # Surface processes initialisation
+        _SPMesh.__init__(self, *args, **kwargs)
+
         # Check if simulations just restarted
         if self.rStep > 0:
             _WriteMesh.readData(self)
 
         # Get external forces
         _UnstMesh.initExtForce(self)
-
-        # Surface processes initialisation
-        _SPMesh.__init__(self, *args, **kwargs)
 
         if MPIrank == 0:
             print(

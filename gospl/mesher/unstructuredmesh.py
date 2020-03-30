@@ -299,7 +299,7 @@ class UnstMesh(object):
         self.cumEDLocal = self.hLocal.duplicate()
         self.cumEDLocal.set(0.0)
 
-        self.sealevel = self.seafunction(self.tNow + self.dt)
+        self.sealevel = self.seafunction(self.tNow)
 
         areaLocal = self.hLocal.duplicate()
         self.areaGlobal = self.hGlobal.duplicate()
@@ -336,7 +336,10 @@ class UnstMesh(object):
 
         t0 = process_time()
         # Sea level
-        self.sealevel = self.seafunction(self.tNow + self.dt)
+        if self.tNow == self.tStart:
+            self.sealevel = self.seafunction(self.tNow)
+        else:
+            self.sealevel = self.seafunction(self.tNow + self.dt)
 
         # Climate information
         self._updateRain()

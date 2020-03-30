@@ -59,3 +59,22 @@ def test_gospl_forward_run():
 
     # Destroy model
     normal.destroy()
+
+
+def test_gospl_restart_run():
+    import gospl
+    from gospl.model import Model
+    import warnings
+
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+    input = "/live/lib/gospl/tests/input/restart.yml"
+
+    # Initialise model
+    normal = Model(input, True, False)
+
+    # Run model
+    normal.runProcesses()
+
+    # Destroy model
+    normal.destroy()

@@ -1,4 +1,4 @@
-name: Testing model forward
+name: Testing model backward
 
 domain:
     npdata: '/live/lib/gospl/tests/data/elev/elev15Ma'
