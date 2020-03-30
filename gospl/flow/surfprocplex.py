@@ -5,7 +5,6 @@ import petsc4py
 import numpy as np
 
 from mpi4py import MPI
-from scipy import sparse
 from petsc4py import PETSc
 from time import process_time
 
@@ -205,7 +204,6 @@ class SPMesh(object):
         # Get global elevation for pit filling...
         t0 = process_time()
         hl = self.hLocal.getArray().copy()
-        gZ = np.zeros(self.gpoints)
         gZ = hl[self.lgIDs]
         gZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
@@ -455,7 +453,6 @@ class SPMesh(object):
             tmpMat = self._matrix_build()
             indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
             indices = self.FVmesh_ngbID[:, k].copy()
-            data = np.zeros(self.npoints)
             ids = np.nonzero(indices < 0)
             indices[ids] = ids
             data = diffCoeffs[:, k + 1]
@@ -583,7 +580,6 @@ class SPMesh(object):
             tmpMat = self._matrix_build()
             indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
             indices = self.FVmesh_ngbID[:, k].copy()
-            data = np.zeros(self.npoints)
             ids = np.nonzero(indices < 0)
             indices[ids] = ids
             data = sedCoeffs[:, k + 1]

@@ -1,6 +1,5 @@
 import os
 import sys
-import errno
 import petsc4py
 import numpy as np
 import pandas as pd
@@ -107,7 +106,7 @@ class ReadYaml(object):
         try:
             with open(self.meshFile) as meshfile:
                 meshfile.close()
-                pass
+
         except IOError:
             print("Unable to open numpy dataset: {}".format(self.meshFile), flush=True)
             raise IOError("The numpy dataset is not found...")
@@ -324,7 +323,7 @@ class ReadYaml(object):
                             dtype=np.float,
                             low_memory=False,
                         )
-                        pass
+
                     except ValueError:
                         try:
                             seadata = pd.read_csv(
@@ -336,7 +335,7 @@ class ReadYaml(object):
                                 dtype=np.float,
                                 low_memory=False,
                             )
-                            pass
+
                         except ValueError:
                             print(
                                 "The sea-level file is not well formed: it should be comma or tab separated",
@@ -386,7 +385,7 @@ class ReadYaml(object):
                 try:
                     with open(tMap) as tecfile:
                         tecfile.close()
-                        pass
+
                 except IOError:
                     print("Unable to open tectonic file: {}".format(tMap), flush=True)
                     raise IOError(
@@ -402,7 +401,7 @@ class ReadYaml(object):
                 try:
                     with open(zMap) as tecfile:
                         tecfile.close()
-                        pass
+
                 except IOError:
                     print("Unable to open tectonic file: {}".format(zMap), flush=True)
                     raise IOError(
@@ -515,7 +514,6 @@ class ReadYaml(object):
 
         except KeyError:
             self.tecdata = None
-            pass
 
         return
 
@@ -609,7 +607,7 @@ class ReadYaml(object):
                         try:
                             with open(rMap[0] + ".npz") as rainfile:
                                 rainfile.close()
-                                pass
+
                         except IOError:
                             print(
                                 "Unable to open rain file: {}.npz".format(rMap[0]),
@@ -665,7 +663,6 @@ class ReadYaml(object):
 
         except KeyError:
             self.raindata = None
-            pass
 
         return
 
@@ -693,7 +690,7 @@ class ReadYaml(object):
                     try:
                         with open(pMap + ".npz") as meshfile:
                             meshfile.close()
-                            pass
+
                     except IOError:
                         print(
                             "Unable to open numpy dataset: {}.npz".format(pMap),
@@ -717,7 +714,6 @@ class ReadYaml(object):
         except KeyError:
             self.paleodata = None
             self.paleoNb = 0
-            pass
 
         return
 
@@ -770,7 +766,6 @@ class ReadYaml(object):
             self.forceDir = None
             self.forceStep = -1
             self.forceNb = 0
-            pass
 
         return
 

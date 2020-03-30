@@ -50,6 +50,10 @@ climate:
   - start: -15000000.
     map: ['/live/lib/gospl/tests/data/rain/rain15Ma','r']
 
+paleomap:
+    time: -15000000.
+    npdata: '/live/lib/gospl/tests/data/elev/elev15Ma'
+
 output:
     dir: 'output/normal'
     makedir: False

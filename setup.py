@@ -1,8 +1,6 @@
 import os
 import io
-import numpy
-import setuptools
-from os import path
+from setuptools import setup
 
 try:
     from numpy.distutils.fcompiler import FCompiler
@@ -14,8 +12,8 @@ try:
 except Exception:
     pass
 
-this_directory = path.abspath(path.dirname(__file__))
-with io.open(path.join(this_directory, "README.md"), encoding="utf-8") as f:
+this_directory = os.path.abspath(os.path.dirname(__file__))
+with io.open(os.path.join(this_directory, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 
 # get F90 environment variable
@@ -72,22 +70,20 @@ def configuration(parent_package="", top_path=None):
 
     PETSC_DIR = os.environ["PETSC_DIR"]
     PETSC_ARCH = os.environ.get("PETSC_ARCH", "")
-    from os.path import join, isdir
 
-    if PETSC_ARCH and isdir(join(PETSC_DIR, PETSC_ARCH)):
+    if PETSC_ARCH and os.path.isdir(os.path.join(PETSC_DIR, PETSC_ARCH)):
         INCLUDE_DIRS += [
-            join(PETSC_DIR, PETSC_ARCH, "include"),
-            join(PETSC_DIR, "include"),
+            os.path.join(PETSC_DIR, PETSC_ARCH, "include"),
+            os.path.join(PETSC_DIR, "include"),
         ]
-        LIBRARY_DIRS += [join(PETSC_DIR, PETSC_ARCH, "lib")]
+        LIBRARY_DIRS += [os.path.join(PETSC_DIR, PETSC_ARCH, "lib")]
     else:
         if PETSC_ARCH:
             pass
-        INCLUDE_DIRS += [join(PETSC_DIR, "include")]
-        LIBRARY_DIRS += [join(PETSC_DIR, "lib")]
+        INCLUDE_DIRS += [os.path.join(PETSC_DIR, "include")]
+        LIBRARY_DIRS += [os.path.join(PETSC_DIR, "lib")]
     LIBRARIES += ["petsc"]
 
-    import os
     import petsc4py
 
     INCLUDE_DIRS += [petsc4py.get_include()]
@@ -125,14 +121,14 @@ def configuration(parent_package="", top_path=None):
 
 if __name__ == "__main__":
 
-    from numpy.distutils.core import setup
+    import numpy.distutils.core
 
-    setup(
+    numpy.distutils.core.setup(
         name="gospl",
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
         url="https://github.com/Geodels/gospl",
-        version="0.1",
+        version="0.1.1",
         description="A Python interface to perform Global Landscape Evolution Model",
         long_description=long_description,
         long_description_content_type="text/markdown",

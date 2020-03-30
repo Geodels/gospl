@@ -13,6 +13,13 @@ RUN git clone https://github.com/Geodels/gospl.git && \
     export PETSC_ARCH=arch-linux-c-opt && \
     python3 setup.py install
 
+# install extras in a new layer
+RUN python3 -m pip install --no-cache-dir \
+        pytest-mpi \
+        pytest-cov \
+        coveralls \
+        twine
+
 # setup space for working in
 VOLUME /live/share
 WORKDIR /live

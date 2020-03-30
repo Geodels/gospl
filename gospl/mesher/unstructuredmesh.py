@@ -450,7 +450,7 @@ class UnstMesh(object):
             if self.tecdata.iloc[nb, 1] != "empty":
                 mdata = np.load(self.tecdata.iloc[nb, 1])
                 self.hdisp = mdata["xyz"][self.glIDs, :]
-                self._meshAdvectorSphere(mdata["xyz"], timer)
+                self._meshAdvectorSphere(mdata["xyz"], timer, kk=3)
 
             if self.tecdata.iloc[nb, 2] != "empty":
                 mdata = np.load(self.tecdata.iloc[nb, 2])
@@ -503,7 +503,7 @@ class UnstMesh(object):
 
         return
 
-    def _meshAdvectorSphere(self, tectonic, timer):
+    def _meshAdvectorSphere(self, tectonic, timer, kk):
         """
         Advect spherical mesh horizontally and interpolate mesh information.
 
@@ -516,20 +516,17 @@ class UnstMesh(object):
 
         # Elevation
         tmp = self.hLocal.getArray().copy()
-        elev = np.zeros(self.gpoints)
         elev = tmp[self.lgIDs]
         elev[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, elev, op=MPI.MAX)
 
         # Erosion/deposition
         tmp = self.cumEDLocal.getArray().copy()
-        erodep = np.zeros(self.gpoints)
         erodep = tmp[self.lgIDs]
         erodep[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, erodep, op=MPI.MAX)
 
         # Build kd-tree
-        kk = 3
         tree = spatial.cKDTree(XYZ, leafsize=10)
         distances, indices = tree.query(self.lcoords, k=kk)
 

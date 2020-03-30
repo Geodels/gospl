@@ -1,10 +1,4 @@
 import os
-import gc
-import sys
-import glob
-import h5py
-import shutil
-import numpy as np
 
 from mpi4py import MPI
 from time import process_time
@@ -117,7 +111,7 @@ class Model(parentModel):
             # Output time step
             _WriteMesh.visModel(self)
             if self.newForcing and self.paleodata is not None:
-                _UnstMesh.updatePaleomap()
+                _UnstMesh.updatePaleomap(self)
 
             # Update Tectonic, Sea-level & Climatic conditions
             if self.tNow < self.tEnd:
