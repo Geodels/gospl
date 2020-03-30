@@ -1,3 +1,5 @@
 [run]
 source = gospl
-omit = *tests*
+omit =
+    *tests*
+    setup.py
