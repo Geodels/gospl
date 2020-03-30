@@ -1,8 +1,8 @@
-numpy
-pandas
-ruamel.yaml
-scikit-image
-sphinx_rtd_theme
-sphinxcontrib-napoleon
-sphinxemoji
-mock
+numpy==1.18.2
+pandas==1.0.3
+ruamel.yaml==0.16.10
+scikit-image==0.16.2
+sphinx_rtd_theme==0.4.3
+sphinxcontrib-napoleon==0.7
+sphinxemoji==0.1.4
+mock==4.0.2
