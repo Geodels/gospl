@@ -1,7 +1,7 @@
 name: Testing model
 
 domain:
-    npdata: 'data/elev/elev20Ma'
+    npdata: '/live/lib/gospl/tests/data/elev/elev20Ma'
     flowdir: 3
     fast: False
     backward: False
@@ -29,26 +29,26 @@ sea:
 tectonic:
   - start: -20000000.
     end: -19000000.
-    mapH: 'data/disp/disp20Ma'
+    mapH: '/live/lib/gospl/tests/data/disp/disp20Ma'
   - start: -19000000.
     end: -18000000.
-    mapH: 'data/disp/disp19Ma'
+    mapH: '/live/lib/gospl/tests/data/disp/disp19Ma'
   - start: -18000000.
     end: -17000000.
-    mapH: 'data/disp/disp18Ma'
+    mapH: '/live/lib/gospl/tests/data/disp/disp18Ma'
   - start: -17000000.
     end: -16000000.
-    mapH: 'data/disp/disp17Ma'
+    mapH: '/live/lib/gospl/tests/data/disp/disp17Ma'
   - start: -16000000.
     end: -15000000.
-    mapH: 'data/disp/disp16Ma'
+    mapH: '/live/lib/gospl/tests/data/disp/disp16Ma'
 
 climate:
   - start: -20000000.
-    map: ['data/rain/rain20Ma','r']
+    map: ['/live/lib/gospl/tests/data/rain/rain20Ma','r']
   - start: -15000000.
-    map: ['data/rain/rain15Ma','r']
+    map: ['/live/lib/gospl/tests/data/rain/rain15Ma','r']
 
 output:
-    dir: 'output/normal'
+    dir: '/live/lib/gospl/tests/output/normal'
     makedir: False
