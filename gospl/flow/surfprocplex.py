@@ -4,10 +4,10 @@ import sys
 import petsc4py
 import numpy as np
 
-from time import clock
 from mpi4py import MPI
 from scipy import sparse
 from petsc4py import PETSc
+from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fillPIT
@@ -142,7 +142,7 @@ class SPMesh(object):
         :arg h1: elevation array
         """
 
-        t0 = clock()
+        t0 = process_time()
 
         # Define multiple flow directions
         self.rcvID, self.distRcv, self.wghtVal = MFDreceivers(
@@ -163,7 +163,7 @@ class SPMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Flow Direction declaration (%0.02f seconds)" % (clock() - t0),
+                "Flow Direction declaration (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
@@ -203,7 +203,7 @@ class SPMesh(object):
 
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
         # Get global elevation for pit filling...
-        t0 = clock()
+        t0 = process_time()
         hl = self.hLocal.getArray().copy()
         gZ = np.zeros(self.gpoints)
         gZ = hl[self.lgIDs]
@@ -218,10 +218,13 @@ class SPMesh(object):
         nZ = MPI.COMM_WORLD.bcast(nZ, root=0)
 
         if MPIrank == 0 and self.verbose:
-            print("Compute pit filling (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "Compute pit filling (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
 
         # Build flow direction
-        t0 = clock()
+        t0 = process_time()
         self._buildFlowDirection(nZ[self.glIDs])
 
         # Update fill elevation
@@ -232,9 +235,12 @@ class SPMesh(object):
         self.dm.localToGlobal(self.FillL, self.FillG)
         del hl, nZ, gZ, id
         if MPIrank == 0 and self.verbose:
-            print("Build flow directions (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "Build flow directions (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
 
-        t0 = clock()
+        t0 = process_time()
         # Build transport direction matrices
         WAMat = self.iMat.copy()
         WAMat0 = self.iMat.copy()
@@ -290,7 +296,7 @@ class SPMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Compute Flow Accumulation (%0.02f seconds)" % (clock() - t0),
+                "Compute Flow Accumulation (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
@@ -372,7 +378,7 @@ class SPMesh(object):
         Compute erosion using stream power law.
         """
 
-        t0 = clock()
+        t0 = process_time()
 
         # Constant local & global vectors/arrays
         self.Eb.set(0.0)
@@ -393,7 +399,8 @@ class SPMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Get Erosion Thicknesses (%0.02f seconds)" % (clock() - t0), flush=True
+                "Get Erosion Thicknesses (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
             )
 
         return
@@ -404,7 +411,7 @@ class SPMesh(object):
         """
 
         # Build sediment load matrix
-        t0 = clock()
+        t0 = process_time()
         SLMat = self.wMat.copy()
         SLMat -= self.iMat
         SLMat.scale(1.0 - self.wgth)
@@ -423,7 +430,10 @@ class SPMesh(object):
         # Update local vector
         self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
         if MPIrank == 0 and self.verbose:
-            print("Update Sediment Load (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
         del Eb
         gc.collect()
 
@@ -464,7 +474,7 @@ class SPMesh(object):
         del ids, indices, indptr, diffCoeffs, Cd
         gc.collect()
 
-        t0 = clock()
+        t0 = process_time()
         if self.Cda > 0.0 or self.Cdm > 0.0:
             # Get erosion values for considered time step
             self.hGlobal.copy(result=self.hOld)
@@ -478,7 +488,7 @@ class SPMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Compute Hillslope Processes (%0.02f seconds)" % (clock() - t0),
+                "Compute Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
@@ -489,7 +499,7 @@ class SPMesh(object):
         Perform sediment deposition from incoming river flux.
         """
 
-        t0 = clock()
+        t0 = process_time()
         # Get the marine volumetric sediment rate (m3/yr) to diffuse
         # during the time step...
         tmp = self.vSedLocal.getArray().copy()
@@ -546,7 +556,7 @@ class SPMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Perform Sediment Deposition (%0.02f seconds)" % (clock() - t0),
+                "Perform Sediment Deposition (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
@@ -557,7 +567,7 @@ class SPMesh(object):
         Perform freshly deposited sediment diffusion.
         """
 
-        t0 = clock()
+        t0 = process_time()
         limit = 1.0e-1
         h0 = self.hOldLocal.getArray().copy()
 
@@ -604,6 +614,9 @@ class SPMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
-            print("Diffuse Top Sediment (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "Diffuse Top Sediment (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
 
         return

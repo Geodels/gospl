@@ -7,6 +7,9 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 def test_gospl_normal_run():
     import gospl
     from gospl.model import Model
+    import warnings
+
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
 
     input = "/live/lib/gospl/tests/input/normal.yml"
 

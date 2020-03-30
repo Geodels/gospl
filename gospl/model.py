@@ -6,8 +6,8 @@ import h5py
 import shutil
 import numpy as np
 
-from time import clock
 from mpi4py import MPI
+from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from .flow import SPMesh as _SPMesh
@@ -47,7 +47,7 @@ class Model(parentModel):
 
         self.showlog = showlog
 
-        self.modelRunTime = clock()
+        self.modelRunTime = process_time()
         self.verbose = verbose
 
         # Read input dataset
@@ -72,7 +72,7 @@ class Model(parentModel):
         if MPIrank == 0:
             print(
                 "--- Initialisation Phase (%0.02f seconds)"
-                % (clock() - self.modelRunTime),
+                % (process_time() - self.modelRunTime),
                 flush=True,
             )
 
@@ -92,7 +92,7 @@ class Model(parentModel):
         self.steppaleo = 0
 
         while self.tNow <= self.tEnd:
-            tstep = clock()
+            tstep = process_time()
 
             if not self.fast:
                 # Compute Flow Accumulation
@@ -132,7 +132,7 @@ class Model(parentModel):
                 print(
                     "--- Computational Step \
                       (%0.02f seconds)"
-                    % (clock() - tstep),
+                    % (process_time() - tstep),
                     flush=True,
                 )
 

@@ -6,10 +6,10 @@ import petsc4py
 import numpy as np
 import pandas as pd
 
-from time import clock
 from mpi4py import MPI
 from scipy import spatial
 from petsc4py import PETSc
+from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import defineTIN
@@ -78,7 +78,7 @@ class UnstMesh(object):
         """
 
         # Create mesh structure with meshplex
-        t0 = clock()
+        t0 = process_time()
         Tmesh = meshplex.MeshTri(self.lcoords, self.lcells)
         self.area = np.abs(Tmesh.control_volumes)
         self.area[np.isnan(self.area)] = 1.0
@@ -98,7 +98,9 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print("FV discretisation (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "FV discretisation (%0.02f seconds)" % (process_time() - t0), flush=True
+            )
 
         return
 
@@ -107,7 +109,7 @@ class UnstMesh(object):
         Reinitialise gospl model for paleo-fitting experiments.
         """
 
-        t0step = clock()
+        t0step = process_time()
 
         # Restart time
         self.tNow = self.tStart
@@ -146,7 +148,7 @@ class UnstMesh(object):
             print(
                 "--- Reinitialise Phase \
                   (%0.02f seconds)\n+++"
-                % (clock() - t0step),
+                % (process_time() - t0step),
                 flush=True,
             )
 
@@ -159,7 +161,7 @@ class UnstMesh(object):
         """
 
         # Read mesh attributes from file
-        t0 = clock()
+        t0 = process_time()
         loadData = np.load(self.meshFile)
         self.gCoords = loadData["v"]
         self.gpoints = len(self.gCoords)
@@ -170,7 +172,8 @@ class UnstMesh(object):
             ngbGlob(self.gpoints, loadData["n"])
         if MPIrank == 0 and self.verbose:
             print(
-                "Reading mesh information (%0.02f seconds)" % (clock() - t0), flush=True
+                "Reading mesh information (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
             )
 
         # Create DMPlex
@@ -178,10 +181,10 @@ class UnstMesh(object):
         del loadData
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print("Create DMPlex (%0.02f seconds)" % (clock() - t0), flush=True)
+            print("Create DMPlex (%0.02f seconds)" % (process_time() - t0), flush=True)
 
         # Define one DoF on the nodes
-        t0 = clock()
+        t0 = process_time()
         self.dm.setNumFields(1)
         origSect = self.dm.createSection(1, [1, 0, 0])
         origSect.setFieldName(0, "points")
@@ -190,12 +193,12 @@ class UnstMesh(object):
         origVec = self.dm.createGlobalVector()
         if MPIrank == 0 and self.verbose:
             print(
-                "Define one DoF on the nodes (%0.02f seconds)" % (clock() - t0),
+                "Define one DoF on the nodes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
         # Distribute to other processors if any
-        t0 = clock()
+        t0 = process_time()
         if MPIsize > 1:
             partitioner = self.dm.getPartitioner()
             partitioner.setType(partitioner.Type.PARMETIS)
@@ -210,10 +213,12 @@ class UnstMesh(object):
         origVec.destroy()
         origSect.destroy()
         if MPIrank == 0 and self.verbose:
-            print("Distribute DMPlex (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "Distribute DMPlex (%0.02f seconds)" % (process_time() - t0), flush=True
+            )
 
         # Define local vertex & cells
-        t0 = clock()
+        t0 = process_time()
         self.lcoords = self.dm.getCoordinatesLocal().array.reshape(-1, 3)
         self.npoints = self.lcoords.shape[0]
         cStart, cEnd = self.dm.getHeightStratum(0)
@@ -226,10 +231,12 @@ class UnstMesh(object):
             del point_closure
         gc.collect()
         if MPIrank == 0 and self.verbose:
-            print("Mesh coords/cells (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "Mesh coords/cells (%0.02f seconds)" % (process_time() - t0), flush=True
+            )
 
         # Define local vertex & cells
-        t = clock()
+        t = process_time()
         cStart, cEnd = self.dm.getHeightStratum(0)
         # Dealing with triangular cells only
         self.lcells = np.zeros((cEnd - cStart, 3), dtype=PETSc.IntType)
@@ -238,7 +245,10 @@ class UnstMesh(object):
             self.lcells[c, :] = point_closure[-3:] - cEnd
         del point_closure
         if MPIrank == 0 and self.verbose:
-            print("Defining local DMPlex (%0.02f seconds)" % (clock() - t), flush=True)
+            print(
+                "Defining local DMPlex (%0.02f seconds)" % (process_time() - t),
+                flush=True,
+            )
 
         # From global values to local ones...
         tree = spatial.cKDTree(self.gCoords, leafsize=10)
@@ -276,7 +286,10 @@ class UnstMesh(object):
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
-            print("Local/global mapping (%0.02f seconds)" % (clock() - t0), flush=True)
+            print(
+                "Local/global mapping (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
 
         # Create mesh structure with meshplex
         self._meshStructure()
@@ -321,7 +334,7 @@ class UnstMesh(object):
         be applied to the considered time interval
         """
 
-        t0 = clock()
+        t0 = process_time()
         # Sea level
         self.sealevel = self.seafunction(self.tNow + self.dt)
 
@@ -330,7 +343,8 @@ class UnstMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Update Climatic Forces (%0.02f seconds)" % (clock() - t0), flush=True
+                "Update Climatic Forces (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
             )
 
         return
@@ -341,12 +355,13 @@ class UnstMesh(object):
         the considered time interval
         """
 
-        t0 = clock()
+        t0 = process_time()
         self._updateTectonic()
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Update Tectonic Forces (%0.02f seconds)" % (clock() - t0), flush=True
+                "Update Tectonic Forces (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
             )
 
         return
@@ -552,7 +567,7 @@ class UnstMesh(object):
         Vectors and Matrices.
         """
 
-        t0 = clock()
+        t0 = process_time()
 
         self.hLocal.destroy()
         self.hGlobal.destroy()
@@ -600,7 +615,8 @@ class UnstMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Cleaning Model Dataset (%0.02f seconds)" % (clock() - t0), flush=True
+                "Cleaning Model Dataset (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
             )
 
         if self.showlog:
@@ -609,7 +625,7 @@ class UnstMesh(object):
         if MPIrank == 0:
             print(
                 "\n+++\n+++ Total run time (%0.02f seconds)\n+++"
-                % (clock() - self.modelRunTime),
+                % (process_time() - self.modelRunTime),
                 flush=True,
             )
 

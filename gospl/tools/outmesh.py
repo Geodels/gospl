@@ -9,7 +9,7 @@ import numpy as np
 
 from mpi4py import MPI
 from petsc4py import PETSc
-from time import clock
+from time import process_time
 
 petsc4py.init(sys.argv)
 MPIrank = PETSc.COMM_WORLD.Get_rank()
@@ -131,7 +131,7 @@ class WriteMesh(object):
         to HDF5 file.
         """
 
-        t = clock()
+        t = process_time()
         h5file = (
             self.outputDir
             + "/h5/stratal."
@@ -163,7 +163,7 @@ class WriteMesh(object):
             print(
                 "Creating stratal outputfile \
                   (%0.02f seconds)"
-                % (clock() - t),
+                % (process_time() - t),
                 flush=True,
             )
 
@@ -177,7 +177,7 @@ class WriteMesh(object):
         If the file already exists, it is overwritten.
         """
 
-        t = clock()
+        t = process_time()
         if self.step == 0:
             topology = self.outputDir + "/h5/topology.p" + str(MPIrank) + ".h5"
             with h5py.File(topology, "w") as f:
@@ -275,7 +275,10 @@ class WriteMesh(object):
 
         MPIcomm.Barrier()
         if MPIrank == 0 and self.verbose:
-            print("Creating outputfile (%0.02f seconds)" % (clock() - t), flush=True)
+            print(
+                "Creating outputfile (%0.02f seconds)" % (process_time() - t),
+                flush=True,
+            )
 
         if MPIrank == 0:
             print("+++ Output Simulation Time: %0.02f years" % (self.tNow), flush=True)
