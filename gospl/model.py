@@ -9,20 +9,11 @@ if "READTHEDOCS" not in os.environ:
     from .mesher import UnstMesh as _UnstMesh
     from .tools import WriteMesh as _WriteMesh
 
-    class parentModel(_ReadYaml, _WriteMesh, _UnstMesh, _SPMesh):
-        pass
-
-
-else:
-
-    class parentModel(object):
-        pass
-
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
-class Model(parentModel):
+class Model(object):
     """
     Instantiates model object and performs surface processes evolution.
 
