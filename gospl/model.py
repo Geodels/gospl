@@ -147,12 +147,6 @@ class Model(parentModel):
 
         return
 
-    def matchPaleo(self):
-
-        _WriteMesh.forceFit(self)
-
-        return
-
     def destroy(self):
         """
         Destroy PETSc DMPlex objects and associated Petsc local/global

@@ -78,26 +78,6 @@ class WriteMesh(object):
 
         return
 
-    def forceFit(self):
-        """
-        Forcing paleotopography fitting.
-        """
-
-        self.tNow = self.tEnd
-        self.saveStrat = self.tEnd
-
-        # Output stratal evolution
-        if self.strat > 0:
-            self.stratStep -= 1
-            self.outputStrat()
-
-        # Output time step
-        self.step -= 1
-        self.saveTime = self.tEnd
-        self._outputMesh()
-
-        return
-
     def _createOutputDir(self):
         """
         Create a directory to store outputs.
@@ -239,8 +219,6 @@ class WriteMesh(object):
                 dtype="float32",
                 compression="gzip",
             )
-            # data = self.vSedLocal.getArray().copy()
-            # data[data<1.] = 1
             f["sedLoad"][:, 0] = self.vSedLocal.getArray().copy()
             if self.uplift is not None:
                 f.create_dataset(

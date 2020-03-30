@@ -19,6 +19,9 @@ def test_gospl_normal_run():
     # Run model
     normal.runProcesses()
 
+    # Reinitialise model
+    normal.reInitialise()
+
     # Destroy model
     normal.destroy()
 
