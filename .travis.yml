@@ -14,7 +14,7 @@ install:
     - docker build -t gospl .
 
 script:
-  - docker run -it --entrypoint /bin/bash gospl -c "cd /live/lib/gospl; python3 -m pytest --cov=."
+  - docker run -it --entrypoint /bin/bash gospl -c "cd /live/lib/gospl; mpirun -np 2 python3 -m pytest --with-mpi --cov=."
 
 after_success:
-  - docker run -it --entrypoint /bin/bash gospl -c "cd /live/lib/gospl; python3 -m pytest --cov=.; COVERALLS_REPO_TOKEN=sl7N2VlsshmA5W8zt7uv3nYid6adiWY6D coveralls --rcfile=.coveragerc"
+  - docker run -it --entrypoint /bin/bash gospl -c "cd /live/lib/gospl; mpirun -np 2 python3 -m pytest --with-mpi --cov=.; COVERALLS_REPO_TOKEN=sl7N2VlsshmA5W8zt7uv3nYid6adiWY6D coveralls --rcfile=.coveragerc"

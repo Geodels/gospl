@@ -7,6 +7,7 @@ ADD dockerhub/bashrc-term /root/.bashrc
 
 # install extras in a new layer
 RUN python3 -m pip install --no-cache-dir \
+        pytest-mpi \
         pytest-cov \
         coveralls
 
@@ -19,6 +20,6 @@ RUN git clone https://github.com/Geodels/gospl.git  && \
     export PETSC_DIR=/opt/petsc && \
     export PETSC_ARCH=arch-linux-c-opt && \
     python3 setup.py install && \
-    pip3 install -e . 
+    pip3 install -e .
 
 CMD ["jupyter", "notebook", "--ip='0.0.0.0'", "--no-browser"]

@@ -4,6 +4,7 @@ import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
+@pytest.mark.mpi
 def test_gospl_normal_run():
     import gospl
     from gospl.model import Model
@@ -23,6 +24,7 @@ def test_gospl_normal_run():
     normal.destroy()
 
 
+@pytest.mark.mpi
 def test_gospl_backward_run():
     import gospl
     from gospl.model import Model
@@ -42,6 +44,7 @@ def test_gospl_backward_run():
     normal.destroy()
 
 
+@pytest.mark.mpi
 def test_gospl_forward_run():
     import gospl
     from gospl.model import Model
@@ -61,6 +64,7 @@ def test_gospl_forward_run():
     normal.destroy()
 
 
+@pytest.mark.mpi
 def test_gospl_restart_run():
     import gospl
     from gospl.model import Model
