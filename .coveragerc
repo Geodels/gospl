@@ -3,3 +3,4 @@ source = gospl
 omit =
     *tests*
     setup.py
+    gospl/tools/inputparser.py
