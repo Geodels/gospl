@@ -50,5 +50,5 @@ climate:
     map: ['/live/lib/gospl/tests/data/rain/rain15Ma','r']
 
 output:
-    dir: '/live/lib/gospl/tests/output/normal'
+    dir: 'normal'
     makedir: False

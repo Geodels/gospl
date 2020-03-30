@@ -54,5 +54,5 @@ forcepaleo:
     freq: 5
 
 output:
-    dir: '/live/lib/gospl/tests/output/forward'
+    dir: 'output/forward'
     makedir: False
