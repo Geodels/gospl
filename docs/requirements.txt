@@ -3,6 +3,6 @@ pandas==1.0.3
 ruamel.yaml==0.16.10
 scikit-image==0.16.2
 sphinx_rtd_theme==0.4.3
-sphinxcontrib-napoleon
+sphinxcontrib-napoleon==0.7
 sphinxemoji
 mock
