@@ -8,7 +8,7 @@ def test_gospl_init_destroy():
     import gospl
     from gospl.model import Model
 
-    input = "input/normal.yml"
+    input = "/live/lib/tests/input/normal.yml"
 
     # Initialise model
     normal = Model(input, True, False)
@@ -21,7 +21,7 @@ def test_gospl_run():
     import gospl
     from gospl.model import Model
 
-    input = "input/normal.yml"
+    input = "/live/lib/tests/input/normal.yml"
 
     # Initialise model
     normal = Model(input, True, False)
