@@ -51,6 +51,7 @@ climate:
 
 forcepaleo:
     dir: '/live/lib/gospl/tests/output/backward'
+    freq: 5
 
 output:
     dir: '/live/lib/gospl/tests/output/forward'
