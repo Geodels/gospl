@@ -7,7 +7,7 @@ API Documentation
 
 
 .. warning::
-  It is worth mentioning that a set of **fortran** functions are part of **gospl** code but are not described in this API...
+  It is worth mentioning that a set of **fortran** functions are part of *gospl* code but are not described in this API...
 
 
 Model Class

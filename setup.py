@@ -66,8 +66,6 @@ def configuration(parent_package="", top_path=None):
     LIBRARIES = []
 
     # PETSc
-    import os
-
     PETSC_DIR = os.environ["PETSC_DIR"]
     PETSC_ARCH = os.environ.get("PETSC_ARCH", "")
 
