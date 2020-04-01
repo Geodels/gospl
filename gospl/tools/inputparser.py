@@ -642,7 +642,7 @@ class ReadYaml(object):
                             "Field name for rainfall is not defined correctly or does not exist!"
                         )
 
-                    raindata = self._defineRain(k, rStart, rMap, rUniform, raindata)
+                raindata = self._defineRain(k, rStart, rMap, rUniform, raindata)
 
             if raindata["start"][0] > self.tStart:
                 tmpRain = []
