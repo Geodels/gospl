@@ -5,7 +5,6 @@ import petsc4py
 import numpy as np
 
 from mpi4py import MPI
-from petsc4py import PETSc
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
@@ -16,8 +15,8 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import setDiffusionCoeff
 
 petsc4py.init(sys.argv)
-MPIrank = PETSc.COMM_WORLD.Get_rank()
-MPIcomm = PETSc.COMM_WORLD
+MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
+MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 
 class SPMesh(object):
@@ -35,8 +34,8 @@ class SPMesh(object):
         self.hbot = -500.0
 
         # Identity matrix construction
-        self.II = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
-        self.JJ = np.arange(0, self.npoints, dtype=PETSc.IntType)
+        self.II = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
+        self.JJ = np.arange(0, self.npoints, dtype=petsc4py.PETSc.IntType)
         self.iMat = self._matrix_build_diag(np.ones(self.npoints))
 
         # Petsc vectors
@@ -65,7 +64,7 @@ class SPMesh(object):
         :arg nnz: array containing the number of nonzero blocks
         """
 
-        matrix = PETSc.Mat().create(comm=MPIcomm)
+        matrix = petsc4py.PETSc.Mat().create(comm=MPIcomm)
         matrix.setType("aij")
         matrix.setSizes(self.sizes)
         matrix.setLGMap(self.lgmap_row, self.lgmap_col)
@@ -86,7 +85,9 @@ class SPMesh(object):
 
         # Define diagonal matrix
         matrix.assemblyBegin()
-        matrix.setValuesLocalCSR(self.II, self.JJ, V, PETSc.InsertMode.INSERT_VALUES)
+        matrix.setValuesLocalCSR(
+            self.II, self.JJ, V, petsc4py.PETSc.InsertMode.INSERT_VALUES
+        )
         matrix.assemblyEnd()
 
         return matrix
@@ -111,7 +112,7 @@ class SPMesh(object):
         :return vector2: PETSC vector of the new values
         """
 
-        ksp = PETSc.KSP().create(PETSc.COMM_WORLD)
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
         if guess:
             ksp.setInitialGuessNonzero(guess)
         ksp.setOperators(matrix, matrix)
@@ -122,7 +123,7 @@ class SPMesh(object):
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
-            KSPReasons = self._make_reasons(PETSc.KSP.ConvergedReason())
+            KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
             print(
                 "LinearSolver failed to converge after %d iterations",
                 ksp.getIterationNumber(),
@@ -242,7 +243,7 @@ class SPMesh(object):
         # Build transport direction matrices
         WAMat = self.iMat.copy()
         WAMat0 = self.iMat.copy()
-        indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
+        indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
         for k in range(0, self.flowDir):
@@ -250,13 +251,13 @@ class SPMesh(object):
             # Drainage area matrix
             tmpMat = self._matrix_build()
             data = -self.wghtVal[:, k].copy()
-            data[self.rcvID[:, k].astype(PETSc.IntType) == nodes] = 0.0
+            data[self.rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                self.rcvID[:, k].astype(PETSc.IntType),
+                self.rcvID[:, k].astype(petsc4py.PETSc.IntType),
                 data,
-                PETSc.InsertMode.INSERT_VALUES,
+                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
             WAMat += tmpMat
@@ -265,13 +266,13 @@ class SPMesh(object):
             # Marine sediment matrix
             tmpMat0 = self._matrix_build()
             data0 = -self.wghtVal0[:, k].copy()
-            data0[self.rcvID0[:, k].astype(PETSc.IntType) == nodes] = 0.0
+            data0[self.rcvID0[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
             tmpMat0.assemblyBegin()
             tmpMat0.setValuesLocalCSR(
                 indptr,
-                self.rcvID0[:, k].astype(PETSc.IntType),
+                self.rcvID0[:, k].astype(petsc4py.PETSc.IntType),
                 data0,
-                PETSc.InsertMode.INSERT_VALUES,
+                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat0.assemblyEnd()
             WAMat0 += tmpMat0
@@ -317,7 +318,7 @@ class SPMesh(object):
         # Define erosion coefficients
         for k in range(0, self.flowDir):
 
-            indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
+            indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
             nodes = indptr[:-1]
             # Define erosion limiter to prevent formation of flat
             dh = self.hOldArray - self.hOldArray[self.rcvID[:, k]]
@@ -333,13 +334,13 @@ class SPMesh(object):
             tmpMat = self._matrix_build()
             wght[self.seaID, k] = 0.0
             data = np.multiply(data, -wght[:, k])
-            data[self.rcvID[:, k].astype(PETSc.IntType) == nodes] = 0.0
+            data[self.rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                self.rcvID[:, k].astype(PETSc.IntType),
+                self.rcvID[:, k].astype(petsc4py.PETSc.IntType),
                 data,
-                PETSc.InsertMode.INSERT_VALUES,
+                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
             EbedMat += tmpMat
@@ -451,7 +452,7 @@ class SPMesh(object):
 
         for k in range(0, self.maxnb):
             tmpMat = self._matrix_build()
-            indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
+            indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
             indices = self.FVmesh_ngbID[:, k].copy()
             ids = np.nonzero(indices < 0)
             indices[ids] = ids
@@ -461,9 +462,9 @@ class SPMesh(object):
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                indices.astype(PETSc.IntType),
+                indices.astype(petsc4py.PETSc.IntType),
                 data,
-                PETSc.InsertMode.INSERT_VALUES,
+                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
             self.Diff += tmpMat
@@ -578,7 +579,7 @@ class SPMesh(object):
 
         for k in range(0, self.maxnb):
             tmpMat = self._matrix_build()
-            indptr = np.arange(0, self.npoints + 1, dtype=PETSc.IntType)
+            indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
             indices = self.FVmesh_ngbID[:, k].copy()
             ids = np.nonzero(indices < 0)
             indices[ids] = ids
@@ -588,9 +589,9 @@ class SPMesh(object):
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                indices.astype(PETSc.IntType),
+                indices.astype(petsc4py.PETSc.IntType),
                 data,
-                PETSc.InsertMode.INSERT_VALUES,
+                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
             sedDiff += tmpMat

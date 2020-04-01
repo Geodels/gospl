@@ -8,12 +8,11 @@ import petsc4py
 import numpy as np
 
 from mpi4py import MPI
-from petsc4py import PETSc
 from time import process_time
 
 petsc4py.init(sys.argv)
-MPIrank = PETSc.COMM_WORLD.Get_rank()
-MPIsize = PETSc.COMM_WORLD.Get_size()
+MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
+MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
 

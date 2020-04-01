@@ -8,7 +8,6 @@ import pandas as pd
 
 from mpi4py import MPI
 from scipy import spatial
-from petsc4py import PETSc
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
@@ -16,8 +15,8 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import ngbGlob
 
 petsc4py.init(sys.argv)
-MPIrank = PETSc.COMM_WORLD.Get_rank()
-MPIsize = PETSc.COMM_WORLD.Get_size()
+MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
+MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
 
@@ -55,8 +54,8 @@ class UnstMesh(object):
             MPIcomm.bcast(cells.shape, root=0)
             MPIcomm.bcast(coords.shape, root=0)
             # Provide the actual data on rank 0.
-            self.dm = PETSc.DMPlex().createFromCellList(
-                dim, cells, coords, comm=PETSc.COMM_WORLD
+            self.dm = petsc4py.PETSc.DMPlex().createFromCellList(
+                dim, cells, coords, comm=petsc4py.PETSc.COMM_WORLD
             )
             del cells, coords
         else:
@@ -64,11 +63,11 @@ class UnstMesh(object):
             coord_shape = list(MPIcomm.bcast(None, root=0))
             cell_shape[0] = 0
             coord_shape[0] = 0
-            self.dm = PETSc.DMPlex().createFromCellList(
+            self.dm = petsc4py.PETSc.DMPlex().createFromCellList(
                 dim,
                 np.zeros(cell_shape, dtype=np.int32),
                 np.zeros(coord_shape, dtype=np.double),
-                comm=PETSc.COMM_WORLD,
+                comm=petsc4py.PETSc.COMM_WORLD,
             )
         return
 
@@ -222,7 +221,7 @@ class UnstMesh(object):
         self.lcoords = self.dm.getCoordinatesLocal().array.reshape(-1, 3)
         self.npoints = self.lcoords.shape[0]
         cStart, cEnd = self.dm.getHeightStratum(0)
-        self.lcells = np.zeros((cEnd - cStart, 3), dtype=PETSc.IntType)
+        self.lcells = np.zeros((cEnd - cStart, 3), dtype=petsc4py.PETSc.IntType)
         point_closure = None
         for c in range(cStart, cEnd):
             point_closure = self.dm.getTransitiveClosure(c)[0]
@@ -239,7 +238,7 @@ class UnstMesh(object):
         t = process_time()
         cStart, cEnd = self.dm.getHeightStratum(0)
         # Dealing with triangular cells only
-        self.lcells = np.zeros((cEnd - cStart, 3), dtype=PETSc.IntType)
+        self.lcells = np.zeros((cEnd - cStart, 3), dtype=petsc4py.PETSc.IntType)
         for c in range(cStart, cEnd):
             point_closure = self.dm.getTransitiveClosure(c)[0]
             self.lcells[c, :] = point_closure[-3:] - cEnd
@@ -267,7 +266,9 @@ class UnstMesh(object):
         l2g = self.lgmap_row.indices.copy()
         offproc = l2g < 0
         l2g[offproc] = -(l2g[offproc] + 1)
-        self.lgmap_col = PETSc.LGMap().create(l2g, comm=PETSc.COMM_WORLD)
+        self.lgmap_col = petsc4py.PETSc.LGMap().create(
+            l2g, comm=petsc4py.PETSc.COMM_WORLD
+        )
 
         # Vertex part of an unique partition
         vIS = self.dm.getVertexNumbering()

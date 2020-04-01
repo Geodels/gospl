@@ -5,12 +5,11 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
-from petsc4py import PETSc
 from operator import itemgetter
 from scipy.interpolate import interp1d
 
 petsc4py.init(sys.argv)
-MPIrank = PETSc.COMM_WORLD.Get_rank()
+MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
 
 class ReadYaml(object):
@@ -26,7 +25,7 @@ class ReadYaml(object):
         """
 
         if self.showlog:
-            self.log = PETSc.Log()
+            self.log = petsc4py.PETSc.Log()
             self.log.begin()
 
         # Check input file exists
