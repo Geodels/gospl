@@ -226,4 +226,5 @@ EXPOSE 8888
 # launch notebook
 ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
 RUN chmod +x /usr/local/bin/run-jupyter.sh
+ADD bashrc-term /root/.bashrc
 CMD /usr/local/bin/run-jupyter.sh
