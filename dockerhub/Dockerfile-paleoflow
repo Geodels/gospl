@@ -195,6 +195,8 @@ RUN cd gmt-6.0.0/build && \
 RUN rm -rf gmt-6.0.0-src.tar.xz && \
     rm -rf gmt-6.0.0
 
+RUN apt-get install -yq --no-install-recommends python3-gdal
+
 # install gopspl
 WORKDIR /live/lib
 RUN git clone https://github.com/Geodels/gospl.git && \
