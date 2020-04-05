@@ -1,3 +1,13 @@
+##############################
+# BUILDING PYTHON PACKAGE PiPY
+##############################
+# python3 -m pip install --user --upgrade setuptools wheel
+# python3 setup.py sdist
+# python3 -m pip install --user --upgrade twine
+#  ~/.local/bin/twine check dist/*
+#  ~/.local/bin/twine upload dist/*
+##############################
+
 import os
 import io
 from setuptools import setup

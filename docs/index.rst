@@ -46,6 +46,13 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 You should have received a copy of the GNU Lesser General Public License along with this program. If not, see `LGPL3`_.
 
+.. toctree::
+   :maxdepth: 3
+   :name: Usage
+   :caption: Usage
+
+   install.rst
+
 
 .. toctree::
    :maxdepth: 3
