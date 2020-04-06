@@ -324,7 +324,7 @@ class UnstMesh(object):
         """
 
         self.applyForces()
-        if self.backward:
+        if self.backward or self.paleoflow:
             self.applyTectonics()
 
         return

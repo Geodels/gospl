@@ -116,7 +116,7 @@ class Model(parentModel):
             # Update Tectonic, Sea-level & Climatic conditions
             if self.tNow < self.tEnd:
                 _UnstMesh.applyForces(self)
-                if not self.backward:
+                if not self.backward or self.paleoflow:
                     _UnstMesh.applyTectonics(self)
 
             # Advance time

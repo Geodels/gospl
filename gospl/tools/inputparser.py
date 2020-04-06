@@ -120,6 +120,11 @@ class ReadYaml(object):
         except KeyError:
             self.backward = False
 
+        try:
+            self.paleoflow = domainDict["paleoflow"]
+        except KeyError:
+            self.paleoflow = False
+
         return
 
     def _readTime(self):
