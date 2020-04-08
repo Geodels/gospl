@@ -121,9 +121,9 @@ class ReadYaml(object):
             self.backward = False
 
         try:
-            self.paleoflow = domainDict["paleoflow"]
+            self.interp = domainDict["interp"]
         except KeyError:
-            self.paleoflow = False
+            self.interp = 3
 
         return
 
@@ -501,6 +501,7 @@ class ReadYaml(object):
         tecdata = None
         try:
             tecDict = self.input["tectonic"]
+
             tecSort = sorted(tecDict, key=itemgetter("start"))
             for k in range(len(tecSort)):
                 tecdata = self._defineTectonic(k, tecSort, tecdata)

@@ -33,6 +33,9 @@ class UnstMesh(object):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
+        self.upsubs = False
+        self.hordisp = False
+        self.verdisp = False
 
         self._buildMesh()
 
@@ -137,7 +140,7 @@ class UnstMesh(object):
         self.cumEDLocal.set(0.0)
 
         # Update external forces
-        self.applyForces()
+        self.updateForces()
         self.applyTectonics()
 
         del gZ, loadData
@@ -323,16 +326,18 @@ class UnstMesh(object):
         Initialise external forces.
         """
 
-        self.applyForces()
-        if self.backward or self.paleoflow:
+        self.updateForces()
+        self._updateTectonics()
+
+        if self.backward:
             self.applyTectonics()
 
         return
 
-    def applyForces(self):
+    def updateForces(self):
         """
-        Find the different values for climatic and sea-level forces that will
-        be applied to the considered time interval
+        Find the different values for climatic, tectonic and sea-level forces
+        that will be applied to the considered time interval
         """
 
         t0 = process_time()
@@ -345,26 +350,12 @@ class UnstMesh(object):
         # Climate information
         self._updateRain()
 
+        # Tectonic information
+        self._updateTectonics()
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Update Climatic Forces (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-
-        return
-
-    def applyTectonics(self):
-        """
-        Find the different values for tectonic forces that will be applied to
-        the considered time interval
-        """
-
-        t0 = process_time()
-        self._updateTectonic()
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Update Tectonic Forces (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
@@ -422,7 +413,7 @@ class UnstMesh(object):
 
         return
 
-    def _updateTectonic(self):
+    def _updateTectonics(self):
         """
         Find the current tectonic rates for the considered time interval.
         """
@@ -442,6 +433,8 @@ class UnstMesh(object):
 
             self.tecNb = nb
             self.upsubs = False
+            self.verdisp = False
+            self.hordisp = False
             if nb < len(self.tecdata.index) - 1:
                 timer = self.tecdata.iloc[nb + 1, 0] - self.tecdata.iloc[nb, 0]
             else:
@@ -451,15 +444,41 @@ class UnstMesh(object):
             if self.tecdata.iloc[nb, 1] != "empty":
                 mdata = np.load(self.tecdata.iloc[nb, 1])
                 self.hdisp = mdata["xyz"][self.glIDs, :]
-                self._meshAdvectorSphere(mdata["xyz"], timer, kk=3)
+                self.hordisp = True
+                self.timer = timer
 
             if self.tecdata.iloc[nb, 2] != "empty":
                 mdata = np.load(self.tecdata.iloc[nb, 2])
-                self._meshUpliftSubsidence(mdata["z"])
+                self.uplift = mdata["z"][self.glIDs]
+                self.verdisp = True
                 self.upsubs = True
 
             if mdata is not None:
                 del mdata
+
+        return
+
+    def applyTectonics(self):
+        """
+        Find the different values for tectonic forces that will be applied to
+        the considered time interval
+        """
+
+        t0 = process_time()
+
+        # Newly tectonic fields...
+        if self.hordisp or self.vertdisp:
+            # Horizontal displacements
+            if self.hordisp:
+                mdata = np.load(self.tecdata.iloc[self.tecNb, 1])
+                self._meshAdvectorSphere(mdata["xyz"], self.timer)
+                self.hordisp = False
+                del mdata
+                gc.collect()
+            # Vertical forcings
+            if self.verdisp:
+                self._meshUpliftSubsidence()
+                self.verdisp = False
 
         elif self.upsubs and self.tNow + self.dt < self.tEnd:
             tmp = self.hLocal.getArray().copy()
@@ -471,9 +490,15 @@ class UnstMesh(object):
         elif self.forceStep >= 0 and not self.newForcing:
             self._forceUpliftSubsidence()
 
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Apply Tectonic Forces (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
         return
 
-    def _meshUpliftSubsidence(self, tectonic):
+    def _meshUpliftSubsidence(self):
         """
         Apply vertical displacements based on tectonic rates.
 
@@ -482,7 +507,6 @@ class UnstMesh(object):
 
         # Define vertical displacements
         tmp = self.hLocal.getArray().copy()
-        self.uplift = tectonic[self.glIDs]
         self.hLocal.setArray(tmp + self.uplift * self.dt)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
         del tmp
@@ -504,7 +528,7 @@ class UnstMesh(object):
 
         return
 
-    def _meshAdvectorSphere(self, tectonic, timer, kk):
+    def _meshAdvectorSphere(self, tectonic, timer):
         """
         Advect spherical mesh horizontally and interpolate mesh information.
 
@@ -529,10 +553,10 @@ class UnstMesh(object):
 
         # Build kd-tree
         tree = spatial.cKDTree(XYZ, leafsize=10)
-        distances, indices = tree.query(self.lcoords, k=kk)
+        distances, indices = tree.query(self.lcoords, k=self.interp)
 
         # Inverse weighting distance...
-        if kk == 1:
+        if self.interp == 1:
             nelev = elev[indices]
             nerodep = erodep[indices]
         else:
