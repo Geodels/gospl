@@ -154,6 +154,7 @@ if __name__ == "__main__":
             "mpi4py>=3.0.0",
             "petsc4py>=3.8.1",
             "pre-commit",
+            "fastfunc==0.2.2",
         ],
         python_requires=">=3.3",
         classifiers=[

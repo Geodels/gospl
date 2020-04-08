@@ -467,7 +467,7 @@ class UnstMesh(object):
         t0 = process_time()
 
         # Newly tectonic fields...
-        if self.hordisp or self.vertdisp:
+        if self.hordisp or self.verdisp:
             # Horizontal displacements
             if self.hordisp:
                 mdata = np.load(self.tecdata.iloc[self.tecNb, 1])

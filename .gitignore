@@ -7,8 +7,9 @@ gospl.egg-info
 fortran/_fortran-f2pywrappers.f
 fortran/_fortran-f2pywrappers2.f90
 fortran/_fortranmodule.c
-gospl/_fortran.cpython-37m-x86_64-linux-gnu.so
 tests/.coverage
 .coverage
 tests/output/normal
 tests/output/forward
+output
+*.so
