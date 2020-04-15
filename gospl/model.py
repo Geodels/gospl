@@ -99,16 +99,14 @@ class Model(parentModel):
             if not self.fast:
                 _SPMesh.sedChange(self)
 
-            # Update Tectonic, Sea-level & Climatic conditions
-            if self.tNow < self.tEnd:
-                _UnstMesh.updateForces(self)
-                if self.backward:
-                    _UnstMesh.applyTectonics(self)
-
             # Output stratal evolution
             if self.tNow >= self.saveStrat:
                 _WriteMesh.outputStrat(self)
                 self.saveStrat += self.strat
+
+            # Update Tectonic, Sea-level & Climatic conditions
+            if self.backward and self.tNow < self.tEnd:
+                _UnstMesh.applyTectonics(self)
 
             # Output time step
             _WriteMesh.visModel(self)
@@ -116,8 +114,10 @@ class Model(parentModel):
                 _UnstMesh.updatePaleomap(self)
 
             # Update Tectonic, Sea-level & Climatic conditions
-            if not self.backward and self.tNow < self.tEnd:
-                _UnstMesh.applyTectonics(self)
+            if self.tNow < self.tEnd:
+                _UnstMesh.applyForces(self)
+                if not self.backward:
+                    _UnstMesh.applyTectonics(self)
 
             # Advance time
             self.tNow += self.dt

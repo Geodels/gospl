@@ -425,13 +425,7 @@ class WriteMesh(object):
         f.write('<Xdmf Version="2.0" xmlns:xi="http://www.w3.org/2001/XInclude">\n')
         f.write(" <Domain>\n")
         f.write('    <Grid GridType="Collection" CollectionType="Spatial">\n')
-        if self.backward:
-            f.write(
-                '      <Time Type="Single" Value="%0.02f"/>\n'
-                % -(self.saveTime - self.tStart)
-            )
-        else:
-            f.write('      <Time Type="Single" Value="%0.02f"/>\n' % self.saveTime)
+        f.write('      <Time Type="Single" Value="%0.02f"/>\n' % self.saveTime)
 
         for p in range(MPIsize):
             pfile = (
