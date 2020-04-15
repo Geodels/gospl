@@ -73,8 +73,6 @@ class WriteMesh(object):
                 self.steppaleo = 0
                 self.newForcing = False
                 self.forceStep += 1
-                if self.forceStep >= self.forceNb:
-                    self.forceStep = 0
             else:
                 self.newForcing = True
 

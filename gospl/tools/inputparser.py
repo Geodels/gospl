@@ -501,7 +501,6 @@ class ReadYaml(object):
         tecdata = None
         try:
             tecDict = self.input["tectonic"]
-
             tecSort = sorted(tecDict, key=itemgetter("start"))
             for k in range(len(tecSort)):
                 tecdata = self._defineTectonic(k, tecSort, tecdata)
@@ -750,15 +749,21 @@ class ReadYaml(object):
                         flush=True,
                     )
                 try:
-                    self.forceNb = fpaleoDict["freq"]
+                    forceNb = fpaleoDict["steps"]
                 except KeyError:
                     print(
-                        "New Paleomap loading frequency 'freq' is required", flush=True,
+                        "New Paleomap loading frequency 'steps' is required",
+                        flush=True,
                     )
-                out_nb = self.forceNb + 1
-                stepf = np.arange(1, out_nb, dtype=int)
-                self.stepb = np.flip(np.arange(0, out_nb - 1, dtype=int))
-                self.alpha = stepf.astype(float) / (out_nb - 1)
+                outNb = np.sum(forceNb)
+                self.stepb = np.flip(np.arange(0, outNb, dtype=int))
+                self.alpha = np.zeros(len(self.stepb))
+                p = 0
+                for k in range(len(forceNb)):
+                    out_nb = forceNb[k] + 1
+                    stepf = np.arange(1, out_nb, dtype=int)
+                    self.alpha[p : p + len(stepf)] = stepf.astype(float) / (out_nb - 1)
+                    p += len(stepf)
                 self.forceStep = 0
             except Exception:
                 print(
@@ -770,7 +775,6 @@ class ReadYaml(object):
         except KeyError:
             self.forceDir = None
             self.forceStep = -1
-            self.forceNb = 0
 
         return
 
