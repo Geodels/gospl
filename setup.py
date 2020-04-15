@@ -4,8 +4,8 @@
 # python3 -m pip install --user --upgrade setuptools wheel
 # python3 setup.py sdist
 # python3 -m pip install --user --upgrade twine
-#  ~/.local/bin/twine check dist/*
-#  ~/.local/bin/twine upload dist/*
+#  /usr/local/bin/twine check dist/*
+#  /usr/local/bin/twine upload dist/*
 ##############################
 
 import os

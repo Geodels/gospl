@@ -4,15 +4,6 @@ MAINTAINER Tristan Salles
 ENV PETSC_DIR=/opt/petsc
 ENV PETSC_ARCH=arch-linux-c-opt
 
-# install gopspl
-WORKDIR /live/lib
-RUN git clone https://github.com/Geodels/gospl.git && \
-    cd gospl && \
-    export F90=gfortran && \
-    export PETSC_DIR=/opt/petsc && \
-    export PETSC_ARCH=arch-linux-c-opt && \
-    python3 setup.py install
-
 # install extras in a new layer
 RUN python3 -m pip install --no-cache-dir \
         pytest-mpi \
@@ -27,6 +18,15 @@ RUN apt-get update -qq && \
         gdal-bin \
         libgdal-dev \
         python3-gdal
+    
+# install gopspl
+WORKDIR /live/lib
+RUN git clone https://github.com/Geodels/gospl.git && \
+    cd gospl && \
+    export F90=gfortran && \
+    export PETSC_DIR=/opt/petsc && \
+    export PETSC_ARCH=arch-linux-c-opt && \
+    python3 setup.py install
 
 # setup space for working in
 VOLUME /live/share
