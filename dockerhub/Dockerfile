@@ -20,6 +20,14 @@ RUN python3 -m pip install --no-cache-dir \
         coveralls \
         twine
 
+RUN pip3 install netCDF4
+RUN apt-get update -qq && \
+    apt-get install -yq --no-install-recommends \
+        build-essential \
+        gdal-bin \
+        libgdal-dev \
+        python3-gdal
+
 # setup space for working in
 VOLUME /live/share
 WORKDIR /live
