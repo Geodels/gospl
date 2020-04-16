@@ -52,6 +52,7 @@ You should have received a copy of the GNU Lesser General Public License along w
    :caption: Usage
 
    install.rst
+   examples.rst
 
 
 .. toctree::
