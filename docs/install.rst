@@ -30,7 +30,7 @@ Once you have installed docker on your system you can *pull* the
 
 .. code:: bash
 
-  docker pull geodels/gospl
+  docker pull geodels/gospl:v0.1.2
 
 You can list all the images available on your system as follow:
 
