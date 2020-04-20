@@ -243,16 +243,19 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff)
     real( kind=8 ), intent(in) :: Kd(nb)
     real( kind=8 ), intent(out) :: dcoeff(nb,8)
 
-    integer :: k, p
-    real( kind=8 ) :: s1, c, v
+    integer :: k, p, n
+    real( kind=8 ) :: s1, c, ck, cn, v
 
     dcoeff = 0.
     do k = 1, nb
       s1 = 0.
       if(FVarea(k)>0)then
-        c = Kd(k)/FVarea(k)
+        ck = Kd(k)
         do p = 1, FVnNb(k)
           if(FVvDist(k,p)>0.)then
+            n = FVnID(k,p)+1
+            cn = Kd(n)
+            c = 0.5*(ck+cn)/FVarea(k)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
             s1 = s1 + v
             dcoeff(k,p+1) = -v
@@ -283,23 +286,28 @@ subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
     real( kind=8 ), intent(out) :: dcoeff(nb,13)
 
     integer :: k, p, n
-    real( kind=8 ) :: s1, c, v, limiter
+    real( kind=8 ) :: s1, c, ck, cn, v, limiter
 
     dcoeff = 0.
     do k = 1, nb
       s1 = 0.
       if(FVarea(k)>0)then
-        c = Kd/FVarea(k)
+        ck = Kd
+        if(dh(k) == 0.) ck = 1.
         do p = 1, FVnNb(k)
           if(FVvDist(k,p)>0.)then
-            v = c*FVvDist(k,p)/FVeLgt(k,p)
             n = FVnID(k,p)+1
+            cn = Kd
+            if(dh(n) == 0.) cn = 1.
+            c = 0.5*(cn + ck)/FVarea(k)
+            v = c*FVvDist(k,p)/FVeLgt(k,p)
             limiter = 0.
             if(elev(n)>elev(k))then
               limiter = dh(n)/(dh(n)+limit)
             elseif(elev(n)<elev(k))then
               limiter = dh(k)/(dh(k)+limit)
             endif
+            limiter = 1.
             s1 = s1 + v*limiter
             dcoeff(k,p+1) = -v*limiter
           endif
@@ -353,7 +361,7 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
   do k = 1, nb
     if(inIDs(k)>0)then
       if(elev(k)<=sl)then
-        rcv(k,1:nRcv) = k-1 
+        rcv(k,1:nRcv) = k-1
       else
         slp = 0.
         id = 0

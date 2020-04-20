@@ -443,6 +443,11 @@ class SPMesh(object):
         Perform hillslope diffusion.
         """
 
+        if self.Cda == 0.0 and self.Cdm == 0.0:
+            return
+
+        t0 = process_time()
+
         # Diffusion matrix construction
         Cd = np.full(self.npoints, self.Cda)
         Cd[self.seaID] = self.Cdm
@@ -472,17 +477,15 @@ class SPMesh(object):
         del ids, indices, indptr, diffCoeffs, Cd
         gc.collect()
 
-        t0 = process_time()
-        if self.Cda > 0.0 or self.Cdm > 0.0:
-            # Get erosion values for considered time step
-            self.hGlobal.copy(result=self.hOld)
-            self._solve_KSP(True, self.Diff, self.hOld, self.hGlobal)
+        # Get erosion values for considered time step
+        self.hGlobal.copy(result=self.hOld)
+        self._solve_KSP(True, self.Diff, self.hOld, self.hGlobal)
 
-            # Update cumulative erosion/deposition and elevation
-            self.stepED.waxpy(-1.0, self.hOld, self.hGlobal)
-            self.cumED.axpy(1.0, self.stepED)
-            self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-            self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+        # Update cumulative erosion/deposition and elevation
+        self.stepED.waxpy(-1.0, self.hOld, self.hGlobal)
+        self.cumED.axpy(1.0, self.stepED)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -596,7 +599,7 @@ class SPMesh(object):
             tmpMat.assemblyEnd()
             sedDiff += tmpMat
             tmpMat.destroy()
-        del ids, indices, indptr
+        del ids, indices, indptr, sedCoeffs, data
         gc.collect()
 
         # Get erosion values for considered time step
