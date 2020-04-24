@@ -7,6 +7,6 @@ h5py==2.10.0
 pandas>=0.24.2
 ruamel.yaml==0.16.10
 fastfunc==0.2.2
-meshio==4.0.10
+meshio==4.0.11
 meshplex==0.12.3
 pre-commit>=1.21.0
