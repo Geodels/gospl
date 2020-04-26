@@ -211,7 +211,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.FAL.getArray().copy()
-            data[data <= 0.0] = 1.0
+            # data[data <= 0.0] = 1.0
             f["flowAcc"][:, 0] = data
             f.create_dataset(
                 "sedLoad",

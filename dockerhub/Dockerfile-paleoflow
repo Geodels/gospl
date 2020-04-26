@@ -218,10 +218,10 @@ RUN git clone --depth=1 https://github.com/Geodels/gospl.git && \
     export PETSC_ARCH=arch-linux-c-opt && \
     python3 setup.py install
 
-RUN git clone --depth=1 https://github.com/badlands-model/badlands.git && \
-    cd badlands/badlands && \
-    python3 setup.py install --user
-# RUN python3 -m pip install --no-cache-dir badlands==2.0.19
+#RUN git clone --depth=1 https://github.com/badlands-model/badlands.git && \
+#    cd badlands/badlands && \
+#    python3 setup.py install --user
+RUN python3 -m pip install --no-cache-dir badlands==2.0.23
 
 # setup space for working in
 VOLUME /live/share

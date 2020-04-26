@@ -1,6 +1,8 @@
 import os
 import gc
 import sys
+import vtk
+import warnings
 import meshplex
 import petsc4py
 import numpy as np
@@ -9,6 +11,8 @@ import pandas as pd
 from mpi4py import MPI
 from scipy import spatial
 from time import process_time
+
+from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import defineTIN
@@ -153,6 +157,86 @@ class UnstMesh(object):
 
         return
 
+    def _xyz2lonlat(self):
+        """
+        Convert x,y,z representation of cartesian points of the
+        spherical triangulation to lat / lon (radians).
+        """
+
+        self.gLatLon = np.zeros((self.gpoints, 2))
+        self.lLatLon = np.zeros((self.npoints, 2))
+
+        self.gLatLon[:, 0] = np.arcsin(self.gCoords[:, 2] / self.radius)
+        self.gLatLon[:, 1] = np.arctan2(self.gCoords[:, 1], self.gCoords[:, 0])
+
+        self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
+        self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
+
+        return
+
+    def _generateVTKmesh(self, points, cells):
+        """
+        Generate a global VTK mesh for coastline contouring.
+        """
+
+        self.vtkMesh = vtk.vtkUnstructuredGrid()
+
+        # Define mesh vertices
+        vtk_points = vtk.vtkPoints()
+        vtk_array = numpy_support.numpy_to_vtk(points, deep=True)
+        vtk_points.SetData(vtk_array)
+        self.vtkMesh.SetPoints(vtk_points)
+
+        # Define mesh cells
+        cell_types = []
+        cell_offsets = []
+        cell_connectivity = []
+        len_array = 0
+        numcells, num_local_nodes = cells.shape
+        cell_types.append(np.empty(numcells, dtype=np.ubyte))
+        cell_types[-1].fill(vtk.VTK_TRIANGLE)
+        cell_offsets.append(
+            np.arange(
+                len_array,
+                len_array + numcells * (num_local_nodes + 1),
+                num_local_nodes + 1,
+                dtype=np.int64,
+            )
+        )
+        cell_connectivity.append(
+            np.c_[
+                num_local_nodes * np.ones(numcells, dtype=cells.dtype), cells
+            ].flatten()
+        )
+        len_array += len(cell_connectivity[-1])
+        cell_types = np.concatenate(cell_types)
+        cell_offsets = np.concatenate(cell_offsets)
+        cell_connectivity = np.concatenate(cell_connectivity)
+
+        # Connectivity
+        connectivity = numpy_support.numpy_to_vtkIdTypeArray(
+            cell_connectivity.astype(np.int64), deep=1
+        )
+        cell_array = vtk.vtkCellArray()
+        cell_array.SetCells(len(cell_types), connectivity)
+
+        self.vtkMesh.SetCells(
+            numpy_support.numpy_to_vtk(
+                cell_types, deep=1, array_type=vtk.vtkUnsignedCharArray().GetDataType()
+            ),
+            numpy_support.numpy_to_vtk(
+                cell_offsets, deep=1, array_type=vtk.vtkIdTypeArray().GetDataType()
+            ),
+            cell_array,
+        )
+
+        # Maybe need to delete some stuff there...
+        del vtk_points, vtk_array, connectivity, numcells, num_local_nodes
+        del cell_array, cell_connectivity, cell_offsets, cell_types
+        gc.collect()
+
+        return
+
     def _buildMesh(self):
         """
         Construct a PETSC mesh and distribute it amongst the different
@@ -165,6 +249,10 @@ class UnstMesh(object):
         self.gCoords = loadData["v"]
         self.gpoints = len(self.gCoords)
         gZ = loadData["z"]
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
+            self._generateVTKmesh(self.gCoords, loadData["c"])
 
         # Store global neighbouring on process rank 0
         if MPIrank == 0:
@@ -315,6 +403,9 @@ class UnstMesh(object):
         self.rainNb = -1
         self.tecNb = -1
         self.flexNb = -1
+
+        # Map longitude/latitude coordinates
+        self._xyz2lonlat()
 
         return
 
@@ -586,6 +677,7 @@ class UnstMesh(object):
         self.hOld.destroy()
         self.hOldLocal.destroy()
         self.stepED.destroy()
+        self.Qs.destroy()
         self.tmpL.destroy()
         self.tmp.destroy()
         self.Eb.destroy()
@@ -594,7 +686,6 @@ class UnstMesh(object):
         self.iMat.destroy()
         if not self.fast:
             self.wMat.destroy()
-            self.wMat0.destroy()
         if not self.fast:
             if self.Cda > 0.0 or self.Cdm > 0.0:
                 self.Diff.destroy()
@@ -609,9 +700,8 @@ class UnstMesh(object):
         if not self.fast:
             del self.distRcv
             del self.wghtVal
-            del self.wghtVal0
             del self.rcvID
-            del self.rcvID0
+            del self.wgtQs
 
         gc.collect()
 

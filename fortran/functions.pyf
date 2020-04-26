@@ -8,30 +8,30 @@ python module _fortran
 
         module meshparams
             integer :: nlocal
-            real(kind=8) :: eps
+            double precision :: eps
             integer, allocatable,dimension(:,:) :: gnid
             integer, allocatable,dimension(:,:) :: fvnid
             integer, allocatable,dimension(:) :: fvnnb
-            real(kind=8), allocatable,dimension(:) :: fvarea
-            real(kind=8), allocatable,dimension(:,:) :: fvelgt
-            real(kind=8), allocatable,dimension(:,:) :: fvvdist
+            double precision, allocatable,dimension(:) :: fvarea
+            double precision, allocatable,dimension(:,:) :: fvelgt
+            double precision, allocatable,dimension(:,:) :: fvvdist
         end module meshparams
 
         subroutine euclid(p1,p2,norm)
-            real(kind=8) dimension(3),intent(in) :: p1
-            real(kind=8) dimension(3),intent(in) :: p2
-            real(kind=8) intent(out) :: norm
+            double precision dimension(3),intent(in) :: p1
+            double precision dimension(3),intent(in) :: p2
+            double precision intent(out) :: norm
         end subroutine euclid
 
         subroutine quicksort(array,first,last,indices)
-            real(kind=8) dimension(:),intent(inout) :: array
+            double precision dimension(:),intent(inout) :: array
             integer intent(in) :: first
             integer intent(in) :: last
             integer dimension(:),intent(inout) :: indices
         end subroutine quicksort
 
         subroutine split(array,low,high,mid,indices)
-            real(kind=8) dimension(:),intent(inout) :: array
+            double precision dimension(:),intent(inout) :: array
             integer intent(in) :: low
             integer intent(in) :: high
             integer intent(out) :: mid
@@ -47,37 +47,46 @@ python module _fortran
         subroutine setHillslopeCoeff(nb,kd,dcoeff)
             use meshparams
             integer :: nb
-            real(kind=8) dimension(nb),intent(in),depend(nb) :: kd
-            real(kind=8) dimension(nb,8),intent(out),depend(nb) :: dcoeff
+            double precision dimension(nb),intent(in),depend(nb) :: kd
+            double precision dimension(nb,8),intent(out),depend(nb) :: dcoeff
         end subroutine setHillslopeCoeff
+
+        subroutine sedReceivers(elev,sl,wgt,nb)
+            use meshparams
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb,13),intent(out),depend(nb) :: wgt
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine sedReceivers
 
         subroutine setDiffusionCoeff(kd,limit,elev,dh,dcoeff,nb)
             use meshparams
-            real(kind=8) intent(in) :: kd
-            real(kind=8) intent(in) :: limit
-            real(kind=8) dimension(nb),intent(in) :: elev
-            real(kind=8) dimension(nb),intent(in),depend(nb) :: dh
-            real(kind=8) dimension(nb,13),intent(out),depend(nb) :: dcoeff
+            double precision intent(in) :: kd
+            double precision intent(in) :: limit
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(in),depend(nb) :: dh
+            double precision dimension(nb,13),intent(out),depend(nb) :: dcoeff
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine setDiffusionCoeff
 
-        subroutine MFDreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)
+        subroutine MFDreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,mxslp,nb)
             use meshparams
             integer intent(in) :: nrcv
-            real(kind=8) intent(in) :: sl
+            double precision intent(in) :: sl
             integer dimension(nb),intent(in) :: inids
-            real(kind=8) dimension(nb),intent(in),depend(nb) :: elev
+            double precision dimension(nb),intent(in),depend(nb) :: elev
             integer dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: rcv
-            real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: dist
-            real(kind=8) dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
+            double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: dist
+            double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
+            double precision dimension(nb),intent(out),depend(nb) :: mxslp
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
         end subroutine MFDreceivers
 
         subroutine fillPIT(sl,elev,fillz,nb)
             use meshparams
-            real(kind=8) intent(in) :: sl
-            real(kind=8) dimension(nb),intent(in) :: elev
-            real(kind=8) dimension(nb),intent(out) :: fillz
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(out) :: fillz
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine fillPIT
 
@@ -89,12 +98,12 @@ python module _fortran
 
         subroutine defineTIN(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,n,nb,m)
             use meshparams
-            real(kind=8) dimension(nb,3),intent(in) :: coords
+            double precision dimension(nb,3),intent(in) :: coords
             integer dimension(n,3),intent(in) :: cells_nodes
             integer dimension(n,3),intent(in),depend(n) :: cells_edges
             integer dimension(m,2),intent(in) :: edges_nodes
-            real(kind=8) dimension(nb),intent(in),depend(nb) :: area
-            real(kind=8) dimension(3,n),intent(in),depend(n) :: circumcenter
+            double precision dimension(nb),intent(in),depend(nb) :: area
+            double precision dimension(3,n),intent(in),depend(n) :: circumcenter
             integer dimension(nb,8),intent(out),depend(nb) :: ngbid
             integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
             integer, optional,check(shape(coords,0)==nb),depend(coords) :: nb=shape(coords,0)

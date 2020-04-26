@@ -15,20 +15,20 @@ module meshparams
 
   integer :: nGlobal
   integer :: nLocal
-  real(kind=8) :: eps
+  double precision :: eps
 
   integer, dimension(:,:), allocatable :: gnID
   integer, dimension(:,:), allocatable :: FVnID
   integer, dimension(:), allocatable :: FVnNb
 
-  real( kind=8 ), dimension(:), allocatable :: FVarea
-  real( kind=8 ), dimension(:,:), allocatable :: FVeLgt
-  real( kind=8 ), dimension(:,:), allocatable :: FVvDist
+  double precision, dimension(:), allocatable :: FVarea
+  double precision, dimension(:,:), allocatable :: FVeLgt
+  double precision, dimension(:,:), allocatable :: FVvDist
 
   ! Queue node definition: index and elevation
   type node
     integer :: id
-    real(kind=8) :: Z
+    double precision :: Z
   end type
 
   ! Definition of priority queue (1 priority: elevation)
@@ -78,7 +78,7 @@ module meshparams
 
     subroutine PQpush(this, Z, id)
       class(pqueue), intent(inout) :: this
-      real(kind=8) :: Z
+      double precision :: Z
       integer  :: id
       type(node)  :: x
       type(node), allocatable  :: tmp(:)
@@ -110,10 +110,10 @@ subroutine euclid( p1, p2, norm)
 
   implicit none
 
-  real( kind=8 ), intent(in) :: p1(3)
-  real( kind=8 ), intent(in) :: p2(3)
-  real( kind=8 ), intent(out) :: norm
-  real( kind=8 ) :: vec(3)
+  double precision, intent(in) :: p1(3)
+  double precision, intent(in) :: p2(3)
+  double precision, intent(out) :: norm
+  double precision :: vec(3)
 
   vec = p2 - p1
   norm = norm2(vec)
@@ -129,13 +129,13 @@ recursive subroutine quicksort(array, first, last, indices)
 ! Nyhoff & Leestma, Fortran 90 for Engineers & Scientists
 ! (New Jersey: Prentice Hall, 1997), pp 575-577.
 
-  real( kind=8 ), dimension(:), intent(inout) :: array
+  double precision, dimension(:), intent(inout) :: array
   integer, intent(in)  :: first, last
   integer, dimension(:), intent(inout) :: indices
 
   interface
        subroutine split(array, low, high, mid, indices)
-          real( kind=8 ), dimension(:), intent(inout) :: array
+          double precision, dimension(:), intent(inout) :: array
           integer, intent(in) :: low, high
           integer, intent(out) :: mid
           integer, dimension(:), intent(inout) :: indices
@@ -159,13 +159,13 @@ subroutine split(array, low, high, mid, indices)
 ! Nyhoff & Leestma, Fortran 90 for Engineers & Scientists
 ! (New Jersey: Prentice Hall, 1997), pp 575-577.
 
-  real( kind=8 ), dimension(:), intent(inout) :: array
+  double precision, dimension(:), intent(inout) :: array
   integer, intent(in) :: low, high
   integer, intent(out) :: mid
   integer, dimension(:), intent(inout) :: indices
 
   integer :: left, right
-  real( kind=8 ) ::  pivot, swap
+  double precision ::  pivot, swap
   integer :: ipivot, iswap
 
   left = low
@@ -240,11 +240,11 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff)
 
     integer :: nb
 
-    real( kind=8 ), intent(in) :: Kd(nb)
-    real( kind=8 ), intent(out) :: dcoeff(nb,8)
+    double precision, intent(in) :: Kd(nb)
+    double precision, intent(out) :: dcoeff(nb,8)
 
     integer :: k, p, n
-    real( kind=8 ) :: s1, c, ck, cn, v
+    double precision :: s1, c, ck, cn, v
 
     dcoeff = 0.
     do k = 1, nb
@@ -278,41 +278,42 @@ subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
 
     integer :: nb
 
-    real( kind=8 ), intent(in) :: Kd
-    real( kind=8 ), intent(in) :: limit
-    real( kind=8 ), intent(in) :: elev(nb)
-    real( kind=8 ), intent(in) :: dh(nb)
+    double precision, intent(in) :: Kd
+    double precision, intent(in) :: limit
+    double precision, intent(in) :: elev(nb)
+    double precision, intent(in) :: dh(nb)
 
-    real( kind=8 ), intent(out) :: dcoeff(nb,13)
+    double precision, intent(out) :: dcoeff(nb,13)
 
     integer :: k, p, n
-    real( kind=8 ) :: s1, c, ck, cn, v, limiter
+    double precision :: s1, c, ck, cn, v, limiter
 
     dcoeff = 0.
     do k = 1, nb
       s1 = 0.
       if(FVarea(k)>0)then
         ck = Kd
-        if(dh(k) == 0.) ck = 1.
+        if(dh(k) == 0.) ck = 0.
         do p = 1, FVnNb(k)
           if(FVvDist(k,p)>0.)then
             n = FVnID(k,p)+1
             cn = Kd
-            if(dh(n) == 0.) cn = 1.
+            ! ck = Kd
+            if(dh(n) == 0.) cn = 0.
             c = 0.5*(cn + ck)/FVarea(k)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
-            limiter = 0.
-            if(elev(n)>elev(k))then
-              limiter = dh(n)/(dh(n)+limit)
-            elseif(elev(n)<elev(k))then
-              limiter = dh(k)/(dh(k)+limit)
-            endif
+            ! limiter = 0.
+            ! if(elev(n)>elev(k))then
+            !   limiter = dh(n)/(dh(n)+limit)
+            ! elseif(elev(n)<elev(k))then
+            !   limiter = dh(k)/(dh(k)+limit)
+            ! endif
             limiter = 1.
             s1 = s1 + v*limiter
             dcoeff(k,p+1) = -v*limiter
           endif
         enddo
-        dcoeff(k,1) = 1.0 + s1
+        dcoeff(k,1) = 1.0 + s1 + dh(k)
       endif
     enddo
 
@@ -320,11 +321,60 @@ subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
 
 end subroutine setDiffusionCoeff
 
+
+! subroutine getShelfDepth( sl, shelfslope, elev, shelfdepth, nb)
+! !*****************************************************************************
+! ! Define maximum shelf depth based on predefined shelf slope
+!
+!     use meshparams
+!     implicit none
+!
+!     double precision, intent(in) :: sl
+!     double precision, intent(in) :: shelfslope
+!     double precision, intent(in) :: elev(nb)
+!
+!     double precision, intent(out) :: shelfdepth(nb)
+!
+!     integer :: k, p, n
+!
+!     shelfdepth = sl
+!
+!     do k = 1, nb
+!       if(elev(k)<sl)then
+!         do p = 1, FVnNb(k)
+!           n = FVnID(k,p)+1
+!           if(n>0 .and. elev(n)<elev(k))then
+!             shelfdepth(n) = min(shelfdepth(n),shelfdepth(k)+FVeLgt(k,p)*shelfslope)
+!             shelfdepth(n) = max(shelfdepth(n),elev(n))
+!           endif
+!         enddo
+!       endif
+!     enddo
+!
+!     where (elev < sealevel) flux = flux + (elev-shelfdepth)*FVarea
+!
+!     do k = 1, nb
+!       if(elev(k)<sl)then
+!         shelfdepth(k)
+!         do p = 1, FVnNb(k)
+!           n = FVnID(k,p)+1
+!           if(n>0 .and. elev(n)<elev(k))then
+!             shelfdepth(n) = min(shelfdepth(n),shelfdepth(n)+FVeLgt(k,p)*shelfslope)
+!             shelfdepth(n) = max(shelfdepth(n),elev(n))
+!           endif
+!         enddo
+!       endif
+!     enddo
+!
+!     return
+!
+! end subroutine getShelfDepth
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! FLOW DIRECTION FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
+subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, mxslp, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction algorithm
 
@@ -333,7 +383,7 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 
   interface
     recursive subroutine quicksort(array, first, last, indices)
-      real( kind=8 ), dimension(:), intent(inout) :: array
+      double precision, dimension(:), intent(inout) :: array
       integer, intent(in)  :: first, last
       integer, dimension(:), intent(inout) :: indices
     end subroutine quicksort
@@ -343,20 +393,22 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 
   integer, intent(in) :: nRcv
   integer, intent(in) :: inIDs(nb)
-  real(kind=8),intent(in) :: sl
-  real( kind=8 ), intent(in) :: elev(nb)
+  double precision,intent(in) :: sl
+  double precision, intent(in) :: elev(nb)
 
   integer, intent(out) :: rcv(nb,nRcv)
-  real( kind=8 ), intent(out) :: dist(nb,nRcv)
-  real( kind=8 ), intent(out) :: wgt(nb,nRcv)
+  double precision, intent(out) :: dist(nb,nRcv)
+  double precision, intent(out) :: wgt(nb,nRcv)
+  double precision, intent(out) :: mxslp(nb)
 
   integer :: k, n, p, kk
-  real( kind=8 ) :: slp(8),dst(8),val,slope(8)
+  double precision :: slp(8),dst(8),val,slope(8)
   integer :: id(8)
 
   rcv = -1
   dist = 0.
   wgt = 0.
+  mxslp = 0.
 
   do k = 1, nb
     if(inIDs(k)>0)then
@@ -376,6 +428,7 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
               slp(kk) = val
               id(kk) = n-1
               dst(kk) = FVeLgt(k,p)
+              mxslp(k) = max(mxslp(k),slp(kk))
             endif
           endif
         enddo
@@ -391,7 +444,7 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
             val = val + slp(p)
           enddo
           do p = 1, nRcv
-            wgt(k,p) = slp(p)/val
+            wgt(k,p) = slp(p) / val
           enddo
         else
           rcv(k,1:nRcv) = k-1
@@ -418,6 +471,53 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 
 end subroutine MFDreceivers
 
+subroutine sedReceivers( elev, sl, wgt, nb)
+!*****************************************************************************
+! Compute receiver characteristics for marine sediment deposiiton
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+
+  double precision,intent(in) :: sl
+  double precision, intent(in) :: elev(nb)
+
+  double precision, intent(out) :: wgt(nb,13)
+
+  integer :: k, n, p
+  double precision :: slp(13),s1,val
+
+  wgt = 0.
+
+  do k = 1, nb
+    if(elev(k)<=sl)then
+      s1 = 0.
+      slp = 0.
+      do p = 1, FVnNb(k)
+        n = FVnID(k,p)+1
+        if(n>0 .and. FVeLgt(k,p)>0.)then
+          if(elev(k)>elev(n))then
+            val = (elev(k) - elev(n))/FVeLgt(k,p)
+            slp(p) = val
+            s1 = s1 + val
+          endif
+        endif
+      enddo
+      if(s1>0)then
+        do p = 2, 13
+          wgt(k,p) = slp(p-1) / s1
+        enddo
+      else
+        wgt(k,1) = 1.
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine sedReceivers
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! PIT FILLING FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -427,9 +527,9 @@ subroutine fillPIT(sl, elev, fillz, nb)
   implicit none
 
   integer :: nb
-  real(kind=8),intent(in) :: sl
-  real(kind=8),intent(in) :: elev(nb)
-  real(kind=8),intent(out) :: fillz(nb)
+  double precision,intent(in) :: sl
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(out) :: fillz(nb)
   logical :: flag(nb)
 
   integer :: i, k, c
@@ -515,9 +615,9 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   integer, intent(in) :: cells_edges(n,3)
   integer, intent(in) :: edges_nodes(m, 2)
 
-  real( kind=8 ), intent(in) :: coords(nb,3)
-  real( kind=8 ), intent(in) :: area(nb)
-  real( kind=8 ), intent(in) :: circumcenter(3,n)
+  double precision, intent(in) :: coords(nb,3)
+  double precision, intent(in) :: area(nb)
+  double precision, intent(in) :: circumcenter(3,n)
 
   integer, intent(out) :: ngbID(nb, 8)
 
@@ -525,8 +625,8 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   integer :: nid(2), nc(3), edge(nb, 8)
   integer :: edgeNb(3), edges(3,2), cell_ids(nb, 8)
 
-  real( kind=8 ) :: coords0(3), coordsID(3)
-  real( kind=8 ) :: midpoint(3), dist
+  double precision :: coords0(3), coordsID(3)
+  double precision :: midpoint(3), dist
 
   logical :: inside
 

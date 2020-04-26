@@ -138,6 +138,8 @@ Requirements
 -  meshio **== 4.0.10**
 -  meshplex **== 0.12.3**
 -  pre-commit **>= 1.21.0**
+-  vtk **== 8.1.2**
+-  sklearn
 
 
 Install

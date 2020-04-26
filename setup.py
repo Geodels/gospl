@@ -155,6 +155,8 @@ if __name__ == "__main__":
             "petsc4py>=3.8.1",
             "pre-commit",
             "fastfunc==0.2.2",
+            "vtk==8.1.2",
+            "sklearn",
         ],
         python_requires=">=3.3",
         classifiers=[

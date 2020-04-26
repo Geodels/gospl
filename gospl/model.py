@@ -90,7 +90,7 @@ class Model(parentModel):
 
             if not self.fast:
                 # Compute Flow Accumulation
-                _SPMesh.FlowAccumulation(self)
+                _SPMesh.flowAccumulation(self)
 
             # Output time step for first step
             if self.tNow == self.tStart:
