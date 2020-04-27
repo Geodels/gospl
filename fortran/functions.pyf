@@ -51,13 +51,20 @@ python module _fortran
             double precision dimension(nb,8),intent(out),depend(nb) :: dcoeff
         end subroutine setHillslopeCoeff
 
-        subroutine sedReceivers(elev,sl,wgt,nb)
+        subroutine bedReceivers(elev,sl,wgt,nb)
             use meshparams
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev
             double precision dimension(nb,13),intent(out),depend(nb) :: wgt
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine sedReceivers
+        end subroutine bedReceivers
+
+        subroutine suspCoeff(nb,kd,dcoeff)
+            use meshparams
+            integer :: nb
+            double precision dimension(nb),intent(in),depend(nb) :: kd
+            double precision dimension(nb,8),intent(out),depend(nb) :: dcoeff
+        end subroutine suspCoeff
 
         subroutine setDiffusionCoeff(kd,limit,elev,dh,dcoeff,nb)
             use meshparams
@@ -96,7 +103,7 @@ python module _fortran
             integer dimension(nb,6),intent(in),depend(nb) :: ngbid
         end subroutine ngbGlob
 
-        subroutine defineTIN(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,n,nb,m)
+        subroutine defineTIN(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
             use meshparams
             double precision dimension(nb,3),intent(in) :: coords
             integer dimension(n,3),intent(in) :: cells_nodes
@@ -105,6 +112,7 @@ python module _fortran
             double precision dimension(nb),intent(in),depend(nb) :: area
             double precision dimension(3,n),intent(in),depend(n) :: circumcenter
             integer dimension(nb,8),intent(out),depend(nb) :: ngbid
+            double precision intent(out) :: edgemax
             integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
             integer, optional,check(shape(coords,0)==nb),depend(coords) :: nb=shape(coords,0)
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)

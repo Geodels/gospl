@@ -269,6 +269,48 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff)
 
 end subroutine setHillslopeCoeff
 
+subroutine suspCoeff(nb, Ks, dcoeff)
+!*****************************************************************************
+! Define suspension coefficients
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    double precision, intent(in) :: Ks(nb)
+    double precision, intent(out) :: dcoeff(nb,8)
+
+    integer :: k, p, n
+    double precision :: s1, c, ck, cn, v
+
+    dcoeff = 0.
+    do k = 1, nb
+      s1 = 0.
+      if(FVarea(k)>0)then
+        ck = Ks(k)
+        if(ck>0.)then
+          do p = 1, FVnNb(k)
+            n = FVnID(k,p)+1
+            cn = Ks(n)
+            if(cn>0. .and. FVvDist(k,p)>0.)then
+              c = 0.5*(ck+cn)/FVarea(k)
+              v = c*FVvDist(k,p)/FVeLgt(k,p)
+              s1 = s1 + v
+              dcoeff(k,p+1) = -v
+            endif
+          enddo
+          dcoeff(k,1) = 1.0 + s1
+        else
+          dcoeff(k,1) = 1.0
+        endif
+      endif
+    enddo
+
+    return
+
+end subroutine suspCoeff
+
 subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
 !*****************************************************************************
 ! Define freshly deposited sediments diffusion implicit matrix coefficients
@@ -298,7 +340,6 @@ subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
           if(FVvDist(k,p)>0.)then
             n = FVnID(k,p)+1
             cn = Kd
-            ! ck = Kd
             if(dh(n) == 0.) cn = 0.
             c = 0.5*(cn + ck)/FVarea(k)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
@@ -320,55 +361,6 @@ subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
     return
 
 end subroutine setDiffusionCoeff
-
-
-! subroutine getShelfDepth( sl, shelfslope, elev, shelfdepth, nb)
-! !*****************************************************************************
-! ! Define maximum shelf depth based on predefined shelf slope
-!
-!     use meshparams
-!     implicit none
-!
-!     double precision, intent(in) :: sl
-!     double precision, intent(in) :: shelfslope
-!     double precision, intent(in) :: elev(nb)
-!
-!     double precision, intent(out) :: shelfdepth(nb)
-!
-!     integer :: k, p, n
-!
-!     shelfdepth = sl
-!
-!     do k = 1, nb
-!       if(elev(k)<sl)then
-!         do p = 1, FVnNb(k)
-!           n = FVnID(k,p)+1
-!           if(n>0 .and. elev(n)<elev(k))then
-!             shelfdepth(n) = min(shelfdepth(n),shelfdepth(k)+FVeLgt(k,p)*shelfslope)
-!             shelfdepth(n) = max(shelfdepth(n),elev(n))
-!           endif
-!         enddo
-!       endif
-!     enddo
-!
-!     where (elev < sealevel) flux = flux + (elev-shelfdepth)*FVarea
-!
-!     do k = 1, nb
-!       if(elev(k)<sl)then
-!         shelfdepth(k)
-!         do p = 1, FVnNb(k)
-!           n = FVnID(k,p)+1
-!           if(n>0 .and. elev(n)<elev(k))then
-!             shelfdepth(n) = min(shelfdepth(n),shelfdepth(n)+FVeLgt(k,p)*shelfslope)
-!             shelfdepth(n) = max(shelfdepth(n),elev(n))
-!           endif
-!         enddo
-!       endif
-!     enddo
-!
-!     return
-!
-! end subroutine getShelfDepth
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! FLOW DIRECTION FUNCTIONS !!
@@ -471,7 +463,7 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, mxslp, nb)
 
 end subroutine MFDreceivers
 
-subroutine sedReceivers( elev, sl, wgt, nb)
+subroutine bedReceivers( elev, sl, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics for marine sediment deposiiton
 
@@ -516,7 +508,7 @@ subroutine sedReceivers( elev, sl, wgt, nb)
 
   return
 
-end subroutine sedReceivers
+end subroutine bedReceivers
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! PIT FILLING FUNCTIONS !!
@@ -602,7 +594,7 @@ subroutine ngbGlob( nb, ngbIDs )
 end subroutine ngbGlob
 
 subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
-                      circumcenter, ngbID, n, nb, m)
+                      circumcenter, ngbID, edgemax, n, nb, m)
 !*****************************************************************************
 ! Compute for a specific triangulation the characteristics of each node and
 ! associated voronoi for finite volume discretizations
@@ -620,6 +612,7 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   double precision, intent(in) :: circumcenter(3,n)
 
   integer, intent(out) :: ngbID(nb, 8)
+  double precision, intent(out) :: edgemax
 
   integer :: i, n1, n2, k, l, p, eid, cid, e, id
   integer :: nid(2), nc(3), edge(nb, 8)
@@ -629,7 +622,6 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   double precision :: midpoint(3), dist
 
   logical :: inside
-
 
   ! Define fortran global parameters
   nLocal = nb
@@ -651,6 +643,7 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   ngbID = -1
   FVeLgt = 0.
   FVvDist = 0.
+  edgemax = 0.
 
   ! Find all cells surrounding a given vertice
   do i = 1, n
@@ -720,6 +713,7 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
         coordsID = coords(nid(1)+1,1:3)
       endif
       call euclid( coords0, coordsID, FVeLgt(k,l) )
+      edgemax = max(edgemax, FVeLgt(k,l))
     enddo
 
     ! Get voronoi edge lengths

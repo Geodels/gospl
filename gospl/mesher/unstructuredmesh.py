@@ -94,9 +94,12 @@ class UnstMesh(object):
         cells_edges = Tmesh.cells["edges"]
 
         # Finite volume discretisation
-        self.FVmesh_ngbID = defineTIN(
+        edgeMax = np.zeros(1, dtype=np.float64)
+        self.FVmesh_ngbID, edgeMax[0] = defineTIN(
             self.lcoords, cells_nodes, cells_edges, edges_nodes, self.area, cc.T
         )
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, edgeMax, op=MPI.MAX)
+        self.edgeMax = edgeMax[0]
         del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
         gc.collect()
 
@@ -395,6 +398,7 @@ class UnstMesh(object):
         areaLocal.setArray(self.area)
         self.dm.localToGlobal(areaLocal, self.areaGlobal)
         areaLocal.destroy()
+        self.maxArea = self.areaGlobal.max()
 
         # Forcing event number
         self.bG = self.hGlobal.duplicate()
@@ -665,8 +669,6 @@ class UnstMesh(object):
         self.hGlobal.destroy()
         self.FAG.destroy()
         self.FAL.destroy()
-        self.FillG.destroy()
-        self.FillL.destroy()
         self.cumED.destroy()
         self.cumEDLocal.destroy()
         self.vSed.destroy()

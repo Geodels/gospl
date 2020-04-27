@@ -33,11 +33,15 @@
 #define  _setHillslopeCoeff   _sethillslopecoeff
 #define  _setHillslopeCoeff_   _sethillslopecoeff_
 
-#define  sedReceivers  sedreceivers
-#define  sedReceivers_   sedreceivers_
-#define  _sedReceivers   _sedreceivers
-#define  _sedReceivers_   _sedreceivers_
+#define  bedReceivers  bedreceivers
+#define  bedReceivers_   bedreceivers_
+#define  _bedReceivers   _bedreceivers
+#define  _bedReceivers_   _bedreceivers_
 
+#define  suspCoeff  suspcoeff
+#define  suspCoeff_   suspcoeff_
+#define  _suspCoeff   _suspcoeff
+#define  _suspCoeff_   _suspcoeff_
 
 #define  setDiffusionCoeff  setdiffusioncoeff
 #define  setDiffusionCoeff_   setdiffusioncoeff_
