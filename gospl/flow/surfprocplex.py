@@ -16,11 +16,9 @@ from vtk.util import numpy_support
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fillPIT
     from gospl._fortran import setMaxNb
-    from gospl._fortran import suspCoeff
+    from gospl._fortran import marineCoeff
     from gospl._fortran import MFDreceivers
-    from gospl._fortran import bedReceivers
     from gospl._fortran import setHillslopeCoeff
-    from gospl._fortran import setDiffusionCoeff
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -61,20 +59,6 @@ class SPMesh(object):
         self.vSedLocal = self.hLocal.duplicate()
 
         self.maxnb = setMaxNb(self.npoints)
-
-        # Find maximum time stepping for diffusion
-        # diffMax = max(self.sedimentK, self.Cda)
-        # diffMax = max(diffMax, self.Cdm)
-        # self.diffDt = self.dt
-        # self.diffStep = 1
-        # self.lastDt = self.dt
-        # if diffMax > 0:
-        #     diffStep = round(self.maxArea[1] / (2.0 * diffMax))
-        #     if diffStep < self.dt:
-        #         nb = math.ceil(self.dt / diffStep)
-        #         self.diffDt = round(self.diffDt / float(nb), -3)
-        #         self.diffStep = math.ceil(self.dt / self.diffDt)
-        #         self.lastDt = self.dt - self.diffDt * float(self.diffStep - 1)
 
         return
 
@@ -156,7 +140,7 @@ class SPMesh(object):
 
         return vector2
 
-    def _buildFlowDirection(self, h1):
+    def _buildFlowDirection(self, h, hfill):
         """
         Build multiple flow direction based on neighbouring slopes.
 
@@ -166,12 +150,13 @@ class SPMesh(object):
         t0 = process_time()
 
         # Define multiple flow directions
-        self.rcvID, self.distRcv, self.wghtVal, self.maxSlp = MFDreceivers(
-            self.flowDir, self.inIDs, h1, self.sealevel
+        self.rcvID, self.distRcv, self.wghtVal = MFDreceivers(
+            self.flowDir, self.inIDs, hfill, self.sealevel
         )
 
         # Get marine regions
-        self.seaID = np.where(h1 <= self.sealevel)[0]
+        # self.seaID = np.where(hfill <= self.sealevel)[0]
+        self.seaID = np.where(h <= self.sealevel)[0]
 
         # Set marine nodes
         self.rcvID[self.seaID, :] = np.tile(self.seaID, (self.flowDir, 1)).T
@@ -204,16 +189,11 @@ class SPMesh(object):
         # Compute Deposition and Sediment Flux
         self._cptSedFlux()
 
-        # Compute Marine Sediment Deposition
-        # for k in range(self.diffStep - 1):
-        # self._sedbedDeposition()  # Bedload first
-        # Suspended load second
-        # self._sedsuspDeposition(self.diffDt)
-        self._sedsuspDeposition()
+        # Compute Continental Sediment Deposition
+        self._continentalDeposition()
 
-        # Compute Fresh Sediment Diffusion
-        # for k in range(1):
-        #     self._sedimentDiffusion(self.dt * 1.0)
+        # Compute Marine Sediment Deposition
+        self._marineDeposition()
 
         # Compute Hillslope Diffusion Law
         self._hillSlope()
@@ -292,10 +272,7 @@ class SPMesh(object):
 
         # Build flow direction
         t0 = process_time()
-        self._buildFlowDirection(nZ[self.glIDs])
-
-        # Get marine bedload weight coefficients
-        self.wgtCoeffs = bedReceivers(nZ[self.glIDs], self.sealevel)
+        self._buildFlowDirection(gZ[self.glIDs], nZ[self.glIDs])
 
         # Define coastal points
         with warnings.catch_warnings():
@@ -484,7 +461,7 @@ class SPMesh(object):
         t0 = process_time()
         SLMat = self.wMat.copy()
         SLMat -= self.iMat
-        SLMat.scale(1.0 - self.wgth)
+        SLMat.scale(1.0 - self.wght)
         SLMat += self.iMat
 
         # Get erosion rate (m/yr)
@@ -509,21 +486,25 @@ class SPMesh(object):
         del Eb
         gc.collect()
 
-        return
-
-    def _hillSlope(self):
+    def _continentalDeposition(self):
         """
-        Perform hillslope diffusion.
+        Perform continental deposition from incoming river flux.
         """
-
-        if self.Cda == 0.0 and self.Cdm == 0.0:
-            return
 
         t0 = process_time()
+        if self.wght == 0.0 or self.sedimentK == 0.0:
+            return
+
+        # Get continental deposition thickness
+        self.stepED.set(0.0)
+        self.stepED.axpy(1.0, self.Eb)
+        self.stepED.pointwiseMult(self.stepED, self.areaGlobal)
+        self.stepED.axpy(1.0, self.vSed)
+        self.stepED.scale(self.wght * self.dt / (1.0 - self.wght))
+        self.stepED.pointwiseDivide(self.stepED, self.areaGlobal)
 
         # Diffusion matrix construction
-        Cd = np.full(self.npoints, self.Cda, dtype=np.float64)
-        Cd[self.seaID] = self.Cdm
+        Cd = np.full(self.npoints, self.sedimentK, dtype=np.float64)
 
         diffCoeffs = setHillslopeCoeff(self.npoints, Cd * self.dt)
         self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
@@ -549,29 +530,32 @@ class SPMesh(object):
         gc.collect()
 
         # Get elevation values for considered time step
-        self.hGlobal.copy(result=self.hOld)
-        self._solve_KSP(True, self.Diff, self.hOld, self.hGlobal)
+        self._solve_KSP(True, self.Diff, self.stepED, self.tmp)
 
-        # Update cumulative erosion/deposition and elevation
-        self.stepED.waxpy(-1.0, self.hOld, self.hGlobal)
-        self.cumED.axpy(1.0, self.stepED)
+        self.cumED.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
+
+        self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Compute Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
+                "Compute Continental Deposition (%0.02f seconds)"
+                % (process_time() - t0),
                 flush=True,
             )
 
         return
 
-    def _sedsuspDeposition(self):
+    def _marineDeposition(self):
         """
-        Perform sediment suspended deposition from incoming river flux.
+        Perform marine deposition from incoming river continental flux.
         """
 
         t0 = process_time()
+
+        if self.sedimentK == 0.0:
+            return
 
         # Get the marine volumetric sediment rate (m3 / yr) to diffuse
         # during the time step as suspended material...
@@ -606,7 +590,7 @@ class SPMesh(object):
         maxSedVol = self.Qs.sum()
         self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
 
-        diffCoeffs = suspCoeff(self.npoints, Cd * self.dt)
+        diffCoeffs = marineCoeff(self.npoints, Cd * self.dt)
         self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
 
@@ -693,41 +677,30 @@ class SPMesh(object):
                 flush=True,
             )
 
-    def _sedbedDeposition(self):
+        return
+
+    def _hillSlope(self):
         """
-        Perform sediment bedload deposition from incoming river flux.
+        Perform hillslope diffusion.
         """
+
+        if self.Cda == 0.0 and self.Cdm == 0.0:
+            return
 
         t0 = process_time()
 
-        # Get the marine volumetric sediment rate (m3 / yr) to diffuse
-        # during the time step...
-        tmp = self.vSedLocal.getArray().copy()
-        Qs = np.zeros(self.npoints, dtype=np.float64)
+        # Diffusion matrix construction
+        Cd = np.full(self.npoints, self.Cda, dtype=np.float64)
+        Cd[self.seaID] = self.Cdm
 
-        # Convert in volume (m3) for considered timestep
-        # Consider that 5% of continental sediments are
-        # transported as bedload load
-        Qs[self.seaID] = 0.05 * tmp[self.seaID] * self.dt
-
-        if np.sum(Qs) == 0:
-            del Qs, tmp
-            gc.collect()
-
-            return
-
-        # Build bedload sediment fluxes vector
-        self.tmpL.setArray(Qs)
-        self.dm.localToGlobal(self.tmpL, self.Qs)
-
-        # Sediment fluxes weight matrix construction
-        wgtQs = self._matrix_build_diag(self.wgtCoeffs[:, 0])
+        diffCoeffs = setHillslopeCoeff(self.npoints, Cd * self.dt)
+        self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
 
         for k in range(0, self.maxnb):
             tmpMat = self._matrix_build()
             indices = self.FVmesh_ngbID[:, k].copy()
-            data = self.wgtCoeffs[:, k + 1]
+            data = diffCoeffs[:, k + 1]
             ids = np.nonzero(data == 0.0)
             indices[ids] = ids
             tmpMat.assemblyBegin()
@@ -738,133 +711,14 @@ class SPMesh(object):
                 petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
-            wgtQs += tmpMat
+            self.Diff += tmpMat
             tmpMat.destroy()
-
-        self.wgtQs = wgtQs.transpose().copy()
-        wgtQs.destroy()
-        del indices, data, ids, indptr
+        del ids, indices, indptr, diffCoeffs, Cd
         gc.collect()
 
-        # Build maximum sediment volume (in m3)
-        # Here we fix the bedload induced slope for the shelf
-        # to -1.e-5
-        h0 = self.hLocal.getArray().copy()
-        toplimit = self.sealevel - self.coastDist * 1.0e-5
-        maxD = (toplimit - h0) * self.area
-        maxD[maxD < 0.0] = 0.0
-
-        # Initialise local deposit volume
-        Db = np.zeros(self.npoints, dtype=np.float64)
-
-        iter = 0
-        while self.Qs.sum() > 0 and iter < 1000:
-
-            # Check local cell deposits
-            excess = np.where(np.logical_and(Qs > 0, Qs >= maxD))[0]
-            added = np.where(np.logical_and(Qs > 0, Qs < maxD))[0]
-            # Overfilling cells
-            Db[excess] += maxD[excess]
-            Qs[excess] -= maxD[excess]
-            maxD[excess] = 0.0
-            # Underfilling cells
-            Db[added] += Qs[added]
-            maxD[added] -= Qs[added]
-            Qs[added] = 0.0
-
-            # Distribute overfilling fluxes downstream
-            self.tmpL.setArray(Qs)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.wgtQs.mult(self.tmp, self.Qs)
-
-            # Update downstream nodes receiving fluxes
-            self.dm.globalToLocal(self.Qs, self.tmpL)
-            Qs = self.tmpL.getArray().copy()
-            iter += 1
-            if iter >= 1000 and MPIrank == 0:
-                print(
-                    "Bedload sediment marine deposition not converging; decrease time step",
-                    flush=True,
-                )
-
-        # Get deposition thickness
-        self.stepED.set(0.0)
-        if self.wgth > 0.0:
-            self.stepED.axpy(-1.0, self.Eb)
-            self.stepED.pointwiseMult(self.stepED, self.areaGlobal)
-            self.stepED.axpy(1.0, self.vSed)
-            self.stepED.scale(self.wgth * self.dt / (1.0 - self.wgth))
-            self.stepED.pointwiseDivide(self.stepED, self.areaGlobal)
-
-        self.tmpL.setArray(Db / self.area)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-
-        self.stepED.axpy(1.0, self.tmp)
-        self.cumED.axpy(1.0, self.stepED)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-
-        self.hGlobal.axpy(1.0, self.stepED)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
-
-        del Qs, tmp, h0, maxD, Db, excess, added
-        gc.collect()
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Compute Bedload Sediment Deposition (%0.02f seconds)"
-                % (process_time() - t0),
-                flush=True,
-            )
-
-        return
-
-    def _sedimentDiffusion(self, dt):
-        """
-        Perform freshly deposited sediment diffusion.
-        """
-
-        t0 = process_time()
-        limit = 1.0
-        h0 = self.hOldLocal.getArray().copy()
-
-        h = self.hLocal.getArray().copy()
-        dh = h - h0
-        dh[dh < 0.0] = 0.0
-
-        # Get local sediment flux (m/yr)
-        Qs = self.tmpL.getArray().copy()
-
-        sedCoeffs = setDiffusionCoeff(self.sedimentK * dt, limit, h, Qs)
-        sedDiff = self._matrix_build_diag(sedCoeffs[:, 0])
-        del h, dh
-        gc.collect()
-
-        for k in range(0, self.maxnb):
-            tmpMat = self._matrix_build()
-            indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
-            indices = self.FVmesh_ngbID[:, k].copy()
-            ids = np.nonzero(indices < 0)
-            indices[ids] = ids
-            data = sedCoeffs[:, k + 1]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(petsc4py.PETSc.IntType),
-                data,
-                petsc4py.PETSc.InsertMode.INSERT_VALUES,
-            )
-            tmpMat.assemblyEnd()
-            sedDiff += tmpMat
-            tmpMat.destroy()
-        del ids, indices, indptr, sedCoeffs, data
-        gc.collect()
-
-        # Get erosion values for considered time step
+        # Get elevation values for considered time step
         self.hGlobal.copy(result=self.hOld)
-        self._solve_KSP(True, sedDiff, self.hOld, self.hGlobal)
-        sedDiff.destroy()
+        self._solve_KSP(True, self.Diff, self.hOld, self.hGlobal)
 
         # Update cumulative erosion/deposition and elevation
         self.stepED.waxpy(-1.0, self.hOld, self.hGlobal)
@@ -874,7 +728,7 @@ class SPMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Diffuse Top Sediment (%0.02f seconds)" % (process_time() - t0),
+                "Compute Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 

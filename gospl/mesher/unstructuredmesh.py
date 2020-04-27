@@ -703,7 +703,6 @@ class UnstMesh(object):
             del self.distRcv
             del self.wghtVal
             del self.rcvID
-            del self.wgtQs
 
         gc.collect()
 

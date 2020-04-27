@@ -51,32 +51,14 @@ python module _fortran
             double precision dimension(nb,8),intent(out),depend(nb) :: dcoeff
         end subroutine setHillslopeCoeff
 
-        subroutine bedReceivers(elev,sl,wgt,nb)
-            use meshparams
-            double precision intent(in) :: sl
-            double precision dimension(nb),intent(in) :: elev
-            double precision dimension(nb,13),intent(out),depend(nb) :: wgt
-            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine bedReceivers
-
-        subroutine suspCoeff(nb,kd,dcoeff)
+        subroutine marineCoeff(nb,kd,dcoeff)
             use meshparams
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: kd
             double precision dimension(nb,8),intent(out),depend(nb) :: dcoeff
-        end subroutine suspCoeff
+        end subroutine marineCoeff
 
-        subroutine setDiffusionCoeff(kd,limit,elev,dh,dcoeff,nb)
-            use meshparams
-            double precision intent(in) :: kd
-            double precision intent(in) :: limit
-            double precision dimension(nb),intent(in) :: elev
-            double precision dimension(nb),intent(in),depend(nb) :: dh
-            double precision dimension(nb,13),intent(out),depend(nb) :: dcoeff
-            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine setDiffusionCoeff
-
-        subroutine MFDreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,mxslp,nb)
+        subroutine MFDreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)
             use meshparams
             integer intent(in) :: nrcv
             double precision intent(in) :: sl
@@ -85,7 +67,6 @@ python module _fortran
             integer dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: rcv
             double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: dist
             double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
-            double precision dimension(nb),intent(out),depend(nb) :: mxslp
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
         end subroutine MFDreceivers
 

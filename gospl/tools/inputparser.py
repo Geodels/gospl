@@ -236,17 +236,17 @@ class ReadYaml(object):
             except KeyError:
                 self.frac_fine = 0.0
             try:
-                # `wgth` is the percentage of upstream sediment flux
+                # `wght` is the percentage of upstream sediment flux
                 # that will be deposited on each cell...
-                self.wgth = splDict["wgth"]
-                if self.wgth >= 1.0:
-                    self.wgth = 0.999
+                self.wght = splDict["wght"]
+                if self.wght >= 1.0:
+                    self.wght = 0.999
             except KeyError:
-                self.wgth = 0.0
+                self.wght = 0.0
 
         except KeyError:
             self.K = 1.0e-12
-            self.wgth = 0.0
+            self.wght = 0.0
             self.frac_fine = 0.0
 
         return

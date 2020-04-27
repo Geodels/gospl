@@ -269,7 +269,7 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff)
 
 end subroutine setHillslopeCoeff
 
-subroutine suspCoeff(nb, Ks, dcoeff)
+subroutine marineCoeff(nb, Ks, dcoeff)
 !*****************************************************************************
 ! Define suspension coefficients
 
@@ -309,64 +309,13 @@ subroutine suspCoeff(nb, Ks, dcoeff)
 
     return
 
-end subroutine suspCoeff
-
-subroutine setDiffusionCoeff(Kd, limit, elev, dh, dcoeff, nb)
-!*****************************************************************************
-! Define freshly deposited sediments diffusion implicit matrix coefficients
-
-    use meshparams
-    implicit none
-
-    integer :: nb
-
-    double precision, intent(in) :: Kd
-    double precision, intent(in) :: limit
-    double precision, intent(in) :: elev(nb)
-    double precision, intent(in) :: dh(nb)
-
-    double precision, intent(out) :: dcoeff(nb,13)
-
-    integer :: k, p, n
-    double precision :: s1, c, ck, cn, v, limiter
-
-    dcoeff = 0.
-    do k = 1, nb
-      s1 = 0.
-      if(FVarea(k)>0)then
-        ck = Kd
-        if(dh(k) == 0.) ck = 0.
-        do p = 1, FVnNb(k)
-          if(FVvDist(k,p)>0.)then
-            n = FVnID(k,p)+1
-            cn = Kd
-            if(dh(n) == 0.) cn = 0.
-            c = 0.5*(cn + ck)/FVarea(k)
-            v = c*FVvDist(k,p)/FVeLgt(k,p)
-            ! limiter = 0.
-            ! if(elev(n)>elev(k))then
-            !   limiter = dh(n)/(dh(n)+limit)
-            ! elseif(elev(n)<elev(k))then
-            !   limiter = dh(k)/(dh(k)+limit)
-            ! endif
-            limiter = 1.
-            s1 = s1 + v*limiter
-            dcoeff(k,p+1) = -v*limiter
-          endif
-        enddo
-        dcoeff(k,1) = 1.0 + s1 + dh(k)
-      endif
-    enddo
-
-    return
-
-end subroutine setDiffusionCoeff
+end subroutine marineCoeff
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! FLOW DIRECTION FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, mxslp, nb)
+subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction algorithm
 
@@ -391,7 +340,6 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, mxslp, nb)
   integer, intent(out) :: rcv(nb,nRcv)
   double precision, intent(out) :: dist(nb,nRcv)
   double precision, intent(out) :: wgt(nb,nRcv)
-  double precision, intent(out) :: mxslp(nb)
 
   integer :: k, n, p, kk
   double precision :: slp(8),dst(8),val,slope(8)
@@ -400,7 +348,6 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, mxslp, nb)
   rcv = -1
   dist = 0.
   wgt = 0.
-  mxslp = 0.
 
   do k = 1, nb
     if(inIDs(k)>0)then
@@ -420,7 +367,6 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, mxslp, nb)
               slp(kk) = val
               id(kk) = n-1
               dst(kk) = FVeLgt(k,p)
-              mxslp(k) = max(mxslp(k),slp(kk))
             endif
           endif
         enddo
@@ -462,53 +408,6 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, mxslp, nb)
   return
 
 end subroutine MFDreceivers
-
-subroutine bedReceivers( elev, sl, wgt, nb)
-!*****************************************************************************
-! Compute receiver characteristics for marine sediment deposiiton
-
-  use meshparams
-  implicit none
-
-  integer :: nb
-
-  double precision,intent(in) :: sl
-  double precision, intent(in) :: elev(nb)
-
-  double precision, intent(out) :: wgt(nb,13)
-
-  integer :: k, n, p
-  double precision :: slp(13),s1,val
-
-  wgt = 0.
-
-  do k = 1, nb
-    if(elev(k)<=sl)then
-      s1 = 0.
-      slp = 0.
-      do p = 1, FVnNb(k)
-        n = FVnID(k,p)+1
-        if(n>0 .and. FVeLgt(k,p)>0.)then
-          if(elev(k)>elev(n))then
-            val = (elev(k) - elev(n))/FVeLgt(k,p)
-            slp(p) = val
-            s1 = s1 + val
-          endif
-        endif
-      enddo
-      if(s1>0)then
-        do p = 2, 13
-          wgt(k,p) = slp(p-1) / s1
-        enddo
-      else
-        wgt(k,1) = 1.
-      endif
-    endif
-  enddo
-
-  return
-
-end subroutine bedReceivers
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! PIT FILLING FUNCTIONS !!
