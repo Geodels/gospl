@@ -100,6 +100,11 @@ class UnstMesh(object):
         )
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, edgeMax, op=MPI.MAX)
         self.edgeMax = edgeMax[0]
+
+        self.garea = np.zeros(self.gpoints)
+        self.garea = self.area[self.lgIDs]
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.garea, op=MPI.MAX)
+
         del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
         gc.collect()
 
@@ -253,9 +258,10 @@ class UnstMesh(object):
         self.gpoints = len(self.gCoords)
         gZ = loadData["z"]
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore")
-            self._generateVTKmesh(self.gCoords, loadData["c"])
+        self.vtkMesh = None
+        # with warnings.catch_warnings():
+        #     warnings.filterwarnings("ignore")
+        #     self._generateVTKmesh(self.gCoords, loadData["c"])
 
         # Store global neighbouring on process rank 0
         if MPIrank == 0:
@@ -365,6 +371,8 @@ class UnstMesh(object):
         vIS = self.dm.getVertexNumbering()
         self.inIDs = np.zeros(self.npoints, dtype=int)
         self.inIDs[vIS.indices >= 0] = 1
+        self.lIDs = np.where(self.inIDs == 1)[0]
+        self.nIDs = np.where(self.inIDs == 0)[0]
         vIS.destroy()
 
         # Local/Global vectors
@@ -398,7 +406,7 @@ class UnstMesh(object):
         areaLocal.setArray(self.area)
         self.dm.localToGlobal(areaLocal, self.areaGlobal)
         areaLocal.destroy()
-        self.maxArea = self.areaGlobal.max()
+        self.minArea = self.areaGlobal.min()
 
         # Forcing event number
         self.bG = self.hGlobal.duplicate()
@@ -409,7 +417,7 @@ class UnstMesh(object):
         self.flexNb = -1
 
         # Map longitude/latitude coordinates
-        self._xyz2lonlat()
+        # self._xyz2lonlat()
 
         return
 
@@ -669,6 +677,8 @@ class UnstMesh(object):
         self.hGlobal.destroy()
         self.FAG.destroy()
         self.FAL.destroy()
+        self.fillFAG.destroy()
+        self.fillFAL.destroy()
         self.cumED.destroy()
         self.cumEDLocal.destroy()
         self.vSed.destroy()
@@ -688,7 +698,6 @@ class UnstMesh(object):
         self.iMat.destroy()
         if not self.fast:
             self.wMat.destroy()
-        if not self.fast:
             if self.Cda > 0.0 or self.Cdm > 0.0:
                 self.Diff.destroy()
         self.lgmap_col.destroy()

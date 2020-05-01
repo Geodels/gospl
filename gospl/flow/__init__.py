@@ -1,4 +1,4 @@
 """
-Surface process module for hillslope and stream erosion/deposition.
+Continental river module.
 """
-from .surfprocplex import SPMesh
+from .flowplex import FAMesh

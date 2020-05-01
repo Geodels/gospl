@@ -4,12 +4,13 @@ from mpi4py import MPI
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
-    from .flow import SPMesh as _SPMesh
+    from .flow import FAMesh as _FAMesh
+    from .sed import SEDMesh as _SEDMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
     from .tools import WriteMesh as _WriteMesh
 
-    class parentModel(_ReadYaml, _WriteMesh, _UnstMesh, _SPMesh):
+    class parentModel(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
         pass
 
 
@@ -53,8 +54,11 @@ class Model(parentModel):
         # Define unstructured mesh
         _UnstMesh.__init__(self)
 
-        # Surface processes initialisation
-        _SPMesh.__init__(self, *args, **kwargs)
+        # River flow initialisation
+        _FAMesh.__init__(self, *args, **kwargs)
+
+        # Sediment initialisation
+        _SEDMesh.__init__(self, *args, **kwargs)
 
         # Check if simulations just restarted
         if self.rStep > 0:
@@ -90,14 +94,21 @@ class Model(parentModel):
 
             if not self.fast:
                 # Compute Flow Accumulation
-                _SPMesh.flowAccumulation(self)
+                _FAMesh.flowAccumulation(self, filled=False)
 
             # Output time step for first step
             if self.tNow == self.tStart:
                 _WriteMesh.visModel(self)
 
             if not self.fast:
-                _SPMesh.sedChange(self)
+                # Perform River Incision
+                _FAMesh.riverIncision(self)
+                # Find Continental Sediment Fluxes
+                _SEDMesh.getSedFlux(self)
+                # Compute Filled Elevation Flow Accumulation
+                _FAMesh.flowAccumulation(self, filled=True)
+                # Continental and Marine Deposition and Sedimentation
+                _SEDMesh.sedChange(self)
 
             # Output stratal evolution
             if self.tNow >= self.saveStrat:

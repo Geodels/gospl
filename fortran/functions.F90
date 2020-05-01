@@ -15,7 +15,6 @@ module meshparams
 
   integer :: nGlobal
   integer :: nLocal
-  double precision :: eps
 
   integer, dimension(:,:), allocatable :: gnID
   integer, dimension(:,:), allocatable :: FVnID
@@ -39,7 +38,7 @@ module meshparams
     procedure :: PQpop
     procedure :: PQpush
     procedure :: shiftdown
-  end type
+  end type pqueue
 
   type(pqueue) :: priorityqueue
 
@@ -413,7 +412,7 @@ end subroutine MFDreceivers
 !! PIT FILLING FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine fillPIT(sl, elev, fillz, nb)
+subroutine fillPIT(sl, elev, fillz, pits, nb)
   use meshparams
   implicit none
 
@@ -421,13 +420,17 @@ subroutine fillPIT(sl, elev, fillz, nb)
   double precision,intent(in) :: sl
   double precision,intent(in) :: elev(nb)
   double precision,intent(out) :: fillz(nb)
+  ! Pit number and overspilling point ID
+  integer,intent(out) :: pits(nb,2)
   logical :: flag(nb)
 
-  integer :: i, k, c
+  integer :: i, k, c, pitNb
 
   type (node)  :: ptID
+  double precision :: h
 
   fillz = elev
+  pits = -1
 
   ! Push marine edges nodes to priority queue
   flag = .False.
@@ -446,9 +449,8 @@ subroutine fillPIT(sl, elev, fillz, nb)
     endif
   enddo
 
-  ! Perform pit filling using priority flood algorithm variant from Barnes 2014
-  ! Here we use only one priority total queue as the plain queue doesn't ensure
-  ! a consistent pit+epsilon filling in our case... not sure why?
+  ! Perform pit filling using priority total queue
+  pitNb = 0
   do while(priorityqueue%n>0)
     ptID = priorityqueue%PQpop()
     i = ptID%id
@@ -457,8 +459,28 @@ subroutine fillPIT(sl, elev, fillz, nb)
       if(c>0)then
         if(.not.flag(c))then
           flag(c) = .True.
-          fillz(c) = max(fillz(c),fillz(i)+eps)
-          call priorityqueue%PQpush(fillz(c), c)
+          h = nearest(fillz(i), 1.0)
+          ! Not a depression
+          if(fillz(c)>h)then
+            call priorityqueue%PQpush(fillz(c), c)
+          ! Find a depression
+          else
+            ! This is a new one update information
+            if(pits(i,1)==-1)then
+              fillz(c) = h
+              pitNb = pitNb+1
+              pits(i,1) = pitNb
+              pits(c,1) = pitNb
+              pits(i,2) = i-1
+              pits(c,2) = i-1
+            ! This is an existing one: add nodes to the depression
+            else
+              fillz(c) = h
+              pits(c,1) = pits(i,1)
+              pits(c,2) = pits(i,2)
+            endif
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
         endif
       endif
     enddo
@@ -480,13 +502,10 @@ subroutine ngbGlob( nb, ngbIDs )
   integer, intent(in) :: nb
   integer, intent(in) :: ngbIDs(nb, 6)
 
-  ! integer :: k, p
-
   nGlobal = nb
   if(allocated(gnID)) deallocate(gnID)
   allocate(gnID(nGlobal,6))
   gnID = ngbIDs+1
-  eps = 0.0000001
 
   return
 

@@ -22,10 +22,22 @@ Flow Model
 .. automodule:: flow
     :members:
 
+Flow accumulation
+^^^^^^^^^^^^^^^^^^
+
+.. automodule:: flow.flowplex
+    :members:
+
+Sediment Model
+------------
+
+.. automodule:: sed
+    :members:
+
 Surface Processes
 ^^^^^^^^^^^^^^^^^^
 
-.. automodule:: flow.surfprocplex
+.. automodule:: sed.sedplex
     :members:
 
 

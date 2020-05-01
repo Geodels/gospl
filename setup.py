@@ -141,7 +141,7 @@ if __name__ == "__main__":
         long_description=long_description,
         long_description_content_type="text/markdown",
         configuration=configuration,
-        packages=["gospl", "gospl.tools", "gospl.mesher", "gospl.flow"],
+        packages=["gospl", "gospl.tools", "gospl.mesher", "gospl.sed", "gospl.flow"],
         install_requires=[
             "pytest",
             "Cython>=0.28.5",
@@ -156,7 +156,7 @@ if __name__ == "__main__":
             "pre-commit",
             "fastfunc==0.2.2",
             "vtk==8.1.2",
-            "sklearn",
+            "numpy-indexed",
         ],
         python_requires=">=3.3",
         classifiers=[

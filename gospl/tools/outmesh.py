@@ -214,6 +214,14 @@ class WriteMesh(object):
             # data[data <= 0.0] = 1.0
             f["flowAcc"][:, 0] = data
             f.create_dataset(
+                "filledAcc",
+                shape=(len(self.lcoords[:, 0]), 1),
+                dtype="float32",
+                compression="gzip",
+            )
+            data = self.fillFAL.getArray().copy()
+            f["filledAcc"][:, 0] = data
+            f.create_dataset(
                 "sedLoad",
                 shape=(len(self.lcoords[:, 0]), 1),
                 dtype="float32",
@@ -295,6 +303,8 @@ class WriteMesh(object):
             self.dm.localToGlobal(self.vSedLocal, self.vSed)
             self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
             self.dm.localToGlobal(self.FAL, self.FAG)
+            self.FAL.setArray(np.array(hf["/filledAcc"])[:, 0])
+            self.dm.localToGlobal(self.fillFAL, self.fillFAG)
 
             self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
             self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
@@ -344,6 +354,8 @@ class WriteMesh(object):
             self.dm.localToGlobal(self.vSedLocal, self.vSed)
             self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
             self.dm.localToGlobal(self.FAL, self.FAG)
+            self.FAL.setArray(np.array(hf["/filledAcc"])[:, 0])
+            self.dm.localToGlobal(self.fillFAL, self.fillFAG)
 
             hf.close()
 
@@ -482,6 +494,17 @@ class WriteMesh(object):
             )
             f.write(
                 'Dimensions="%d 1">%s:/flowAcc</DataItem>\n' % (self.nodes[p], pfile)
+            )
+            f.write("         </Attribute>\n")
+
+            f.write(
+                '         <Attribute Type="Scalar" Center="Node" Name="filledFA">\n'
+            )
+            f.write(
+                '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+            )
+            f.write(
+                'Dimensions="%d 1">%s:/filledAcc</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
 

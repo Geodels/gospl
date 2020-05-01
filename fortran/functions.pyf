@@ -8,7 +8,6 @@ python module _fortran
 
         module meshparams
             integer :: nlocal
-            double precision :: eps
             integer, allocatable,dimension(:,:) :: gnid
             integer, allocatable,dimension(:,:) :: fvnid
             integer, allocatable,dimension(:) :: fvnnb
@@ -70,11 +69,12 @@ python module _fortran
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
         end subroutine MFDreceivers
 
-        subroutine fillPIT(sl,elev,fillz,nb)
+        subroutine fillPIT(sl,elev,fillz,pits,nb)
             use meshparams
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev
             double precision dimension(nb),intent(out) :: fillz
+            integer dimension(nb,2),intent(out) :: pits
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine fillPIT
 

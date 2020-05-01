@@ -139,7 +139,7 @@ Requirements
 -  meshplex **== 0.12.3**
 -  pre-commit **>= 1.21.0**
 -  vtk **== 8.1.2**
--  sklearn
+-  numpy-indexed
 
 
 Install
