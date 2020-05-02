@@ -16,7 +16,6 @@ time:
 spl:
     K: 3.e-9
     Ff: 0.2
-    wght: 5.e-3
 
 diffusion:
     hillslopeKa: 0.01

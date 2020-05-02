@@ -15,7 +15,7 @@ The tutorials proposed in the `Examples`_ repository are there to help you build
 
 .. code:: bash
 
-  docker pull geodels/gospl:v0.1.2
+  docker pull geodels/gospl:v0.1.3
 
 And to attach a volume to the container.
 

@@ -76,7 +76,6 @@ e. :yaml:`tec` is the tectonic timestep interval used to update the tectonic mes
   spl:
       K: 3.e-8
       Ff: 0.2
-      wght: 1.e-3
 
 
 This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
@@ -87,7 +86,6 @@ a. :yaml:`K` representing the erodibility coefficient which is scale-dependent a
   It is worth noting that the coefficient *m* and *n* are fixed in this version of *gospl* and take the value of *0.5* & *1* respectively.
 
 b. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never be deposited either due to resuspension or dissolution.
-c. :yaml:`wght` corresponds to the percentage of upstream sediment flux that will be deposited on each cell.
 
 
 :yaml:`diffusion` key
