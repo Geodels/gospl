@@ -145,7 +145,7 @@ if __name__ == "__main__":
         install_requires=[
             "pytest",
             "Cython==0.29.17",
-            "numpy==1.18.3",
+            "numpy==1.18.2",
             "scipy==1.4.1",
             "h5py==2.10.0",
             "pandas==1.0.3",
