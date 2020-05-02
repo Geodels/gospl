@@ -75,7 +75,6 @@ class SEDMesh(object):
                     self.flowAccumulation(filled=False)
                 else:
                     fill = True
-                    # self.fillSeaID = np.where(self.hFill <= self.sealevel)[0]
                 self._moveFluxes(filled=fill)
                 iters += 1
                 if iters == 100 and MPIrank == 0:
