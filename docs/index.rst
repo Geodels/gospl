@@ -20,7 +20,7 @@ What's in the box?
 ------------------
 
 .. image:: images/fig_gospl.jpg
-   :scale: 60 %
+   :scale: 30 %
    :alt: global model
    :align: center
 
