@@ -10,7 +10,7 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 <div align="center">
-    <img width=900 src="https://github.com/Geodels/gospl/blob/master/docs/images/fig_gospl.jpg" alt="model" title="gospl"</img>
+    <img width=1000 src="https://github.com/Geodels/gospl/blob/master/docs/images/fig_gospl.jpg" alt="model" title="gospl"</img>
 </div>
 
 ### What's in the box?
