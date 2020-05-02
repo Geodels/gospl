@@ -11,13 +11,15 @@ if "READTHEDOCS" not in os.environ:
     from .tools import WriteMesh as _WriteMesh
 
     class parentModel(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
-        pass
+        def __init__(self):
+            pass
 
 
 else:
 
     class parentModel(object):
-        pass
+        def __init__(self):
+            pass
 
 
 MPIrank = MPI.COMM_WORLD.Get_rank()

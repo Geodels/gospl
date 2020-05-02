@@ -2,7 +2,8 @@ import os
 import gc
 import sys
 import vtk
-import warnings
+
+# import warnings
 import meshplex
 import petsc4py
 import numpy as np

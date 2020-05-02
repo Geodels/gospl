@@ -2,7 +2,6 @@ import os
 import gc
 import sys
 import vtk
-import math
 import warnings
 import petsc4py
 import numpy as np
