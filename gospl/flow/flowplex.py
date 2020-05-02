@@ -188,7 +188,6 @@ class FAMesh(object):
         cf.GenerateTrianglesOff()
         cf.Update()
         coastXYZ = numpy_support.vtk_to_numpy(cf.GetOutput().GetPoints().GetData())
-
         tree = spatial.cKDTree(coastXYZ, leafsize=10)
         self.coastDist[self.seaID], indices = tree.query(
             self.lcoords[self.seaID, :], k=k_neighbors
@@ -307,6 +306,9 @@ class FAMesh(object):
         # Solve flow accumulation
         self.wMat = WAMat.transpose().copy()
 
+        if self.isfill:
+            self.fillMat = self.wMat.copy()
+
         WAMat.destroy()
 
         return
@@ -332,10 +334,10 @@ class FAMesh(object):
             if self.vtkMesh is not None:
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore")
-                    self.coastDist[self.seaID] = self._distanceCoasts(gZ)
-
+                    self._distanceCoasts(gZ)
             del hFill, gZ
             gc.collect()
+
         else:
             self._buildFlowDirection(gZ[self.glIDs])
 

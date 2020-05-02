@@ -165,22 +165,22 @@ class UnstMesh(object):
 
         return
 
-    def _xyz2lonlat(self):
-        """
-        Convert x,y,z representation of cartesian points of the
-        spherical triangulation to lat / lon (radians).
-        """
-
-        self.gLatLon = np.zeros((self.gpoints, 2))
-        self.lLatLon = np.zeros((self.npoints, 2))
-
-        self.gLatLon[:, 0] = np.arcsin(self.gCoords[:, 2] / self.radius)
-        self.gLatLon[:, 1] = np.arctan2(self.gCoords[:, 1], self.gCoords[:, 0])
-
-        self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
-        self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
-
-        return
+    # def _xyz2lonlat(self):
+    #     """
+    #     Convert x,y,z representation of cartesian points of the
+    #     spherical triangulation to lat / lon (radians).
+    #     """
+    #
+    #     self.gLatLon = np.zeros((self.gpoints, 2))
+    #     self.lLatLon = np.zeros((self.npoints, 2))
+    #
+    #     self.gLatLon[:, 0] = np.arcsin(self.gCoords[:, 2] / self.radius)
+    #     self.gLatLon[:, 1] = np.arctan2(self.gCoords[:, 1], self.gCoords[:, 0])
+    #
+    #     self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
+    #     self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
+    #
+    #     return
 
     def _generateVTKmesh(self, points, cells):
         """
@@ -698,6 +698,7 @@ class UnstMesh(object):
         self.iMat.destroy()
         if not self.fast:
             self.wMat.destroy()
+            self.fillMat.destroy()
             if self.Cda > 0.0 or self.Cdm > 0.0:
                 self.Diff.destroy()
         self.lgmap_col.destroy()

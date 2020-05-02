@@ -1,7 +1,6 @@
 import os
 import gc
 import sys
-import math
 import petsc4py
 import numpy as np
 import numpy_indexed as npi
@@ -58,13 +57,37 @@ class SEDMesh(object):
         self.vSedLocal.copy(result=self.QsL)
         self.dm.localToGlobal(self.QsL, self.Qs)
 
+        # Define points in the marine environment for filled surface
+        self.fillSeaID = np.where(self.hFill <= self.sealevel)[0]
+
+        perc = 1.0
         iters = 0
+        fill = False
+        totQs = self.Qs.sum()
         while self.Qs.sum() > 0.0 and iters < 100:
             self._continentalDeposition()
+            if perc < 1.0e-2:
+                self.Qs.set(0.0)
+                self.QsL.set(0.0)
+            perc = self.Qs.sum() / totQs
             if self.Qs.sum() > 0.0:
-                self.flowAccumulation(filled=False)
-                self._moveFluxes()
+                if perc >= 1.0e-2:
+                    self.flowAccumulation(filled=False)
+                else:
+                    fill = True
+                    # self.fillSeaID = np.where(self.hFill <= self.sealevel)[0]
+                self._moveFluxes(filled=fill)
                 iters += 1
+                if iters == 100 and MPIrank == 0:
+                    print(
+                        "Continental sediment transport not converging; decrease time step",
+                        flush=True,
+                    )
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Remaining percentage to transport: %0.01f " % (perc * 100.0),
+                    flush=True,
+                )
 
         # Compute Marine Sediment Deposition
         self.QsL.setArray(self.seaQs)
@@ -72,21 +95,26 @@ class SEDMesh(object):
         self._marineDeposition()
 
         # Compute Hillslope Diffusion Law
+        h = self.hLocal.getArray().copy()
+        self.seaID = np.where(h <= self.sealevel)[0]
         self._hillSlope()
+
+        del h
+        gc.collect()
 
         return
 
-    def _moveFluxes(self):
+    def _moveFluxes(self, filled=False):
         """
         Move continental sediment fluxes downstream based on depressions.
         """
 
         t0 = process_time()
-        self.tmp.copy(result=self.Qs)
+        self.Qs.copy(result=self.tmp)
 
         # Transport sediment volume in m3 per year
-        if self.tNow == self.rStart:
-            self._solve_KSP(False, self.wMat, self.tmp, self.Qs)
+        if filled:
+            self._solve_KSP(True, self.fillMat, self.tmp, self.Qs)
         else:
             self._solve_KSP(True, self.wMat, self.tmp, self.Qs)
 
@@ -139,7 +167,7 @@ class SEDMesh(object):
         tmp = self.QsL.getArray().copy()
 
         # Convert in volume (m3) for considered timestep
-        # We only consider the nodes that are not their own receivers
+        # We only consider the nodes that are their own receivers
         Qs = np.zeros(self.npoints, dtype=np.float64)
         Qs[self.pitPts] = tmp[self.pitPts] * self.dt
 
@@ -148,8 +176,8 @@ class SEDMesh(object):
         Qs = np.multiply(Qs, self.scaleIDs)
 
         # Do not take ocean nodes they will be updated later
-        self.seaQs[self.seaID] += Qs[self.seaID] / self.dt
-        Qs[self.seaID] = 0.0
+        self.seaQs[self.fillSeaID] += Qs[self.fillSeaID] / self.dt
+        Qs[self.fillSeaID] = 0.0
 
         # Get the sediment volume available for transport and deposition
         # globally
@@ -158,15 +186,14 @@ class SEDMesh(object):
 
         # Find sediment load originally in a depression which are now
         # able to flow downslope
-        sumpit = np.sum(self.pits, axis=1)
-        ids = np.where(np.logical_and(sumpit == -2, gQ > 0))[0]
+        ids = np.where(np.logical_and(self.pits[:, 0] == -1, gQ > 0))[0]
         newgQ = np.zeros(self.gpoints, dtype=np.float64)
         newgQ[ids] = gQ[ids]
         gQ[ids] = 0.0
 
         # Get the cumulative volume for each depression
         groupPits = npi.group_by(self.pits[:, 0])
-        outNb, depFill = groupPits.max(gQ)
+        outNb, depFill = groupPits.sum(gQ)
 
         # Add the excess volume for each pit that needs to be distributed
         excess = np.where(depFill - self.pitVol > 0.0)[0]
@@ -198,7 +225,7 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         del newQs, excess, newgQ, dep, h, scaleV, groupPits
-        del gQ, ids, Qs, tmp, outNb, depFill, sumpit
+        del gQ, ids, Qs, tmp, outNb, depFill
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
@@ -226,11 +253,11 @@ class SEDMesh(object):
         Qs = np.zeros(self.npoints, dtype=np.float64)
 
         # Convert in volume (m3) for considered timestep
-        Qs[self.seaID] = tmp[self.seaID] * self.dt
+        Qs[self.fillSeaID] = tmp[self.fillSeaID] * self.dt
 
         # Diffusion matrix construction
         Cd = np.zeros(self.npoints, dtype=np.float64)
-        Cd[self.seaID] = self.sedimentK
+        Cd[self.fillSeaID] = self.sedimentK
 
         # From the distance to coastline define the upper limit
         # of the shelf to ensure a maximum slope angle
@@ -314,12 +341,12 @@ class SEDMesh(object):
             remainPerc = sedVol / maxSedVol
             self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
 
-            if iters >= 100 and MPIrank == 0:
+            iters += 1
+            if iters > 100 and MPIrank == 0:
                 print(
                     "Sediment marine diffusion not converging; decrease time step",
                     flush=True,
                 )
-            iters += 1
 
             if MPIrank == 0 and self.verbose:
                 print(
