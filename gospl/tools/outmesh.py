@@ -105,7 +105,7 @@ class WriteMesh(object):
 
         return
 
-    def outputStrat(self):
+    def _outputStrat(self):
         """
         Saves mesh local stratigraphic information stored in the DMPlex
         to HDF5 file.
@@ -115,30 +115,33 @@ class WriteMesh(object):
         h5file = (
             self.outputDir
             + "/h5/stratal."
-            + str(self.stratStep)
+            + str(self.step)
             + ".p"
             + str(MPIrank)
             + ".h5"
         )
         with h5py.File(h5file, "w") as f:
+
+            # Write stratal layers elevations per cells
             f.create_dataset(
-                "elev",
-                shape=(len(self.lcoords[:, 0]), 1),
+                "stratZ",
+                shape=(self.npoints, self.stratStep),
                 dtype="float32",
                 compression="gzip",
             )
-            f["elev"][:, 0] = self.hLocal.getArray()
-            f.create_dataset("sea", shape=(1, 1), dtype="float32", compression="gzip")
-            f["sea"][:, 0] = self.sealevel
+            f["stratZ"][:, : self.stratStep] = self.stratZ[:, : self.stratStep]
+
+            # Write stratal layers thicknesses per cells
             f.create_dataset(
-                "erodep",
-                shape=(len(self.lcoords[:, 0]), 1),
-                dtype="float32",
+                "stratH",
+                shape=(self.npoints, self.stratStep),
+                dtype="float64",
                 compression="gzip",
             )
-            f["erodep"][:, 0] = self.cumEDLocal.getArray()
+            f["stratH"][:, : self.stratStep] = self.stratH[:, : self.stratStep]
 
         MPIcomm.Barrier()
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Creating stratal outputfile \
@@ -146,8 +149,6 @@ class WriteMesh(object):
                 % (process_time() - t),
                 flush=True,
             )
-
-        self.stratStep += 1
 
         return
 
@@ -163,7 +164,7 @@ class WriteMesh(object):
             with h5py.File(topology, "w") as f:
                 f.create_dataset(
                     "coords",
-                    shape=(len(self.lcoords[:, 0]), 3),
+                    shape=(self.npoints, 3),
                     dtype="float32",
                     compression="gzip",
                 )
@@ -176,7 +177,7 @@ class WriteMesh(object):
                 )
                 f["cells"][:, :] = self.lcells + 1
             self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
-            self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
+            self.nodes = MPIcomm.gather(self.npoints, root=0)
 
         h5file = (
             self.outputDir
@@ -189,49 +190,29 @@ class WriteMesh(object):
             + ".h5"
         )
         with h5py.File(h5file, "w") as f:
-            if self.stratStep == 0:
-                f.create_dataset(
-                    "elev",
-                    shape=(len(self.lcoords[:, 0]), 1),
-                    dtype="float32",
-                    compression="gzip",
-                )
-                f["elev"][:, 0] = self.hLocal.getArray()
-                f.create_dataset(
-                    "erodep",
-                    shape=(len(self.lcoords[:, 0]), 1),
-                    dtype="float32",
-                    compression="gzip",
-                )
-                f["erodep"][:, 0] = self.cumEDLocal.getArray()
+            # if self.stratStep == 0:
             f.create_dataset(
-                "flowAcc",
-                shape=(len(self.lcoords[:, 0]), 1),
-                dtype="float32",
-                compression="gzip",
+                "elev", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+            )
+            f["elev"][:, 0] = self.hLocal.getArray()
+            f.create_dataset(
+                "erodep", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+            )
+            f["erodep"][:, 0] = self.cumEDLocal.getArray()
+            f.create_dataset(
+                "flowAcc", shape=(self.npoints, 1), dtype="float32", compression="gzip",
             )
             data = self.FAL.getArray().copy()
             data[data <= 0.0] = 1.0
             f["flowAcc"][:, 0] = data
-            # f.create_dataset(
-            #     "filledAcc",
-            #     shape=(len(self.lcoords[:, 0]), 1),
-            #     dtype="float32",
-            #     compression="gzip",
-            # )
-            # data = self.fillFAL.getArray().copy()
-            # f["filledAcc"][:, 0] = data
             f.create_dataset(
-                "sedLoad",
-                shape=(len(self.lcoords[:, 0]), 1),
-                dtype="float32",
-                compression="gzip",
+                "sedLoad", shape=(self.npoints, 1), dtype="float32", compression="gzip",
             )
             f["sedLoad"][:, 0] = self.vSedLocal.getArray().copy()
             if self.uplift is not None:
                 f.create_dataset(
                     "uplift",
-                    shape=(len(self.lcoords[:, 0]), 1),
+                    shape=(self.npoints, 1),
                     dtype="float32",
                     compression="gzip",
                 )
@@ -239,7 +220,7 @@ class WriteMesh(object):
             if self.hdisp is not None:
                 f.create_dataset(
                     "hdisp",
-                    shape=(len(self.lcoords[:, 0]), 3),
+                    shape=(self.npoints, 3),
                     dtype="float32",
                     compression="gzip",
                 )
@@ -247,13 +228,16 @@ class WriteMesh(object):
             if self.rainVal is not None:
                 f.create_dataset(
                     "rain",
-                    shape=(len(self.lcoords[:, 0]), 1),
+                    shape=(self.npoints, 1),
                     dtype="float32",
                     compression="gzip",
                 )
                 f["rain"][:, 0] = self.rainVal
 
             del data
+
+        if self.stratNb > 0 and self.stratStep > 0:
+            self._outputStrat()
 
         if MPIrank == 0:
             self._save_DMPlex_XMF()
@@ -279,43 +263,41 @@ class WriteMesh(object):
         For restarted simulations, this function reads the previous dataset.
         """
 
-        if self.stratStep == 0:
-            h5file = (
-                self.outputDir
-                + "/h5/"
-                + self.file
-                + "."
-                + str(self.step)
-                + ".p"
-                + str(MPIrank)
-                + ".h5"
-            )
-            if os.path.exists(h5file):
-                hf = h5py.File(h5file, "r")
-            else:
-                raise ValueError("Restart file is missing...")
-
-            self.hLocal.setArray(np.array(hf["/elev"])[:, 0])
-            self.dm.localToGlobal(self.hLocal, self.hGlobal)
-            self.cumEDLocal.setArray(np.array(hf["/erodep"])[:, 0])
-            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-            self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
-            self.dm.localToGlobal(self.vSedLocal, self.vSed)
-            self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
-            self.dm.localToGlobal(self.FAL, self.FAG)
-            # self.FAL.setArray(np.array(hf["/filledAcc"])[:, 0])
-            # self.dm.localToGlobal(self.fillFAL, self.fillFAG)
-
-            self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
-            self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
-
-            hf.close()
-
+        # if self.stratStep == 0:
+        h5file = (
+            self.outputDir
+            + "/h5/"
+            + self.file
+            + "."
+            + str(self.step - 1)
+            + ".p"
+            + str(MPIrank)
+            + ".h5"
+        )
+        if os.path.exists(h5file):
+            hf = h5py.File(h5file, "r")
         else:
+            raise ValueError("Restart file is missing...")
+        self.hLocal.setArray(np.array(hf["/elev"])[:, 0])
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        self.cumEDLocal.setArray(np.array(hf["/erodep"])[:, 0])
+        self.dm.localToGlobal(self.cumEDLocal, self.cumED)
+        self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
+        self.dm.localToGlobal(self.vSedLocal, self.vSed)
+        self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
+        self.dm.localToGlobal(self.FAL, self.FAG)
+
+        self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
+        self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
+
+        hf.close()
+
+        # else:
+        if self.stratNb > 0 and self.stratStep > 0:
             h5file = (
                 self.outputDir
                 + "/h5/stratal."
-                + str(self.stratStep - 1)
+                + str(self.step - 1)
                 + ".p"
                 + str(MPIrank)
                 + ".h5"
@@ -325,37 +307,10 @@ class WriteMesh(object):
             else:
                 raise ValueError("Restart file is missing...")
 
-            self.hLocal.setArray(np.array(hf["/elev"])[:, 0])
-            self.dm.localToGlobal(self.hLocal, self.hGlobal)
-            self.cumEDLocal.setArray(np.array(hf["/erodep"])[:, 0])
-            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-
-            self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
-            self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
-
-            hf.close()
-
-            h5file = (
-                self.outputDir
-                + "/h5/"
-                + self.file
-                + "."
-                + str(self.step)
-                + ".p"
-                + str(MPIrank)
-                + ".h5"
-            )
-            if os.path.exists(h5file):
-                hf = h5py.File(h5file, "r")
-            else:
-                raise ValueError("Restart file is missing...")
-
-            self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
-            self.dm.localToGlobal(self.vSedLocal, self.vSed)
-            self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
-            self.dm.localToGlobal(self.FAL, self.FAG)
-            # self.FAL.setArray(np.array(hf["/filledAcc"])[:, 0])
-            # self.dm.localToGlobal(self.fillFAL, self.fillFAG)
+            self.stratZ.fill(0.0)
+            self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
+            self.stratH.fill(0.0)
+            self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
 
             hf.close()
 
@@ -371,15 +326,16 @@ class WriteMesh(object):
         self._upliftBF(self.alpha[self.forceStep], self.stepb[self.forceStep])
 
         # Update model parameters to the former tectonic time step
-        self.tNow -= self.tecStep
+        self.tNow -= self.tout
         self.step -= 1
-
+        n = int(self.tout / self.tecStep)
+        self.tecNb -= n
         if self.strat > 0:
             n = int(self.tout / self.strat)
             self.stratStep = (self.step - 1) * n
         self.saveTime = self.tNow + self.tout
 
-        if self.saveStrat <= self.tEnd:
+        if self.saveStrat <= self.tEnd + self.strat:
             self.saveStrat = self.tNow + self.strat
 
         # Getting PETSc vectors values
@@ -441,18 +397,6 @@ class WriteMesh(object):
             pfile = (
                 "h5/" + str(self.file) + "." + str(self.step) + ".p" + str(p) + ".h5"
             )
-            if self.stratStep == 0:
-                afile = (
-                    "h5/"
-                    + str(self.file)
-                    + "."
-                    + str(self.step)
-                    + ".p"
-                    + str(p)
-                    + ".h5"
-                )
-            else:
-                afile = "h5/stratal." + str(self.stratStep - 1) + ".p" + str(p) + ".h5"
             tfile = "h5/topology.p" + str(p) + ".h5"
             f.write('      <Grid Name="Block.%s">\n' % (str(p)))
             f.write(
@@ -476,7 +420,7 @@ class WriteMesh(object):
             f.write(
                 '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
             )
-            f.write('Dimensions="%d 1">%s:/elev</DataItem>\n' % (self.nodes[p], afile))
+            f.write('Dimensions="%d 1">%s:/elev</DataItem>\n' % (self.nodes[p], pfile))
             f.write("         </Attribute>\n")
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="ED">\n')
@@ -484,7 +428,7 @@ class WriteMesh(object):
                 '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
             )
             f.write(
-                'Dimensions="%d 1">%s:/erodep</DataItem>\n' % (self.nodes[p], afile)
+                'Dimensions="%d 1">%s:/erodep</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
 
@@ -496,17 +440,6 @@ class WriteMesh(object):
                 'Dimensions="%d 1">%s:/flowAcc</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
-
-            # f.write(
-            #     '         <Attribute Type="Scalar" Center="Node" Name="filledFA">\n'
-            # )
-            # f.write(
-            #     '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
-            # )
-            # f.write(
-            #     'Dimensions="%d 1">%s:/filledAcc</DataItem>\n' % (self.nodes[p], pfile)
-            # )
-            # f.write("         </Attribute>\n")
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="SL">\n')
             f.write(

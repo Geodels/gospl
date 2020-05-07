@@ -135,14 +135,14 @@ class SEDMesh(object):
         t0 = process_time()
 
         # Get erosion rate (m/yr) to volume
-        self.Eb.copy(result=self.stepED)
-        self.stepED.pointwiseMult(self.stepED, self.areaGlobal)
+        self.Eb.copy(result=self.tmp)
+        self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
 
         # Get the volume of sediment transported in m3 per year
         if self.tNow == self.rStart:
-            self._solve_KSP(False, self.wMat, self.stepED, self.vSed)
+            self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
         else:
-            self._solve_KSP(True, self.wMat, self.stepED, self.vSed)
+            self._solve_KSP(True, self.wMat, self.tmp, self.vSed)
 
         # Update local vector
         self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
@@ -216,12 +216,16 @@ class SEDMesh(object):
         # Update PETSc vectors
         self.QsL.setArray(newQs / self.dt)
         self.dm.localToGlobal(self.QsL, self.Qs)
+
         self.tmpL.setArray(dep)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.cumED.axpy(1.0, self.tmp)
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+
+        if self.stratNb > 0:
+            self._deposeStrat()
 
         del newQs, excess, newgQ, dep, h, scaleV, groupPits
         del gQ, ids, Qs, tmp, outNb, depFill
@@ -362,6 +366,9 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
+        if self.stratNb > 0:
+            self._deposeStrat()
+
         del h0, cumDep, dH, overDep, maxDep, Qs
         gc.collect()
 
@@ -416,15 +423,87 @@ class SEDMesh(object):
         self._solve_KSP(True, self.Diff, self.hOld, self.hGlobal)
 
         # Update cumulative erosion/deposition and elevation
-        self.stepED.waxpy(-1.0, self.hOld, self.hGlobal)
-        self.cumED.axpy(1.0, self.stepED)
+        self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
+        self.cumED.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+
+        if self.stratNb > 0:
+            self._deposeStrat()
+            self.erodeStrat()
+            self._elevStrat()
 
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
+
+        return
+
+    def _deposeStrat(self):
+        """
+        Add deposition on top of existing stratigraphic layer.
+        """
+
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        depo = self.tmpL.getArray().copy()
+        depo[depo < 0] = 0.0
+        self.stratH[:, self.stratStep] += depo
+        del depo
+        gc.collect()
+
+        return
+
+    def erodeStrat(self):
+        """
+        Remove thickness from the stratigraphic pile.
+        """
+
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        ero = self.tmpL.getArray().copy()
+        ero[ero > 0] = 0.0
+
+        # Nodes experiencing erosion
+        nids = np.where(ero < 0)[0]
+        if len(nids) == 0:
+            return
+
+        # Cumulative thickness for each node
+        self.stratH[nids, 0] += 1.0e6
+        cumThick = np.cumsum(self.stratH[nids, self.stratStep :: -1], axis=1)[:, ::-1]
+
+        # Find nodes with no remaining stratigraphic thicknesses
+        ids = np.where(-ero[nids] >= cumThick[:, 0])[0]
+        self.stratH[nids[ids], : self.stratStep + 1] = 0.0
+
+        # Erode remaining stratal layers
+        if len(ids) < len(nids):
+            ero[nids[ids]] = 0.0
+
+            # Clear all stratigraphy points which are eroded
+            cumThick[cumThick < -ero[nids].reshape((len(nids), 1))] = 0
+            mask = (cumThick > 0).astype(int) == 0
+            tmp = self.stratH[nids, : self.stratStep + 1]
+            tmp[mask] = 0
+            self.stratH[[nids], : self.stratStep + 1] = tmp
+
+            # Update thickness of top stratigraphic layer
+            eroIDs = np.bincount(np.nonzero(cumThick)[0]) - 1
+            eroVal = cumThick[np.arange(len(nids)), eroIDs] + ero[nids]
+            eroVal[ids] = 0.0
+            self.stratH[nids, eroIDs] = eroVal
+
+        self.stratH[nids, 0] -= 1.0e6
+        self.stratH[self.stratH < 0] = 0.0
+
+        return
+
+    def _elevStrat(self):
+        """
+        Update current stratigraphic layer elevation.
+        """
+
+        self.stratZ[:, self.stratStep] = self.hLocal.getArray()
 
         return

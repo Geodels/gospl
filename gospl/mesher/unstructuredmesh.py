@@ -38,6 +38,8 @@ class UnstMesh(object):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
+        self.stratH = None
+        self.stratZ = None
 
         self._buildMesh()
 
@@ -132,7 +134,7 @@ class UnstMesh(object):
         if self.strat > 0:
             self.saveStrat = self.tNow + self.strat
         else:
-            self.saveStrat = self.tEnd + self.tout
+            self.saveStrat = self.tEnd + 2.0 * self.tout
 
         # Forcing functions
         self.rainNb = -1
@@ -420,6 +422,11 @@ class UnstMesh(object):
         # Map longitude/latitude coordinates
         # self._xyz2lonlat()
 
+        # Build stratigraphic data if any
+        if self.stratNb > 0:
+            self.stratH = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
+            self.stratZ = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
+
         return
 
     def initExtForce(self):
@@ -572,7 +579,7 @@ class UnstMesh(object):
             del tmp
             gc.collect()
 
-        elif self.forceStep >= 0 and not self.newForcing:
+        if self.forceStep >= 0 and not self.newForcing:
             self._forceUpliftSubsidence()
 
         return
@@ -624,35 +631,68 @@ class UnstMesh(object):
         elev = tmp[self.lgIDs]
         elev[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, elev, op=MPI.MAX)
-
         # Erosion/deposition
         tmp = self.cumEDLocal.getArray().copy()
         erodep = tmp[self.lgIDs]
         erodep[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, erodep, op=MPI.MAX)
 
+        # Stratal dataset
+        if self.stratNb > 0 and self.stratStep > 0:
+            stratH = self.stratH[self.lgIDs, : self.stratStep]
+            stratH[self.outIDs, :] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, stratH, op=MPI.MAX)
+            stratZ = self.stratZ[self.lgIDs, : self.stratStep]
+            stratZ[self.outIDs, :] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, stratZ, op=MPI.MAX)
+
         # Build kd-tree
         tree = spatial.cKDTree(XYZ, leafsize=10)
-        distances, indices = tree.query(self.lcoords, k=self.interp)
+        distances, indices = tree.query(self.lcoords, k=3)
 
         # Inverse weighting distance...
         if self.interp == 1:
-            nelev = elev[indices]
-            nerodep = erodep[indices]
-        else:
-            weights = np.divide(
-                1.0, distances, out=np.zeros_like(distances), where=distances != 0
-            )
-            onIDs = np.where(distances[:, 0] == 0)[0]
+            nelev = elev[indices[:, 0]]
+
+        weights = np.divide(
+            1.0, distances, out=np.zeros_like(distances), where=distances != 0
+        )
+        onIDs = np.where(distances[:, 0] == 0)[0]
+        tmp2 = np.sum(weights, axis=1)
+
+        # Update elevation
+        if self.interp > 1:
             tmp = np.sum(weights * elev[indices], axis=1)
-            tmp2 = np.sum(weights, axis=1)
             nelev = np.divide(tmp, tmp2, out=np.zeros_like(tmp2), where=tmp2 != 0)
-            tmp = np.sum(weights * erodep[indices], axis=1)
-            nerodep = np.divide(tmp, tmp2, out=np.zeros_like(tmp2), where=tmp2 != 0)
-            if len(onIDs) > 0:
+
+        # Update erosion deposition
+        tmp = np.sum(weights * erodep[indices], axis=1)
+        nerodep = np.divide(tmp, tmp2, out=np.zeros_like(tmp2), where=tmp2 != 0)
+
+        # Update stratigraphic record
+        if self.stratNb > 0 and self.stratStep > 0:
+            weights = weights.reshape((self.npoints, 3, 1))
+            weights = np.tile(weights, (1, 1, self.stratStep))
+            ids = np.where(distances[:, 0] > 0)[0]
+            self.stratZ[ids, : self.stratStep] = np.average(
+                stratZ[indices[ids, :], :], weights=weights[ids, :], axis=1
+            )
+            self.stratH[ids, : self.stratStep] = np.average(
+                stratH[indices[ids, :], :], weights=weights[ids, :], axis=1
+            )
+
+        if len(onIDs) > 0:
+            nerodep[onIDs] = erodep[indices[onIDs, 0]]
+            if self.interp > 1:
                 nelev[onIDs] = elev[indices[onIDs, 0]]
-                nerodep[onIDs] = erodep[indices[onIDs, 0]]
-            del weights, tmp, tmp2
+            if self.stratNb > 0 and self.stratStep > 0:
+                self.stratZ[onIDs, : self.stratStep] = stratZ[indices[onIDs, 0], :]
+                self.stratH[onIDs, : self.stratStep] = stratH[indices[onIDs, 0], :]
+
+        del weights, tmp, tmp2
+
+        if self.stratNb > 0 and self.stratStep > 0:
+            del ids, stratH, stratZ
 
         self.hLocal.setArray(nelev)
         self.dm.localToGlobal(self.hLocal, self.hGlobal, 1)
@@ -689,10 +729,10 @@ class UnstMesh(object):
         self.bL.destroy()
         self.hOld.destroy()
         self.hOldLocal.destroy()
-        self.stepED.destroy()
         self.Qs.destroy()
         self.tmpL.destroy()
         self.tmp.destroy()
+        self.stepED.destroy()
         self.Eb.destroy()
         self.EbLocal.destroy()
 
@@ -709,6 +749,8 @@ class UnstMesh(object):
         del self.lcoords
         del self.lcells
         del self.inIDs
+        del self.stratH
+        del self.stratZ
 
         if not self.fast:
             del self.distRcv

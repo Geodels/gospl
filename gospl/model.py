@@ -112,14 +112,14 @@ class Model(parentModel):
                 # Continental and Marine Deposition and Sedimentation
                 _SEDMesh.sedChange(self)
 
-            # Output stratal evolution
-            if self.tNow >= self.saveStrat:
-                _WriteMesh.outputStrat(self)
-                self.saveStrat += self.strat
-
             # Update Tectonic, Sea-level & Climatic conditions
             if self.backward and self.tNow < self.tEnd:
                 _UnstMesh.applyTectonics(self)
+
+            # Output stratal evolution
+            if self.tNow >= self.saveStrat:
+                self.stratStep += 1
+                self.saveStrat += self.strat
 
             # Output time step
             _WriteMesh.visModel(self)

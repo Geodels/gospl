@@ -43,8 +43,8 @@ class FAMesh(object):
         self.fillFAL = self.hLocal.duplicate()
         self.hOld = self.hGlobal.duplicate()
         self.hOldLocal = self.hLocal.duplicate()
-        self.stepED = self.hGlobal.duplicate()
         self.Eb = self.hGlobal.duplicate()
+        self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
 
         return
@@ -215,7 +215,7 @@ class FAMesh(object):
 
         # For pits that are below a given volume threshold, we impose the filled
         # elevation value (here we set the threshold to 20m * min area)
-        id = np.where(self.pitVol / self.minArea[1] < 20.0)[0]
+        id = np.where(self.pitVol / self.minArea[1] < 0.0)[0]
         self.pitVol[id] = 0.0
         mask = np.in1d(self.pits[:, 0], id)
         gZ[mask] = hFill[mask]
@@ -424,12 +424,12 @@ class FAMesh(object):
         gc.collect()
 
         # Solve bedrock erosion thickness
-        self._solve_KSP(True, EbedMat, self.hOld, self.tmp)
+        self._solve_KSP(True, EbedMat, self.hOld, self.stepED)
         EbedMat.destroy()
-        self.stepED.waxpy(-1.0, self.hOld, self.tmp)
+        self.tmp.waxpy(-1.0, self.hOld, self.stepED)
 
         # Define erosion rate (positive for incision)
-        E = -self.stepED.getArray().copy()
+        E = -self.tmp.getArray().copy()
         E = np.divide(E, self.dt)
         E[E < 0.0] = 0.0
         self.Eb.setArray(E)
@@ -468,12 +468,16 @@ class FAMesh(object):
 
         # Update bedrock thicknesses due to erosion
         Eb = self.Eb.getArray().copy()
-        self.stepED.setArray(-Eb * self.dt)
-        self.cumED.axpy(1.0, self.stepED)
+        self.tmp.setArray(-Eb * self.dt)
+        self.cumED.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
 
-        self.hGlobal.axpy(1.0, self.stepED)
+        self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+
+        # Update stratigraphic layer
+        if self.stratNb > 0:
+            self.erodeStrat()
 
         if MPIrank == 0 and self.verbose:
             print(

@@ -123,7 +123,7 @@ class ReadYaml(object):
         try:
             self.interp = domainDict["interp"]
         except KeyError:
-            self.interp = 3
+            self.interp = 1
 
         return
 
@@ -213,6 +213,41 @@ class ReadYaml(object):
             self.strat = timeDict["strat"]
         except KeyError:
             self.strat = 0
+
+        if self.tout < self.tecStep:
+            self.tecStep = self.tout
+            print(
+                "Output time interval and tectonic forcing time step \
+                 have been adjusted to match each others.",
+                flush=True,
+            )
+
+        if self.tout < self.strat:
+            self.strat = self.tout
+            print(
+                "Output time interval and stratal time step \
+                 have been adjusted to match each others.",
+                flush=True,
+            )
+
+        if self.tecStep > 0:
+            if self.tout % self.tecStep != 0:
+                print(
+                    "When declaring tectonic time interval, the value should be divisible by the output time interval.",
+                    flush=True,
+                )
+                raise ValueError("Tectonic time interval definition is wrong!")
+
+        if self.strat > 0:
+            if self.tout % self.strat != 0:
+                print(
+                    "When declaring stratal time interval, the value should be divisible by the output time interval.",
+                    flush=True,
+                )
+                raise ValueError("Stratal time interval definition is wrong!")
+            self.stratNb = int((self.tEnd - self.tStart) / self.strat) + 1
+        else:
+            self.stratNb = 0
 
         return
 
@@ -734,20 +769,6 @@ class ReadYaml(object):
                 if not os.path.exists(self.forceDir):
                     print("Forcing paleo directory does not exist!", flush=True)
                     raise ValueError("Forcing paleo directory does not exist!")
-                if self.tout > self.tecStep:
-                    self.tout = self.tecStep
-                    print(
-                        "Output time interval and tectonic forcing time step \
-                         have been adjusted to match each others.",
-                        flush=True,
-                    )
-                elif self.tout < self.tecStep:
-                    self.tecStep = self.tout
-                    print(
-                        "Output time interval and tectonic forcing time step \
-                         have been adjusted to match each others.",
-                        flush=True,
-                    )
                 try:
                     forceNb = fpaleoDict["steps"]
                 except KeyError:

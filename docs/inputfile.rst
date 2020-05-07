@@ -39,7 +39,7 @@ In addition the following optional parameters can be set:
 
 c. the :yaml:`fast` key allows you to run a model without applying any surface processes on top. This is used to run backward model in a quick way, but can also potential be set to *True* if you want to check your input files prior to running a forward model with all options.
 d. when running a backward model the :yaml:`backward` key has to be set to *True* as well!
-e. the :yaml:`interp` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. High values (>3) will tend to smooth the topography over time, a value of 1 will pick the closest point when perfoming the interpolation.
+e. the :yaml:`interp` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. The key has 2 possible values: **1** or **3**. A value of **3** will take the 3 closest nodes to perform the interpolation and will tend to smooth the topography over time. A value of **1** will pick the closest point when performing the interpolation thus limiting the smoothing but potentially increasing the distorsion.
 
 .. important::
   It is worth noting that all the input files require to run a *gospl* simulation must be defined as numpy zip array (**.npz**). This allows to directly and efficiently load the dataset during initialisation. This is specially efficient when running large models.
@@ -53,8 +53,9 @@ e. the :yaml:`interp` key is set when running model with 3D cartesian displaceme
       start: -20000000.
       end: 0.
       tout: 1000000.
-      dt: 1000000.
+      dt: 250000.
       tec: 1000000.
+      strat: 500000.
 
 
 :yaml:`time` is also required and set the model temparal evolution. The following parameters are required:
@@ -64,9 +65,10 @@ b. :yaml:`end` is the model end time in years,
 c. :yaml:`tout` is the output interval used to create model outputs,
 d. :yaml:`dt` is the model internal time step (the approach in *gospl* uses an implicit time step.
 e. :yaml:`tec` is the tectonic timestep interval used to update the tectonic meshes and perform the required displacements.
+e. :yaml:`strat` is the stratigraphic timestep interval used to update the stratigraphic record.
 
 .. important::
-  In cases where the specify :yaml:`dt` and :yaml:`tec` parameters are greater than :yaml:`tout`, they will automatically be rescaled to match with the output interval.
+  In cases where the specify :yaml:`dt`, :yaml:`strat` and :yaml:`tec` parameters are greater than :yaml:`tout`, they will automatically be rescaled to match with the output interval. The :yaml:`tec` parameter should be set to similar to the temporal time step used in your reconstruction (usually around 1Ma). This time step is used to perform the horizontal displacements. The vertical displacements are updated for each time step. When turn-on the stratal records will be output at the same time as the output ones, but the file will potentially contain multiple stratigraphic layers per output if :yaml:`strat` is lower than :yaml:`tout`.
 
 :yaml:`spl` key
 --------------------
