@@ -1,7 +1,7 @@
 numpy==1.18.4
 pandas==1.0.3
 ruamel.yaml==0.16.10
-scikit-image==0.16.2
+scikit-image==0.17.0
 sphinx_rtd_theme==0.4.3
 sphinxcontrib-napoleon==0.7
 sphinxemoji==0.1.5
