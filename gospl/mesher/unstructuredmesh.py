@@ -504,7 +504,7 @@ class UnstMesh(object):
 
         nb = self.rainNb
         if nb < len(self.raindata) - 1:
-            if self.raindata.iloc[nb + 1, 0] <= self.tNow + self.dt:
+            if self.raindata.iloc[nb + 1, 0] <= self.tNow:  # + self.dt:
                 nb += 1
 
         if nb > self.rainNb or nb == -1:
@@ -512,6 +512,7 @@ class UnstMesh(object):
                 nb = 0
 
             self.rainNb = nb
+
             if pd.isnull(self.raindata["rUni"][nb]):
                 loadData = np.load(self.raindata.iloc[nb, 2])
                 rainArea = loadData[self.raindata.iloc[nb, 3]]

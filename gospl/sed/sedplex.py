@@ -200,9 +200,13 @@ class SEDMesh(object):
         newQs = newgQ[self.glIDs]
 
         # Scale the deposition based on available volume
-        scaleV = np.divide(
-            depFill, self.pitVol, out=np.zeros_like(self.pitVol), where=self.pitVol != 0
-        )
+        with np.errstate(divide="ignore", over="ignore"):
+            scaleV = np.divide(
+                depFill,
+                self.pitVol,
+                out=np.zeros_like(self.pitVol),
+                where=self.pitVol != 0,
+            )
         scaleV[scaleV > 1.0] = 1.0
 
         # Update available volume on each pit

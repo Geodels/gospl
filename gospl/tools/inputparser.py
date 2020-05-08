@@ -549,7 +549,8 @@ class ReadYaml(object):
                     [pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap"]), tecdata],
                     ignore_index=True,
                 )
-            self.tecdata = tecdata
+            self.tecdata = tecdata[tecdata["start"] >= self.tStart]
+            self.tecdata.reset_index(drop=True, inplace=True)
 
         except KeyError:
             self.tecdata = None
@@ -698,7 +699,9 @@ class ReadYaml(object):
                     ],
                     ignore_index=True,
                 )
-            self.raindata = raindata
+            self.raindata = raindata[raindata["start"] >= self.tStart]
+            self.raindata.reset_index(drop=True, inplace=True)
+            self.rainNb = len(self.raindata)
 
         except KeyError:
             self.raindata = None
@@ -747,8 +750,9 @@ class ReadYaml(object):
                         ignore_index=True,
                     )
 
-            self.paleodata = paleodata
-            self.paleoNb = len(paleodata)
+            self.paleodata = paleodata[paleodata["time"] >= self.tStart]
+            self.paleodata.reset_index(drop=True, inplace=True)
+            self.paleoNb = len(self.paleodata)
 
         except KeyError:
             self.paleodata = None
