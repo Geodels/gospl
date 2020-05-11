@@ -1,4 +1,4 @@
-numpy==1.18.2
+numpy==1.18.4
 scipy==1.4.1
 Cython==0.29.17
 mpi4py==3.0.3
