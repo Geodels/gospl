@@ -339,7 +339,6 @@ class FAMesh(object):
 
         else:
             self._buildFlowDirection(gZ[self.glIDs])
-
             del gZ
             gc.collect()
 

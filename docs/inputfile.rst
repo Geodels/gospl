@@ -28,6 +28,7 @@ The YAML structure is shown through indentation (one or more spaces) and sequenc
       fast: False
       backward: False
       interp: 1
+      overlap: 1
 
 
 :yaml:`domain` defines the initial surface and set several simulation parameters. The following ones are **required**:
@@ -40,6 +41,7 @@ In addition the following optional parameters can be set:
 c. the :yaml:`fast` key allows you to run a model without applying any surface processes on top. This is used to run backward model in a quick way, but can also potential be set to *True* if you want to check your input files prior to running a forward model with all options.
 d. when running a backward model the :yaml:`backward` key has to be set to *True* as well!
 e. the :yaml:`interp` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. The key has 2 possible values: **1** or **3**. A value of **3** will take the 3 closest nodes to perform the interpolation and will tend to smooth the topography over time. A value of **1** will pick the closest point when performing the interpolation thus limiting the smoothing but potentially increasing the distorsion.
+f. the :yaml:`overlap` key is set when running model with 3D cartesian displacements and specifies the number of ghost nodes used when defining the PETSc partition. It needs to be set so that all the points belonging to a single processors will not move further than the distances between the maximum horizontal displacement distance. The value will change depending of the resolution of your mesh.
 
 .. important::
   It is worth noting that all the input files require to run a *gospl* simulation must be defined as numpy zip array (**.npz**). This allows to directly and efficiently load the dataset during initialisation. This is specially efficient when running large models.
@@ -96,6 +98,7 @@ b. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never b
 .. code:: yaml
 
   diffusion:
+      shelfslope: True
       hillslopeKa: 0.02
       hillslopeKm: 0.2
       sedimentK: 1000.
@@ -103,9 +106,10 @@ b. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never b
 
 Hillslope processes in *gospl* is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
 
-a. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
-b. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
-c. :yaml:`sedimentK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
+a. :yaml:`shelfslope` specifies the shelf maximum slope when marine sediments are deposited. By default (when set to False), the sediment are allowed to be deposited up to sea-level,
+b. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
+c. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
+d. :yaml:`sedimentK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
 
 
 :yaml:`sea` key

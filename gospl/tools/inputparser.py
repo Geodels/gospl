@@ -58,6 +58,7 @@ class ReadYaml(object):
         self._readOut()
         self._readForcePaleo()
 
+        self.radius = 6378137.0
         self.gravity = 9.81
         self.tNow = self.tStart
         self.saveTime = self.tNow
@@ -81,10 +82,10 @@ class ReadYaml(object):
             )
             raise KeyError("Key domain is required in the input file!")
 
-        try:
-            self.radius = domainDict["radius"]
-        except KeyError:
-            self.radius = 6378137.0
+        # try:
+        #     self.radius = domainDict["radius"]
+        # except KeyError:
+        #     self.radius = 6378137.0
 
         try:
             self.flowDir = domainDict["flowdir"]
@@ -124,6 +125,11 @@ class ReadYaml(object):
             self.interp = domainDict["interp"]
         except KeyError:
             self.interp = 1
+
+        try:
+            self.overlap = domainDict["overlap"]
+        except KeyError:
+            self.overlap = 1
 
         return
 
@@ -293,6 +299,11 @@ class ReadYaml(object):
 
         try:
             hillDict = self.input["diffusion"]
+
+            try:
+                self.shelfslope = hillDict["shelfslope"]
+            except KeyError:
+                self.shelfslope = False
             try:
                 self.Cda = hillDict["hillslopeKa"]
             except KeyError:
@@ -318,6 +329,7 @@ class ReadYaml(object):
             except KeyError:
                 self.sedimentK = 10.0
         except KeyError:
+            self.shelfslope = False
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 10.0

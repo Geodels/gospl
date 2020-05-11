@@ -6,6 +6,7 @@ domain:
     fast: False
     backward: False
     interp: 3
+    overlap: 10
 
 time:
     start: -20000000.
@@ -20,6 +21,7 @@ spl:
     Ff: 0.2
 
 diffusion:
+    shelfslope: True
     hillslopeKa: 0.01
     hillslopeKm: 0.1
     sedimentK: 1000.

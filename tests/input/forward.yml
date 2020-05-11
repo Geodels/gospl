@@ -5,6 +5,7 @@ domain:
     flowdir: 3
     fast: False
     backward: False
+    overlap: 10
 
 time:
     start: -20000000.

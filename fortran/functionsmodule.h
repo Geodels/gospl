@@ -23,6 +23,11 @@
 #define  _MFDreceivers  _mfdreceivers
 #define  _MFDreceivers_  _mfdreceivers_
 
+#define  strataBuild   stratabuild
+#define  strataBuild_   stratabuild_
+#define  _strataBuild  _stratabuild
+#define  _strataBuild_  _stratabuild_
+
 #define  setMaxNb  setmaxnb
 #define  setMaxNb_   setmaxnb_
 #define  _setMaxNb   _setmaxnb
