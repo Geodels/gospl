@@ -406,21 +406,23 @@ class UnstMesh(object):
         # Find local shadow nodes global indices
         tree = spatial.cKDTree(self.gCoords[self.shadowAlls, :], leafsize=10)
         distances, indices = tree.query(self.lcoords, k=1)
-        self.gshadowIDs = np.unique(self.shadowAlls[indices])
-        tmp.fill(0.0)
-        tmp[self.gshadowIDs] = 1.0
-        ltmp = tmp[self.glIDs]
-        self.lshadowIDs = np.unique(np.where(ltmp > 0)[0])
-        distances, indices = tree.query(self.lcoords[self.shadow_lOuts], k=1)
-        self.shadow_gOuts = np.unique(self.shadowAlls[indices])
+        if MPIsize > 1:
+            self.gshadowIDs = np.unique(self.shadowAlls[indices])
+            tmp.fill(0.0)
+            tmp[self.gshadowIDs] = 1.0
+            ltmp = tmp[self.glIDs]
+            self.lshadowIDs = np.unique(np.where(ltmp > 0)[0])
+            distances, indices = tree.query(self.lcoords[self.shadow_lOuts], k=1)
+            self.shadow_gOuts = np.unique(self.shadowAlls[indices])
 
-        # Get shadow zones sorted indices
-        self.shadowgNb = len(self.shadowAlls)
-        self.gshadinIDs = np.where(np.in1d(self.shadowAlls, self.gshadowIDs))[0]
-        self.gshadoutIDs = np.where(np.in1d(self.shadowAlls, self.shadow_gOuts))[0]
-        tmp = np.concatenate((self.shadow_lOuts, np.arange(self.npoints)))
-        cbin = np.bincount(tmp)
-        self.lshadinIDs = np.where(cbin == 1)[0]
+            # Get shadow zones sorted indices
+            self.shadowgNb = len(self.shadowAlls)
+            self.gshadinIDs = np.where(np.in1d(self.shadowAlls, self.gshadowIDs))[0]
+            self.gshadoutIDs = np.where(np.in1d(self.shadowAlls, self.shadow_gOuts))[0]
+            tmp = np.concatenate((self.shadow_lOuts, np.arange(self.npoints)))
+            cbin = np.bincount(tmp)
+            self.lshadinIDs = np.where(cbin == 1)[0]
+            del ltmp, cbin
 
         # Build PETSc vectors
         self.cumED = self.hGlobal.duplicate()
@@ -445,8 +447,8 @@ class UnstMesh(object):
         self.tecNb = -1
         self.flexNb = -1
 
-        del tree, distances, indices, tmp, ltmp
-        del l2g, offproc, nelev, gZ, cbin
+        del tree, distances, indices, tmp
+        del l2g, offproc, nelev, gZ
         gc.collect()
 
         # Map longitude/latitude coordinates
@@ -662,40 +664,54 @@ class UnstMesh(object):
         # Update local elevation
         tmp = self.hLocal.getArray().copy()
         elev = tmp[self.lgIDs]
-        temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
-        temp[self.gshadinIDs] = elev[self.gshadowIDs]
-        temp[self.gshadoutIDs] = -1.0e8
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-        elev[self.shadowAlls] = temp
-        loc_elev = elev[self.glIDs]
+        if MPIsize > 1:
+            temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
+            temp[self.gshadinIDs] = elev[self.gshadowIDs]
+            temp[self.gshadoutIDs] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            elev[self.shadowAlls] = temp
+            loc_elev = elev[self.glIDs]
+        else:
+            loc_elev = elev[self.glIDs]
 
         # Update local erosion/deposition
         tmp = self.cumEDLocal.getArray().copy()
         erodep = tmp[self.lgIDs]
-        temp.fill(-1.0e8)
-        temp[self.gshadinIDs] = erodep[self.gshadowIDs]
-        temp[self.gshadoutIDs] = -1.0e8
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-        erodep[self.shadowAlls] = temp
-        loc_erodep = erodep[self.glIDs]
+        if MPIsize > 1:
+            temp.fill(-1.0e8)
+            temp[self.gshadinIDs] = erodep[self.gshadowIDs]
+            temp[self.gshadoutIDs] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            erodep[self.shadowAlls] = temp
+            loc_erodep = erodep[self.glIDs]
+        else:
+            loc_erodep = erodep[self.glIDs]
 
         # Update local stratal dataset
         if self.stratNb > 0 and self.stratStep > 0:
             stratH = self.stratH[self.lgIDs, : self.stratStep]
-            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratH[self.shadowAlls, :] = temp
-            loc_stratH = stratH[self.glIDs, :]
+            if MPIsize > 1:
+                temp = np.full(
+                    (self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64
+                )
+                temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratH[self.shadowAlls, :] = temp
+                loc_stratH = stratH[self.glIDs, :]
+            else:
+                loc_stratH = stratH[self.glIDs, :]
 
             stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratZ[self.shadowAlls, :] = temp
-            loc_stratZ = stratZ[self.glIDs, :]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratZ[self.shadowAlls, :] = temp
+                loc_stratZ = stratZ[self.glIDs, :]
+            else:
+                loc_stratZ = stratZ[self.glIDs, :]
 
         # Build and query local kd-tree
         tree = spatial.cKDTree(XYZ, leafsize=10)
@@ -746,20 +762,28 @@ class UnstMesh(object):
         # Update local stratal dataset
         if self.stratNb > 0 and self.stratStep > 0:
             stratH = self.stratH[self.lgIDs, : self.stratStep]
-            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratH[self.shadowAlls, :] = temp
-            self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
+            if MPIsize > 1:
+                temp = np.full(
+                    (self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64
+                )
+                temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratH[self.shadowAlls, :] = temp
+                self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
+            else:
+                self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
 
-            stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratZ[self.shadowAlls, :] = temp
-            self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
+            if MPIsize > 1:
+                stratZ = self.stratZ[self.lgIDs, : self.stratStep]
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratZ[self.shadowAlls, :] = temp
+                self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
+            else:
+                self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
             del stratH, stratZ, loc_stratH, loc_stratZ
 
         if MPIrank == 0 and self.verbose:
