@@ -9,6 +9,6 @@ ruamel.yaml==0.16.10
 fastfunc==0.2.2
 meshio==4.0.12
 meshplex==0.13.0
-pre-commit==2.3.0
+pre-commit==2.4.0
 vtk==8.1.2
 numpy-indexed
