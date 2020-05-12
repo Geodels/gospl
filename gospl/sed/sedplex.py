@@ -113,12 +113,13 @@ class SEDMesh(object):
 
         # Transport sediment volume in m3 per year
         if filled:
-            self._solve_KSP(True, self.fillMat, self.tmp, self.Qs)
+            self._solve_KSP(False, self.fillMat, self.tmp, self.Qs)
         else:
-            self._solve_KSP(True, self.wMat, self.tmp, self.Qs)
+            self._solve_KSP(False, self.wMat, self.tmp, self.Qs)
 
         # Update local vector
         self.dm.globalToLocal(self.Qs, self.QsL, 1)
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Move Sediment Downstream (%0.02f seconds)" % (process_time() - t0),
@@ -142,7 +143,7 @@ class SEDMesh(object):
         if self.tNow == self.rStart:
             self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
         else:
-            self._solve_KSP(True, self.wMat, self.tmp, self.vSed)
+            self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
 
         # Update local vector
         self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)

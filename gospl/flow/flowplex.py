@@ -214,8 +214,8 @@ class FAMesh(object):
         self.outFlows = self.pits[outids, 1]
 
         # For pits that are below a given volume threshold, we impose the filled
-        # elevation value (here we set the threshold to 20m * min area)
-        id = np.where(self.pitVol / self.minArea[1] < 0.0)[0]
+        # elevation value (here we set the threshold to 10m * min area)
+        id = np.where(self.pitVol / self.minArea[1] < 10.0)[0]
         self.pitVol[id] = 0.0
         mask = np.in1d(self.pits[:, 0], id)
         gZ[mask] = hFill[mask]

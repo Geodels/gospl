@@ -29,6 +29,7 @@ The YAML structure is shown through indentation (one or more spaces) and sequenc
       backward: False
       interp: 1
       overlap: 1
+      rstep: 25
 
 
 :yaml:`domain` defines the initial surface and set several simulation parameters. The following ones are **required**:
@@ -42,6 +43,8 @@ c. the :yaml:`fast` key allows you to run a model without applying any surface p
 d. when running a backward model the :yaml:`backward` key has to be set to *True* as well!
 e. the :yaml:`interp` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. The key has 2 possible values: **1** or **3**. A value of **3** will take the 3 closest nodes to perform the interpolation and will tend to smooth the topography over time. A value of **1** will pick the closest point when performing the interpolation thus limiting the smoothing but potentially increasing the distorsion.
 f. the :yaml:`overlap` key is set when running model with 3D cartesian displacements and specifies the number of ghost nodes used when defining the PETSc partition. It needs to be set so that all the points belonging to a single processors will not move further than the distances between the maximum horizontal displacement distance. The value will change depending of the resolution of your mesh.
+g. to restart a simulation use the :yaml:`rstep` key and specify the time step number.
+
 
 .. important::
   It is worth noting that all the input files require to run a *gospl* simulation must be defined as numpy zip array (**.npz**). This allows to directly and efficiently load the dataset during initialisation. This is specially efficient when running large models.
