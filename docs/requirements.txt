@@ -1,4 +1,4 @@
-numpy==1.18.3
+numpy==1.18.4
 pandas==1.0.3
 ruamel.yaml==0.16.10
 scikit-image==0.16.2
