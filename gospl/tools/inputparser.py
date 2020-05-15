@@ -54,6 +54,15 @@ class ReadYaml(object):
         self._readSealevel()
         self._readTectonic()
         self._readRain()
+
+        if self.raindata is not None:
+            if self.rStep > 0:
+                self.raindata = self.raindata[
+                    self.raindata["start"] >= self.tStart + self.rStep * self.tout
+                ]
+                self.raindata.reset_index(drop=True, inplace=True)
+                self.rainNb = len(self.raindata)
+
         self._readBackwardPaleo()
         self._readOut()
         self._readForcePaleo()
@@ -562,6 +571,10 @@ class ReadYaml(object):
                     ignore_index=True,
                 )
             self.tecdata = tecdata[tecdata["start"] >= self.tStart]
+            if self.rStep > 0:
+                self.tecdata = tecdata[
+                    tecdata["start"] >= self.tStart + self.rStep * self.tout
+                ]
             self.tecdata.reset_index(drop=True, inplace=True)
 
         except KeyError:
@@ -763,6 +776,11 @@ class ReadYaml(object):
                     )
 
             self.paleodata = paleodata[paleodata["time"] >= self.tStart]
+            if self.rStep > 0:
+                self.paleodata = paleodata[
+                    paleodata["start"] >= self.tStart + self.rStep * self.tout
+                ]
+
             self.paleodata.reset_index(drop=True, inplace=True)
             self.paleoNb = len(self.paleodata)
 
@@ -802,6 +820,16 @@ class ReadYaml(object):
                     self.alpha[p : p + len(stepf)] = stepf.astype(float) / (out_nb - 1)
                     p += len(stepf)
                 self.forceStep = 0
+
+                if self.rStep > 0:
+                    steptime = np.arange(0, outNb, dtype=int) * self.tout + self.tStart
+                    id = np.where(steptime == self.tStart + self.rStep * self.tout)[0]
+                    if len(id) == 0:
+                        raise steptime(
+                            "Something went wrong with the restart time, it needs to be related to the forcing step."
+                        )
+                    self.forceStep = id[0]
+
             except Exception:
                 print(
                     "A directory is required to force the model with paleodata.",

@@ -182,6 +182,7 @@ class SEDMesh(object):
         # Get the sediment volume available for transport and deposition
         # globally
         gQ = Qs[self.lgIDs]
+        gQ[self.outIDs] = 0.0
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gQ, op=MPI.MAX)
 
         # Find sediment load originally in a depression which are now
