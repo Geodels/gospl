@@ -8,6 +8,13 @@ To get started on how to use *gospl*, a series of examples and tutorials is prov
   Be aware that the `Examples`_ folder is quite large as it comes with several global input files...
 
 
+.. raw:: html
+
+    <div style="text-align: center; margin-bottom: 2em;">
+    <iframe width="100%" height="395" src="https://www.youtube.com/embed/ObosWh4_sQ0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
+
+
 Launching Docker
 ------------------------
 
@@ -125,6 +132,13 @@ A series of 4 input files are provided and can be used to run backward and forwa
 
 
 The last file (:code:`forward.yml`) is the forward model that needs to be ran at the end at it requires the outputs from the backward models.
+
+
+.. raw:: html
+
+    <div style="text-align: center; margin-bottom: 2em;">
+    <iframe width="100%" height="395" src="https://www.youtube.com/embed/GJhUMDiGpw8" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
 
 
 Python3 scripts

@@ -8,6 +8,12 @@ To get started on how to use *gospl*, a series of examples and tutorials is prov
   Be aware that the `Examples`_ folder is quite large as it comes with several global input files...
 
 
+.. image:: images/test.png
+   :scale: 40 %
+   :alt: global model
+   :align: center
+
+
 Input files for *gospl* are based on `YAML`_ syntax.
 
 The YAML structure is shown through indentation (one or more spaces) and sequence items are denoted by a dash. At the moment the following component are available:
@@ -193,7 +199,7 @@ b. :yaml:`steps` the steps from the model outputs that will be used to force the
   The :yaml:`steps` often correspond to the time where you have a paleotopography dataset that you want to match for example from a Scotese paleotopography map.
 
 
-:yaml:`output` 
+:yaml:`output`
 --------------------
 
 .. code:: yaml
