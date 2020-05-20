@@ -5,5 +5,5 @@ sphinx_rtd_theme==0.4.3
 sphinxcontrib-napoleon==0.7
 sphinxemoji==0.1.5
 mock==4.0.2
-vtk==9.0.0
+vtk==8.1.2
 numpy-indexed==0.3.5

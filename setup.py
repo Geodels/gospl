@@ -155,7 +155,7 @@ if __name__ == "__main__":
             "petsc4py>=3.12.0",
             "pre-commit==2.4.0",
             "fastfunc==0.2.2",
-            "vtk==9.0.0",
+            "vtk==8.1.2",
             "numpy-indexed==0.3.5",
             "meshio==4.0.12",
         ],
