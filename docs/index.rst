@@ -6,11 +6,6 @@
 Global Scalable Paleo Landscape Evolution / gospl
 ==================================================
 
-
-.. image:: https://img.shields.io/pypi/v/gospl
-  :target: https://pypi.org/project/gospl
-  :alt: PyPI
-
 .. image:: https://readthedocs.org/projects/gospl/badge/?version=latest
   :target: https://gospl.readthedocs.io/en/latest/?badge=latest
   :alt: Documentation Status
@@ -20,7 +15,7 @@ What's in the box?
 ------------------
 
 .. image:: images/fig_gospl.jpg
-   :scale: 20 %
+   :scale: 18 %
    :alt: global model
    :align: center
 
@@ -44,6 +39,12 @@ The model is based on the following approaches:
 
 License
 **********
+
+.. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
+  :target: https://www.gnu.org/licenses/gpl-3.0
+  :alt: License: GPL v3
+
+
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 

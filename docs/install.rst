@@ -1,6 +1,16 @@
 Installation
 ============
 
+.. image:: https://travis-ci.org/Geodels/gospl.svg?branch=master
+  :target: https://travis-ci.org/Geodels/gospl
+  :alt: Build Status
+
+.. image:: https://coveralls.io/repos/github/Geodels/gospl/badge.svg?branch=master
+  :target: https://coveralls.io/github/Geodels/gospl?branch=master
+  :alt: Coverage Status
+
+
+
 Docker_ installation
 --------------------
 
@@ -13,7 +23,7 @@ required to run models. Users can start running model as soon as they
 have downloaded the image, independently of the underlying operating system
 available on on their machine.
 
-It is strongly encouraged to run UWGeodynamics using the docker images
+It is strongly encouraged to run *gospl* using the docker images
 we provide on `Docker Hub`_
 
 Different version of the `geodels/gospl` image can be pulled using a tag:
@@ -119,6 +129,11 @@ will use to save your results.
 Local Installation
 ------------------
 
+.. image:: https://pyup.io/repos/github/Geodels/gospl/shield.svg
+  :target: https://pyup.io/repos/github/Geodels/gospl/
+  :alt: Updates
+
+
 This is not recommended and involves installing *gospl* and all
 its dependencies. Docker is highly recommended!!!
 
@@ -144,6 +159,11 @@ Requirements
 
 Install
 ~~~~~~~
+
+.. image:: https://img.shields.io/pypi/v/gospl
+  :target: https://pypi.org/project/gospl
+  :alt: PyPI
+
 
 **from Pip**
 

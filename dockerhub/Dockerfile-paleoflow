@@ -221,7 +221,7 @@ RUN git clone --depth=1 https://github.com/Geodels/gospl.git && \
 #RUN git clone --depth=1 https://github.com/badlands-model/badlands.git && \
 #    cd badlands/badlands && \
 #    python3 setup.py install --user
-RUN python3 -m pip install --no-cache-dir badlands==2.0.23
+RUN python3 -m pip install --no-cache-dir badlands==2.0.24
 
 # setup space for working in
 VOLUME /live/share

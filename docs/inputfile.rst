@@ -15,7 +15,7 @@ The YAML structure is shown through indentation (one or more spaces) and sequenc
 .. role:: yaml(code)
    :language: yaml
 
-:yaml:`domain` key
+:yaml:`domain`
 --------------------
 
 .. code:: yaml
@@ -49,7 +49,7 @@ g. to restart a simulation use the :yaml:`rstep` key and specify the time step n
 .. important::
   It is worth noting that all the input files require to run a *gospl* simulation must be defined as numpy zip array (**.npz**). This allows to directly and efficiently load the dataset during initialisation. This is specially efficient when running large models.
 
-:yaml:`time` key
+:yaml:`time`
 --------------------
 
 .. code:: yaml
@@ -70,12 +70,12 @@ b. :yaml:`end` is the model end time in years,
 c. :yaml:`tout` is the output interval used to create model outputs,
 d. :yaml:`dt` is the model internal time step (the approach in *gospl* uses an implicit time step.
 e. :yaml:`tec` is the tectonic timestep interval used to update the tectonic meshes and perform the required displacements.
-e. :yaml:`strat` is the stratigraphic timestep interval used to update the stratigraphic record.
+f. :yaml:`strat` is the stratigraphic timestep interval used to update the stratigraphic record.
 
 .. important::
   In cases where the specify :yaml:`dt`, :yaml:`strat` and :yaml:`tec` parameters are greater than :yaml:`tout`, they will automatically be rescaled to match with the output interval. The :yaml:`tec` parameter should be set to similar to the temporal time step used in your reconstruction (usually around 1Ma). This time step is used to perform the horizontal displacements. The vertical displacements are updated for each time step. When turn-on the stratal records will be output at the same time as the output ones, but the file will potentially contain multiple stratigraphic layers per output if :yaml:`strat` is lower than :yaml:`tout`.
 
-:yaml:`spl` key
+:yaml:`spl`
 --------------------
 
 .. code:: yaml
@@ -95,7 +95,7 @@ a. :yaml:`K` representing the erodibility coefficient which is scale-dependent a
 b. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never be deposited either due to resuspension or dissolution.
 
 
-:yaml:`diffusion` key
+:yaml:`diffusion`
 ----------------------
 
 .. code:: yaml
@@ -115,7 +115,7 @@ c. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
 d. :yaml:`sedimentK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
 
 
-:yaml:`sea` key
+:yaml:`sea`
 --------------------
 
 .. code:: yaml
@@ -130,7 +130,7 @@ a. the relative sea-level :yaml:`position` in meters (optional),
 b. a sea-level :yaml:`curve` *e.g.* a file containing 2 columns (time and sea-level position).
 
 
-:yaml:`tectonic` key
+:yaml:`tectonic`
 ----------------------
 
 .. code:: yaml
@@ -160,7 +160,7 @@ Follows the tectonic forcing conditions with a sequence of events defined by a s
   As mentioned above and for the next key parameter as well, these forcing files are defined as numpy zip array (**.npz**).
 
 
-:yaml:`climate` key
+:yaml:`climate`
 --------------------
 
 .. code:: yaml
@@ -175,7 +175,7 @@ Follows the tectonic forcing conditions with a sequence of events defined by a s
 The climatic forcing is defined in a similar fashion as the tectonic one with again a sequence of events by a starting time (:yaml:`start`) and either an uniform rainfall over the entire mesh (:yaml:`uniform`) or with a precipitation mesh :yaml:`map`. The rainfall values have to be in metres per year.
 
 
-:yaml:`forcepaleo` key
+:yaml:`forcepaleo`
 -----------------------
 
 .. code:: yaml
@@ -193,7 +193,7 @@ b. :yaml:`steps` the steps from the model outputs that will be used to force the
   The :yaml:`steps` often correspond to the time where you have a paleotopography dataset that you want to match for example from a Scotese paleotopography map.
 
 
-:yaml:`output` key
+:yaml:`output` 
 --------------------
 
 .. code:: yaml
