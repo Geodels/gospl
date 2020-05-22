@@ -144,7 +144,7 @@ if __name__ == "__main__":
         packages=["gospl", "gospl.tools", "gospl.mesher", "gospl.sed", "gospl.flow"],
         install_requires=[
             "pytest",
-            "Cython==0.29.18",
+            "Cython==0.29.19",
             "numpy==1.18.4",
             "scipy==1.4.1",
             "h5py==2.10.0",
@@ -152,7 +152,7 @@ if __name__ == "__main__":
             "ruamel.yaml==0.16.10",
             "meshplex==0.13.0",
             "mpi4py>=3.0.3",
-            "petsc4py>=3.12.0",
+            "petsc4py>=3.8.1",
             "pre-commit==2.4.0",
             "fastfunc==0.2.2",
             "vtk==8.1.2",
