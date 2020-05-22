@@ -24,7 +24,7 @@ The model is based on the following approaches:
 
 + an adaptation of the implicit, parallelisable method for calculating drainage area for both single (D8) and multiple flow direction (Dinf) from [Richardson et al., 2014],
 + the methods developed in _badlands_ [Salles et al., 2018] for marine sediment distribution,
-+ a _PETSc_ layer similar to the one in _eSCAPE_ [Salles, 2019] for mash partitioning and solvers.
++ a _PETSc_ layer similar to the one in _eSCAPE_ [Salles, 2019] for mesh partitioning and solvers.
 
 
 ### License
