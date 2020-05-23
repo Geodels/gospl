@@ -10,6 +10,11 @@ Installation
   :alt: Coverage Status
 
 
+.. image:: images/fig_gospl.jpg
+   :scale: 18 %
+   :alt: global model
+   :align: center
+
 
 Docker_ installation
 --------------------

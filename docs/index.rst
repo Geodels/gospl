@@ -14,10 +14,10 @@ Global Scalable Paleo Landscape Evolution / gospl
 What's in the box?
 ------------------
 
-.. image:: images/fig_gospl.jpg
-   :scale: 18 %
-   :alt: global model
-   :align: center
+.. raw:: html
+
+    <iframe width="660" height="400" src="https://kitware.github.io/vtk-js/examples/SceneExplorer/index.html?fileURL=https://raw.githubusercontent.com/tristan-salles/PVGlance.github.io/master/global_LEM.vtkjs" frameborder="0" allowfullscreen></iframe>
+
 
 **gospl** (pronounced: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
 
