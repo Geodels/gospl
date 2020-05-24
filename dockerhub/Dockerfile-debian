@@ -180,6 +180,12 @@ RUN  python3 -m pip install --no-cache-dir \
 
 RUN python3 -m pip install petsc4py==3.13.0
 
+RUN python3 -m pip install --no-cache-dir setuptools wheel && \
+    python3 -m pip install --no-cache-dir \
+    numpy==1.18.4 \
+    mpi4py==3.0.3 \
+    pandas==0.24.2 
+
 # create a volume
 RUN mkdir /live && \
     mkdir /live/lib
