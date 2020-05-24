@@ -231,6 +231,7 @@ MOCK_MODULES = [
     "petsc4py",
     "meshplex",
     "scipy.interpolate",
+    "vtk",
 ]
 
 for m in MOCK_MODULES:

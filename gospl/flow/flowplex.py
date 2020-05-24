@@ -1,6 +1,7 @@
 import os
 import gc
 import sys
+import vtk
 import warnings
 import petsc4py
 import numpy as np
@@ -11,8 +12,6 @@ from mpi4py import MPI
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
-    import vtk
-    from vtk.util import numpy_support
     from gospl._fortran import fillPIT
     from gospl._fortran import MFDreceivers
 
@@ -176,7 +175,7 @@ class FAMesh(object):
 
         self.coastDist = np.zeros(self.npoints)
         pointData = self.vtkMesh.GetPointData()
-        array = numpy_support.numpy_to_vtk(data, deep=1)
+        array = vtk.util.numpy_support.numpy_to_vtk(data, deep=1)
         array.SetName("z")
         pointData.AddArray(array)
 
@@ -186,7 +185,9 @@ class FAMesh(object):
         cf.SetInputArrayToProcess(0, 0, 0, 0, "z")
         cf.GenerateTrianglesOff()
         cf.Update()
-        coastXYZ = numpy_support.vtk_to_numpy(cf.GetOutput().GetPoints().GetData())
+        coastXYZ = vtk.util.numpy_support.vtk_to_numpy(
+            cf.GetOutput().GetPoints().GetData()
+        )
         tree = spatial.cKDTree(coastXYZ, leafsize=10)
         self.coastDist[self.seaID], indices = tree.query(
             self.lcoords[self.seaID, :], k=k_neighbors
