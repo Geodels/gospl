@@ -152,7 +152,7 @@ Requirements
 -  mpi4py **== 3.0.3**
 -  petsc4py **== 3.13.0**
 -  h5py **== 2.10.0**
--  pandas **>= 1.24.2**
+-  pandas **>= 0.24.2**
 -  ruamel.yaml **== 0.16.10**
 -  fastfunc **== 0.2.2**
 -  meshio **== 4.0.12**
