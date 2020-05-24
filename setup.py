@@ -157,7 +157,7 @@ if __name__ == "__main__":
             "fastfunc==0.2.2",
             "vtk==9.0.0",
             "numpy-indexed==0.3.5",
-            "meshio==4.0.12",
+            "meshio==4.0.13",
         ],
         python_requires=">=3.3",
         classifiers=[

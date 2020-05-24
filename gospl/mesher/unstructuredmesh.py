@@ -13,6 +13,8 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
+from vtk.util import numpy_support
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import defineTIN
     from gospl._fortran import ngbGlob
@@ -193,7 +195,7 @@ class UnstMesh(object):
 
         # Define mesh vertices
         vtk_points = vtk.vtkPoints()
-        vtk_array = vtk.util.numpy_support.numpy_to_vtk(points, deep=True)
+        vtk_array = numpy_support.numpy_to_vtk(points, deep=True)
         vtk_points.SetData(vtk_array)
         self.vtkMesh.SetPoints(vtk_points)
 
@@ -224,17 +226,17 @@ class UnstMesh(object):
         cell_connectivity = np.concatenate(cell_connectivity)
 
         # Connectivity
-        connectivity = vtk.util.numpy_support.numpy_to_vtkIdTypeArray(
+        connectivity = numpy_support.numpy_to_vtkIdTypeArray(
             cell_connectivity.astype(np.int64), deep=1
         )
         cell_array = vtk.vtkCellArray()
         cell_array.SetCells(len(cell_types), connectivity)
 
         self.vtkMesh.SetCells(
-            vtk.util.numpy_support.numpy_to_vtk(
+            numpy_support.numpy_to_vtk(
                 cell_types, deep=1, array_type=vtk.vtkUnsignedCharArray().GetDataType()
             ),
-            vtk.util.numpy_support.numpy_to_vtk(
+            numpy_support.numpy_to_vtk(
                 cell_offsets, deep=1, array_type=vtk.vtkIdTypeArray().GetDataType()
             ),
             cell_array,

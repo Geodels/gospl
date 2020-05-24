@@ -232,6 +232,7 @@ MOCK_MODULES = [
     "meshplex",
     "scipy.interpolate",
     "vtk",
+    "vtk.util",
 ]
 
 for m in MOCK_MODULES:
