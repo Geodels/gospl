@@ -77,7 +77,7 @@ RUN pip3 install -U setuptools  && \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 WORKDIR /tmp/petsc-build
-ARG PETSC_VERSION="3.11.2"
+ARG PETSC_VERSION="3.13.0"
 RUN wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-${PETSC_VERSION}.tar.gz && \
     tar zxf petsc-lite-${PETSC_VERSION}.tar.gz && cd petsc-${PETSC_VERSION}   && \
     ./configure --with-debugging=0 --prefix=/opt/petsc                     \
@@ -99,7 +99,7 @@ RUN wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-${PETSC_V
                 --with-cxx-dialect=C++11     && \
     make PETSC_DIR=/tmp/petsc-build/petsc-${PETSC_VERSION} PETSC_ARCH=arch-linux-c-opt all     && \
     make PETSC_DIR=/tmp/petsc-build/petsc-${PETSC_VERSION} PETSC_ARCH=arch-linux-c-opt install && \
-    make PETSC_DIR=/opt/petsc PETSC_ARCH="" test && \
+    make PETSC_DIR=/opt/petsc PETSC_ARCH="" check && \
     cd /tmp && \
     rm -fr *
 
@@ -107,13 +107,15 @@ ENV PETSC_DIR=/opt/petsc
 ENV PATH=${PETSC_DIR}/bin:$PATH
 
 ENV PYTHONPATH $PYTHONPATH:/usr/lib
-RUN CC=h5pcc HDF5_MPI="ON" HDF5_DIR=${PETSC_DIR} python3 -m pip install --no-cache-dir --no-binary=h5py h5py && \
-    python3 -m pip install --no-cache-dir petsc4py==3.11.0
+#RUN CC=h5pcc HDF5_MPI="ON" HDF5_DIR=${PETSC_DIR} python3 -m pip install --no-cache-dir --no-binary=h5py h5py && \
+RUN python3 -m pip install --no-cache-dir h5py==2.10.0
+
+RUN python3 -m pip install --no-cache-dir petsc4py==3.13.0
 
 # install extras in a new layer
 RUN python3 -m pip install --no-cache-dir \
         ipython \
-        jupyter 
+        jupyter
 
 # Install Tini.. this is required because CMD (below) doesn't play nice with notebooks for some reason: https://github.com/ipython/ipython/issues/7062, https://github.com/jupyter/notebook/issues/334
 RUN curl -L https://github.com/krallin/tini/releases/download/v0.10.0/tini > tini && \
@@ -127,22 +129,25 @@ EXPOSE 8888
 RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     python3 -m pip install --no-cache-dir \
     pathlib \
-    pandas>=0.24.2 \
-    meshio>=4.0.10 \
+    meshio>=4.0.12 \
     shapely \
-    meshplex>=0.12.3 \
-    ruamel.yaml>=0.15.98 \
+    meshplex>=0.13.0 \
+    ruamel.yaml>=0.16.10 \
     stripy \
-    numpy>=1.18.2 \
+    numpy>=1.18.4 \
     scipy>=1.4.1 \
-    Cython>=0.29.15 \
-    h5py>=2.9.0 \
+    Cython>=0.29.19 \
+    h5py>=2.10.0 \
     pandas>=0.24.2  \
     ruamel.yaml>=0.15.98 \
     fastfunc>=0.2.2 \
-    meshio>=4.0.10 \
-    meshplex>=0.12.3 \
+    meshio>=4.0.12 \
+    meshplex>=0.13.0 \
     pre-commit>=1.21.0
+
+# install latest vtk from wheel
+RUN  python3 -m pip install --no-cache-dir \
+        https://www.vtk.org/files/release/9.0/vtk-9.0.0-cp37-cp37m-linux_x86_64.whl
 
 # create a volume
 RUN mkdir /live && \
