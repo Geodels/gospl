@@ -138,7 +138,7 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     scipy>=1.4.1 \
     Cython>=0.29.19 \
     h5py>=2.10.0 \
-    pandas>=0.24.2  \
+    pandas>=1.0.3  \
     ruamel.yaml>=0.15.98 \
     fastfunc>=0.2.2 \
     meshio>=4.0.12 \
