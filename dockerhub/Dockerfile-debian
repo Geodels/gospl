@@ -77,7 +77,7 @@ RUN pip3 install -U setuptools  && \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 WORKDIR /tmp/petsc-build
-ARG PETSC_VERSION="3.13.0"
+ARG PETSC_VERSION="3.11.2"
 RUN wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-${PETSC_VERSION}.tar.gz && \
     tar zxf petsc-lite-${PETSC_VERSION}.tar.gz && cd petsc-${PETSC_VERSION}   && \
     ./configure --with-debugging=0 --prefix=/opt/petsc                     \
@@ -87,7 +87,6 @@ RUN wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-${PETSC_V
                 --download-ctetgen=1            \
                 --download-triangle=1           \
                 --download-hdf5=1               \
-                --download-scalapack=1          \
                 --download-mumps=1              \
                 --download-parmetis=1           \
                 --download-eigen=1              \
@@ -100,49 +99,21 @@ RUN wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-${PETSC_V
                 --with-cxx-dialect=C++11     && \
     make PETSC_DIR=/tmp/petsc-build/petsc-${PETSC_VERSION} PETSC_ARCH=arch-linux-c-opt all     && \
     make PETSC_DIR=/tmp/petsc-build/petsc-${PETSC_VERSION} PETSC_ARCH=arch-linux-c-opt install && \
-    make PETSC_DIR=/opt/petsc PETSC_ARCH="" check && \
+    make PETSC_DIR=/opt/petsc PETSC_ARCH="" test && \
     cd /tmp && \
     rm -fr *
 
 ENV PETSC_DIR=/opt/petsc
 ENV PATH=${PETSC_DIR}/bin:$PATH
 
-RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get -yq upgrade
-
-RUN apt-get update -qq && \
-    apt-get install -yq --no-install-recommends \
-    build-essential \
-    zlib1g-dev \
-    libncurses5-dev \
-    libgdbm-dev \
-    libnss3-dev \
-    libssl-dev \
-    libreadline-dev \
-    libffi-dev \
-    wget
-
-# Update to Python 3.8
-RUN wget https://www.python.org/ftp/python/3.8.2/Python-3.8.2.tar.xz && \
-    tar -xf Python-3.8.2.tar.xz && \
-    cd Python-3.8.2 && \
-    ./configure --enable-optimizations && \
-    make -j 4 && \
-    make install
-
-
-RUN update-alternatives --install /usr/bin/python python /usr/local/bin/python3.8 5
-RUN python3 -V
-
 ENV PYTHONPATH $PYTHONPATH:/usr/lib
-
-RUN python3 -m pip install --no-cache-dir h5py==2.10.0 && \
-        petsc4py==3.13.0
+RUN CC=h5pcc HDF5_MPI="ON" HDF5_DIR=${PETSC_DIR} python3 -m pip install --no-cache-dir --no-binary=h5py h5py && \
+    python3 -m pip install --no-cache-dir petsc4py==3.11.0
 
 # install extras in a new layer
 RUN python3 -m pip install --no-cache-dir \
         ipython \
-        jupyter
+        jupyter 
 
 # Install Tini.. this is required because CMD (below) doesn't play nice with notebooks for some reason: https://github.com/ipython/ipython/issues/7062, https://github.com/jupyter/notebook/issues/334
 RUN curl -L https://github.com/krallin/tini/releases/download/v0.10.0/tini > tini && \
@@ -152,39 +123,26 @@ RUN curl -L https://github.com/krallin/tini/releases/download/v0.10.0/tini > tin
 
 # expose notebook port
 EXPOSE 8888
-RUN python3 -m pip install --upgrade pip
+
 RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     python3 -m pip install --no-cache-dir \
     pathlib \
-    pandas>=1.0.3 \
-    meshio>=4.0.12 \
+    pandas>=0.24.2 \
+    meshio>=4.0.10 \
     shapely \
-    meshplex>=0.13.0 \
-    ruamel.yaml>=0.16.10 \
+    meshplex>=0.12.3 \
+    ruamel.yaml>=0.15.98 \
     stripy \
-    numpy>=1.18.4 \
+    numpy>=1.18.2 \
     scipy>=1.4.1 \
-    Cython>=0.29.19 \
-    h5py>=2.10.0 \
+    Cython>=0.29.15 \
+    h5py>=2.9.0 \
     pandas>=0.24.2  \
-    ruamel.yaml>=0.16.10 \
+    ruamel.yaml>=0.15.98 \
     fastfunc>=0.2.2 \
-    meshio>=4.0.12 \
-    meshplex>=0.13.0 \
-    pre-commit>=2.4.0 \
-    numpy-indexed==0.3.5
-
-# install latest vtk from wheel
-RUN  python3 -m pip install --no-cache-dir \
-        https://www.vtk.org/files/release/9.0/vtk-9.0.0-cp38-cp38-linux_x86_64.whl
-
-RUN python3 -m pip install petsc4py==3.13.0
-
-RUN python3 -m pip install --no-cache-dir setuptools wheel && \
-    python3 -m pip install --no-cache-dir \
-    numpy==1.18.4 \
-    mpi4py==3.0.3 \
-    pandas==0.24.2 
+    meshio>=4.0.10 \
+    meshplex>=0.12.3 \
+    pre-commit>=1.21.0
 
 # create a volume
 RUN mkdir /live && \

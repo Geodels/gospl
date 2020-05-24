@@ -1,4 +1,4 @@
-FROM geodels/gospl-base:petsc-3.13.0
+FROM geodels/gospl-base:latest
 MAINTAINER Tristan Salles
 
 ENV PETSC_DIR=/opt/petsc
@@ -18,8 +18,7 @@ RUN apt-get update -qq && \
         gdal-bin \
         libgdal-dev \
         python3-gdal
-
-
+    
 # install gopspl
 WORKDIR /live/lib
 RUN git clone https://github.com/Geodels/gospl.git && \
