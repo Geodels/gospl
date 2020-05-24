@@ -1,7 +1,6 @@
 import os
 import gc
 import sys
-import vtk
 import warnings
 import petsc4py
 import numpy as np
@@ -10,9 +9,10 @@ import numpy_indexed as npi
 
 from mpi4py import MPI
 from time import process_time
-from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
+    import vtk
+    from vtk.util import numpy_support
     from gospl._fortran import fillPIT
     from gospl._fortran import MFDreceivers
 

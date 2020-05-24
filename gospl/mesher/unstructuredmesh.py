@@ -1,7 +1,6 @@
 import os
 import gc
 import sys
-import vtk
 
 import warnings
 import meshplex
@@ -13,9 +12,9 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
-from vtk.util import numpy_support
-
 if "READTHEDOCS" not in os.environ:
+    import vtk
+    from vtk.util import numpy_support
     from gospl._fortran import defineTIN
     from gospl._fortran import ngbGlob
     from gospl._fortran import strataBuild
