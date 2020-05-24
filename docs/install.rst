@@ -145,20 +145,20 @@ its dependencies. Docker is highly recommended!!!
 Requirements
 ~~~~~~~~~~~~
 
--  Python **>= 3.6**
+-  Python **>= 3.8**
 -  Numpy **>= 1.18.4**
 -  Scipy **>= 1.4.1**
 -  Cython **>= 0.29.19**
 -  mpi4py **== 3.0.3**
--  petsc4py **== 3.8.1**
+-  petsc4py **== 3.13.0**
 -  h5py **== 2.10.0**
 -  pandas **>= 1.24.2**
 -  ruamel.yaml **== 0.16.10**
 -  fastfunc **== 0.2.2**
--  meshio **== 4.0.10**
--  meshplex **== 0.12.3**
+-  meshio **== 4.0.12**
+-  meshplex **== 0.13.0**
 -  pre-commit **>= 1.21.0**
--  vtk **== 8.1.2**
+-  vtk **== 9.0.0**
 -  numpy-indexed
 
 
