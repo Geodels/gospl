@@ -1,8 +1,12 @@
-FROM geodels/gospl-base:3.13.0
+FROM geodels/gospl-base:petsc-3.13.0
 MAINTAINER Tristan Salles
 
 ENV PETSC_DIR=/opt/petsc
 ENV PETSC_ARCH=arch-linux-c-opt
+
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+        libgl1-mesa-dev
 
 # install extras in a new layer
 RUN python3 -m pip install --no-cache-dir \
