@@ -1,4 +1,4 @@
-FROM geodels/gospl-base:latest
+FROM geodels/gospl-base:petsc-3.13.0
 
 ENV PETSC_DIR=/opt/petsc
 ENV PETSC_ARCH=arch-linux-c-opt
