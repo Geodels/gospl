@@ -178,6 +178,8 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
 RUN  python3 -m pip install --no-cache-dir \
         https://www.vtk.org/files/release/9.0/vtk-9.0.0-cp38-cp38-linux_x86_64.whl
 
+RUN python3 -m pip install petsc4py==3.13.0
+
 # create a volume
 RUN mkdir /live && \
     mkdir /live/lib
