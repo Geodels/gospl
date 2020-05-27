@@ -253,4 +253,4 @@ The file can be opened with the `Paraview`_ software.
 .. _`Scotese`: http://www.scotese.com
 .. _`Paraview`: https://www.paraview.org/download/
 .. _`YAML`: https://circleci.com/blog/what-is-yaml-a-beginner-s-guide/
-.. _`Examples`: https://unisyd-my.sharepoint.com/:f:/g/personal/tristan_salles_sydney_edu_au/En8Wf56W_j9Jmqovx__PicgBczIcUogo6WuR-TVzZMHIMg?e=2pFtqT
+.. _`Examples`: https://unisyd-my.sharepoint.com/:f:/g/personal/tristan_salles_sydney_edu_au/En8Wf56W_j9Jmqovx__zIcUogo6WuR-TVzZMHIMg?e=2pFtqT
