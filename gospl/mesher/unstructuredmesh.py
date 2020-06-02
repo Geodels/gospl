@@ -180,9 +180,13 @@ class UnstMesh(object):
 
         self.gLatLon[:, 0] = np.arcsin(self.gCoords[:, 2] / self.radius)
         self.gLatLon[:, 1] = np.arctan2(self.gCoords[:, 1], self.gCoords[:, 0])
+        self.gLatLon[:, 0] = np.mod(np.degrees(self.gLatLon[:, 0]) + 90, 180.0)
+        self.gLatLon[:, 1] = np.mod(np.degrees(self.gLatLon[:, 1]) + 180.0, 360.0)
 
         self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
         self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
+        self.lLatLon[:, 0] = np.mod(np.degrees(self.lLatLon[:, 0]) + 90, 180.0)
+        self.lLatLon[:, 1] = np.mod(np.degrees(self.lLatLon[:, 1]) + 180.0, 360.0)
 
         return
 
@@ -830,6 +834,8 @@ class UnstMesh(object):
         self.stepED.destroy()
         self.Eb.destroy()
         self.EbLocal.destroy()
+        self.upsG.destroy()
+        self.upsL.destroy()
 
         self.iMat.destroy()
         if not self.fast:

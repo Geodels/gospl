@@ -148,7 +148,7 @@ if __name__ == "__main__":
             "numpy==1.18.4",
             "scipy==1.4.1",
             "h5py==2.10.0",
-            "pandas==1.0.3",
+            "pandas==1.0.4",
             "ruamel.yaml==0.16.10",
             "meshplex==0.13.0",
             "mpi4py>=3.0.3",

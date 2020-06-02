@@ -50,11 +50,11 @@ class Model(parentModel):
         # Read input dataset
         _ReadYaml.__init__(self, filename)
 
-        # Initialise output mesh
-        _WriteMesh.__init__(self)
-
         # Define unstructured mesh
         _UnstMesh.__init__(self)
+
+        # Initialise output mesh
+        _WriteMesh.__init__(self)
 
         # River flow initialisation
         _FAMesh.__init__(self, *args, **kwargs)

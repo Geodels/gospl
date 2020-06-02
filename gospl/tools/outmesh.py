@@ -6,6 +6,8 @@ import glob
 import shutil
 import petsc4py
 import numpy as np
+from scipy import spatial
+from scipy import ndimage
 
 from mpi4py import MPI
 from time import process_time
@@ -46,6 +48,36 @@ class WriteMesh(object):
 
         else:
             self.rStart = self.tStart
+
+        if self.forceStep >= 0:
+
+            res = 0.5
+            nx = int(360.0 / res)
+            ny = int(180.0 / res)
+            lon = np.linspace(0.0, 360.0, nx)
+            lat = np.linspace(0, 180, ny)
+
+            lon, lat = np.meshgrid(lon, lat)
+            latlonreg = np.dstack([lat.flatten(), lon.flatten()])[0]
+            self.regshape = lon.shape
+            outTree = spatial.cKDTree(self.lLatLon, leafsize=10)
+            distances, self.forceIDs = outTree.query(latlonreg, k=3)
+            self.forceWeights = 1.0 / distances ** 2
+            self.forceTop = 1.0 / np.sum(self.forceWeights, axis=1)
+            self.forceonIDs = np.where(distances[:, 0] == 0)[0]
+
+            outTree = spatial.cKDTree(latlonreg, leafsize=10)
+            distances, self.regIDs = outTree.query(self.lLatLon, k=3)
+            self.regWeights = 1.0 / distances ** 2
+            self.regTop = 1.0 / np.sum(self.regWeights, axis=1)
+            self.regonIDs = np.where(distances[:, 0] == 0)[0]
+
+            del distances, outTree, lon, lat, latlonreg
+            gc.collect()
+
+        # Petsc vectors
+        self.upsG = self.hGlobal.duplicate()
+        self.upsL = self.hLocal.duplicate()
 
         return
 
@@ -206,6 +238,12 @@ class WriteMesh(object):
             data[data <= 0.0] = 1.0
             f["flowAcc"][:, 0] = data
             f.create_dataset(
+                "fillAcc", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+            )
+            data = self.fillFAL.getArray().copy()
+            data[data <= 0.0] = 1.0
+            f["fillAcc"][:, 0] = data
+            f.create_dataset(
                 "sedLoad", shape=(self.npoints, 1), dtype="float32", compression="gzip",
             )
             f["sedLoad"][:, 0] = self.vSedLocal.getArray().copy()
@@ -286,6 +324,8 @@ class WriteMesh(object):
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
         self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
         self.dm.localToGlobal(self.FAL, self.FAG)
+        self.fillFAL.setArray(np.array(hf["/fillAcc"])[:, 0])
+        self.dm.localToGlobal(self.fillFAL, self.fillFAG)
 
         self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
         self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
@@ -369,9 +409,48 @@ class WriteMesh(object):
             print("Backward file: {} is missing!".format(h5file), flush=True)
             raise ValueError("Backward file is missing...")
 
-        self.uplift = np.array(hf["/elev"])[:, 0] - self.hLocal.getArray()
+        # Get the difference between backward and forward model on TIN
+        ldiff = np.array(hf["/elev"])[:, 0] - self.hLocal.getArray()
+
+        # Specify new uplift value matching backward elevation removing the
+        # erosional features using a low-pass filter
+        # self.uplift = ldiff
+        # self.uplift *= alpha / self.tecStep
+        # hf.close()
+        # return
+
+        # Map it on a regularly spaced mesh (lon/lat)
+        diffreg = (
+            np.sum(self.forceWeights * ldiff[self.forceIDs], axis=1) * self.forceTop
+        )
+        if len(self.forceonIDs) > 0:
+            diffreg[self.forceonIDs] = ldiff[self.forceIDs[self.forceonIDs, 0]]
+
+        # Apply a low-pass filter to the regular array
+        kernel_size = 3
+        filter = ndimage.median_filter(
+            diffreg.reshape(self.regshape), size=kernel_size, mode="wrap"
+        )
+        filter = filter.flatten()
+
+        # Map it back to the spherical mesh
+        lfilter = np.sum(self.regWeights * filter[self.regIDs], axis=1) * self.regTop
+        if len(self.regonIDs) > 0:
+            lfilter[self.regonIDs] = filter[self.regIDs[self.regonIDs, 0]]
+
+        # From local to global
+        gfilter = lfilter[self.lgIDs]
+        gfilter[self.outIDs] = -1.0e8
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gfilter, op=MPI.MAX)
+
+        # Specify new uplift value matching backward elevation removing the
+        # erosional features using a low-pass filter
+        self.uplift = gfilter[self.glIDs]
         self.uplift *= alpha / self.tecStep
         hf.close()
+
+        del diffreg, filter, lfilter, gfilter, ldiff, hf
+        gc.collect()
 
         return
 
@@ -438,6 +517,15 @@ class WriteMesh(object):
             )
             f.write(
                 'Dimensions="%d 1">%s:/flowAcc</DataItem>\n' % (self.nodes[p], pfile)
+            )
+            f.write("         </Attribute>\n")
+
+            f.write('         <Attribute Type="Scalar" Center="Node" Name="fillFA">\n')
+            f.write(
+                '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+            )
+            f.write(
+                'Dimensions="%d 1">%s:/fillAcc</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
 
