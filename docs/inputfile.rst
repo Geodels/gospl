@@ -87,18 +87,24 @@ f. :yaml:`strat` is the stratigraphic timestep interval used to update the strat
 .. code:: yaml
 
   spl:
+      hfill: 100.
       K: 3.e-8
       Ff: 0.2
 
 
 This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
-a. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics.
+a. :yaml:`hfill` the maximum filling elevation for depressions in the continental domain. This can be seen as a maximum lake elevation. This parameter has a default value of 100 m. It is used to avoid by-passing large depressions and to ensure deposition in endorheic basins.
+
+b. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics.
 
 .. warning::
   It is worth noting that the coefficient *m* and *n* are fixed in this version of *gospl* and take the value of *0.5* & *1* respectively.
 
-b. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never be deposited either due to resuspension or dissolution.
+c. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never be deposited in the marine environment either due to resuspension or dissolution. The minimal value is hard-coded to be at least 5% of the sediment load reaching the ocean. The user can chose an higher value if necessary.
+
+.. important:
+  The fraction of fines that is lost is only for the sediment reaching the coast and not for the sediments deposited in continental regions.
 
 
 :yaml:`diffusion`

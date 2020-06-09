@@ -97,6 +97,8 @@ class Model(parentModel):
             if not self.fast:
                 # Compute Flow Accumulation
                 _FAMesh.flowAccumulation(self, filled=False)
+                # Compute Flow Accumulation
+                _FAMesh.flowAccumulation(self, filled=True, limit=True)
 
             # Output time step for first step
             if self.tNow == self.tStart:
@@ -108,7 +110,7 @@ class Model(parentModel):
                 # Find Continental Sediment Fluxes
                 _SEDMesh.getSedFlux(self)
                 # Compute Filled Elevation Flow Accumulation
-                _FAMesh.flowAccumulation(self, filled=True)
+                _FAMesh.flowAccumulation(self, filled=True, limit=False)
                 # Continental and Marine Deposition and Sedimentation
                 _SEDMesh.sedChange(self)
 

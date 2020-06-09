@@ -42,6 +42,30 @@ class SEDMesh(object):
 
         return
 
+    def getSedFlux(self):
+        """
+        Compute sediment flux in cubic metres per year.
+        """
+
+        t0 = process_time()
+
+        # Get erosion rate (m/yr) to volume
+        self.Eb.copy(result=self.tmp)
+        self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+
+        # Get the volume of sediment transported in m3 per year
+        self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
+
+        # Update local vector
+        self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        return
+
     def sedChange(self):
         """
         Perform erosion deposition changes.
@@ -61,30 +85,27 @@ class SEDMesh(object):
         self.fillSeaID = np.where(self.hFill <= self.sealevel)[0]
 
         perc = 1.0
+        minperc = 1.0e-3
         iters = 0
         fill = False
         totQs = self.Qs.sum()
         while self.Qs.sum() > 0.0 and iters < 100:
-            self._continentalDeposition()
-            if perc < 1.0e-2:
+            self._continentalDeposition(filled=fill)
+            if perc < minperc:
                 self.Qs.set(0.0)
                 self.QsL.set(0.0)
             perc = self.Qs.sum() / totQs
             if self.Qs.sum() > 0.0:
-                if perc >= 1.0e-2:
-                    self.flowAccumulation(filled=False)
+                if perc >= minperc and iters < 99:
+                    self.flowAccumulation(filled=False, limit=False)
                 else:
                     fill = True
                 self._moveFluxes(filled=fill)
                 iters += 1
-                if iters == 100 and MPIrank == 0:
-                    print(
-                        "Continental sediment transport not converging; decrease time step",
-                        flush=True,
-                    )
             if MPIrank == 0 and self.verbose:
                 print(
-                    "Remaining percentage to transport: %0.01f " % (perc * 100.0),
+                    "Remaining percentage to transport: %0.01f %d"
+                    % (perc * 100.0, iters),
                     flush=True,
                 )
 
@@ -128,34 +149,7 @@ class SEDMesh(object):
 
         return
 
-    def getSedFlux(self):
-        """
-        Compute sediment flux in cubic metres per year.
-        """
-
-        t0 = process_time()
-
-        # Get erosion rate (m/yr) to volume
-        self.Eb.copy(result=self.tmp)
-        self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-
-        # Get the volume of sediment transported in m3 per year
-        if self.tNow == self.rStart:
-            self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
-        else:
-            self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
-
-        # Update local vector
-        self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-
-        return
-
-    def _continentalDeposition(self):
+    def _continentalDeposition(self, filled=False):
         """
         Perform continental deposition from incoming river flux.
         """
@@ -178,6 +172,11 @@ class SEDMesh(object):
         # Do not take ocean nodes they will be updated later
         self.seaQs[self.fillSeaID] += Qs[self.fillSeaID] / self.dt
         Qs[self.fillSeaID] = 0.0
+
+        # In case we are using the filled topography all continental rivers
+        # drain into the ocean, therefore we can leave the function.
+        if filled:
+            return
 
         # Get the sediment volume available for transport and deposition
         # globally
@@ -317,7 +316,7 @@ class SEDMesh(object):
 
         iters = 0
         remainPerc = 1.0
-        while iters < 100 and remainPerc > max(0.1, self.frac_fine):
+        while iters < 500 and remainPerc > max(0.05, self.frac_fine):
 
             # Get erosion values for considered time step
             self._solve_KSP(False, self.Diff, self.Qs, self.tmp)
@@ -351,7 +350,7 @@ class SEDMesh(object):
             self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
 
             iters += 1
-            if iters > 100 and MPIrank == 0:
+            if iters >= 500 and MPIrank == 0:
                 print(
                     "Sediment marine diffusion not converging; decrease time step",
                     flush=True,

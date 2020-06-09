@@ -17,6 +17,7 @@ time:
     strat: 500000.
 
 spl:
+    hfill: 100.
     K: 3.e-9
     Ff: 0.2
 

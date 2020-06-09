@@ -134,7 +134,7 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     meshplex>=0.13.0 \
     ruamel.yaml>=0.16.10 \
     stripy \
-    numpy>=1.18.4 \
+    numpy>=1.18.5 \
     scipy>=1.4.1 \
     Cython>=0.29.19 \
     h5py>=2.10.0 \

@@ -80,14 +80,24 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
         end subroutine strataBuild
 
-        subroutine fillPIT(sl,elev,fillz,pits,nb)
+        subroutine fillPIT(sl,elev,hmax,fillz,pits,nb)
             use meshparams
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev
+            double precision intent(in) :: hmax
             double precision dimension(nb),intent(out) :: fillz
             integer dimension(nb,2),intent(out) :: pits
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine fillPIT
+
+        subroutine fillLabel(sl,elev,fillz,labels,nb)
+            use meshparams
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(out) :: fillz
+            integer dimension(nb),intent(out) :: labels
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine fillLabel
 
         subroutine ngbGlob(nb,ngbid)
             use meshparams

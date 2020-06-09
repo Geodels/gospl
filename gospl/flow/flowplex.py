@@ -177,13 +177,14 @@ class FAMesh(object):
         self.coastDist = np.zeros(self.npoints)
         pointData = self.vtkMesh.GetPointData()
         array = numpy_support.numpy_to_vtk(data, deep=1)
-        array.SetName("z")
+        array.SetName("elev")
         pointData.AddArray(array)
+        self.vtkMesh.SetFieldData(pointData)
 
         cf = vtk.vtkContourFilter()
         cf.SetInputData(self.vtkMesh)
         cf.SetValue(0, self.sealevel)
-        cf.SetInputArrayToProcess(0, 0, 0, 0, "z")
+        cf.SetInputArrayToProcess(0, 0, 0, 0, "elev")
         cf.GenerateTrianglesOff()
         cf.Update()
         coastXYZ = numpy_support.vtk_to_numpy(cf.GetOutput().GetPoints().GetData())
@@ -213,19 +214,12 @@ class FAMesh(object):
         _, outids, _ = np.intersect1d(self.pits[:, 0], pitNb, return_indices=True)
         self.outFlows = self.pits[outids, 1]
 
-        # For pits that are below a given volume threshold, we impose the filled
-        # elevation value (here we set the threshold to 10m * min area)
-        id = np.where(self.pitVol / self.minArea[1] < 10.0)[0]
-        self.pitVol[id] = 0.0
-        mask = np.in1d(self.pits[:, 0], id)
-        gZ[mask] = hFill[mask]
-
-        del groupPits, pitNb, id, mask, outids
+        del groupPits, pitNb, outids
         gc.collect()
 
-        return gZ
+        return
 
-    def _depressionlessSurface(self):
+    def _depressionlessSurface(self, limit=False):
         """
         Compute depression less surface.
         """
@@ -240,11 +234,14 @@ class FAMesh(object):
         if self.isfill:
             # Perform pit filling on process rank 0
             if MPIrank == 0:
+                hmax = 1.0e8
+                if limit:
+                    hmax = self.fillmax
                 # Fillpit returns:
                 # - hFill: filled elevation values
                 # - pits: 2D array containing each pit ID and
                 #         corresponding overspilling point ID
-                hFill, pits = fillPIT(self.sealevel - 1000.0, gZ)
+                hFill, pits = fillPIT(self.sealevel - 1000.0, gZ, hmax)
             else:
                 hFill = np.zeros(self.gpoints, dtype=np.float64)
                 pits = np.zeros((self.gpoints, 2), dtype=np.int64)
@@ -254,7 +251,7 @@ class FAMesh(object):
             self.hFill = hFill[self.glIDs]
 
             # Get depressions information
-            gZ = self._pitInformation(gZ, hFill)
+            self._pitInformation(gZ, hFill)
 
             if MPIrank == 0 and self.verbose:
                 print(
@@ -303,16 +300,16 @@ class FAMesh(object):
         gc.collect()
 
         # Solve flow accumulation
-        self.wMat = WAMat.transpose().copy()
-
         if self.isfill:
-            self.fillMat = self.wMat.copy()
+            self.fillMat = WAMat.transpose().copy()
+        else:
+            self.wMat = WAMat.transpose().copy()
 
         WAMat.destroy()
 
         return
 
-    def flowAccumulation(self, filled=False):
+    def flowAccumulation(self, filled=False, limit=False):
         """
         Compute multiple flow accumulation.
 
@@ -324,7 +321,7 @@ class FAMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         # Fill surface to remove pits
-        gZ, hFill = self._depressionlessSurface()
+        gZ, hFill = self._depressionlessSurface(limit)
 
         # Build flow direction
         if self.isfill:
@@ -348,7 +345,10 @@ class FAMesh(object):
 
         if self.isfill:
             # Solve flow accumulation for filled elevation
-            self._solve_KSP(True, self.wMat, self.bG, self.fillFAG)
+            if self.tNow == self.rStart:
+                self._solve_KSP(False, self.fillMat, self.bG, self.fillFAG)
+            else:
+                self._solve_KSP(True, self.fillMat, self.bG, self.fillFAG)
             self.dm.globalToLocal(self.fillFAG, self.fillFAL, 1)
         else:
             # Solve flow accumulation for unfilled elevation
@@ -376,10 +376,13 @@ class FAMesh(object):
 
     def _getErosionRate(self):
         """
-        Compute sediment and bedrock erosion rates in metres per year.
+        Compute sediment and bedrock erosion rates in metres per year. This is done
+        on the filled-limited elevation. We use the filled-limited elevation to ensure
+        that erosion is not going to be underestimate by small depressions which are
+        likely to be filled (either by sediments or water) during a single time step.
         """
 
-        Kcoeff = self.FAL.getArray()
+        Kcoeff = self.fillFAL.getArray()
         Kbr = np.sqrt(Kcoeff) * self.K * self.dt
         Kbr[self.seaID] = 0.0
 
@@ -394,6 +397,9 @@ class FAMesh(object):
             nodes = indptr[:-1]
             # Define erosion limiter to prevent formation of flat
             dh = self.hOldArray - self.hOldArray[self.rcvID[:, k]]
+            # Set places with have been filled (e.g. depression/lakes) as no slope regions
+            dh[self.hFill > self.hOldArray] = 0.0
+            dh[dh < 0.0] = 0.0
             limiter = np.divide(dh, dh + 1.0e-3, out=np.zeros_like(dh), where=dh != 0)
 
             # Bedrock erosion processes SPL computation (maximum bedrock incision)
@@ -434,6 +440,7 @@ class FAMesh(object):
         self.Eb.setArray(E)
         self.dm.globalToLocal(self.Eb, self.EbLocal, 1)
         E = self.EbLocal.getArray().copy()
+
         E[self.seaID] = 0.0
         ids = np.where(
             np.logical_and(
@@ -442,6 +449,7 @@ class FAMesh(object):
             )
         )[0]
         E[ids] = (self.hOldArray[ids] - self.sealevel - 1.0e-2) / self.dt
+        E[self.hFill > self.hOldArray] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb, 1)
 

@@ -8,6 +8,11 @@
 #define  _defineGTIN  _definegtin
 #define  _defineGTIN_   _definegtin_
 
+#define  fillLabel   filllabel
+#define  fillLabel_   filllabel_
+#define  _fillLabel  _filllabel
+#define  _fillLabel_  _filllabel_
+
 #define  fillPIT   fillpit
 #define  fillPIT_   fillpit_
 #define  _fillPIT  _fillpit

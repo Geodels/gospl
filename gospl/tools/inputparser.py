@@ -283,8 +283,19 @@ class ReadYaml(object):
                 raise ValueError("Surface Process Model: Kb coefficient not found.")
             try:
                 self.frac_fine = splDict["Ff"]
+                if self.frac_fine < 0.05:
+                    self.frac_fine = 0.05
+                    if MPIrank == 0:
+                        print(
+                            "The fraction of fine has been reset to 5%, which is minimal authorised value.",
+                            flush=True,
+                        )
             except KeyError:
-                self.frac_fine = 0.0
+                self.frac_fine = 0.05
+            try:
+                self.fillmax = splDict["hfill"]
+            except KeyError:
+                self.fillmax = 100.0
             # try:
             #     # `wght` is the percentage of upstream sediment flux
             #     # that will be deposited on each cell...
@@ -296,8 +307,9 @@ class ReadYaml(object):
 
         except KeyError:
             self.K = 1.0e-12
+            self.fillmax = 100.0
             # self.wght = 0.0
-            self.frac_fine = 0.0
+            self.frac_fine = 0.05
 
         return
 

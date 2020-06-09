@@ -412,8 +412,15 @@ class WriteMesh(object):
         # Get the difference between backward and forward model on TIN
         ldiff = np.array(hf["/elev"])[:, 0] - self.hLocal.getArray()
 
-        # Specify new uplift value matching backward elevation removing the
         # erosional features using a low-pass filter
+        gdiff = ldiff[self.lgIDs]
+        temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
+        temp[self.gshadinIDs] = gdiff[self.gshadowIDs]
+        temp[self.gshadoutIDs] = -1.0e8
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+        gdiff[self.shadowAlls] = temp
+        ldiff = gdiff[self.glIDs]
+
         # self.uplift = ldiff
         # self.uplift *= alpha / self.tecStep
         # hf.close()
@@ -440,16 +447,21 @@ class WriteMesh(object):
 
         # From local to global
         gfilter = lfilter[self.lgIDs]
-        gfilter[self.outIDs] = -1.0e8
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gfilter, op=MPI.MAX)
+        temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
+        temp[self.gshadinIDs] = gfilter[self.gshadowIDs]
+        temp[self.gshadoutIDs] = -1.0e8
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+        gfilter[self.shadowAlls] = temp
 
         # Specify new uplift value matching backward elevation removing the
         # erosional features using a low-pass filter
         self.uplift = gfilter[self.glIDs]
+        self.uplift[self.seaID] = ldiff[self.seaID]
+
         self.uplift *= alpha / self.tecStep
         hf.close()
 
-        del diffreg, filter, lfilter, gfilter, ldiff, hf
+        del diffreg, filter, lfilter, gfilter, ldiff, hf, temp
         gc.collect()
 
         return

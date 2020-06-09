@@ -414,6 +414,7 @@ end subroutine MFDreceivers
 
 subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, nstrath, nstratz)
 !*****************************************************************************
+! Record stratigraphic layers through time
 
   implicit none
 
@@ -453,13 +454,17 @@ end subroutine strataBuild
 !! PIT FILLING FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine fillPIT(sl, elev, fillz, pits, nb)
+subroutine fillPIT(sl, elev, hmax, fillz, pits, nb)
+!*****************************************************************************
+! Perform pit filling using a priority queue approach
+
   use meshparams
   implicit none
 
   integer :: nb
   double precision,intent(in) :: sl
   double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: hmax
   double precision,intent(out) :: fillz(nb)
   ! Pit number and overspilling point ID
   integer,intent(out) :: pits(nb,2)
@@ -468,9 +473,10 @@ subroutine fillPIT(sl, elev, fillz, pits, nb)
   integer :: i, k, c, pitNb
 
   type (node)  :: ptID
-  double precision :: h
+  double precision :: h, limitz(nb)
 
   fillz = elev
+  limitz = elev
   pits = -1
 
   ! Push marine edges nodes to priority queue
@@ -509,6 +515,8 @@ subroutine fillPIT(sl, elev, fillz, pits, nb)
             ! This is a new one update information
             if(pits(i,1)==-1)then
               fillz(c) = h
+              limitz(c) = h
+              if(fillz(c)-elev(c)>hmax) limitz(c) = elev(c)+hmax
               pitNb = pitNb+1
               pits(i,1) = pitNb
               pits(c,1) = pitNb
@@ -517,6 +525,8 @@ subroutine fillPIT(sl, elev, fillz, pits, nb)
             ! This is an existing one: add nodes to the depression
             else
               fillz(c) = h
+              limitz(c) = h
+              if(fillz(c)-elev(c)>hmax) limitz(c) = elev(c)+hmax
               pits(c,1) = pits(i,1)
               pits(c,2) = pits(i,2)
             endif
@@ -527,9 +537,87 @@ subroutine fillPIT(sl, elev, fillz, pits, nb)
     enddo
   enddo
 
+  fillz = limitz
+  
   return
 
 end subroutine fillPIT
+
+subroutine fillLabel(sl, elev, fillz, labels, nb)
+!*****************************************************************************
+! Perform pit filling and watershed labeling using a variant of the priority
+! queue approach
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision,intent(in) :: sl
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(out) :: fillz(nb)
+  ! Pit number and overspilling point ID
+  integer,intent(out) :: labels(nb)
+  logical :: flag(nb)
+
+  integer :: i, k, c, label
+
+  type (node)  :: ptID
+  double precision :: h
+
+  fillz = elev
+  labels = -1
+
+  ! Push marine edges nodes to priority queue
+  flag = .False.
+  do i = 1, nb
+    if(fillz(i)<sl)then
+      flag(i) = .True.
+      labels(i) = 0
+      lp: do k = 1, 6
+        c = gnID(i,k)
+        if(c>0)then
+          if(fillz(c)>=sl)then
+            call priorityqueue%PQpush(fillz(i), i)
+            exit lp
+          endif
+        endif
+      enddo lp
+    endif
+  enddo
+
+  ! Perform pit filling using priority total queue
+  label = 0
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    if(labels(i)==0)then
+      label = label + 1
+      labels(i) = label
+    endif
+    do k = 1, 6
+      c = gnID(i,k)
+      if(c>0)then
+        if(.not.flag(c))then
+          flag(c) = .True.
+          h = nearest(fillz(i), 1.0)
+          ! Not a depression
+          if(fillz(c)>h)then
+            call priorityqueue%PQpush(fillz(c), c)
+          ! Find a depression
+          else
+            ! This is a new one update information
+            fillz(c) = h
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
+          labels(c) = labels(i)
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine fillLabel
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! MESH DECLARATION FUNCTIONS !!
