@@ -463,7 +463,9 @@ class WriteMesh(object):
         self.uplift *= alpha / self.tecStep
         hf.close()
 
-        del diffreg, filter, lfilter, gfilter, ldiff, hf, temp
+        del diffreg, filter, lfilter, gfilter, ldiff, hf
+        if MPIsize > 1:
+            del temp
         gc.collect()
 
         return
