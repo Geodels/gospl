@@ -81,7 +81,7 @@ It is also possible to ssh into the container as follow:
   # Bash
   docker run -it -v my_vol:/live/share \
      --entrypoint /bin/bash  \
-     geodels/gospl
+     geodels/gospl:petsc-3.13.0
 
 
 You can list the containers currently existing on your machine by running:
@@ -121,7 +121,7 @@ linux the installation may differ depending on the distribution you
 are running.
 
 1. Download and Install Kitematic_
-2. Open Kitematic and search for the **gospl** image.
+2. Open Kitematic and search for the tag petsc-3.13.0 in **gospl** image.
 3. Create a container by clicking on the create button.
 
 You should now have a container appearing on the left side of your

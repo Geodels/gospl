@@ -25,7 +25,7 @@ RUN apt-get update -qq && \
 
 # install gopspl
 WORKDIR /live/lib
-RUN git clone -b petsc-3.13.0 https://github.com/Geodels/gospl.git && \
+RUN git clone https://github.com/Geodels/gospl.git && \
     cd gospl && \
     export F90=gfortran && \
     export PETSC_DIR=/opt/petsc && \

@@ -103,7 +103,7 @@ b. :yaml:`K` representing the erodibility coefficient which is scale-dependent a
 
 c. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never be deposited in the marine environment either due to resuspension or dissolution. The minimal value is hard-coded to be at least 5% of the sediment load reaching the ocean. The user can chose an higher value if necessary.
 
-.. important:
+.. important::
   The fraction of fines that is lost is only for the sediment reaching the coast and not for the sediments deposited in continental regions.
 
 
