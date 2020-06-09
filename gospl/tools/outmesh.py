@@ -414,11 +414,12 @@ class WriteMesh(object):
 
         # erosional features using a low-pass filter
         gdiff = ldiff[self.lgIDs]
-        temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
-        temp[self.gshadinIDs] = gdiff[self.gshadowIDs]
-        temp[self.gshadoutIDs] = -1.0e8
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-        gdiff[self.shadowAlls] = temp
+        if MPIsize > 1:
+            temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
+            temp[self.gshadinIDs] = gdiff[self.gshadowIDs]
+            temp[self.gshadoutIDs] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            gdiff[self.shadowAlls] = temp
         ldiff = gdiff[self.glIDs]
 
         # self.uplift = ldiff
@@ -447,11 +448,12 @@ class WriteMesh(object):
 
         # From local to global
         gfilter = lfilter[self.lgIDs]
-        temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
-        temp[self.gshadinIDs] = gfilter[self.gshadowIDs]
-        temp[self.gshadoutIDs] = -1.0e8
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-        gfilter[self.shadowAlls] = temp
+        if MPIsize > 1:
+            temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
+            temp[self.gshadinIDs] = gfilter[self.gshadowIDs]
+            temp[self.gshadoutIDs] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            gfilter[self.shadowAlls] = temp
 
         # Specify new uplift value matching backward elevation removing the
         # erosional features using a low-pass filter
