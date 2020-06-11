@@ -7,7 +7,7 @@ h5py==2.10.0
 pandas==1.0.4
 ruamel.yaml==0.16.10
 fastfunc==0.2.2
-meshio==4.0.13
+meshio==4.0.15
 meshplex==0.13.0
 pre-commit==2.4.0
 vtk==9.0.0
