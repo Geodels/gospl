@@ -129,21 +129,21 @@ EXPOSE 8888
 RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     python3 -m pip install --no-cache-dir \
     pathlib \
-    meshio>=4.0.12 \
+    meshio>=4.0.15 \
     shapely \
     meshplex>=0.13.0 \
     ruamel.yaml>=0.16.10 \
     stripy \
     numpy>=1.18.5 \
     scipy>=1.4.1 \
-    Cython>=0.29.19 \
+    Cython>=0.29.20 \
     h5py>=2.10.0 \
     pandas>=1.0.3  \
     ruamel.yaml>=0.15.98 \
     fastfunc>=0.2.2 \
-    meshio>=4.0.12 \
+    meshio>=4.0.15 \
     meshplex>=0.13.0 \
-    pre-commit>=1.21.0
+    pre-commit>=2.5.1
 
 # install latest vtk from wheel
 RUN  python3 -m pip install --no-cache-dir \

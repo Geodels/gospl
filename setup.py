@@ -144,7 +144,7 @@ if __name__ == "__main__":
         packages=["gospl", "gospl.tools", "gospl.mesher", "gospl.sed", "gospl.flow"],
         install_requires=[
             "pytest",
-            "Cython==0.29.19",
+            "Cython==0.29.20",
             "numpy==1.18.5",
             "scipy==1.4.1",
             "h5py==2.10.0",
@@ -153,11 +153,11 @@ if __name__ == "__main__":
             "meshplex==0.13.0",
             "mpi4py>=3.0.3",
             "petsc4py>=3.13.0",
-            "pre-commit==2.4.0",
+            "pre-commit==2.5.1",
             "fastfunc==0.2.2",
             "vtk==9.0.0",
             "numpy-indexed==0.3.5",
-            "meshio==4.0.13",
+            "meshio==4.0.15",
         ],
         python_requires=">=3.3",
         classifiers=[

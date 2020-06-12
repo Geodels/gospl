@@ -90,13 +90,14 @@ f. :yaml:`strat` is the stratigraphic timestep interval used to update the strat
       hfill: 100.
       K: 3.e-8
       Ff: 0.2
+      d: 0.42
 
 
 This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
 a. :yaml:`hfill` the maximum filling elevation for depressions in the continental domain. This can be seen as a maximum lake elevation. This parameter has a default value of 100 m. It is used to avoid by-passing large depressions and to ensure deposition in endorheic basins.
 
-b. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics.
+b. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics. It is used in the SPL law: :math:`E = K (\bar{P}A)^m S^n`
 
 .. warning::
   It is worth noting that the coefficient *m* and *n* are fixed in this version of *gospl* and take the value of *0.5* & *1* respectively.
@@ -105,6 +106,9 @@ c. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never b
 
 .. important::
   The fraction of fines that is lost is only for the sediment reaching the coast and not for the sediments deposited in continental regions.
+
+d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following [Murphy16]_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. ::yaml:`coeffd` (:math:`d` in the equation) is is a positive exponent that has been estimated from field-based relationships to 0.42.
+`YAML`_
 
 
 :yaml:`diffusion`
@@ -223,3 +227,8 @@ b. the option :yaml:`makedir` gives the ability to delete any existing output fo
 .. _`Paraview`: https://www.paraview.org/download/
 .. _`YAML`: https://circleci.com/blog/what-is-yaml-a-beginner-s-guide/
 .. _`Examples`: https://unisyd-my.sharepoint.com/:f:/g/personal/tristan_salles_sydney_edu_au/En8Wf56W_j9Jmqovx__PicgBczIcUogo6WuR-TVzZMHIMg?e=2pFtqT
+
+.. [Murphy16] Murphy, B., Johnson, J., Gasparini, N. & Sklar, L. S. -
+    Chemical weathering as a mechanism for the climatic control of bedrock river incision. **Nature**, 532, 223–227, `doi:10.1038/nature17449`_, 2016.
+
+ .. _`doi:10.1038/nature17449`:  https://doi.org/10.1038/nature17449

@@ -86,7 +86,7 @@ Indices and tables
     pyBadlands: A framework to simulate sediment transport, landscape dynamics and basin stratigraphic evolution through space and time. **PLOS ONE**, 13(4): e0195557, `doi:10.1371/journal.pone.0195557`_, 2018.
 
 .. [Salles19] Salles, T. -
-    eSCAPE: Regional to Global Scale Landscape Evolution Model v2.0. **Geosci. Model Dev.**, 12, 4165-4184, `doi:10.5194/gmd-12-4165-2019`_, 2019, 2019.
+    eSCAPE: Regional to Global Scale Landscape Evolution Model v2.0. **Geosci. Model Dev.**, 12, 4165-4184, `doi:10.5194/gmd-12-4165-2019`_, 2019.
 
 
 .. _`badlands`:  https://github.com/badlands-model/badlands

@@ -296,6 +296,11 @@ class ReadYaml(object):
                 self.fillmax = splDict["hfill"]
             except KeyError:
                 self.fillmax = 100.0
+
+            try:
+                self.coeffd = splDict["d"]
+            except KeyError:
+                self.coeffd = 0.0
             # try:
             #     # `wght` is the percentage of upstream sediment flux
             #     # that will be deposited on each cell...
@@ -310,6 +315,7 @@ class ReadYaml(object):
             self.fillmax = 100.0
             # self.wght = 0.0
             self.frac_fine = 0.05
+            self.coeffd = 0.0
 
         return
 

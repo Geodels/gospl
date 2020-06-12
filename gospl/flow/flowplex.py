@@ -382,8 +382,12 @@ class FAMesh(object):
         likely to be filled (either by sediments or water) during a single time step.
         """
 
-        Kcoeff = self.fillFAL.getArray()
-        Kbr = np.sqrt(Kcoeff) * self.K * self.dt
+        # Upstream-averaged mean annual precipitation rate and the drainage area
+        PA = self.fillFAL.getArray()
+
+        # Incorporate the effect of local mean annual precipitation rate on erodibility
+        Kbr = self.K * (self.rainVal ** self.coeffd)
+        Kbr *= np.sqrt(PA) * self.dt
         Kbr[self.seaID] = 0.0
 
         # Initialise identity matrices...
@@ -406,7 +410,7 @@ class FAMesh(object):
             data = np.divide(
                 Kbr * limiter,
                 self.distRcv[:, k],
-                out=np.zeros_like(Kcoeff),
+                out=np.zeros_like(PA),
                 where=self.distRcv[:, k] != 0,
             )
             tmpMat = self._matrix_build()
@@ -453,7 +457,7 @@ class FAMesh(object):
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb, 1)
 
-        del E, Kcoeff, Kbr, ids
+        del E, PA, Kbr, ids
         gc.collect()
 
         return
