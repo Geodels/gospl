@@ -28,6 +28,11 @@
 #define  _MFDreceivers  _mfdreceivers
 #define  _MFDreceivers_  _mfdreceivers_
 
+#define  strataBuildCarb   stratabuildcarb
+#define  strataBuildCarb_   stratabuildcarb_
+#define  _strataBuildCarb  _stratabuildcarb
+#define  _strataBuildCarb_  _stratabuildcarb_
+
 #define  strataBuild   stratabuild
 #define  strataBuild_   stratabuild_
 #define  _strataBuild  _stratabuild

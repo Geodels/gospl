@@ -172,6 +172,16 @@ class WriteMesh(object):
             )
             f["stratH"][:, : self.stratStep] = self.stratH[:, : self.stratStep]
 
+            # Write stratal layers carbonate percentage per layers
+            if self.carbOn:
+                f.create_dataset(
+                    "stratC",
+                    shape=(self.npoints, self.stratStep),
+                    dtype="float64",
+                    compression="gzip",
+                )
+                f["stratC"][:, : self.stratStep] = self.stratC[:, : self.stratStep]
+
         MPIcomm.Barrier()
 
         if MPIrank == 0 and self.verbose:
@@ -332,7 +342,6 @@ class WriteMesh(object):
 
         hf.close()
 
-        # else:
         if self.stratNb > 0 and self.stratStep > 0:
             h5file = (
                 self.outputDir
@@ -351,6 +360,9 @@ class WriteMesh(object):
             self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
             self.stratH.fill(0.0)
             self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
+            if self.carbOn:
+                self.stratC.fill(0.0)
+                self.stratC[:, : self.stratStep] = np.array(hf["/stratC"])
 
             hf.close()
 

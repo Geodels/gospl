@@ -119,10 +119,76 @@ class SEDMesh(object):
         self.seaID = np.where(h <= self.sealevel)[0]
         self._hillSlope()
 
+        # Compute Fuzzy Logic Carbonate Growth
+        if self.carbOn:
+            self._growCarbonates()
+
+        # Update layer elevation
+        if self.stratNb > 0:
+            self._elevStrat()
+
         del h
         gc.collect()
 
         return
+
+    def _growCarbonates(self):
+        """
+        When carbonates is turned on update carbonate thicknesses based on fuzzy logic controls.
+        """
+
+        # Thickness of reef already deposited in the current stratigraphic layer
+        if self.stratNb > 0:
+            reefH = self.stratC[:, self.stratStep] * self.stratH[:, self.stratStep]
+
+        # Limit fuzzy controllers to possible value range
+        hl = self.sealevel - self.hLocal.getArray().copy()
+
+        # TO DO: this will need to be updated with additional controls...
+        carbH = np.zeros(self.npoints, dtype=np.float64)
+        validIDs = np.ones(self.npoints, dtype=np.int64)
+        for k in range(len(self.carbCtrl.controlKeys)):
+            # Accomodation control
+            if self.carbCtrl.controlKeys[k] == "depth":
+                ids = np.where(
+                    np.logical_or(
+                        hl <= self.carbCtrl.controlBounds[k][0],
+                        hl >= self.carbCtrl.controlBounds[k][1],
+                    )
+                )[0]
+                validIDs[ids] = 0
+
+        # Compute carbonate growth rates in metres per thousand years
+        # and associated thicknesses
+        ids = np.where(validIDs > 0)[0]
+        for k in range(len(ids)):
+            self.carbCtrl.carbControlSystem.input["depth"] = hl[ids[k]]
+            self.carbCtrl.carbControlSystem.input["temperature"] = 20.0
+            self.carbCtrl.carbControlSystem.compute()
+            growthRate = self.carbCtrl.carbControlSystem.output["growth"]
+            carbH[ids[k]] = min(hl[ids[k]] - 1.0e-6, growthRate * self.dt * 1.0e-3)
+
+        # Update top layers based on carbonate growth
+        self.tmpL.setArray(carbH)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+
+        if self.stratNb > 0:
+            self._deposeStrat()
+
+            # Update carbonate reef content in the stratigraphic layer
+            ids = np.where(carbH > 0.0)[0]
+            self.stratC[ids, self.stratStep] = (carbH[ids] + reefH[ids]) / self.stratH[
+                ids, self.stratStep
+            ]
+
+            del reefH
+
+        del ids, validIDs, carbH, hl
+        gc.collect()
 
     def _moveFluxes(self, filled=False):
         """
@@ -436,7 +502,6 @@ class SEDMesh(object):
         if self.stratNb > 0:
             self._deposeStrat()
             self.erodeStrat()
-            self._elevStrat()
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -454,7 +519,15 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.tmp, self.tmpL)
         depo = self.tmpL.getArray().copy()
         depo[depo < 0] = 0.0
+        if self.carbOn:
+            carbH = self.stratH[:, self.stratStep] * self.stratC[:, self.stratStep]
         self.stratH[:, self.stratStep] += depo
+        if self.carbOn:
+            ids = np.where(depo > 0)[0]
+            self.stratC[ids, self.stratStep] = (
+                carbH[ids] / self.stratH[ids, self.stratStep]
+            )
+            del carbH
         del depo
         gc.collect()
 
@@ -481,6 +554,8 @@ class SEDMesh(object):
         # Find nodes with no remaining stratigraphic thicknesses
         ids = np.where(-ero[nids] >= cumThick[:, 0])[0]
         self.stratH[nids[ids], : self.stratStep + 1] = 0.0
+        if self.carbOn:
+            self.stratC[nids[ids], : self.stratStep + 1] = 0.0
 
         # Erode remaining stratal layers
         if len(ids) < len(nids):
@@ -500,6 +575,8 @@ class SEDMesh(object):
             self.stratH[nids, eroIDs] = eroVal
 
         self.stratH[nids, 0] -= 1.0e6
+        if self.carbOn:
+            self.stratC[self.stratH < 0] = 0.0
         self.stratH[self.stratH < 0] = 0.0
 
         return

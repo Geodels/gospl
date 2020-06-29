@@ -40,12 +40,19 @@ class Model(parentModel):
     :arg showlog: Output option for PETSC logging file
     """
 
-    def __init__(self, filename, verbose=True, showlog=False, *args, **kwargs):
+    def __init__(
+        self, filename, verbose=True, showlog=False, carbctrl=None, *args, **kwargs
+    ):
 
         self.showlog = showlog
 
         self.modelRunTime = process_time()
         self.verbose = verbose
+
+        self.carbOn = False
+        if carbctrl is not None:
+            self.carbOn = True
+            self.carbCtrl = carbctrl
 
         # Read input dataset
         _ReadYaml.__init__(self, filename)

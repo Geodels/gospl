@@ -450,6 +450,49 @@ subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, nstrath, nstra
 
 end subroutine strataBuild
 
+subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratc, nstrath, nstratz, nstratc)
+!*****************************************************************************
+! Record stratigraphic layers through time with carbonate turned on
+
+  implicit none
+
+  integer, intent(in) :: nb
+  integer, intent(in) :: stratnb
+
+  integer, intent(in) :: ids(nb,3)
+  double precision,intent(in) :: weights(nb,3)
+  double precision, intent(in) :: stratz(nb,stratnb)
+  double precision, intent(in) :: strath(nb,stratnb)
+  double precision, intent(in) :: stratc(nb,stratnb)
+
+  double precision, intent(out) :: nstratz(nb,stratnb)
+  double precision, intent(out) :: nstrath(nb,stratnb)
+  double precision, intent(out) :: nstratc(nb,stratnb)
+
+  integer :: k, p, kk
+  double precision :: tmp1(stratnb), tmp2(stratnb), tmp3(stratnb), sum_weight
+
+  do k = 1, nb
+    sum_weight = sum(weights(k,:))
+    do kk = 1, stratnb
+      tmp1 = 0.0
+      tmp2 = 0.0
+      tmp3 = 0.0
+      do p = 1, 3
+        tmp1(kk) = tmp1(kk) + weights(k,p)*stratz(ids(k,p)+1,kk)
+        tmp2(kk) = tmp2(kk) + weights(k,p)*strath(ids(k,p)+1,kk)
+        tmp3(kk) = tmp3(kk) + weights(k,p)*stratc(ids(k,p)+1,kk)
+      enddo
+      nstratz(k,kk) = tmp1(kk)/sum_weight
+      nstrath(k,kk) = tmp2(kk)/sum_weight
+      nstratc(k,kk) = tmp3(kk)/sum_weight
+    enddo
+  enddo
+
+  return
+
+end subroutine strataBuildCarb
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
 !! PIT FILLING FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -538,7 +581,7 @@ subroutine fillPIT(sl, elev, hmax, fillz, pits, nb)
   enddo
 
   fillz = limitz
-  
+
   return
 
 end subroutine fillPIT

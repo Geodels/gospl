@@ -80,6 +80,19 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
         end subroutine strataBuild
 
+        subroutine strataBuildCarb(nb,stratnb,ids,weights,strath,stratz,stratc,nstrath,nstratz,nstratc)
+            integer intent(in) :: nb
+            integer intent(in) :: stratnb
+            integer dimension(nb,3),intent(in),depend(nb) :: ids
+            double precision dimension(nb,3),intent(in),depend(nb) :: weights
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: strath
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratz
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratc
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstrath
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratc
+        end subroutine strataBuildCarb
+
         subroutine fillPIT(sl,elev,hmax,fillz,pits,nb)
             use meshparams
             double precision intent(in) :: sl

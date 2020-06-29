@@ -146,13 +146,13 @@ Requirements
 ~~~~~~~~~~~~
 
 -  Python **>= 3.6**
--  Numpy **>= 1.18.5**
--  Scipy **>= 1.4.1**
+-  Numpy **>= 1.19.0**
+-  Scipy **>= 1.5.0**
 -  Cython **>= 0.29.20**
 -  mpi4py **== 3.0.3**
 -  petsc4py **== 3.13.0**
 -  h5py **== 2.10.0**
--  pandas **>= 1.0.3**
+-  pandas **>= 1.0.5**
 -  ruamel.yaml **== 0.16.10**
 -  fastfunc **== 0.2.2**
 -  meshio **== 4.0.15**

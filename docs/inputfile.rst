@@ -107,8 +107,7 @@ c. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never b
 .. important::
   The fraction of fines that is lost is only for the sediment reaching the coast and not for the sediments deposited in continental regions.
 
-d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following [Murphy16]_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. ::yaml:`coeffd` (:math:`d` in the equation) is is a positive exponent that has been estimated from field-based relationships to 0.42.
-`YAML`_
+d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following [Murphy16]_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`coeffd` (:math:`d` in the equation) is is a positive exponent that has been estimated from field-based relationships to 0.42.
 
 
 :yaml:`diffusion`

@@ -19,6 +19,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import defineTIN
     from gospl._fortran import ngbGlob
     from gospl._fortran import strataBuild
+    from gospl._fortran import strataBuildCarb
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -41,6 +42,7 @@ class UnstMesh(object):
         self.rainVal = None
         self.stratH = None
         self.stratZ = None
+        self.stratC = None
 
         self._buildMesh()
 
@@ -462,6 +464,8 @@ class UnstMesh(object):
         if self.stratNb > 0:
             self.stratH = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
             self.stratZ = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
+            if self.carbOn:
+                self.stratC = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
 
         return
 
@@ -691,31 +695,12 @@ class UnstMesh(object):
         else:
             loc_erodep = erodep[self.glIDs]
 
-        # Update local stratal dataset
+        # Update local stratal dataset after displacements
         if self.stratNb > 0 and self.stratStep > 0:
-            stratH = self.stratH[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp = np.full(
-                    (self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64
-                )
-                temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratH[self.shadowAlls, :] = temp
-                loc_stratH = stratH[self.glIDs, :]
+            if self.carbOn:
+                loc_stratH, loc_stratZ, loc_stratC = self._updateDispStrata()
             else:
-                loc_stratH = stratH[self.glIDs, :]
-
-            stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratZ[self.shadowAlls, :] = temp
-                loc_stratZ = stratZ[self.glIDs, :]
-            else:
-                loc_stratZ = stratZ[self.glIDs, :]
+                loc_stratH, loc_stratZ = self._updateDispStrata()
 
         # Build and query local kd-tree
         tree = spatial.cKDTree(XYZ, leafsize=10)
@@ -742,12 +727,12 @@ class UnstMesh(object):
 
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:
-            (
-                self.stratH[:, : self.stratStep],
-                self.stratZ[:, : self.stratStep],
-            ) = strataBuild(
-                self.npoints, self.stratStep, indices, weights, loc_stratH, loc_stratZ
-            )
+            if self.carbOn:
+                self._stratalRecord(
+                    indices, weights, loc_stratH, loc_stratZ, loc_stratC
+                )
+            else:
+                self._stratalRecord(indices, weights, loc_stratH, loc_stratZ, None)
 
         if len(onIDs) > 0:
             nerodep[onIDs] = loc_erodep[indices[onIDs, 0]]
@@ -756,6 +741,10 @@ class UnstMesh(object):
             if self.stratNb > 0 and self.stratStep > 0:
                 self.stratZ[onIDs, : self.stratStep] = loc_stratZ[indices[onIDs, 0], :]
                 self.stratH[onIDs, : self.stratStep] = loc_stratH[indices[onIDs, 0], :]
+                if self.carbOn:
+                    self.stratC[onIDs, : self.stratStep] = loc_stratC[
+                        indices[onIDs, 0], :
+                    ]
 
         self.hLocal.setArray(nelev)
         self.dm.localToGlobal(self.hLocal, self.hGlobal, 1)
@@ -765,30 +754,10 @@ class UnstMesh(object):
 
         # Update local stratal dataset
         if self.stratNb > 0 and self.stratStep > 0:
-            stratH = self.stratH[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp = np.full(
-                    (self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64
-                )
-                temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratH[self.shadowAlls, :] = temp
-                self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
-            else:
-                self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
-
-            if MPIsize > 1:
-                stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratZ[self.shadowAlls, :] = temp
-                self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
-            else:
-                self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
-            del stratH, stratZ, loc_stratH, loc_stratZ
+            self._localStrat()
+            del loc_stratH, loc_stratZ
+            if self.carbOn:
+                del loc_stratC
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -802,6 +771,121 @@ class UnstMesh(object):
         del weights, tmp, temp
         del tree, distances, indices
         gc.collect()
+
+        return
+
+    def _updateDispStrata(self):
+        """
+        Build stratigraphic records after mesh advection.
+        """
+
+        stratH = self.stratH[self.lgIDs, : self.stratStep]
+        if MPIsize > 1:
+            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
+            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
+            temp[self.gshadoutIDs, :] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            stratH[self.shadowAlls, :] = temp
+            loc_stratH = stratH[self.glIDs, :]
+        else:
+            loc_stratH = stratH[self.glIDs, :]
+
+        stratZ = self.stratZ[self.lgIDs, : self.stratStep]
+        if MPIsize > 1:
+            temp.fill(-1.0e8)
+            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
+            temp[self.gshadoutIDs, :] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            stratZ[self.shadowAlls, :] = temp
+            loc_stratZ = stratZ[self.glIDs, :]
+        else:
+            loc_stratZ = stratZ[self.glIDs, :]
+
+        if self.carbOn:
+            stratC = self.stratC[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratC[self.shadowAlls, :] = temp
+                loc_stratC = stratC[self.glIDs, :]
+            else:
+                loc_stratC = stratC[self.glIDs, :]
+
+            return loc_stratH, loc_stratZ, loc_stratC
+        else:
+            return loc_stratH, loc_stratZ
+
+    def _stratalRecord(self, indices, weights, loc_stratH, loc_stratZ, loc_stratC):
+        """
+        Build stratigraphic records for advected mesh.
+        """
+
+        if self.carbOn:
+            (
+                self.stratH[:, : self.stratStep],
+                self.stratZ[:, : self.stratStep],
+                self.stratC[:, : self.stratStep],
+            ) = strataBuildCarb(
+                self.npoints,
+                self.stratStep,
+                indices,
+                weights,
+                loc_stratH,
+                loc_stratZ,
+                loc_stratC,
+            )
+        else:
+            (
+                self.stratH[:, : self.stratStep],
+                self.stratZ[:, : self.stratStep],
+            ) = strataBuild(
+                self.npoints, self.stratStep, indices, weights, loc_stratH, loc_stratZ,
+            )
+
+        return
+
+    def _localStrat(self):
+        """
+        Update stratigraphic records locaaly for advected mesh.
+        """
+
+        stratH = self.stratH[self.lgIDs, : self.stratStep]
+        if MPIsize > 1:
+            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
+            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
+            temp[self.gshadoutIDs, :] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            stratH[self.shadowAlls, :] = temp
+            self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
+        else:
+            self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
+
+        stratZ = self.stratZ[self.lgIDs, : self.stratStep]
+        if MPIsize > 1:
+            temp.fill(-1.0e8)
+            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
+            temp[self.gshadoutIDs, :] = -1.0e8
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+            stratZ[self.shadowAlls, :] = temp
+            self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
+        else:
+            self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
+        del stratH, stratZ
+
+        if self.carbOn:
+            stratC = self.stratC[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratC[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratC[self.shadowAlls, :] = temp
+                self.stratC[:, : self.stratStep] = stratC[self.glIDs, :]
+            else:
+                self.stratC[:, : self.stratStep] = stratC[self.glIDs, :]
+            del stratC
 
         return
 
@@ -852,6 +936,8 @@ class UnstMesh(object):
         del self.inIDs
         del self.stratH
         del self.stratZ
+        if self.carbOn:
+            del self.stratC
 
         if not self.fast:
             del self.distRcv

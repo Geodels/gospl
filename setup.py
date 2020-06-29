@@ -145,10 +145,10 @@ if __name__ == "__main__":
         install_requires=[
             "pytest",
             "Cython==0.29.20",
-            "numpy==1.18.5",
-            "scipy==1.4.1",
+            "numpy==1.19.0",
+            "scipy==1.5.0",
             "h5py==2.10.0",
-            "pandas==1.0.4",
+            "pandas==1.0.5",
             "ruamel.yaml==0.16.10",
             "meshplex==0.13.0",
             "mpi4py>=3.0.3",
