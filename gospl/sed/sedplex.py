@@ -163,7 +163,7 @@ class SEDMesh(object):
         ids = np.where(validIDs > 0)[0]
         for k in range(len(ids)):
             self.carbCtrl.carbControlSystem.input["depth"] = hl[ids[k]]
-            self.carbCtrl.carbControlSystem.input["temperature"] = 20.0
+            # self.carbCtrl.carbControlSystem.input["temperature"] = 20.0
             self.carbCtrl.carbControlSystem.compute()
             growthRate = self.carbCtrl.carbControlSystem.output["growth"]
             carbH[ids[k]] = min(hl[ids[k]] - 1.0e-6, growthRate * self.dt * 1.0e-3)

@@ -62,6 +62,12 @@ def test_meshplex_import():
     print("\t\t You have meshio version {}".format(meshplex.__version__))
 
 
+def test_skfuzzy_import():
+    import skfuzzy
+
+    print("\t\t You have skfuzzy version {}".format(skfuzzy.__version__))
+
+
 def test_gospl_modules():
     import gospl
     from gospl.model import Model

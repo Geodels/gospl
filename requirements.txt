@@ -12,3 +12,4 @@ meshplex==0.13.0
 pre-commit==2.5.1
 vtk==9.0.0
 numpy-indexed==0.3.5
+scikit-fuzzy>=0.4.2

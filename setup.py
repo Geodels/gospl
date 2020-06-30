@@ -136,7 +136,7 @@ if __name__ == "__main__":
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
         url="https://github.com/Geodels/gospl",
-        version="0.1.6",
+        version="0.1.7",
         description="A Python interface to perform Global Landscape Evolution Model",
         long_description=long_description,
         long_description_content_type="text/markdown",
@@ -158,6 +158,7 @@ if __name__ == "__main__":
             "vtk==9.0.0",
             "numpy-indexed==0.3.5",
             "meshio==4.0.15",
+            "scikit-fuzzy>=0.4.2",
         ],
         python_requires=">=3.3",
         classifiers=[

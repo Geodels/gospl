@@ -159,6 +159,7 @@ Requirements
 -  meshplex **== 0.12.3**
 -  pre-commit **>= 2.5.1**
 -  vtk **== 9.0.0**
+-  scikit-fuzzy **>= 0.4.2**
 -  numpy-indexed
 
 

@@ -143,6 +143,7 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     fastfunc>=0.2.2 \
     meshio>=4.0.15 \
     meshplex>=0.13.0 \
+    scikit-fuzzy>=0.4.2 \
     pre-commit>=2.5.1
 
 # install latest vtk from wheel
