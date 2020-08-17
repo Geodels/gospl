@@ -440,7 +440,9 @@ class SEDMesh(object):
 
         iters = 0
         remainPerc = 1.0
-        while iters < 500 and remainPerc > max(0.05, self.frac_fine):
+        while (
+            iters < 500 and remainPerc > max(0.05, self.frac_fine) and maxSedVol > 0.0
+        ):
 
             # Get erosion values for considered time step
             self._solve_KSP(False, self.Diff, self.Qs, self.tmp)
@@ -498,7 +500,9 @@ class SEDMesh(object):
         if self.stratNb > 0:
             self._deposeStrat(stype)
 
-        del h0, cumDep, dH, overDep, maxDep, Qs
+        del h0, cumDep, maxDep, Qs
+        if maxSedVol > 0.0:
+            del dH, overDep
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
