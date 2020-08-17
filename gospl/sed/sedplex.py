@@ -35,7 +35,12 @@ class SEDMesh(object):
         self.QsL = self.hLocal.duplicate()
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
-
+        if self.stratNb > 0:
+            self.vSedf = self.hGlobal.duplicate()
+            self.vSedfLocal = self.hLocal.duplicate()
+            if self.carbOn:
+                self.vSedc = self.hGlobal.duplicate()
+                self.vSedcLocal = self.hLocal.duplicate()
         self.maxnb = setMaxNb(self.npoints)
         self.scaleIDs = np.zeros(self.npoints)
         self.scaleIDs[self.lIDs] = 1.0
@@ -49,15 +54,48 @@ class SEDMesh(object):
 
         t0 = process_time()
 
-        # Get erosion rate (m/yr) to volume
-        self.Eb.copy(result=self.tmp)
-        self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+        # Multi-lithology case
+        if self.stratNb > 0:
+            # Coarse sediment
+            # Get erosion rate (m/yr) to volume
+            self.tmpL.setArray(self.thCoarse)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            # Get the volume of sediment transported in m3 per year
+            self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
+            # Update local vector
+            self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
 
-        # Get the volume of sediment transported in m3 per year
-        self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
+            # Fine sediment
+            # Get erosion rate (m/yr) to volume
+            self.tmpL.setArray(self.thFine)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            # Get the volume of sediment transported in m3 per year
+            self._solve_KSP(False, self.wMat, self.tmp, self.vSedf)
+            # Update local vector
+            self.dm.globalToLocal(self.vSedf, self.vSedfLocal, 1)
 
-        # Update local vector
-        self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
+            # Carbonate sediment
+            if self.carbOn:
+                # Get erosion rate (m/yr) to volume
+                self.tmpL.setArray(self.thCarb)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+                # Get the volume of sediment transported in m3 per year
+                self._solve_KSP(False, self.wMat, self.tmp, self.vSedc)
+                # Update local vector
+                self.dm.globalToLocal(self.vSedc, self.vSedcLocal, 1)
+
+        else:
+            # Get erosion rate (m/yr) to volume
+            self.Eb.copy(result=self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            # Get the volume of sediment transported in m3 per year
+            self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
+            # Update local vector
+            self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
@@ -68,21 +106,42 @@ class SEDMesh(object):
 
     def sedChange(self):
         """
-        Perform erosion deposition changes.
+        Perform continental and marine deposition induced by river fluxes.
+        """
+
+        # Define points in the marine environment for filled surface
+        self.fillSeaID = np.where(self.hFill <= self.sealevel)[0]
+
+        if self.stratNb > 0:
+            self._sedChange(stype=0)
+            if self.carbOn:
+                self._sedChange(stype=2)
+            self._sedChange(stype=1)
+        else:
+            self._sedChange(stype=0)
+
+        return
+
+    def _sedChange(self, stype):
+        """
+        Deposition in depressions and marine environment.
 
         This function contains methods for the following operations:
 
-         - stream induced deposition diffusion
-         - hillslope diffusion
+         - stream induced deposition in depression
+         - marine river sediments diffusion
+         - carbonate production from fuzzy logic
         """
 
         # Compute Continental Sediment Deposition
         self.seaQs = np.zeros(self.npoints, dtype=np.float64)
-        self.vSedLocal.copy(result=self.QsL)
+        if stype == 0:
+            self.vSedLocal.copy(result=self.QsL)
+        elif stype == 1:
+            self.vSedfLocal.copy(result=self.QsL)
+        elif stype == 2:
+            self.vSedcLocal.copy(result=self.QsL)
         self.dm.localToGlobal(self.QsL, self.Qs)
-
-        # Define points in the marine environment for filled surface
-        self.fillSeaID = np.where(self.hFill <= self.sealevel)[0]
 
         perc = 1.0
         minperc = 1.0e-3
@@ -90,7 +149,7 @@ class SEDMesh(object):
         fill = False
         totQs = self.Qs.sum()
         while self.Qs.sum() > 0.0 and iters < 100:
-            self._continentalDeposition(filled=fill)
+            self._continentalDeposition(stype, filled=fill)
             if perc < minperc:
                 self.Qs.set(0.0)
                 self.QsL.set(0.0)
@@ -112,16 +171,27 @@ class SEDMesh(object):
         # Compute Marine Sediment Deposition
         self.QsL.setArray(self.seaQs)
         self.dm.localToGlobal(self.QsL, self.Qs)
-        self._marineDeposition()
+        sedK = self.sedimentK
+        if sedK > 0.0:
+            if stype == 1:
+                sedK *= 2
+            self._marineDeposition(stype, sedK)
+
+        # Compute Fuzzy Logic Carbonate Growth
+        if self.carbOn:
+            self._growCarbonates()
+
+        return
+
+    def getHillslope(self):
+        """
+        Perform hillslope diffusion (linear - soil creep).
+        """
 
         # Compute Hillslope Diffusion Law
         h = self.hLocal.getArray().copy()
         self.seaID = np.where(h <= self.sealevel)[0]
         self._hillSlope()
-
-        # Compute Fuzzy Logic Carbonate Growth
-        if self.carbOn:
-            self._growCarbonates()
 
         # Update layer elevation
         if self.stratNb > 0:
@@ -135,11 +205,8 @@ class SEDMesh(object):
     def _growCarbonates(self):
         """
         When carbonates is turned on update carbonate thicknesses based on fuzzy logic controls.
+        The carbonate thicknesses created are uncompacted ones.
         """
-
-        # Thickness of reef already deposited in the current stratigraphic layer
-        if self.stratNb > 0:
-            reefH = self.stratC[:, self.stratStep] * self.stratH[:, self.stratStep]
 
         # Limit fuzzy controllers to possible value range
         hl = self.sealevel - self.hLocal.getArray().copy()
@@ -177,15 +244,8 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if self.stratNb > 0:
-            self._deposeStrat()
-
             # Update carbonate reef content in the stratigraphic layer
-            ids = np.where(carbH > 0.0)[0]
-            self.stratC[ids, self.stratStep] = (carbH[ids] + reefH[ids]) / self.stratH[
-                ids, self.stratStep
-            ]
-
-            del reefH
+            self._deposeStrat(2)
 
         del ids, validIDs, carbH, hl
         gc.collect()
@@ -215,14 +275,15 @@ class SEDMesh(object):
 
         return
 
-    def _continentalDeposition(self, filled=False):
+    def _continentalDeposition(self, stype, filled=False):
         """
-        Perform continental deposition from incoming river flux.
+        Perform continental deposition from incoming river flux. For each sediment type
+        freshly deposits are given the surface porosities given in the input file.
         """
 
         t0 = process_time()
 
-        # Get the marine volumetric sediment rate (m3 / yr) to distribute
+        # Get the volumetric sediment rate (m3 / yr) to distribute
         # during the time step
         tmp = self.QsL.getArray().copy()
 
@@ -296,7 +357,7 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if self.stratNb > 0:
-            self._deposeStrat()
+            self._deposeStrat(stype)
 
         del newQs, excess, newgQ, dep, h, scaleV, groupPits
         del gQ, ids, Qs, tmp, outNb, depFill
@@ -311,15 +372,12 @@ class SEDMesh(object):
 
         return
 
-    def _marineDeposition(self):
+    def _marineDeposition(self, stype, sedK):
         """
         Perform marine deposition from incoming river continental flux.
         """
 
         t0 = process_time()
-
-        if self.sedimentK == 0.0:
-            return
 
         # Get the marine volumetric sediment rate (m3 / yr) to diffuse
         # during the time step as suspended material...
@@ -331,7 +389,7 @@ class SEDMesh(object):
 
         # Diffusion matrix construction
         Cd = np.zeros(self.npoints, dtype=np.float64)
-        Cd[self.fillSeaID] = self.sedimentK
+        Cd[self.fillSeaID] = sedK
 
         # From the distance to coastline define the upper limit
         # of the shelf to ensure a maximum slope angle
@@ -438,7 +496,7 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if self.stratNb > 0:
-            self._deposeStrat()
+            self._deposeStrat(stype)
 
         del h0, cumDep, dH, overDep, maxDep, Qs
         gc.collect()
@@ -500,8 +558,8 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
         if self.stratNb > 0:
-            self._deposeStrat()
             self.erodeStrat()
+            self._deposeStrat(1)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -511,7 +569,7 @@ class SEDMesh(object):
 
         return
 
-    def _deposeStrat(self):
+    def _deposeStrat(self, stype):
         """
         Add deposition on top of existing stratigraphic layer.
         """
@@ -519,23 +577,63 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.tmp, self.tmpL)
         depo = self.tmpL.getArray().copy()
         depo[depo < 0] = 0.0
+        fineH = self.stratH[:, self.stratStep] * self.stratF[:, self.stratStep]
         if self.carbOn:
             carbH = self.stratH[:, self.stratStep] * self.stratC[:, self.stratStep]
         self.stratH[:, self.stratStep] += depo
-        if self.carbOn:
-            ids = np.where(depo > 0)[0]
+        ids = np.where(depo > 0)[0]
+
+        if stype == 0:
+            self.phiS[ids, self.stratStep] = self.phi0s
+            self.stratF[ids, self.stratStep] = (
+                fineH[ids] / self.stratH[ids, self.stratStep]
+            )
+            if self.carbOn:
+                self.stratC[ids, self.stratStep] = (
+                    carbH[ids] / self.stratH[ids, self.stratStep]
+                )
+                del carbH
+
+        elif stype == 1:
+            fineH[ids] += depo[ids]
+            self.stratF[ids, self.stratStep] = (
+                fineH[ids] / self.stratH[ids, self.stratStep]
+            )
+            self.phiF[ids, self.stratStep] = self.phi0f
+            if self.carbOn:
+                self.stratC[ids, self.stratStep] = (
+                    carbH[ids] / self.stratH[ids, self.stratStep]
+                )
+                del carbH
+
+        elif stype == 2:
+            self.stratF[ids, self.stratStep] = (
+                fineH[ids] / self.stratH[ids, self.stratStep]
+            )
+            carbH[ids] += depo[ids]
             self.stratC[ids, self.stratStep] = (
                 carbH[ids] / self.stratH[ids, self.stratStep]
             )
+            self.phiC[ids, self.stratStep] = self.phi0c
             del carbH
-        del depo
+
+        # Cleaning arrays
+        del depo, fineH, ids
         gc.collect()
 
         return
 
     def erodeStrat(self):
         """
-        Remove thickness from the stratigraphic pile.
+        Remove thickness from the stratigraphic pile. The function takes into account
+        the porosity values of considered lithologies in each stratigraphic layers eroded.
+        It follows the following assumptions:
+        - Eroded thicknesses from stream power law and hillslope diffusion are considered
+          to encompass both the solid and void phase.
+        - We extract the solid phase that will be moved dowstream by surface processes.
+        - The corresponding deposit thicknesses for those freshly eroded sediments correspond to
+          uncompacted thicknesses based on the porosity at surface given from the input file.
+        - Uncompacted thicknesses are subsequently distributed.
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -545,39 +643,111 @@ class SEDMesh(object):
         # Nodes experiencing erosion
         nids = np.where(ero < 0)[0]
         if len(nids) == 0:
+            del ero, nids
+            gc.collect()
             return
 
         # Cumulative thickness for each node
         self.stratH[nids, 0] += 1.0e6
         cumThick = np.cumsum(self.stratH[nids, self.stratStep :: -1], axis=1)[:, ::-1]
+        boolMask = cumThick < -ero[nids].reshape((len(nids), 1))
+        mask = boolMask.astype(int)
 
-        # Find nodes with no remaining stratigraphic thicknesses
-        ids = np.where(-ero[nids] >= cumThick[:, 0])[0]
-        self.stratH[nids[ids], : self.stratStep + 1] = 0.0
+        # Get fine sediment eroded from river incision
+        thickF = (
+            self.stratH[nids, 0 : self.stratStep + 1]
+            * self.stratF[nids, 0 : self.stratStep + 1]
+        )
+        # From fine thickness extract the solid phase that is eroded
+        thFine = thickF * (1.0 - self.phiF[nids, 0 : self.stratStep + 1])
+        thFine = np.sum((thFine * mask), axis=1)
+
+        # Get carbonate sediment eroded from river incision
         if self.carbOn:
-            self.stratC[nids[ids], : self.stratStep + 1] = 0.0
+            thickC = (
+                self.stratH[nids, 0 : self.stratStep + 1]
+                * self.stratC[nids, 0 : self.stratStep + 1]
+            )
+            # From carbonate thickness extract the solid phase that is eroded
+            thCarb = thickC * (1.0 - self.phiC[nids, 0 : self.stratStep + 1])
+            thCarb = np.sum((thCarb * mask), axis=1)
+            # From sand thickness extract the solid phase that is eroded
+            thickS = self.stratH[nids, 0 : self.stratStep + 1] - thickF - thickC
+            thCoarse = thickS * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
+            thCoarse = np.sum((thCoarse * mask), axis=1)
+        else:
+            # From sand thickness extract the solid phase that is eroded
+            thickS = self.stratH[nids, 0 : self.stratStep + 1] - thickF
+            thCoarse = thickS * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
+            thCoarse = np.sum((thCoarse * mask), axis=1)
+
+        # Clear all stratigraphy points which are eroded
+        cumThick[boolMask] = 0.0
+        tmp = self.stratH[nids, : self.stratStep + 1]
+        tmp[boolMask] = 0
+        self.stratH[nids, : self.stratStep + 1] = tmp
 
         # Erode remaining stratal layers
-        if len(ids) < len(nids):
-            ero[nids[ids]] = 0.0
+        # Get non-zero top layer number
+        eroLayNb = np.bincount(np.nonzero(cumThick)[0]) - 1
+        eroVal = cumThick[np.arange(len(nids)), eroLayNb] + ero[nids]
 
-            # Clear all stratigraphy points which are eroded
-            cumThick[cumThick < -ero[nids].reshape((len(nids), 1))] = 0
-            mask = (cumThick > 0).astype(int) == 0
-            tmp = self.stratH[nids, : self.stratStep + 1]
-            tmp[mask] = 0
-            self.stratH[[nids], : self.stratStep + 1] = tmp
+        # Get thickness of each sediment type eroded in the remaining layer
+        self.thFine = np.zeros(self.npoints)
+        # From fine thickness extract the solid phase that is eroded from this last layer
+        tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratF[nids, eroLayNb]
+        thFine += tmp * (1.0 - self.phiF[nids, eroLayNb])
+        # Define the uncompacted fine thickness that will be deposited dowstream
+        self.thFine[nids] = thFine / (1.0 - self.phi0f)
+        self.thFine[self.thFine < 0.0] = 0.0
 
-            # Update thickness of top stratigraphic layer
-            eroIDs = np.bincount(np.nonzero(cumThick)[0]) - 1
-            eroVal = cumThick[np.arange(len(nids)), eroIDs] + ero[nids]
-            eroVal[ids] = 0.0
-            self.stratH[nids, eroIDs] = eroVal
-
-        self.stratH[nids, 0] -= 1.0e6
+        self.thCoarse = np.zeros(self.npoints)
         if self.carbOn:
-            self.stratC[self.stratH < 0] = 0.0
-        self.stratH[self.stratH < 0] = 0.0
+            # From carb thickness extract the solid phase that is eroded from this last layer
+            self.thCarb = np.zeros(self.npoints)
+            tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratC[nids, eroLayNb]
+            thCarb += tmp * (1.0 - self.phiC[nids, eroLayNb])
+            # Define the uncompacted carbonate thickness that will be deposited dowstream
+            self.thCarb[nids] = thCarb / (1.0 - self.phi0c)
+            self.thCarb[self.thCarb < 0.0] = 0.0
+            # From sand thickness extract the solid phase that is eroded from this last layer
+            tmp = self.stratH[nids, eroLayNb] - eroVal
+            tmp *= 1.0 - self.stratC[nids, eroLayNb] - self.stratF[nids, eroLayNb]
+            # Define the uncompacted sand thickness that will be deposited dowstream
+            thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
+            self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
+            self.thCoarse[self.thCoarse < 0.0] = 0.0
+        else:
+            # From sand thickness extract the solid phase that is eroded from this last layer
+            tmp = self.stratH[nids, eroLayNb] - eroVal
+            tmp *= 1.0 - self.stratF[nids, eroLayNb]
+            # Define the uncompacted sand thickness that will be deposited dowstream
+            thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
+            self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
+            self.thCoarse[self.thCoarse < 0.0] = 0.0
+
+        # Update thickness of top stratigraphic layer
+        self.stratH[nids, eroLayNb] = eroVal
+        self.stratH[nids, 0] -= 1.0e6
+        self.stratH[self.stratH <= 0] = 0.0
+        self.stratF[self.stratH <= 0] = 0.0
+        self.phiS[self.stratH <= 0] = 0.0
+        self.phiF[self.stratH <= 0] = 0.0
+        if self.carbOn:
+            self.stratC[self.stratH <= 0] = 0.0
+            self.phiC[self.stratH <= 0] = 0.0
+
+        self.thCoarse /= self.dt
+        self.thFine /= self.dt
+        if self.carbOn:
+            self.thCarb /= self.dt
+
+        del ero, nids, cumThick, boolMask, mask, tmp, eroLayNb, eroVal
+        del thFine, thickF, thickS, thCoarse
+        if self.carbOn:
+            del thickC, thCarb
+
+        gc.collect()
 
         return
 
@@ -587,5 +757,120 @@ class SEDMesh(object):
         """
 
         self.stratZ[:, self.stratStep] = self.hLocal.getArray()
+
+        return
+
+    def getCompaction(self):
+        """
+        Compute changes in sedimentary layers porosity and thicknesses due to
+        compaction. We assume depth-porosiy relationships for each sediment type
+        available in individual layers.
+        """
+
+        t0 = process_time()
+        topZ = np.vstack(self.hLocal.getArray())
+        totH = np.sum(self.stratH[:, : self.stratStep + 1], axis=1)
+
+        # Height of the sediment column above the center of each layer is given by
+        cumZ = -np.cumsum(self.stratH[:, self.stratStep :: -1], axis=1) + topZ
+        elev = np.append(topZ, cumZ[:, :-1], axis=1)
+        zlay = np.fliplr(elev - np.fliplr(self.stratH[:, : self.stratStep + 1] / 2.0))
+
+        # Compute lithologies porosities for each depositional layers
+        # Get depth below basement
+        depth = zlay - topZ
+
+        # Now using depth-porosity relationships we compute the porosities
+        # We assume that porosity cannot increase after unloading
+        phiS = self.phi0s * np.exp(depth / self.z0s)
+        phiS = np.minimum(phiS, self.phiS[:, : self.stratStep + 1])
+        phiF = self.phi0f * np.exp(depth / self.z0f)
+        phiF = np.minimum(phiF, self.phiF[:, : self.stratStep + 1])
+        if self.carbOn:
+            phiC = self.phi0c * np.exp(depth / self.z0c)
+            phiC = np.minimum(phiC, self.phiC[:, : self.stratStep + 1])
+
+        # Compute the solid phase in each layers
+        tmpF = (
+            self.stratH[:, : self.stratStep + 1] * self.stratF[:, : self.stratStep + 1]
+        )
+        tmpF *= 1.0 - self.phiF[:, : self.stratStep + 1]
+
+        if self.carbOn:
+            tmpC = (
+                self.stratH[:, : self.stratStep + 1]
+                * self.stratC[:, : self.stratStep + 1]
+            )
+            tmpC *= 1.0 - self.phiC[:, : self.stratStep + 1]
+            tmpS = (
+                self.stratC[:, : self.stratStep + 1]
+                + self.stratF[:, : self.stratStep + 1]
+            )
+            tmpS = self.stratH[:, : self.stratStep + 1] * (1.0 - tmpS)
+            tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
+            solidPhase = tmpC + tmpS + tmpF
+        else:
+            tmpS = self.stratH[:, : self.stratStep + 1] * (
+                1.0 - self.stratF[:, : self.stratStep + 1]
+            )
+            tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
+            solidPhase = tmpS + tmpF
+
+        # Get new layer thickness after porosity change
+        tmpF = self.stratF[:, : self.stratStep + 1] * (
+            1.0 - phiF[:, : self.stratStep + 1]
+        )
+        if self.carbOn:
+            tmpC = self.stratC[:, : self.stratStep + 1] * (
+                1.0 - phiC[:, : self.stratStep + 1]
+            )
+            tmpS = (
+                1.0
+                - self.stratF[:, : self.stratStep + 1]
+                - self.stratC[:, : self.stratStep + 1]
+            )
+            tmpS *= 1.0 - phiS[:, : self.stratStep + 1]
+            tot = tmpS + tmpC + tmpF
+        else:
+            tmpS = (1.0 - self.stratF[:, : self.stratStep + 1]) * (
+                1.0 - phiS[:, : self.stratStep + 1]
+            )
+            tot = tmpS + tmpF
+        ids = np.where(tot > 0.0)
+        newH = np.zeros(tot.shape)
+        newH[ids] = solidPhase[ids] / tot[ids]
+        newH[newH <= 0] = 0.0
+        phiS[newH <= 0] = 0.0
+        phiF[newH <= 0] = 0.0
+        if self.carbOn:
+            phiC[newH <= 0] = 0.0
+
+        # Update porosities in each sedimentary layer
+        self.phiF[:, : self.stratStep + 1] = phiF
+        self.phiS[:, : self.stratStep + 1] = phiS
+        if self.carbOn:
+            self.phiC[:, : self.stratStep + 1] = phiC
+
+        # Get the total thickness changes induced by compaction and update the elevation accordingly
+        dz = totH - np.sum(newH, axis=1)
+        dz[dz <= 0] = 0.0
+        self.hLocal.setArray(topZ.flatten() - dz.flatten())
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+
+        # Update each layer thicknesses
+        self.stratH[:, : self.stratStep + 1] = newH
+        del dz, newH, totH, topZ, phiS, phiF, solidPhase
+        del ids, tmpF, tmpS, tot, depth, zlay, cumZ, elev
+        if self.carbOn:
+            del phiC, tmpC
+
+        gc.collect()
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Compute Lithology Porosity Values (%0.02f seconds)"
+                % (process_time() - t0),
+                flush=True,
+            )
 
         return

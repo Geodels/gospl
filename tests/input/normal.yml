@@ -29,7 +29,7 @@ diffusion:
     sedimentK: 1000.
 
 sea:
-    curve: /live/lib/gospl/tests/data/sealevel.csv
+    curve: '/live/lib/gospl/tests/data/sealevel.csv'
 
 tectonic:
   - start: -20000000.

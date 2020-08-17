@@ -23,7 +23,7 @@ What's in the box?
 
 **gospl** is a parallel TIN-based landscape evolution model, built to simulate topography dynamic of the Earth over millions of years.
 
-The model accounts for hillslope processes (soil creep using linear diffusion), fluvial incision (stream power law), spatially and temporally varying tectonics (horizontal and vertical displacements) and climatic forces (temporal and spatial precipitation changes and/or sea-level fluctuations).
+The model accounts for hillslope processes (soil creep using linear diffusion), fluvial incision (stream power law), spatially and temporally varying tectonics (horizontal and vertical displacements) and climatic forces (temporal and spatial precipitation changes and/or sea-level fluctuations). The model enables the representation of pre-defined stratigraphic layers composed of 2 different sediment classes (lithologies). It also takes into account the sorting of these different lithologies and specific compaction factors are used to simulate stratigraphic architecture.
 
 
 Specs

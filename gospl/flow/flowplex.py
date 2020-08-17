@@ -469,7 +469,7 @@ class FAMesh(object):
 
         t0 = process_time()
 
-        # Constant local & global vectors/arrays
+        # Local & global vectors/arrays
         self.Eb.set(0.0)
         self.hGlobal.copy(result=self.hOld)
         self.dm.globalToLocal(self.hOld, self.hOldLocal, 1)
@@ -495,5 +495,8 @@ class FAMesh(object):
                 "Get Erosion Thicknesses (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
+
+        del Eb
+        gc.collect()
 
         return

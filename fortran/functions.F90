@@ -412,7 +412,8 @@ end subroutine MFDreceivers
 !! STRATIGRAPHIC FUNCTIONS !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, nstrath, nstratz)
+subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, &
+                       phif, nstrath, nstratz, nstratf, nphis, nphif)
 !*****************************************************************************
 ! Record stratigraphic layers through time
 
@@ -425,24 +426,42 @@ subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, nstrath, nstra
   double precision,intent(in) :: weights(nb,3)
   double precision, intent(in) :: stratz(nb,stratnb)
   double precision, intent(in) :: strath(nb,stratnb)
+  double precision, intent(in) :: stratf(nb,stratnb)
+  double precision, intent(in) :: phis(nb,stratnb)
+  double precision, intent(in) :: phif(nb,stratnb)
 
   double precision, intent(out) :: nstratz(nb,stratnb)
   double precision, intent(out) :: nstrath(nb,stratnb)
+  double precision, intent(out) :: nstratf(nb,stratnb)
+  double precision, intent(out) :: nphis(nb,stratnb)
+  double precision, intent(out) :: nphif(nb,stratnb)
 
   integer :: k, p, kk
-  double precision :: tmp1(stratnb), tmp2(stratnb), sum_weight
+  double precision :: tmp1, tmp2, tmp3
+  double precision :: tmp4, tmp5, sum_weight
 
   do k = 1, nb
-    sum_weight = sum(weights(k,:))
+    sum_weight = weights(k,1) + weights(k,2) + weights(k,3)
     do kk = 1, stratnb
       tmp1 = 0.0
       tmp2 = 0.0
+      tmp3 = 0.0
+      tmp4 = 0.0
+      tmp5 = 0.0
       do p = 1, 3
-        tmp1(kk) = tmp1(kk) + weights(k,p)*stratz(ids(k,p)+1,kk)
-        tmp2(kk) = tmp2(kk) + weights(k,p)*strath(ids(k,p)+1,kk)
+        tmp1 = tmp1 + weights(k,p)*stratz(ids(k,p)+1,kk)
+        tmp2 = tmp2 + weights(k,p)*strath(ids(k,p)+1,kk)
+        tmp3 = tmp3 + weights(k,p)*stratf(ids(k,p)+1,kk)
+        tmp4 = tmp4 + weights(k,p)*phis(ids(k,p)+1,kk)
+        tmp5 = tmp5 + weights(k,p)*phif(ids(k,p)+1,kk)
       enddo
-      nstratz(k,kk) = tmp1(kk)/sum_weight
-      nstrath(k,kk) = tmp2(kk)/sum_weight
+      nstratz(k,kk) = tmp1/sum_weight
+      nstrath(k,kk) = tmp2/sum_weight
+      nstratf(k,kk) = tmp3/sum_weight
+      nphis(k,kk) = tmp4/sum_weight
+      nphif(k,kk) = tmp5/sum_weight
+      if(nstratf(k,kk)<0.) nstratf(k,kk) = 0.0
+      if(nstratf(k,kk)>1.) nstratf(k,kk) = 1.0
     enddo
   enddo
 
@@ -450,7 +469,9 @@ subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, nstrath, nstra
 
 end subroutine strataBuild
 
-subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratc, nstrath, nstratz, nstratc)
+subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
+                           stratc, phis, phif, phic, nstrath, nstratz, nstratf, &
+                           nstratc, nphis, nphif, nphic)
 !*****************************************************************************
 ! Record stratigraphic layers through time with carbonate turned on
 
@@ -463,29 +484,56 @@ subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratc, ns
   double precision,intent(in) :: weights(nb,3)
   double precision, intent(in) :: stratz(nb,stratnb)
   double precision, intent(in) :: strath(nb,stratnb)
+  double precision, intent(in) :: stratf(nb,stratnb)
   double precision, intent(in) :: stratc(nb,stratnb)
+  double precision, intent(in) :: phis(nb,stratnb)
+  double precision, intent(in) :: phif(nb,stratnb)
+  double precision, intent(in) :: phic(nb,stratnb)
 
   double precision, intent(out) :: nstratz(nb,stratnb)
   double precision, intent(out) :: nstrath(nb,stratnb)
+  double precision, intent(out) :: nstratf(nb,stratnb)
   double precision, intent(out) :: nstratc(nb,stratnb)
+  double precision, intent(out) :: nphis(nb,stratnb)
+  double precision, intent(out) :: nphif(nb,stratnb)
+  double precision, intent(out) :: nphic(nb,stratnb)
 
   integer :: k, p, kk
-  double precision :: tmp1(stratnb), tmp2(stratnb), tmp3(stratnb), sum_weight
+  double precision :: tmp1, tmp2, tmp3, tmp4
+  double precision :: tmp5, tmp6, tmp7, sum_weight
 
   do k = 1, nb
-    sum_weight = sum(weights(k,:))
+    sum_weight = weights(k,1) + weights(k,2) + weights(k,3)
     do kk = 1, stratnb
       tmp1 = 0.0
       tmp2 = 0.0
       tmp3 = 0.0
+      tmp4 = 0.0
+      tmp5 = 0.0
+      tmp6 = 0.0
+      tmp7 = 0.0
       do p = 1, 3
-        tmp1(kk) = tmp1(kk) + weights(k,p)*stratz(ids(k,p)+1,kk)
-        tmp2(kk) = tmp2(kk) + weights(k,p)*strath(ids(k,p)+1,kk)
-        tmp3(kk) = tmp3(kk) + weights(k,p)*stratc(ids(k,p)+1,kk)
+        tmp1 = tmp1 + weights(k,p)*stratz(ids(k,p)+1,kk)
+        tmp2 = tmp2 + weights(k,p)*strath(ids(k,p)+1,kk)
+        tmp3 = tmp3 + weights(k,p)*stratf(ids(k,p)+1,kk)
+        tmp4 = tmp4 + weights(k,p)*stratc(ids(k,p)+1,kk)
+        tmp5 = tmp5 + weights(k,p)*phis(ids(k,p)+1,kk)
+        tmp6 = tmp6 + weights(k,p)*phif(ids(k,p)+1,kk)
+        tmp7 = tmp7 + weights(k,p)*phic(ids(k,p)+1,kk)
       enddo
-      nstratz(k,kk) = tmp1(kk)/sum_weight
-      nstrath(k,kk) = tmp2(kk)/sum_weight
-      nstratc(k,kk) = tmp3(kk)/sum_weight
+      nstratz(k,kk) = tmp1/sum_weight
+      nstrath(k,kk) = tmp2/sum_weight
+      nstratf(k,kk) = tmp3/sum_weight
+      nstratc(k,kk) = tmp4/sum_weight
+      if(nstratf(k,kk)<0.) nstratf(k,kk) = 0.0
+      if(nstratc(k,kk)<0.) nstratc(k,kk) = 0.0
+      if(nstratf(k,kk)+nstratc(k,kk)>1.)then
+        nstratf(k,kk) = nstratf(k,kk)/(nstratf(k,kk)+nstratc(k,kk))
+        nstratc(k,kk) = nstratc(k,kk)/(nstratf(k,kk)+nstratc(k,kk))
+      endif
+      nphis(k,kk) = tmp5/sum_weight
+      nphif(k,kk) = tmp6/sum_weight
+      nphic(k,kk) = tmp7/sum_weight
     enddo
   enddo
 

@@ -54,6 +54,7 @@ class ReadYaml(object):
         self._readSealevel()
         self._readTectonic()
         self._readRain()
+        self._readCompaction()
 
         if self.raindata is not None:
             if self.rStep > 0:
@@ -139,6 +140,33 @@ class ReadYaml(object):
             self.overlap = domainDict["overlap"]
         except KeyError:
             self.overlap = 1
+
+        self._extraDomain()
+
+        return
+
+    def _extraDomain(self):
+        """
+        Read domain additional information.
+        """
+
+        domainDict = self.input["domain"]
+
+        try:
+            dataFile = domainDict["nperodep"]
+            self.dataFile = dataFile + ".npz"
+            with open(self.dataFile) as dataFile:
+                dataFile.close()
+        except KeyError:
+            self.dataFile = None
+
+        try:
+            strataFile = domainDict["npstrata"]
+            self.strataFile = strataFile + ".npz"
+            with open(self.strataFile) as strataFile:
+                strataFile.close()
+        except KeyError:
+            self.strataFile = None
 
         return
 
@@ -858,6 +886,53 @@ class ReadYaml(object):
         except KeyError:
             self.forceDir = None
             self.forceStep = -1
+
+        return
+
+    def _readCompaction(self):
+        """
+        Read compaction parameters.
+        """
+
+        try:
+            compDict = self.input["compaction"]
+            try:
+                self.phi0s = compDict["phis"]
+            except KeyError:
+                self.phi0s = 0.49
+
+            try:
+                self.phi0f = compDict["phif"]
+            except KeyError:
+                self.phi0f = 0.63
+
+            try:
+                self.phi0c = compDict["phic"]
+            except KeyError:
+                self.phi0c = 0.65
+
+            try:
+                self.z0s = compDict["z0s"]
+            except KeyError:
+                self.z0s = 3700.0
+
+            try:
+                self.z0f = compDict["z0f"]
+            except KeyError:
+                self.z0f = 1960.0
+
+            try:
+                self.z0c = compDict["z0c"]
+            except KeyError:
+                self.z0c = 2570.0
+
+        except KeyError:
+            self.phi0s = 0.49
+            self.phi0f = 0.63
+            self.phi0c = 0.65
+            self.z0s = 3700.0
+            self.z0f = 1960.0
+            self.z0c = 2570.0
 
         return
 

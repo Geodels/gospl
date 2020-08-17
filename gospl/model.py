@@ -120,13 +120,17 @@ class Model(parentModel):
                 _FAMesh.flowAccumulation(self, filled=True, limit=False)
                 # Continental and Marine Deposition and Sedimentation
                 _SEDMesh.sedChange(self)
+                # Hillslope diffusion
+                _SEDMesh.getHillslope(self)
 
             # Update Tectonic, Sea-level & Climatic conditions
             if self.backward and self.tNow < self.tEnd:
                 _UnstMesh.applyTectonics(self)
 
-            # Output stratal evolution
+            # Create new stratal layer
             if self.tNow >= self.saveStrat:
+                # Stratigraphic Layer Porosity and Thicknesses under Compaction
+                _SEDMesh.getCompaction(self)
                 self.stratStep += 1
                 self.saveStrat += self.strat
 

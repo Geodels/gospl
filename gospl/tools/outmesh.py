@@ -49,6 +49,9 @@ class WriteMesh(object):
         else:
             self.rStart = self.tStart
 
+        if self.strataFile is not None:
+            self.stratStep = self.initLay
+
         if self.forceStep >= 0:
 
             res = 0.5
@@ -154,7 +157,7 @@ class WriteMesh(object):
         )
         with h5py.File(h5file, "w") as f:
 
-            # Write stratal layers elevations per cells
+            # Write stratal layers elevations per layers
             f.create_dataset(
                 "stratZ",
                 shape=(self.npoints, self.stratStep),
@@ -163,7 +166,7 @@ class WriteMesh(object):
             )
             f["stratZ"][:, : self.stratStep] = self.stratZ[:, : self.stratStep]
 
-            # Write stratal layers thicknesses per cells
+            # Write stratal layers thicknesses per layers
             f.create_dataset(
                 "stratH",
                 shape=(self.npoints, self.stratStep),
@@ -171,6 +174,33 @@ class WriteMesh(object):
                 compression="gzip",
             )
             f["stratH"][:, : self.stratStep] = self.stratH[:, : self.stratStep]
+
+            # Write stratal layers fine percentage per layers
+            f.create_dataset(
+                "stratF",
+                shape=(self.npoints, self.stratStep),
+                dtype="float64",
+                compression="gzip",
+            )
+            f["stratF"][:, : self.stratStep] = self.stratF[:, : self.stratStep]
+
+            # Write porosity values for coarse sediments
+            f.create_dataset(
+                "phiS",
+                shape=(self.npoints, self.stratStep),
+                dtype="float64",
+                compression="gzip",
+            )
+            f["phiS"][:, : self.stratStep] = self.phiS[:, : self.stratStep]
+
+            # Write porosity values for fine sediments
+            f.create_dataset(
+                "phiF",
+                shape=(self.npoints, self.stratStep),
+                dtype="float64",
+                compression="gzip",
+            )
+            f["phiF"][:, : self.stratStep] = self.phiF[:, : self.stratStep]
 
             # Write stratal layers carbonate percentage per layers
             if self.carbOn:
@@ -181,6 +211,15 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["stratC"][:, : self.stratStep] = self.stratC[:, : self.stratStep]
+
+                # Write porosity values for carbonate sediments
+                f.create_dataset(
+                    "phiC",
+                    shape=(self.npoints, self.stratStep),
+                    dtype="float64",
+                    compression="gzip",
+                )
+                f["phiC"][:, : self.stratStep] = self.phiC[:, : self.stratStep]
 
         MPIcomm.Barrier()
 
@@ -257,6 +296,22 @@ class WriteMesh(object):
                 "sedLoad", shape=(self.npoints, 1), dtype="float32", compression="gzip",
             )
             f["sedLoad"][:, 0] = self.vSedLocal.getArray().copy()
+            if self.stratNb > 0:
+                f.create_dataset(
+                    "sedLoadf",
+                    shape=(self.npoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["sedLoadf"][:, 0] = self.vSedfLocal.getArray().copy()
+                if self.carbOn:
+                    f.create_dataset(
+                        "sedLoadc",
+                        shape=(self.npoints, 1),
+                        dtype="float32",
+                        compression="gzip",
+                    )
+                    f["sedLoadc"][:, 0] = self.vSedcLocal.getArray().copy()
             if self.uplift is not None:
                 f.create_dataset(
                     "uplift",
@@ -336,7 +391,12 @@ class WriteMesh(object):
         self.dm.localToGlobal(self.FAL, self.FAG)
         self.fillFAL.setArray(np.array(hf["/fillAcc"])[:, 0])
         self.dm.localToGlobal(self.fillFAL, self.fillFAG)
-
+        if self.stratNb > 0:
+            self.vSedfLocal.setArray(np.array(hf["/sedLoadf"])[:, 0])
+            self.dm.localToGlobal(self.vSedfLocal, self.vSedf)
+            if self.carbOn:
+                self.vSedcLocal.setArray(np.array(hf["/sedLoadc"])[:, 0])
+                self.dm.localToGlobal(self.vSedcLocal, self.vSedc)
         self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
         self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
 
@@ -398,6 +458,12 @@ class WriteMesh(object):
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
             self.vSed.set(0.0)
             self.vSedLocal.set(0.0)
+            if self.stratNb > 0:
+                self.vSedf.set(0.0)
+                self.vSedfLocal.set(0.0)
+                if self.carbOn:
+                    self.vSedc.set(0.0)
+                    self.vSedcLocal.set(0.0)
             self.cumED.set(0.0)
             self.cumEDLocal.set(0.0)
         else:
@@ -447,10 +513,16 @@ class WriteMesh(object):
             diffreg[self.forceonIDs] = ldiff[self.forceIDs[self.forceonIDs, 0]]
 
         # Apply a low-pass filter to the regular array
+        median = False
         kernel_size = 3
-        filter = ndimage.median_filter(
-            diffreg.reshape(self.regshape), size=kernel_size, mode="wrap"
-        )
+        if median:
+            filter = ndimage.median_filter(
+                diffreg.reshape(self.regshape), size=kernel_size, mode="wrap"
+            )
+        else:
+            filter = ndimage.gaussian_filter(
+                diffreg.reshape(self.regshape), sigma=kernel_size, mode="wrap"
+            )
         filter = filter.flatten()
 
         # Map it back to the spherical mesh
@@ -565,6 +637,29 @@ class WriteMesh(object):
                 'Dimensions="%d 1">%s:/sedLoad</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
+            if self.stratNb > 0:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="SLf">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/sedLoadf</DataItem>\n'
+                    % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+                if self.carbOn:
+                    f.write(
+                        '         <Attribute Type="Scalar" Center="Node" Name="SLc">\n'
+                    )
+                    f.write(
+                        '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                    )
+                    f.write(
+                        'Dimensions="%d 1">%s:/sedLoadc</DataItem>\n'
+                        % (self.nodes[p], pfile)
+                    )
+                    f.write("         </Attribute>\n")
+
             if self.hdisp is not None:
                 f.write(
                     '         <Attribute Type="Vector" Center="Node" Name="hTec">\n'

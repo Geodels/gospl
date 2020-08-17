@@ -36,6 +36,8 @@ The YAML structure is shown through indentation (one or more spaces) and sequenc
       interp: 1
       overlap: 1
       rstep: 25
+      nperodep: 'strat8/erodep20Ma'
+      npstrata: 'strat8/sed20Ma'
 
 
 :yaml:`domain` defines the initial surface and set several simulation parameters. The following ones are **required**:
@@ -50,6 +52,8 @@ d. when running a backward model the :yaml:`backward` key has to be set to *True
 e. the :yaml:`interp` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. The key has 2 possible values: **1** or **3**. A value of **3** will take the 3 closest nodes to perform the interpolation and will tend to smooth the topography over time. A value of **1** will pick the closest point when performing the interpolation thus limiting the smoothing but potentially increasing the distorsion.
 f. the :yaml:`overlap` key is set when running model with 3D cartesian displacements and specifies the number of ghost nodes used when defining the PETSc partition. It needs to be set so that all the points belonging to a single processors will not move further than the distances between the maximum horizontal displacement distance. The value will change depending of the resolution of your mesh.
 g. to restart a simulation use the :yaml:`rstep` key and specify the time step number.
+h. to start a simulation using a previous erosion/deposition map use the :yaml:`nperodep` key and specify a file containing for each vertex of the mesh the cumulative erosion deposition values in metres.
+i. to start a simulation using an initial stratigraphic layer use the :yaml:`npstrata` key and specify a file containing for each vertex of the mesh the stratigraphic layer thickness, the percentage of fine lithology inside each layer and the porosities of the coarse and fine sediments (the multi-lithology option is only available for model without horizontal displacement and when the `backward` key is set to `False`).
 
 
 .. important::
@@ -173,6 +177,26 @@ Follows the tectonic forcing conditions with a sequence of events defined by a s
 
 .. important::
   As mentioned above and for the next key parameter as well, these forcing files are defined as numpy zip array (**.npz**).
+
+
+:yaml:`compaction`
+--------------------
+
+.. code:: yaml
+
+  compaction:
+      phis: 0.49
+      phif: 0.63
+      z0s: 3700.0
+      z0f: 1960.0
+
+The compaction module is turned-on when a multi-lithology model is ran (_i.e._ the :yaml:`npstrata` key is defined). We assume  different depth-porosity relationships for the 2 considered lithology types, the following parameters are required:
+
+
+a. lithology one (coarser lithology) porosity at the surface :yaml:`phis`,
+b. lithology two (finer lithology) porosity at the surface :yaml:`phif`,
+c. e-folding depth of lithology one (in metres)
+d. e-folding depth of lithology two (in metres)
 
 
 :yaml:`climate`

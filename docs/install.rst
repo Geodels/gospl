@@ -147,17 +147,17 @@ Requirements
 
 -  Python **>= 3.6**
 -  Numpy **>= 1.19.0**
--  Scipy **>= 1.5.0**
+-  Scipy **>= 1.5.1**
 -  Cython **>= 0.29.20**
 -  mpi4py **== 3.0.3**
 -  petsc4py **== 3.13.0**
 -  h5py **== 2.10.0**
 -  pandas **>= 1.0.5**
 -  ruamel.yaml **== 0.16.10**
--  fastfunc **== 0.2.2**
--  meshio **== 4.0.15**
+-  fastfunc **== 0.2.3**
+-  meshio **== 4.0.16**
 -  meshplex **== 0.12.3**
--  pre-commit **>= 2.5.1**
+-  pre-commit **>= 2.6.0**
 -  vtk **== 9.0.0**
 -  scikit-fuzzy **>= 0.4.2**
 -  numpy-indexed
