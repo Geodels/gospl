@@ -174,7 +174,7 @@ class SEDMesh(object):
         sedK = self.sedimentK
         if sedK > 0.0:
             if stype == 1:
-                sedK *= 2
+                sedK = self.sedimentKf
             self._marineDeposition(stype, sedK)
 
         # Compute Fuzzy Logic Carbonate Growth

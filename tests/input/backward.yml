@@ -22,7 +22,7 @@ spl:
 diffusion:
     hillslopeKa: 0.01
     hillslopeKm: 0.1
-    sedimentK: 1000.
+    sedK: 1000.
 
 sea:
     position: 0.

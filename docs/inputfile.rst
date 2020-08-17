@@ -123,7 +123,8 @@ d. Studies have shown that the physical strength of bedrock which varies with th
       shelfslope: True
       hillslopeKa: 0.02
       hillslopeKm: 0.2
-      sedimentK: 1000.
+      sedK: 1000.
+      sedKf: 2000.
 
 
 Hillslope processes in *gospl* is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
@@ -131,7 +132,8 @@ Hillslope processes in *gospl* is defined using a classical *diffusion law* in w
 a. :yaml:`shelfslope` specifies the shelf maximum slope when marine sediments are deposited. By default (when set to False), the sediment are allowed to be deposited up to sea-level,
 b. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
 c. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
-d. :yaml:`sedimentK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
+d. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
+d. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
 
 
 :yaml:`sea`

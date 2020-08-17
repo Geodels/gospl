@@ -26,7 +26,8 @@ diffusion:
     shelfslope: True
     hillslopeKa: 0.01
     hillslopeKm: 0.1
-    sedimentK: 1000.
+    sedK: 1000.
+    sedKf: 2000.
 
 sea:
     position: 0.
