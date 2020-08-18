@@ -513,16 +513,16 @@ class WriteMesh(object):
             diffreg[self.forceonIDs] = ldiff[self.forceIDs[self.forceonIDs, 0]]
 
         # Apply a low-pass filter to the regular array
-        median = False
+        # median = False
         kernel_size = 3
-        if median:
-            filter = ndimage.median_filter(
-                diffreg.reshape(self.regshape), size=kernel_size, mode="wrap"
-            )
-        else:
-            filter = ndimage.gaussian_filter(
-                diffreg.reshape(self.regshape), sigma=kernel_size, mode="wrap"
-            )
+        # if median:
+        #     filter = ndimage.median_filter(
+        #         diffreg.reshape(self.regshape), size=kernel_size, mode="wrap"
+        #     )
+        # else:
+        filter = ndimage.gaussian_filter(
+            diffreg.reshape(self.regshape), sigma=kernel_size, mode="wrap"
+        )
         filter = filter.flatten()
 
         # Map it back to the spherical mesh
