@@ -394,11 +394,14 @@ class SEDMesh(object):
         # From the distance to coastline define the upper limit
         # of the shelf to ensure a maximum slope angle
         if self.vtkMesh is not None:
-            toplimit = self.sealevel - self.coastDist * 1.0e-4
-            ids = self.coastDist < 2.0 * self.edgeMax
-            toplimit[ids] = self.sealevel - self.coastDist[ids] * 1.0e-5
-            ids = self.coastDist < self.edgeMax
-            toplimit[ids] = self.sealevel
+            if stype == 1:
+                toplimit = np.full((self.npoints), 0.9 * self.sealevel)
+            else:
+                toplimit = self.sealevel - self.coastDist * 1.0e-4
+                ids = self.coastDist < 2.0 * self.edgeMax
+                toplimit[ids] = self.sealevel - self.coastDist[ids] * 1.0e-5
+                ids = self.coastDist < self.edgeMax
+                toplimit[ids] = self.sealevel
         else:
             toplimit = np.full((self.npoints), 0.9 * self.sealevel)
 
