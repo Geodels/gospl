@@ -129,9 +129,9 @@ EXPOSE 8888
 RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     python3 -m pip install --no-cache-dir \
     pathlib \
-    meshio>=4.1.0 \
+    meshio>=4.2.0 \
     shapely \
-    meshplex>=0.13.2 \
+    meshplex>=0.13.3 \
     ruamel.yaml>=0.16.12 \
     stripy \
     numpy>=1.19.2 \
@@ -141,8 +141,8 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     pandas>=1.1.2  \
     ruamel.yaml>=0.15.98 \
     fastfunc>=0.2.3 \
-    meshio>=4.1.0 \
-    meshplex>=0.13.2 \
+    meshio>=4.2.0 \
+    meshplex>=0.13.3 \
     scikit-fuzzy>=0.4.2 \
     pre-commit>=2.7.1
 
