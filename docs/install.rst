@@ -152,12 +152,12 @@ Requirements
 -  mpi4py **== 3.0.3**
 -  petsc4py **== 3.13.0**
 -  h5py **== 2.10.0**
--  pandas **>= 1.1.0**
+-  pandas **>= 1.1.1**
 -  ruamel.yaml **== 0.16.10**
 -  fastfunc **== 0.2.3**
 -  meshio **== 4.1.0**
 -  meshplex **== 0.12.3**
--  pre-commit **>= 2.6.0**
+-  pre-commit **>= 2.7.1**
 -  vtk **== 9.0.0**
 -  scikit-fuzzy **>= 0.4.2**
 -  numpy-indexed

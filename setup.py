@@ -1,5 +1,5 @@
 ##############################
-# BUILDING PYTHON PACKAGE PiPY
+# BUILDING PYTHON PACKAGE PYPi
 ##############################
 # python3 -m pip install --user --upgrade setuptools wheel
 # python3 setup.py sdist
@@ -148,12 +148,12 @@ if __name__ == "__main__":
             "numpy==1.19.1",
             "scipy==1.5.2",
             "h5py==2.10.0",
-            "pandas==1.1.0",
+            "pandas==1.1.1",
             "ruamel.yaml==0.16.10",
             "meshplex==0.13.2",
             "mpi4py>=3.0.3",
             "petsc4py>=3.13.0",
-            "pre-commit==2.6.0",
+            "pre-commit==2.7.1",
             "fastfunc==0.2.3",
             "vtk==9.0.0",
             "numpy-indexed==0.3.5",

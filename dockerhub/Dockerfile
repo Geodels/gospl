@@ -13,7 +13,10 @@ RUN python3 -m pip install --no-cache-dir \
         pytest-mpi \
         pytest-cov \
         coveralls \
-        twine
+        twine \
+        https://github.com/j08lue/pycpt/archive/master.zip \
+        pyevtk
+
 
 RUN pip3 install netCDF4
 RUN apt-get update -qq && \
@@ -30,6 +33,12 @@ RUN git clone https://github.com/Geodels/gospl.git  && \
     export F90=gfortran && \
     export PETSC_DIR=/opt/petsc && \
     export PETSC_ARCH=arch-linux-c-opt && \
+    python3 setup.py install
+
+# install JIGSAW
+RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
+    cd jigsaw-python && \
+    python3 setup.py build_external && \
     python3 setup.py install
 
 # setup space for working in
