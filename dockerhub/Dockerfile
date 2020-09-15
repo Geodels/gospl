@@ -17,6 +17,9 @@ RUN python3 -m pip install --no-cache-dir \
         https://github.com/j08lue/pycpt/archive/master.zip \
         pyevtk
 
+RUN python3 -m pip install --no-cache-dir \
+        itkwidgets==0.25.2 \
+        pyvista==0.26.0
 
 RUN pip3 install netCDF4
 RUN apt-get update -qq && \
@@ -60,4 +63,5 @@ ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
 ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
 RUN chmod +x /usr/local/bin/run-jupyter.sh
 ADD bashrc-term /root/.bashrc
-CMD /usr/local/bin/run-jupyter.sh
+#CMD /usr/local/bin/run-jupyter.sh
+CMD /usr/local/bin/run-jupyterlab.sh
