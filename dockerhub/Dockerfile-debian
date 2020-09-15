@@ -132,13 +132,13 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     meshio>=4.1.0 \
     shapely \
     meshplex>=0.13.2 \
-    ruamel.yaml>=0.16.10 \
+    ruamel.yaml>=0.16.12 \
     stripy \
-    numpy>=1.19.1 \
+    numpy>=1.19.2 \
     scipy>=1.5.2 \
     Cython>=0.29.21 \
     h5py>=2.10.0 \
-    pandas>=1.1.1  \
+    pandas>=1.1.2  \
     ruamel.yaml>=0.15.98 \
     fastfunc>=0.2.3 \
     meshio>=4.1.0 \

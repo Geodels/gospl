@@ -1,6 +1,6 @@
-numpy==1.19.1
-pandas==1.1.1
-ruamel.yaml==0.16.10
+numpy==1.19.2
+pandas==1.1.2
+ruamel.yaml==0.16.12
 sphinx_rtd_theme==0.5.0
 sphinxcontrib-napoleon==0.7
 sphinxemoji==0.1.6
