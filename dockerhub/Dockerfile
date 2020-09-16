@@ -48,6 +48,21 @@ RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
 VOLUME /live/share
 WORKDIR /live
 
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+        nodejs \
+        npm \
+        libgl1-mesa-dev \
+        xvfb
+
+RUN python3 -m pip install --no-cache-dir \
+        voila \
+        panel \
+        jupyterlab
+
+RUN jupyter labextension install @jupyter-voila/jupyterlab-preview
+RUN jupyter labextension install @pyviz/jupyterlab_pyviz
+
 ENV LD_LIBRARY_PATH "$LD_LIBRARY_PATH:/live/lib/:/live/share"
 
 EXPOSE 8888
@@ -59,9 +74,14 @@ EXPOSE 9999
 # note we use xvfb which to mimic the X display
 ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
 
-# launch notebook
-ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
-RUN chmod +x /usr/local/bin/run-jupyter.sh
-ADD bashrc-term /root/.bashrc
+# launch jupyter
+#ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
+#RUN chmod +x /usr/local/bin/run-jupyter.sh
+#ADD bashrc-term /root/.bashrc
 #CMD /usr/local/bin/run-jupyter.sh
+
+# launch jupyterlab
+ADD run-jupyterlab.sh /usr/local/bin/run-jupyterlab.sh
+RUN chmod +x /usr/local/bin/run-jupyterlab.sh
+ADD bashrc-term /root/.bashrc
 CMD /usr/local/bin/run-jupyterlab.sh

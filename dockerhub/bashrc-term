@@ -1,5 +1,5 @@
 export PATH=$PATH:/opt/mpich/bin/:/opt/petsc/bin
-export PS1="\[\e[1;32m\]gospl \[\e[35m\]\w \[\e[34m\]\[\e[1;33m\]$ \[\e[0m\]"
+export PS1="\[\e[1;32m\]gospl \[\e[35m\]\w \[\e[34m\]\[\e[1;30m\]$ \[\e[0m\]"
 export F90=gfortran
 
 # You may uncomment the following lines if you want `ls' to be colorized:
