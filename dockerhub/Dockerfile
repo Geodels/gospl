@@ -39,8 +39,8 @@ python3 setup.py build_external && \
 python3 setup.py install
 
 RUN python3 -m pip install --no-cache-dir \
-        itkwidgets==0.25.2 \
-        pyvista==0.26.0
+        itkwidgets \
+        pyvista
 
 RUN pip3 install netCDF4
 RUN apt-get update -qq && \
@@ -50,9 +50,13 @@ RUN apt-get update -qq && \
         libgdal-dev \
         python3-gdal
 
+
+RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager \
+    jupyter-matplotlib jupyterlab-datawidgets itkwidgets
+
 # install gopspl
 WORKDIR /live/lib
-RUN git clone https://github.com/Geodels/gospl.git  && \
+RUN git clone https://github.com/Geodels/gospl.git   && \
     cd gospl && \
     export F90=gfortran && \
     export PETSC_DIR=/opt/petsc && \
