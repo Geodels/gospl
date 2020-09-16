@@ -17,6 +17,20 @@ RUN python3 -m pip install --no-cache-dir \
         https://github.com/j08lue/pycpt/archive/master.zip \
         pyevtk
 
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+        nodejs \
+        npm \
+        libgl1-mesa-dev \
+        xvfb
+
+RUN python3 -m pip install --no-cache-dir \
+        voila \
+        panel \
+        jupyterlab
+
+RUN jupyter labextension install @jupyter-voila/jupyterlab-preview
+RUN jupyter labextension install @pyviz/jupyterlab_pyviz
 
 # install JIGSAW
 RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
@@ -49,28 +63,18 @@ RUN git clone https://github.com/Geodels/gospl.git  && \
 VOLUME /live/share
 WORKDIR /live
 
-RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-        nodejs \
-        npm \
-        libgl1-mesa-dev \
-        xvfb
-
-RUN python3 -m pip install --no-cache-dir \
-        voila \
-        panel \
-        jupyterlab
-
-RUN jupyter labextension install @jupyter-voila/jupyterlab-preview
-RUN jupyter labextension install @pyviz/jupyterlab_pyviz
-
 ENV LD_LIBRARY_PATH "$LD_LIBRARY_PATH:/live/lib/:/live/share"
 
 EXPOSE 8888
-ENV TINI_VERSION v0.18.0
-ENTRYPOINT ["/usr/local/bin/tini", "--"]
+COPY start_xvfb.sh /usr/local/sbin/start_xvfb.sh
+RUN chmod a+x /usr/local/sbin/start_xvfb.sh
 
-EXPOSE 9999
+ENTRYPOINT ["tini", "-g", "--", "start_xvfb.sh"]
+
+#ENV TINI_VERSION v0.18.0
+#ENTRYPOINT ["/usr/local/bin/tini", "--"]
+
+#EXPOSE 9999
 
 # note we use xvfb which to mimic the X display
 ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
