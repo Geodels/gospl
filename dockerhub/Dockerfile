@@ -17,6 +17,13 @@ RUN python3 -m pip install --no-cache-dir \
         https://github.com/j08lue/pycpt/archive/master.zip \
         pyevtk
 
+
+# install JIGSAW
+RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
+cd jigsaw-python && \
+python3 setup.py build_external && \
+python3 setup.py install
+
 RUN python3 -m pip install --no-cache-dir \
         itkwidgets==0.25.2 \
         pyvista==0.26.0
@@ -31,17 +38,11 @@ RUN apt-get update -qq && \
 
 # install gopspl
 WORKDIR /live/lib
-RUN git clone https://github.com/Geodels/gospl.git && \
+RUN git clone https://github.com/Geodels/gospl.git  && \
     cd gospl && \
     export F90=gfortran && \
     export PETSC_DIR=/opt/petsc && \
     export PETSC_ARCH=arch-linux-c-opt && \
-    python3 setup.py install
-
-# install JIGSAW
-RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
-    cd jigsaw-python && \
-    python3 setup.py build_external && \
     python3 setup.py install
 
 # setup space for working in
