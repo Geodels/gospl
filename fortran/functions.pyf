@@ -47,14 +47,14 @@ python module _fortran
             use meshparams
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: kd
-            double precision dimension(nb,8),intent(out),depend(nb) :: dcoeff
+            double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine setHillslopeCoeff
 
         subroutine marineCoeff(nb,kd,dcoeff)
             use meshparams
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: kd
-            double precision dimension(nb,8),intent(out),depend(nb) :: dcoeff
+            double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine marineCoeff
 
         subroutine MFDreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)

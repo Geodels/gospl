@@ -41,7 +41,10 @@ class SEDMesh(object):
             if self.carbOn:
                 self.vSedc = self.hGlobal.duplicate()
                 self.vSedcLocal = self.hLocal.duplicate()
-        self.maxnb = setMaxNb(self.npoints)
+        maxnb = np.zeros(1, dtype=np.int)
+        maxnb[0] = setMaxNb(self.npoints)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, maxnb, op=MPI.MAX)
+        self.maxnb = maxnb[0]
         self.scaleIDs = np.zeros(self.npoints)
         self.scaleIDs[self.lIDs] = 1.0
 
@@ -635,6 +638,7 @@ class SEDMesh(object):
         Remove thickness from the stratigraphic pile. The function takes into account
         the porosity values of considered lithologies in each stratigraphic layers eroded.
         It follows the following assumptions:
+
         - Eroded thicknesses from stream power law and hillslope diffusion are considered
           to encompass both the solid and void phase.
         - We extract the solid phase that will be moved dowstream by surface processes.

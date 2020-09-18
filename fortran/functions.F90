@@ -240,7 +240,7 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff)
     integer :: nb
 
     double precision, intent(in) :: Kd(nb)
-    double precision, intent(out) :: dcoeff(nb,8)
+    double precision, intent(out) :: dcoeff(nb,9)
 
     integer :: k, p, n
     double precision :: s1, c, ck, cn, v
@@ -278,7 +278,7 @@ subroutine marineCoeff(nb, Ks, dcoeff)
     integer :: nb
 
     double precision, intent(in) :: Ks(nb)
-    double precision, intent(out) :: dcoeff(nb,8)
+    double precision, intent(out) :: dcoeff(nb,9)
 
     integer :: k, p, n
     double precision :: s1, c, ck, cn, v

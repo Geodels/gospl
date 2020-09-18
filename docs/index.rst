@@ -21,8 +21,6 @@ What's in the box?
 
 **gospl** (pronounced: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
 
-**gospl** is a parallel TIN-based landscape evolution model, built to simulate topography dynamic of the Earth over millions of years.
-
 The model accounts for hillslope processes (soil creep using linear diffusion), fluvial incision (stream power law), spatially and temporally varying tectonics (horizontal and vertical displacements) and climatic forces (temporal and spatial precipitation changes and/or sea-level fluctuations). The model enables the representation of pre-defined stratigraphic layers composed of 2 different sediment classes (lithologies). It also takes into account the sorting of these different lithologies and specific compaction factors are used to simulate stratigraphic architecture.
 
 

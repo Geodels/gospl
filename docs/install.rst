@@ -11,7 +11,7 @@ Installation
 
 
 .. image:: images/fig_gospl.jpg
-   :scale: 18 %
+   :width: 100 %
    :alt: global model
    :align: center
 

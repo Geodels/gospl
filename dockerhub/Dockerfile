@@ -66,6 +66,7 @@ RUN git clone https://github.com/Geodels/gospl.git   && \
 # setup space for working in
 VOLUME /live/share
 WORKDIR /live
+RUN rm -rf jigsaw-python
 
 ENV LD_LIBRARY_PATH "$LD_LIBRARY_PATH:/live/lib/:/live/share"
 
@@ -75,13 +76,12 @@ RUN chmod a+x /usr/local/sbin/start_xvfb.sh
 
 ENTRYPOINT ["tini", "-g", "--", "start_xvfb.sh"]
 
-#ENV TINI_VERSION v0.18.0
-#ENTRYPOINT ["/usr/local/bin/tini", "--"]
+EXPOSE 9999
 
-#EXPOSE 9999
-
-# note we use xvfb which to mimic the X display
+RUN pip3 install lavavu
+# note we use xvfb which to mimic the X display for lavavu
 ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
+
 
 # launch jupyter
 #ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh

@@ -9,7 +9,7 @@ To get started on how to use *gospl*, a series of examples and tutorials is prov
 
 
 .. image:: images/test.png
-   :scale: 40 %
+   :width: 90 %
    :alt: global model
    :align: center
 
