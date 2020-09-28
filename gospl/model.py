@@ -32,12 +32,14 @@ class Model(parentModel):
     This object contains methods for the following operations:
 
      - initialisation of gospl mesh based on input file options
-     - computation of surface processes
+     - computation of surface processes over time
      - cleaning/destruction of PETSC objects
 
     :arg filename: YAML input file
-    :arg verbose: output option for model main functions
-    :arg showlog: Output option for PETSC logging file
+    :arg verbose: output flag for model main functions
+    :arg showlog: output flag for PETSC logging file
+    :arg carbctrl: carbonate control option
+
     """
 
     def __init__(
@@ -87,12 +89,16 @@ class Model(parentModel):
 
     def runProcesses(self):
         """
-        Run simulation.
+        Runs simulation over time.
 
         This function contains methods for the following operations:
 
-         - get flow accumulation
-         - apply surface evolution
+         - computes flow accumulation based on imposed precipitation field
+         - performs land surface evolution from river erosion, transport and deposition
+         - executes creep processes and marine depostion (linear hillslope diffusion)
+         - records stratigraphic layers evolution and associated porosity variations
+         - applies user-defined tectonics forcing (horizontal and vertical displacements)
+
         """
 
         self.newForcing = True
@@ -161,6 +167,9 @@ class Model(parentModel):
     def reInitialise(self):
         """
         Reinitialise model for paleo-fitting experiments.
+
+        This function clears PETSc DMPlex objects and forcing conditions without
+        having to reset the mesh structure.
         """
 
         _UnstMesh.reInitialiseModel(self)

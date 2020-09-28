@@ -5,9 +5,14 @@
 #undef  CHKERRQ
 #define CHKERRQ(n) if ((n) .ne. 0) return;
 
-!!!!!!!!!!!!!!!!!!!!!!!!
-!! INTERNAL FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                 INTERNAL MODULE                  !!
+!!           Fortran Module: meshparams             !!
+!!                                                  !!
+!!  - Define global variables for mesh parameters   !!
+!!  - Set the main functions for priority queues    !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 module meshparams
 
@@ -16,9 +21,9 @@ module meshparams
   integer :: nGlobal
   integer :: nLocal
 
+  integer, dimension(:), allocatable :: FVnNb
   integer, dimension(:,:), allocatable :: gnID
   integer, dimension(:,:), allocatable :: FVnID
-  integer, dimension(:), allocatable :: FVnNb
 
   double precision, dimension(:), allocatable :: FVarea
   double precision, dimension(:,:), allocatable :: FVeLgt
@@ -30,7 +35,8 @@ module meshparams
     double precision :: Z
   end type
 
-  ! Definition of priority queue (1 priority: elevation)
+  ! Definition of priority queue functions
+  ! The priority is based on the mesh elevation
   type pqueue
     type(node), allocatable :: buf(:)
     integer :: n = 0
@@ -44,6 +50,7 @@ module meshparams
 
   contains
 
+    ! Move the new element down the stack
     subroutine shiftdown(this, a)
       class (pqueue)  :: this
       integer :: a, parent, child
@@ -66,6 +73,7 @@ module meshparams
       end associate
     end subroutine shiftdown
 
+    ! Pop the top element in the stack
     function PQpop(this) result (res)
       class(pqueue) :: this
       type(node)   :: res
@@ -75,6 +83,7 @@ module meshparams
       call this%shiftdown(1)
     end function PQpop
 
+    ! Add a new element to the stack
     subroutine PQpush(this, Z, id)
       class(pqueue), intent(inout) :: this
       double precision :: Z
@@ -102,10 +111,16 @@ module meshparams
 
 end module meshparams
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!               INTERNAL FUNCTIONS                 !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 subroutine euclid( p1, p2, norm)
 !*****************************************************************************
-! Computes the Euclidean vector norm between 2 points
-! along the 3 dimensions
+! Computes the Euclidean vector norm between 2 points along the 3 dimensions
+! based on fortran norm2 function.
 
   implicit none
 
@@ -153,7 +168,7 @@ end subroutine quicksort
 
 subroutine split(array, low, high, mid, indices)
 !*****************************************************************************
-! used by quicksort  from http://www.cgd.ucar.edu/pubsoft/TestQuicksort.html
+! used by quicksort from http://www.cgd.ucar.edu/pubsoft/TestQuicksort.html
 ! Reference:
 ! Nyhoff & Leestma, Fortran 90 for Engineers & Scientists
 ! (New Jersey: Prentice Hall, 1997), pp 575-577.
@@ -202,13 +217,16 @@ subroutine split(array, low, high, mid, indices)
 
 end subroutine split
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! HILLSLOPE PROCESSES FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!         HILLSLOPE PROCESSES FUNCTIONS            !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine setMaxNb(nb, maxnb)
 !*****************************************************************************
-! Define hillslope coefficients
+! Get the maximum number of neighbours for each mesh vertice.
+! This function is called once during the initialisation phase.
 
     use meshparams
     implicit none
@@ -232,7 +250,8 @@ end subroutine setMaxNb
 
 subroutine setHillslopeCoeff(nb, Kd, dcoeff)
 !*****************************************************************************
-! Define hillslope coefficients
+! Define hillslope coefficients based on a finite volume spatial
+! discretisation as proposed in Tucker et al. (2001).
 
     use meshparams
     implicit none
@@ -270,7 +289,8 @@ end subroutine setHillslopeCoeff
 
 subroutine marineCoeff(nb, Ks, dcoeff)
 !*****************************************************************************
-! Define suspension coefficients
+! Define marine diffusion coefficients based on a finite volume spatial
+! discretisation as proposed in Tucker et al. (2001).
 
     use meshparams
     implicit none
@@ -310,13 +330,16 @@ subroutine marineCoeff(nb, Ks, dcoeff)
 
 end subroutine marineCoeff
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! FLOW DIRECTION FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!            FLOW DIRECTION FUNCTION               !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
-! Compute receiver characteristics based on multiple flow direction algorithm
+! Compute receiver characteristics based on multiple flow direction
+! algorithm.
 
   use meshparams
   implicit none
@@ -408,14 +431,16 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 
 end subroutine MFDreceivers
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! STRATIGRAPHIC FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!            STRATIGRAPHIC FUNCTIONS               !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, &
                        phif, nstrath, nstratz, nstratf, nphis, nphif)
 !*****************************************************************************
-! Record stratigraphic layers through time
+! Record stratigraphic layers through time.
 
   implicit none
 
@@ -473,7 +498,7 @@ subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
                            stratc, phis, phif, phic, nstrath, nstratz, nstratf, &
                            nstratc, nphis, nphif, nphic)
 !*****************************************************************************
-! Record stratigraphic layers through time with carbonate turned on
+! Record stratigraphic layers through time with carbonate module turned on.
 
   implicit none
 
@@ -541,13 +566,15 @@ subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
 
 end subroutine strataBuildCarb
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! PIT FILLING FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!             PIT FILLING FUNCTIONS                !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine fillPIT(sl, elev, hmax, fillz, pits, nb)
 !*****************************************************************************
-! Perform pit filling using a priority queue approach
+! Perform pit filling using a priority queue approach following Barnes (2015).
 
   use meshparams
   implicit none
@@ -637,7 +664,7 @@ end subroutine fillPIT
 subroutine fillLabel(sl, elev, fillz, labels, nb)
 !*****************************************************************************
 ! Perform pit filling and watershed labeling using a variant of the priority
-! queue approach
+! queue approach following Barnes (2015).
 
   use meshparams
   implicit none
@@ -710,11 +737,15 @@ subroutine fillLabel(sl, elev, fillz, labels, nb)
 
 end subroutine fillLabel
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! MESH DECLARATION FUNCTIONS !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!          MESH DECLARATION FUNCTIONS              !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine ngbGlob( nb, ngbIDs )
+!*****************************************************************************
+! Set global mesh neighbours indices.
 
   use meshparams
   implicit none
@@ -763,6 +794,7 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
 
   ! Define fortran global parameters
   nLocal = nb
+
   if(allocated(FVarea)) deallocate(FVarea)
   if(allocated(FVnID)) deallocate(FVnID)
   if(allocated(FVnNb)) deallocate(FVnNb)
@@ -774,6 +806,7 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   allocate(FVnID(nLocal,8))
   allocate(FVeLgt(nLocal,8))
   allocate(FVvDist(nLocal,8))
+
   FVarea = area
   cell_ids = -1
   edge = -1
@@ -835,7 +868,6 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
   enddo
 
   do k = 1, nb
-
     ! Get triangulation edge lengths
     coords0 = coords(k,1:3)
     l = 0
@@ -853,7 +885,6 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
       call euclid( coords0, coordsID, FVeLgt(k,l) )
       edgemax = max(edgemax, FVeLgt(k,l))
     enddo
-
     ! Get voronoi edge lengths
     lp2: do cid = 1, 8
       if( cell_ids(k,cid) == -1 ) exit lp2
@@ -883,7 +914,6 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
         endif
       enddo
     enddo lp2
-
   enddo
 
   FVnID = ngbID
@@ -892,7 +922,8 @@ end subroutine defineTIN
 
 subroutine defineGTIN( nb, cells_nodes, edges_nodes, ngbNb, ngbID, n, m)
 !*****************************************************************************
-! Compute for global triangulation the characteristics of each node
+! Compute for the global mesh, the characteristics of each node and
+! associated voronoi for finite volume discretizations
 
   use meshparams
   implicit none

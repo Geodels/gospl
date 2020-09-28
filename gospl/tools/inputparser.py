@@ -14,7 +14,9 @@ MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
 class ReadYaml(object):
     """
-    Reading simulation input file.
+    Class for reading simulation input file and initialising model parameters.
+
+    Definition of input parameters is provided in the `User Documentation <https://gospl.readthedocs.io/en/latest/inputfile.html>`_
     """
 
     def __init__(self, filename):
@@ -92,10 +94,10 @@ class ReadYaml(object):
             )
             raise KeyError("Key domain is required in the input file!")
 
-        # try:
-        #     self.radius = domainDict["radius"]
-        # except KeyError:
-        #     self.radius = 6378137.0
+        try:
+            self.radius = domainDict["radius"]
+        except KeyError:
+            self.radius = 6378137.0
 
         try:
             self.flowDir = domainDict["flowdir"]
@@ -136,11 +138,6 @@ class ReadYaml(object):
         except KeyError:
             self.interp = 1
 
-        try:
-            self.overlap = domainDict["overlap"]
-        except KeyError:
-            self.overlap = 1
-
         self._extraDomain()
 
         return
@@ -151,6 +148,11 @@ class ReadYaml(object):
         """
 
         domainDict = self.input["domain"]
+
+        try:
+            self.overlap = domainDict["overlap"]
+        except KeyError:
+            self.overlap = 1
 
         try:
             dataFile = domainDict["nperodep"]
@@ -324,7 +326,6 @@ class ReadYaml(object):
                 self.fillmax = splDict["hfill"]
             except KeyError:
                 self.fillmax = 100.0
-
             try:
                 self.coeffd = splDict["d"]
             except KeyError:
@@ -661,7 +662,8 @@ class ReadYaml(object):
         tmpRain = []
         if rMap is None:
             tmpRain.insert(
-                0, {"start": rStart, "rUni": rUniform, "rMap": None, "rKey": None},
+                0,
+                {"start": rStart, "rUni": rUniform, "rMap": None, "rKey": None},
             )
         else:
             tmpRain.insert(

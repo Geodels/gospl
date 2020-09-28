@@ -20,10 +20,20 @@ MPIcomm = MPI.COMM_WORLD
 
 class WriteMesh(object):
     """
-    Output model paramters using hdf5 library
+    Class for writing model outputs. The outputs are written as hdf5 files for each
+    mesh partition. The outputs structure is composed of library
+
+    .. note::
+
+        The model outputs are all located in an output folder (`dir` key in the inputfile documentation) and consist of a time series file named `gospl.xdmf` and 2 other folders (`h5` and `xmf`).
+
+    The `XDMF` file is the main entry point for visualising the output and should be sufficient for most users. This file can easely be opened within `Paraview <https://www.paraview.org/download/>`_.
     """
 
     def __init__(self):
+        """
+        Initialise model outputs paramters.
+        """
 
         self.step = 0
         self.stratStep = 0
@@ -34,6 +44,8 @@ class WriteMesh(object):
         # Sync the chosen output dir to all processors
         self.outputDir = MPIcomm.bcast(self.outputDir, root=0)
 
+        # In case of a restarting simulation, get the corresponding time
+        # values according to the restarting step
         if self.rStep > 0:
             self.step = self.rStep + 1
             if self.strat > 0:
@@ -45,13 +57,13 @@ class WriteMesh(object):
             self.saveStrat = self.tEnd + self.tout
             if self.strat > 0:
                 self.saveStrat = self.tNow + self.strat
-
         else:
             self.rStart = self.tStart
 
         if self.strataFile is not None:
             self.stratStep = self.initLay
 
+        # If series of paleomaps are used to force the model through time.
         if self.forceStep >= 0:
 
             res = 0.5
@@ -86,7 +98,7 @@ class WriteMesh(object):
 
     def visModel(self):
         """
-        Visualise model outputs.
+        Main function to write model outputs on disk.
         """
 
         # Output time step for first step
@@ -94,7 +106,7 @@ class WriteMesh(object):
             self._outputMesh()
             self.saveTime += self.tout
 
-        # Output time step
+        # Output time step after start time
         elif self.tNow >= self.saveTime:
             self._outputMesh()
             self.saveTime += self.tout
@@ -115,7 +127,13 @@ class WriteMesh(object):
 
     def _createOutputDir(self):
         """
-        Create a directory to store outputs.
+        Create a directory to store outputs. By default the folder will be called
+        `output`. If a folder name is specified in the YAML input file, this name
+        will be used.
+
+        .. note::
+            The input option `makedir` gives the ability to delete any existing output folder with the same name (if set to `False`) or to create a new folder with the given dir name plus a number at the end (*e.g.* `outputDir_XX` if set to `True` with `XX` the run number). It prevents overwriting on top of previous runs.
+
         """
 
         # Get output directory
@@ -143,7 +161,28 @@ class WriteMesh(object):
     def _outputStrat(self):
         """
         Saves mesh local stratigraphic information stored in the DMPlex
-        to HDF5 file.
+        as HDF5 file. The following variables will be recorded:
+
+        - elevation at time of deposition, considered to be to the current elevation
+          for the top stratigraphic layer `stratZ`.
+        - thickness of each stratigrapic layer `stratH` accounting for both
+          erosion & deposition events.
+        - proportion of fine sediment `stratF` contains in each stratigraphic layer.
+        - porosity of coarse sediment `phiS` in each stratigraphic layer computed at
+          center of each layer.
+        - porosity of fine sediment `phiF` in each stratigraphic layer computed at
+          center of each layer.
+        - proportion of carbonate sediment `stratC` contains in each stratigraphic layer
+          if the carbonate module is turned on.
+        - porosity of carbonate sediment `phiC` in each stratigraphic layer computed at
+          center of each layer when the carbonate module is turned on.
+
+        .. important::
+
+            It is worth mentioning that the stratigraphic architecture is only outputed as
+            HDF5 files and does not record the XMF and XDMF files. A set of post-processing
+            scripts are then required to extract the informations and visualise the stratigraphic
+            records of any specific simulations.
         """
 
         t = process_time()
@@ -235,8 +274,21 @@ class WriteMesh(object):
 
     def _outputMesh(self):
         """
-        Saves mesh local information stored in the DMPlex to HDF5 file
-        If the file already exists, it is overwritten.
+        Saves mesh local information stored in the DMPlex to HDF5 file. If the file already
+        exists, it will be overwritten. Mesh characteristics are recorded for each partition.
+        The following variables will be available:
+
+        - surface elevation `elev`.
+        - cumulative erosion & deposition values `erodep`.
+        - flow accumulation `flowAcc` before pit filling.
+        - flow accumulation `fillAcc` for depressionless surface.
+        - river sediment load `sedLoad`.
+        - fine sediment load `sedLoadf` when dual lithologies are accounted for.
+        - carbonate sediment load `sedLoadc` when carbonate module is turned on.
+        - uplift subsidence values if vertical tectonic forcing is considered `uplift`.
+        - horizontal displacement values when considered `hdisp`.
+        - precipitation maps based on forcing conditions `rain`.
+
         """
 
         t = process_time()
@@ -273,27 +325,42 @@ class WriteMesh(object):
         with h5py.File(h5file, "w") as f:
             # if self.stratStep == 0:
             f.create_dataset(
-                "elev", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+                "elev",
+                shape=(self.npoints, 1),
+                dtype="float32",
+                compression="gzip",
             )
             f["elev"][:, 0] = self.hLocal.getArray()
             f.create_dataset(
-                "erodep", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+                "erodep",
+                shape=(self.npoints, 1),
+                dtype="float32",
+                compression="gzip",
             )
             f["erodep"][:, 0] = self.cumEDLocal.getArray()
             f.create_dataset(
-                "flowAcc", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+                "flowAcc",
+                shape=(self.npoints, 1),
+                dtype="float32",
+                compression="gzip",
             )
             data = self.FAL.getArray().copy()
             data[data <= 0.0] = 1.0
             f["flowAcc"][:, 0] = data
             f.create_dataset(
-                "fillAcc", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+                "fillAcc",
+                shape=(self.npoints, 1),
+                dtype="float32",
+                compression="gzip",
             )
             data = self.fillFAL.getArray().copy()
             data[data <= 0.0] = 1.0
             f["fillAcc"][:, 0] = data
             f.create_dataset(
-                "sedLoad", shape=(self.npoints, 1), dtype="float32", compression="gzip",
+                "sedLoad",
+                shape=(self.npoints, 1),
+                dtype="float32",
+                compression="gzip",
             )
             f["sedLoad"][:, 0] = self.vSedLocal.getArray().copy()
             if self.stratNb > 0:
@@ -363,7 +430,19 @@ class WriteMesh(object):
 
     def readData(self):
         """
-        For restarted simulations, this function reads the previous dataset.
+        When a simulation restarts, variables from previous HDF5 output files are read and assigned
+        to the restarting run.
+
+        The following variables are used:
+
+        - surface elevation `elev`.
+        - cumulative erosion & deposition values `erodep`.
+        - flow accumulation `flowAcc` before pit filling.
+        - flow accumulation `fillAcc` for depressionless surface.
+        - river sediment load `sedLoad`.
+        - fine sediment load `sedLoadf` when dual lithologies are accounted for.
+        - carbonate sediment load `sedLoadc` when carbonate module is turned on.
+
         """
 
         # if self.stratStep == 0:
@@ -431,7 +510,19 @@ class WriteMesh(object):
     def _forcePaleo(self):
         """
         Forcing the model based on backward simulation results. This function computes
-        difference between backward model elevation and current one
+        difference between backward model elevation and current one.
+
+        .. note::
+
+            The backward elevation is often computed based on paleo-elevation maps at specific
+            time interval. During the pre-processing phase a series of backward elevations are
+            then created based on these paleo-elevation maps. These backward elevations are then
+            used to force the forward model over time. This is done by computing the differences
+            at any given time step between the obtained forward elevations and the predicted backward
+            ones. These differences are then used to define an uplift map that matches the differences
+            modulated by an imposed factor (`alpha`). Once the uplift map has been computed the model
+            is then rerun from the previous time step to the current one.
+
         """
 
         # Store the vertical displacement in the uplift variable
@@ -556,8 +647,13 @@ class WriteMesh(object):
 
     def _save_DMPlex_XMF(self):
         """
-        Saves mesh local information stored in the HDF5 to XMF file
-        to visualise in Paraview.
+        Saves mesh local information stored in the HDF5 to XmF file. The XMF files are XML schema
+        explaining how to read `gospl` data files.
+
+        The XmF file is written by a single processor (rank 0) and contains each partition HDF5 files
+        in blocks. The variables described for the HDF5 file (function `_outputMesh` above) are all
+        accessible from this file.
+
         """
 
         xmf_file = self.outputDir + "/xmf/" + self.file + str(self.step) + ".xmf"
@@ -719,7 +815,14 @@ class WriteMesh(object):
 
     def _save_XDMF(self):
         """
-        This function writes the XDmF file which is calling the XmF file.
+        This function writes the XDmF file which is calling the XmF files above. The XDmF file
+        represents the *time series* of the model outputs and can be directly loaded and visualised
+        with `Paraview <https://www.paraview.org/download/>`_.
+
+        .. note::
+
+            For a brief overview of the approach used to record `gospl` outputs, user can read
+            this `visit documentation <https://www.visitusers.org/index.php?title=Using_XDMF_to_read_HDF5>`_
         """
 
         xdmf_file = self.outputDir + "/" + self.file + ".xdmf"
