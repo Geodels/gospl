@@ -358,7 +358,21 @@ class FAMesh(object):
 
     def _matrixFA(self):
         """
-        Build transport direction matrices for both filled and unfilled elevations.
+        This function defines the transport direction matrices for both filled and unfilled elevations.
+
+        .. note::
+
+            Each matrix is built incrementally looping through the number of flow direction paths
+            defined by the user. It proceeds by assembling a local Compressed Sparse Row (**CSR**)
+            matrix to a global PETSc matrix.
+
+            When setting up transport direction matrix in PETSc, we preallocate the non-zero entries
+            of the matrix before starting filling in the values. Using PETSc sparse matrix storage
+            scheme has the advantage that matrix-vector multiplication is extremely fast.
+
+        The  matrix coefficients consist of weights (comprised between 0 and 1) calculated based on
+        the number of downslope neighbours and proportional to the slope.
+
         """
 
         WAMat = self.iMat.copy()
@@ -367,7 +381,7 @@ class FAMesh(object):
 
         for k in range(0, self.flowDir):
 
-            # Drainage area matrix
+            # Flow direction matrice for a specific direction
             tmpMat = self._matrix_build()
             data = -self.wghtVal[:, k].copy()
             data[self.rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
@@ -379,13 +393,15 @@ class FAMesh(object):
                 petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
+
+            # Add the weights from each direction
             WAMat += tmpMat
             tmpMat.destroy()
 
         del data, indptr, nodes
         gc.collect()
 
-        # Solve flow accumulation
+        # Store flow accumulation matrices
         if self.isfill:
             self.fillMat = WAMat.transpose().copy()
         else:
@@ -397,10 +413,28 @@ class FAMesh(object):
 
     def flowAccumulation(self, filled=False, limit=False):
         """
-        Compute multiple flow accumulation.
+        This function is the **main entry point** for flow accumulation computation.
 
-         - depression identification and pit filling
-         - flow accumulation based on filled and unfilled surfaces
+        .. note::
+
+            Flow accumulation (`FA`) calculations are a core component of landscape evolution models as
+            they are often used as proxy to estimate flow discharge, sediment load, river width, bedrock
+            erosion, and sediment deposition. Until recently, conventional `FA` algorithms were serial
+            and limited to small spatial problems.
+
+        `gospl` model computes the flow discharge from `FA` and the net precipitation rate using a
+        **parallel implicit drainage area (IDA) method** proposed by `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ but adapted to unstructured grids.
+
+        It calls the following *private functions*:
+
+        1. `_depressionlessSurface <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._depressionlessSurface>`_
+        2. `_buildFlowDirection <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._buildFlowDirection>`_
+        3. `_distanceCoasts <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._distanceCoasts>`_
+        4. `_matrixFA <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._matrixFA>`_
+        5. `_solve_KSP <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._solve_KSP>`_
+
+        :arg filled: boolean to turn the filling algorithm
+        :arg limit: boolean to turn a limit on the maximum filling value
         """
 
         self.isfill = filled
