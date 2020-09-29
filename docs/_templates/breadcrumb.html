@@ -1,0 +1,7 @@
+{% for doc in parents %}
+    <li><a href="{{ doc.link }}" aria-current="page">{{ doc.title }}</a>
+    </li>
+{% endfor %}
+{% if title %}
+    <li class="is-active">{{ title }}</li>
+{% endif %}
