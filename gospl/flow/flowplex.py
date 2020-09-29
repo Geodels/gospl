@@ -505,7 +505,7 @@ class FAMesh(object):
 
         .. math::
 
-          I = − \kappa P^d (PA)^m S^n
+          E = − \kappa P^d (PA)^m S^n
 
         :math:`\kappa` is a dimensional coefficient describing the erodibility of the channel bed as a function of rock strength, bed roughness and climate, :math:`d`, :math:`m` and :math:`n` are dimensionless positive constants.
 
@@ -619,7 +619,8 @@ class FAMesh(object):
 
         .. important::
 
-            The approach assumes that the volume of rock eroded using the stream power law encompass both the solid and void phase.
+            The approach assumes that the volume of rock eroded using the stream power law accounts
+            for both the solid and void phase.
 
         """
 
