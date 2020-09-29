@@ -51,6 +51,24 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, see `GPL3`_.
 
 
+.. toctree::
+   :maxdepth: 3
+   :name: Usage
+   :caption: Usage
+
+   install.rst
+   inputfile.rst
+   examples.rst
+
+
+.. toctree::
+   :maxdepth: 3
+   :name: Code Source
+   :caption: Code Source
+
+   api.rst
+
+
 .. [Richardson14] Ribal, A. Hill, C. N. & Perron, J. T. -
     IDA: An implicit, parallelizable method for calculating drainage area. **Water Resour. Res.**, 50, 4110-4130, `doi:10.1002/2013WR014326`_, 2014.
 

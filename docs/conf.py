@@ -109,9 +109,8 @@ html_theme = "pydata_sphinx_theme"
 html_logo = "images/logo.png"
 html_theme_options = {
     "github_url": "https://github.com/Geodels/gospl",
-    "twitter_url": "https://twitter.com/salles_tristan",
-    "search_bar_text": "Search gospl docs ...",
-    "show_toc_level": 2,
+    "search_bar_text": "Search GOSPL docs ...",
+    "show_toc_level": 3,
 }
 # html_theme_options = {
 #     "logo_only": True,
