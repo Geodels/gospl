@@ -495,11 +495,34 @@ class FAMesh(object):
         return
 
     def _getErosionRate(self):
-        """
-        Compute sediment and bedrock erosion rates in metres per year. This is done
-        on the filled-limited elevation. We use the filled-limited elevation to ensure
-        that erosion is not going to be underestimate by small depressions which are
-        likely to be filled (either by sediments or water) during a single time step.
+        r"""
+        This function computes erosion rates in metres per year. This is done on the filled elevation.
+        We use the filled-limited elevation to ensure that erosion is not going to be underestimate by
+        small depressions which are likely to be filled (either by sediments or water) during a single
+        time step.
+
+        The simplest law to simulate fluvial incision is based on the detachment-limited stream power law, in which erosion rate  depends on drainage area :math:`A`, net precipitation :math:`P` and local slope :math:`S` and takes the form:
+
+        .. math::
+
+          I = − \kappa P^d (PA)^m S^n
+
+        :math:`\kappa` is a dimensional coefficient describing the erodibility of the channel bed as a function of rock strength, bed roughness and climate, :math:`d`, :math:`m` and :math:`n` are dimensionless positive constants.
+
+        Default formulation assumes :math:`d = 0`, :math:`m = 0.5` and :math:`n = 1`. The precipitation exponent :math:`d` allows for representation of climate-dependent chemical weathering of river bed across non-uniform rainfall.
+
+        .. important::
+
+            In `gospl`, the coefficients `m` and `n` are fixed and the only variables that the user can
+            tune are the coefficient `d` and the erodibility :math:`\kappa`. E is in m/yr and therefore the erodibility dimension is :math:`(m yr)^{−0.5}`.
+
+        The erosion rate is solved by an implicit time integration method, the matrix system is
+        based on the receiver distributions and is assembled from local Compressed Sparse Row
+        (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers*
+        (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution
+        is obtained using PETSc Richardson solver (`richardson`) with block Jacobian
+        preconditioning (`bjacobi`).
+
         """
 
         # Upstream-averaged mean annual precipitation rate and the drainage area
@@ -584,7 +607,20 @@ class FAMesh(object):
 
     def riverIncision(self):
         """
-        Compute stream erosion using stream power law.
+        River incision is based on a standard form of the **stream power law** assuming
+        **detachment-limited behaviour**.
+
+        It calls the private function `_getErosionRate <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._getErosionRate>`_ described above.
+        Once erosion rates have been calculated, the function computes local eroded thicknesses for
+        the considered time step and update local elevation and cumulative erosion, deposition values.
+
+        If multiple lithologies are considered, the stratigraphic record is updated based on eroded
+        thicknesses.
+
+        .. important::
+
+            The approach assumes that the volume of rock eroded using the stream power law encompass both the solid and void phase.
+
         """
 
         t0 = process_time()
@@ -597,7 +633,7 @@ class FAMesh(object):
 
         self._getErosionRate()
 
-        # Update bedrock thicknesses due to erosion
+        # Get eroded thicknesses
         Eb = self.Eb.getArray().copy()
         self.tmp.setArray(-Eb * self.dt)
         self.cumED.axpy(1.0, self.tmp)
@@ -606,7 +642,7 @@ class FAMesh(object):
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
 
-        # Update stratigraphic layer
+        # Update stratigraphic layers
         if self.stratNb > 0:
             self.erodeStrat()
 
