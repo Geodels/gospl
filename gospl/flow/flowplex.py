@@ -202,8 +202,17 @@ class FAMesh(object):
 
     def _distanceCoasts(self, data, k_neighbors=1):
         """
-        Update the elevation and set it up in the VTK mesh. Then perform contour filtering
-        to extract coastline positions globally and compute distance to shore for ocean nodes.
+        This function computes for every marine vertices the distance to the closest coastline.
+
+        .. important::
+
+            The calculation takes advantage of the `vtkContourFilter` function from VTK library
+            which is performed on the **global** VTK mesh. Once the coastlines have been extracted,
+            the distances are obtained by querying a kd-tree (initialised with the coastal nodes) for
+            marine vertices contained within each partition.
+
+        :arg data: global elevation numpy array
+        :arg k_neighbors: number of nodes to use when querying the kd-tree
         """
 
         t0 = process_time()
@@ -239,7 +248,18 @@ class FAMesh(object):
 
     def _pitInformation(self, gZ, hFill):
         """
-        Define depression characteristics.
+
+        Function to extract the volume of all depressions based on current elevation, depressionless
+        one and voronoi cell areas. It also stores the spillover vertices indices for each of the depression. It is ran over the global mesh.
+
+        .. note::
+
+            This function uses the **numpy-indexed** library which contains functionality for indexed
+            operations on numpy ndarrays and provides efficient vectorized functionality such as
+            grouping and set operations.
+
+        :arg gZ: global elevation numpy array
+        :arg hFill: global depressionless elevation numpy array
         """
 
         # Compute pit volumes
@@ -255,7 +275,39 @@ class FAMesh(object):
 
     def _depressionlessSurface(self, limit=False):
         """
-        Compute depression less surface.
+        This function computes the depression less surface.
+
+        .. note::
+
+            In most landscape evolution models, internally draining regions (*e.g.* depressions
+            and pits) are usually filled before the calculation of flow discharge and erosion–deposition
+            rates. This ensures that all flows conveniently reach the coast or the boundary of the
+            simulated domain. In models intended to simulate purely erosional features, such depressions
+            are usually treated as transient features and often ignored.
+
+            However, `gospl` is designed to not only address erosion problems but also to simulate
+            source-to-sink transfer and sedimentary basins formation and evolution in potentially
+            complex tectonic settings. In such cases, depressions may be formed at different periods
+            during runtime and may be filled or remain internally drained (*e.g.* endorheic basins)
+            depending on the volume of sediment transported by upstream catchments.
+
+        The function is **not parallelised** and is performed on the master processor. It calls a
+        fortran subroutine `fillPIT` that uses a *priority-flood + ϵ* variant of the algorithm proposed
+        in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ for unstructured meshes.
+
+        The initialisation step consists of pushing all the marine nodes which are neighbours to a
+        deep ocean node (*i.e.* nodes at water depth below 1000 m) onto a priority queue. The
+        priority queue rearranges these nodes so that the ones with the lowest elevations in the
+        queue are always processed first. The algorithm then proceeds incrementally by adding new vertices
+        in the queue and defines filled elevations in the ascending order of their spill elevations + ϵ.
+
+        At the end of the function, the global unfilled and filled elevations are returned as well as
+        the depressions charcateristics (*i.e.* a unique indice for each depressions, their volumes and
+        the positions of the spill-over global vertices).
+
+        :arg limit: boolean to turn a limit on the maximum filling value
+
+        :return: gZ hFill (global and depressionless elevations numpy arrays)
         """
 
         # Get global elevations for pit filling...
