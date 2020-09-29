@@ -1,0 +1,231 @@
+{% if sphinx_version < "1.8.0" %}
+    {{ warning("This template needs Sphinx 1.8.0 or highter") }}
+{% endif %}
+
+{%- set url_root = pathto('', 1) -%}
+{%- if url_root == '#' -%}{%- set url_root = '' -%}{%- endif -%}
+
+{%- set ismasterdoc = pagename == master_doc -%}
+
+
+{%- block doctype -%}
+    <!DOCTYPE html>
+{% endblock doctype -%}
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    {{ metatags }}
+
+    {%- block htmltitle %}
+        {%- set title = title|striptags|e -%}
+        {%- if title -%}
+            <title>{{ title|striptags|e }}{{ titlesuffix }}</title>
+        {%- else -%}
+            {#- Ablog index has no document title, use only docstitle -#}
+            <title>{{ docstitle|e }}</title>
+        {%- endif -%}
+    {%- endblock htmltitle %}
+
+    {% block css %}
+        {# CSS from theme.conf's "stylesheet" option or conf.py "html_style" #}
+        <link rel="stylesheet" href="{{ pathto('_static/' + style, 1) }}">
+        {# Any chosen Pygments style will be named "pygments.css" #}
+        <link rel="stylesheet" href="{{ pathto('_static/pygments.css', 1) }}" type="text/css"/>
+        {# CSS injected from extensions and html_css_files option #}
+        {% for css in css_files %}
+            {{ css_tag(css) }}
+        {% endfor %}
+    {% endblock css %}
+
+    {% block headjs %}
+        {#- Compiled from _javascript/main.js -#}
+        <script type="text/javascript" src="{{ pathto('_static/js/main.js', 1) }}"></script>
+
+        <script type="text/javascript" id="documentation_options"
+                data-url_root="{{ pathto('', 1) }}"
+                src="{{ pathto('_static/documentation_options.js', 1) }}"></script>
+
+        {# Scripts injected by extensions and html_js_files option #}
+        {%- for js in script_files %}
+            {{ js_tag(js) }}
+        {%- endfor %}
+    {% endblock headjs %}
+
+    {% if favicon %}
+        {# conf.py html_favicon option #}
+        <link rel="shortcut icon" href="{{ pathto('_static/' + favicon, 1) }}"/>
+    {% else %}
+        {# or default one #}
+        <link rel="shortcut icon" href="{{ pathto('_static/img/favicon.ico', 1) }}"/>
+    {% endif %}
+
+    {%- block linktags %}
+        {%- if hasdoc('about') %}
+            <link rel="author" title="{{ _('About these documents') }}"
+                  href="{{ pathto('about') }}"/>
+        {%- endif %}
+        {%- if hasdoc('genindex') %}
+            <link rel="index" title="{{ _('Index') }}" href="{{ pathto('genindex') }}"/>
+        {%- endif %}
+        {%- if hasdoc('search') %}
+            <link rel="search" title="{{ _('Search') }}" href="{{ pathto('search') }}"/>
+        {%- endif %}
+        {%- if hasdoc('copyright') %}
+            <link rel="copyright" title="{{ _('Copyright') }}" href="{{ pathto('copyright') }}"/>
+        {%- endif %}
+        {%- if next %}
+            <link rel="next" title="{{ next.title|striptags|e }}" href="{{ next.link|e }}"/>
+        {%- endif %}
+        {%- if prev %}
+            <link rel="prev" title="{{ prev.title|striptags|e }}" href="{{ prev.link|e }}"/>
+        {%- endif %}
+    {%- endblock linktags %}
+
+    {# Contains value html_baseurl if set #}
+    {%- if pageurl %}
+        <link rel="canonical" href="{{ pageurl|e }}" />
+    {%- endif %}
+
+    {% block extrahead %}{% endblock extrahead %}
+</head>
+<body>
+{% block extrabody %}{% endblock extrabody %}
+{% block header %}
+    <header>
+        {% block navbar %}
+            <nav class="navbar" role="navigation" aria-label="main navigation">
+                <div class="container">
+                    <div class="navbar-brand">
+                        <a class="navbar-item" href="{{ url_root }}">
+                            {% if logo %}
+                                <img src="{{ pathto('_static/' + logo, 1) }}"
+                                     alt="{{ _('Logo') }}"/>
+                            {% else %}
+                                <img src="{{ pathto('_static/img/logo.svg', 1) }}"
+                                     alt="{{ _('Logo') }}"/>
+                            {% endif %}
+                        </a>
+                        <!--<a role="button" class="navbar-burger burger" aria-label="menu"
+                           aria-expanded="false"
+                           data-target="navbarMenu">
+                            <span aria-hidden="true"></span>
+                            <span aria-hidden="true"></span>
+                            <span aria-hidden="true"></span>
+                        </a>-->
+                    </div>
+
+                    {% block navbarmenu %}
+                        <div id="navbarMenu" class="navbar-menu">
+                            <div class="navbar-end">
+                                <a class="navbar-item" href="https://documatt.com">Documatt</a>
+                                <a class="navbar-item"
+                                   href="https://snippets.documatt.com">Snippets</a>
+                                <a class="navbar-item is-active" href="https://blog.documatt.com">Blog</a>
+                            </div>
+                        </div>
+                    {% endblock navbarmenu %}
+                </div>
+            </nav>
+        {% endblock navbar %}
+
+        {% block breadcrumb %}
+            <nav class="breadcrumb" aria-label="breadcrumbs">
+                <div class="container">
+                    <ul>
+                        <li><a href="{{ url_root }}">{{ project }}</a></li>
+                        {% include "breadcrumb.html" %}
+                    </ul>
+                </div>
+            </nav>
+        {% endblock breadcrumb %}
+    </header>
+{% endblock header %}
+
+{% block cover %}
+    <section class="section site-cover" style="padding-bottom: 0;">
+        <div class="container">
+            <div class="columns">
+                <div class="column is-8 is-offset-2">
+                    {#- On homepage, big cover text and image vertically -#}
+                    {% if ismasterdoc %}
+                        {% block mastercover %}
+                            <h1 class="title is-2 has-text-primary">
+                                <a href="{{ url_root }}">{{ project }}</a>
+                            </h1>
+                            <h2 class="subtitle is-4">
+                                {{ theme_motto }}
+                            </h2>
+                            <a href="{{ url_root }}">
+                                <figure class="image">
+                                    <img src="{{ pathto('_static/img/logo.svg', 1) }}" alt="{{ _('Logo') }}">
+                                </figure>
+                            </a>
+                        {% endblock mastercover %}
+                    {% else %}
+                        {% block nonmastercover %}
+                            <h1 class="title is-2 has-text-primary">
+                                <a href="{{ url_root }}">{{ project }}</a>
+                            </h1>
+                            <h2 class="subtitle is-4">
+                                {{ theme_motto }}
+                            </h2>
+                        {% endblock nonmastercover %}
+                    {% endif %}
+                </div>
+                <div class="column">
+                    {% block coverrightcolumn %}
+                        e.g. [twitter follow]
+                    {% endblock coverrightcolumn %}
+                </div>
+            </div>
+        </div>
+    </section>
+{% endblock cover %}
+
+<hr>
+
+{% block content %}
+    {% block document %}
+        <section class="section is-paddingless" id="document">
+            <div class="container">
+                <div class="columns">
+                    <div class="column is-2">
+                        {% block leftsidebar %}{% endblock %}
+                    </div>
+                    <div class="column is-8">
+                        {# ! body variable (printed in basic's page.html) must be enclosed into
+                        sphinx-body CSS! #}
+                        <article class="content is-medium sphinx-body">
+                            {% block body %}{% endblock %}
+                        </article>
+                    </div>
+                    <div class="column is-2">
+                        {% block rightsidebar %}{% endblock %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    {% endblock document %}
+{% endblock content %}
+
+{%- block footer %}
+    <footer class="footer">
+        <div class="container">
+            <div class="content has-text-centered has-text-primary">
+                <a href="{{ url_root }}">
+                <img
+                        src="{{ pathto('_static/img/logo.svg', 1) }}"
+                        alt="{{ _('Logo') }}" style="width: 10rem;"></a>
+                <p>{{ theme_motto }}</p>
+                <p>{{ copyright }}</p>
+            </div>
+        </div>
+    </footer>
+{%- endblock footer %}
+
+{% block extrafooter %}{% endblock %}
+</body>
+</html>
