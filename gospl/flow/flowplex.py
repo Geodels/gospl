@@ -37,6 +37,9 @@ class FAMesh(object):
     """
 
     def __init__(self, *args, **kwargs):
+        """
+        The initialisation of `FAMesh` class consists in the declaration of PETSc vectors and matrices.
+        """
 
         # KSP solver parameters
         self.rtol = 1.0e-8
@@ -61,9 +64,16 @@ class FAMesh(object):
 
     def _matrix_build(self, nnz=(1, 1)):
         """
-        Define PETSC Matrix.
+        Creates a sparse PETSc matrix.
 
-        :arg nnz: array containing the number of nonzero blocks
+        .. note::
+
+            To achieve good performance during matrix assembly, the function preallocates
+            the matrix storage by setting the array nnz.
+
+        :arg nnz: array containing the number of nonzeros in the various rows
+
+        :return: sparse PETSc matrix
         """
 
         matrix = petsc4py.PETSc.Mat().create(comm=MPIcomm)
@@ -77,10 +87,12 @@ class FAMesh(object):
 
     def _matrix_build_diag(self, V, nnz=(1, 1)):
         """
-        Define PETSC Diagonal Matrix.
+        Builds a PETSc diagonal matrix based on a given array `V`
 
         :arg V: diagonal data array
         :arg nnz: array containing the number of nonzero blocks
+
+        :return: sparse PETSc matrix
         """
 
         matrix = self._matrix_build()
@@ -96,7 +108,7 @@ class FAMesh(object):
 
     def _make_reasons(self, reasons):
         """
-        Provide reasons for PETSC error if possible...
+        Provides reasons for PETSc error...
         """
 
         return dict(
@@ -105,14 +117,21 @@ class FAMesh(object):
 
     def _solve_KSP(self, guess, matrix, vector1, vector2):
         """
-        Set PETSC KSP solver.
 
-        :arg guess: Boolean specifying if the iterative KSP solver initial guess is nonzero
-        :arg matrix: PETSC matrix used by the KSP solver
-        :arg vector1: PETSC vector corresponding to the initial values
-        :arg vector2: PETSC vector corresponding to the new values
+        PETSc *scalable linear equations solvers* (**KSP**) component provides Krylov subspace iterative method and a preconditioner. Here, flow accumulation solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
-        :return: vector2 PETSC vector of the new values
+        .. note::
+
+            The solver choice was made based on the convergence results from `Richardson et al. (2014) <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ but can be changed if better solver and preconditioner combinations are found.
+
+        Using such iterative method allows for an initial guess to be provided. When this initial guess is close to the solution, the number of iterations required for convergence dramatically decreases. Here the flow discharge solution from previous time step can be passed as an initial `guess` to the solver as discharge often exhibits little change between successive time intervals.
+
+        :arg guess: Boolean specifying if the iterative KSP solver initial guess is nonzero (when provided it corresponds to the previous flow discharge values)
+        :arg matrix: PETSc sparse matrix used by the KSP solver composed of diagonal terms set to unity (identity matrix) and off-diagonal terms (weights between 0 and 1). The weights are calculated based on the number of downslope neighbours (based on the chosen number of flow direction directions) and are proportional to the slope.
+        :arg vector1: PETSc vector corresponding to the local volume of water available for runoff during a given time step (*e.g.* voronoi area times local precipitation rate)
+        :arg vector2: PETSc vector corresponding to the unknown flow discharge values
+
+        :return: vector2 PETSc vector of the new flow discharge values
         """
 
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
@@ -140,9 +159,13 @@ class FAMesh(object):
 
     def _buildFlowDirection(self, h):
         """
-        Build multiple flow direction based on neighbouring slopes.
+        This function builds from neighbouring slopes the flow directions. It calls a fortran subroutine that locally computes for each vertice:
 
-        :arg h1: elevation array
+        - the indices of receivers (downstream) nodes depending on the desired number of flow directions (SFD to MFD).
+        - the distances to the receivers based on mesh resolution.
+        - the associated weights calculated based on the number of receivers and proportional to the slope.
+
+        :arg h: elevation numpy array
         """
 
         t0 = process_time()
