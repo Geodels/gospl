@@ -665,7 +665,19 @@ class SEDMesh(object):
 
     def _deposeStrat(self, stype):
         """
-        Add deposition on top of existing stratigraphic layer.
+        Add deposition on top of an existing stratigraphic layer. The following variables will be recorded:
+
+        - thickness of each stratigrapic layer `stratH` accounting for both
+          erosion & deposition events.
+        - proportion of fine sediment `stratF` contains in each stratigraphic layer.
+        - porosity of coarse sediment `phiS` in each stratigraphic layer computed at
+          center of each layer.
+        - porosity of fine sediment `phiF` in each stratigraphic layer computed at
+          center of each layer.
+        - proportion of carbonate sediment `stratC` contains in each stratigraphic layer
+          if the carbonate module is turned on.
+        - porosity of carbonate sediment `phiC` in each stratigraphic layer computed at
+          center of each layer when the carbonate module is turned on.
 
         :arg stype: sediment type (integer)
         """
@@ -721,16 +733,17 @@ class SEDMesh(object):
 
     def erodeStrat(self):
         """
-        Remove thickness from the stratigraphic pile. The function takes into account
-        the porosity values of considered lithologies in each stratigraphic layers eroded.
+        This function removes eroded sediment thicknesses from the stratigraphic pile.
+        The function takes into account the porosity values of considered lithologies in
+        each eroded stratigraphic layers.
+
         It follows the following assumptions:
 
         - Eroded thicknesses from stream power law and hillslope diffusion are considered
           to encompass both the solid and void phase.
-        - We extract the solid phase that will be moved dowstream by surface processes.
+        - Only the solid phase will be moved dowstream by surface processes.
         - The corresponding deposit thicknesses for those freshly eroded sediments correspond to
           uncompacted thicknesses based on the porosity at surface given from the input file.
-        - Uncompacted thicknesses are subsequently distributed.
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -859,9 +872,13 @@ class SEDMesh(object):
 
     def getCompaction(self):
         """
-        Compute changes in sedimentary layers porosity and thicknesses due to
-        compaction. We assume depth-porosiy relationships for each sediment type
-        available in individual layers.
+        This function computes the changes in sedimentary layers porosity and thicknesses due to
+        compaction.
+
+        .. note::
+
+            We assume simple depth-porosiy relationships for each sediment type available in each
+            layers.
         """
 
         t0 = process_time()
