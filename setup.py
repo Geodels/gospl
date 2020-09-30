@@ -130,9 +130,9 @@ def configuration(parent_package="", top_path=None):
 
 if __name__ == "__main__":
 
-    # import numpy.distutils.core
+    import numpy.distutils.core
 
-    setup(
+    numpy.distutils.core.setup(
         name="gospl",
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
@@ -158,7 +158,7 @@ if __name__ == "__main__":
             "fastfunc==0.2.3",
             "vtk>=9.0.0",
             "numpy-indexed==0.3.5",
-            "meshio==4.2.0",
+            "meshio==4.2.1",
             "scikit-fuzzy>=0.4.2",
         ],
         python_requires=">=3.3",
