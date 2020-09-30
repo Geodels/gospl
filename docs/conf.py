@@ -125,9 +125,13 @@ html_static_path = ["_static"]
 
 html_css_files = [
     "css/getting_started.css",
-    "css/pandas.css",
+    "css/gospl.css",
 ]
 
+# The name of an image file (within the static path) to use as favicon of the
+# docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
+# pixels large.
+html_favicon = "../../web/pandas/static/img/favicon.ico"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
