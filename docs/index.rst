@@ -1,97 +1,108 @@
+:notoc:
+
 .. gospl documentation master file, created by
-   sphinx-quickstart on Fri May 10 16:22:41 2019.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
 
-Global Scalable Paleo Landscape Evolution / gospl
-==================================================
+.. module:: gospl
 
-.. image:: https://readthedocs.org/projects/gospl/badge/?version=latest
-  :target: https://gospl.readthedocs.io/en/latest/?badge=latest
-  :alt: Documentation Status
+********************
+gospl documentation
+********************
+
+**Date**: |today| **Version**: 1.0.0
 
 
-What's in the box?
-------------------
+**Useful links**:
+`Binary Installers <https://pypi.org/project/gospl>`__ |
+`Source Repository <https://github.com/Geodels/gospl>`__ |
+`Issues & Ideas <https://github.com/Geodels/gospl/issues>`__ |
+`Q&A Support <https://stackoverflow.com/questions/tagged/gospl>`__ |
+`Mailing List <https://groups.google.com/forum/#!forum/gospl>`__
+
+:mod:`gospl` is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
 
 .. raw:: html
 
-    <iframe width="660" height="400" src="https://kitware.github.io/vtk-js/examples/SceneExplorer/index.html?fileURL=https://raw.githubusercontent.com/tristan-salles/PVGlance.github.io/master/global_LEM.vtkjs" frameborder="0" allowfullscreen></iframe>
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-6 col-md-6 col-sm-6 col-xs-12 d-flex">
+                <div class="card text-center intro-card shadow">
+                <img src="_static/index_getting_started.svg" class="card-img-top" alt="getting started with gospl action icon" height="52">
+                <div class="card-body flex-fill">
+                    <h5 class="card-title">Getting started</h5>
+                    <p class="card-text">New to <em>gospl</em>? Check out the getting started guides. They
+                    contain an introduction to <em>gospl'</em> main concepts and links to additional tutorials.</p>
 
+.. container:: custom-button
 
-**gospl** (pronounced: /ˈɡospel/, [ˈɡo̞s̠pe̞l]) is a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
+    :ref:`To the getting started guides<getting_started>`
 
-The model accounts for hillslope processes (soil creep using linear diffusion), fluvial incision (stream power law), spatially and temporally varying tectonics (horizontal and vertical displacements) and climatic forces (temporal and spatial precipitation changes and/or sea-level fluctuations). The model enables the representation of pre-defined stratigraphic layers composed of 2 different sediment classes (lithologies). It also takes into account the sorting of these different lithologies and specific compaction factors are used to simulate stratigraphic architecture.
+.. raw:: html
 
+                </div>
+                </div>
+            </div>
+            <div class="col-lg-6 col-md-6 col-sm-6 col-xs-12 d-flex">
+                <div class="card text-center intro-card shadow">
+                <img src="_static/index_user_guide.svg" class="card-img-top" alt="gospl user guide action icon" height="52">
+                <div class="card-body flex-fill">
+                    <h5 class="card-title">User guide</h5>
+                    <p class="card-text">The user guide provides in-depth information on the
+                    key concepts of gospl with useful background information and explanation.</p>
 
-Specs
-**********
+.. container:: custom-button
 
+    :ref:`To the user guide<user_guide>`
 
-The model is based on the following approaches:
+.. raw:: html
 
-+ an adaptation of the implicit, parallelisable method for calculating drainage area for both single (D8) and multiple flow direction (Dinf) from [Richardson14]_,
-+ the methods developed in `badlands`_ [Salles18]_ for marine sediment distribution,
-+ a `PETSc`_ layer similar to the one in `eSCAPE`_ [Salles19]_ for mesh partitioning and solvers.
+                </div>
+                </div>
+            </div>
+            <div class="col-lg-6 col-md-6 col-sm-6 col-xs-12 d-flex">
+                <div class="card text-center intro-card shadow">
+                <img src="_static/index_api.svg" class="card-img-top" alt="api of gospl action icon" height="52">
+                <div class="card-body flex-fill">
+                    <h5 class="card-title">API reference</h5>
+                    <p class="card-text">The reference guide contains a detailed description of
+                    the gospl API. The reference describes how the methods work and which parameters can
+                    be used. It assumes that you have an understanding of the key concepts.</p>
 
+.. container:: custom-button
 
-License
-**********
+    :ref:`To the reference guide<api>`
 
-.. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
-  :target: https://www.gnu.org/licenses/gpl-3.0
-  :alt: License: GPL v3
+.. raw:: html
 
+                </div>
+                </div>
+            </div>
+            <div class="col-lg-6 col-md-6 col-sm-6 col-xs-12 d-flex">
+                <div class="card text-center intro-card shadow">
+                <img src="_static/index_contribute.svg" class="card-img-top" alt="contribute to gospl action icon" height="52">
+                <div class="card-body flex-fill">
+                    <h5 class="card-title">Developer guide</h5>
+                    <p class="card-text">Saw a typo in the documentation? Want to improve
+                    existing functionalities? The contributing guidelines will guide
+                    you through the process of improving gopsl.</p>
 
+.. container:: custom-button
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU  General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+    :ref:`To the development guide<development>`
 
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU  General Public License for more details.
+.. raw:: html
 
-You should have received a copy of the GNU General Public License along with this program. If not, see `GPL3`_.
-
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
 .. toctree::
-   :maxdepth: 3
-   :name: Usage
-   :caption: Usage
+    :maxdepth: 3
+    :hidden:
+    :titlesonly:
 
-   install.rst
-   inputfile.rst
-   examples.rst
-
-
-.. toctree::
-   :maxdepth: 3
-   :name: Code Source
-   :caption: Code Source
-
-   api.rst
-
-
-.. [Richardson14] Ribal, A. Hill, C. N. & Perron, J. T. -
-    IDA: An implicit, parallelizable method for calculating drainage area. **Water Resour. Res.**, 50, 4110-4130, `doi:10.1002/2013WR014326`_, 2014.
-
-.. [Salles18] Salles, T., Ding, X. & Brocard, G. -
-    pyBadlands: A framework to simulate sediment transport, landscape dynamics and basin stratigraphic evolution through space and time. **PLOS ONE**, 13(4): e0195557, `doi:10.1371/journal.pone.0195557`_, 2018.
-
-.. [Salles19] Salles, T. -
-    eSCAPE: Regional to Global Scale Landscape Evolution Model v2.0. **Geosci. Model Dev.**, 12, 4165-4184, `doi:10.5194/gmd-12-4165-2019`_, 2019.
-
-
-.. _`badlands`:  https://github.com/badlands-model/badlands
-
-.. _`eSCAPE`:  https://github.com/Geodels/eSCAPE
-
-.. _`PETSc`: https://www.mcs.anl.gov/petsc/
-
-.. _`GPL3`:  http://www.gnu.org/licenses/gpl-3.0.en.html
-
-
-
-
-.. _`doi:10.1002/2013WR014326`:  https://doi.org/10.1002/2013WR014326
-
-.. _`doi:10.1371/journal.pone.0195557`: https://doi.org/10.1371/journal.pone.0195557
-
-.. _`doi:10.5194/gmd-12-4165-2019`:  https://doi.org/10.5194/gmd-12-4165-2019
+    install.rst
+    inputfile.rst
+    examples.rst
+    api.rst
