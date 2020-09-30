@@ -16,7 +16,7 @@ import os
 import sys
 import inspect
 import sphinx_rtd_theme
-
+import numpy
 import gospl
 from mock import Mock as MagicMock
 from sphinx.builders.html import (
