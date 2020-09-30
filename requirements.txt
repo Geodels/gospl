@@ -2,6 +2,7 @@ numpy==1.19.2
 scipy==1.5.2
 Cython==0.29.21
 mpi4py==3.0.3
+petsc==3.13.5
 petsc4py==3.13.0
 h5py==2.10.0
 pandas==1.1.2
@@ -10,6 +11,6 @@ fastfunc==0.2.3
 meshio==4.2.0
 meshplex==0.13.3
 pre-commit==2.7.1
-vtk==9.0.0
+vtk>=9.0.0
 numpy-indexed==0.3.5
 scikit-fuzzy>=0.4.2
