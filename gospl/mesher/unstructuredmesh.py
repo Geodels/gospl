@@ -841,14 +841,10 @@ class UnstMesh(object):
 
         The advection proceeds in each partition seprately in the following way:
 
-        1. based on the horizontal displacement velocities, the mesh coordinates and associated
-            variables (cumulative erosion deposition and stratigraphic layers composition) are
-            moved.
+        1. based on the horizontal displacement velocities, the mesh coordinates and associated variables (cumulative erosion deposition and stratigraphic layers composition) are moved.
         2. a kdtree is built with the advected coordinates and used to interpolate the mesh variables
-            on the initial local mesh position. The interpolation is based on a weighting distance
-            function accounting for the 3 closest advected vertices.
-        3. interpolated variables on the initial mesh coordinates are then stored in PETSc vectors and
-            class parameters are updated accordingly.
+        on the initial local mesh position. The interpolation is based on a weighting distance function accounting for the 3 closest advected vertices.
+        3. interpolated variables on the initial mesh coordinates are then stored in PETSc vectors and class parameters are updated accordingly.
 
         :arg tectonic: local tectonic rates in 3D
         :arg timer: tectonic time step in years
@@ -1141,22 +1137,15 @@ class UnstMesh(object):
         1. strataBuild
         2. strataBuildCarb
 
-
         :arg indices: indices of the closest nodes used for interpolation
         :arg weights: weights based on the distances to closest nodes
-        :arg loc_stratH: thickness of each stratigrapic layer accounting for both
-          erosion & deposition events.
+        :arg loc_stratH: thickness of each stratigrapic layer accounting for both erosion & deposition events.
         :arg loc_stratH: proportion of fine sediment contains in each stratigraphic layer.
-        :arg loc_stratZ: elevation at time of deposition, considered to be to the current elevation
-          for the top stratigraphic layer.
-        :arg loc_phiS: porosity of coarse sediment in each stratigraphic layer computed at
-          center of each layer.
-        :arg loc_phiF: porosity of fine sediment in each stratigraphic layer computed at
-          center of each layer.
-        :arg loc_strataC: proportion of carbonate sediment contains in each stratigraphic layer
-          if the carbonate module is turned on.
-        :arg loc_phiC: porosity of carbonate sediment in each stratigraphic layer computed at
-          center of each layer when the carbonate module is turned on.
+        :arg loc_stratZ: elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer.
+        :arg loc_phiS: porosity of coarse sediment in each stratigraphic layer computed at center of each layer.
+        :arg loc_phiF: porosity of fine sediment in each stratigraphic layer computed at center of each layer.
+        :arg loc_strataC: proportion of carbonate sediment contains in each stratigraphic layer if the carbonate module is turned on.
+        :arg loc_phiC: porosity of carbonate sediment in each stratigraphic layer computed at center of each layer when the carbonate module is turned on.
 
         """
 
