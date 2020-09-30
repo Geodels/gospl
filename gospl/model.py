@@ -164,15 +164,15 @@ class Model(parentModel):
 
         return
 
-    def reInitialise(self):
+    def reInitialiseZ(self):
         """
-        Reinitialise model for paleo-fitting experiments.
+        Reinitialise model elevation.
 
-        This function clears PETSc DMPlex objects and forcing conditions without
+        This function clears PETSc vectors and forcing conditions without
         having to reset the mesh structure.
         """
 
-        _UnstMesh.reInitialiseModel(self)
+        _UnstMesh.reInitialiseElev(self)
 
         return
 

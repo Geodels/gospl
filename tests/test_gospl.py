@@ -20,7 +20,7 @@ def test_gospl_normal_run():
     normal.runProcesses()
 
     # Reinitialise model
-    normal.reInitialise()
+    normal.reInitialiseZ()
 
     # Destroy model
     normal.destroy()
@@ -61,7 +61,7 @@ def test_gospl_strat_run():
     normal.runProcesses()
 
     # Reinitialise model
-    normal.reInitialise()
+    normal.reInitialiseZ()
 
     # Destroy model
     normal.destroy()
@@ -125,7 +125,7 @@ def test_gospl_carbonate_run():
     normal.runProcesses()
 
     # Reinitialise model
-    normal.reInitialise()
+    normal.reInitialiseZ()
 
     # Destroy model
     normal.destroy()

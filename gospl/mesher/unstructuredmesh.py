@@ -29,12 +29,31 @@ MPIcomm = MPI.COMM_WORLD
 
 class UnstMesh(object):
     """
-    Creating a distributed DMPlex and global vector based on imported triangulated mesh.
+    This class defines the spherical mesh characteristics and builds a PETSc DMPlex that
+    encapsulates this unstructured mesh, with interfaces for both topology and geometry.
+    The PETSc DMPlex is used for parallel redistribution for load balancing.
+
+    .. note::
+
+        `gospl` is built around a **Finite-Volume** method (FVM) for representing and evaluating
+        partial differential equations. It requires the definition of several mesh variables such as:
+
+            - the number of neighbours surrounding every node,
+            - the cell area defined using  Voronoi area,
+            - the length of the edge connecting every nodes, and
+            - the length of the Voronoi faces shared by each node with his neighbours.
+
+    In addition to mesh defintions, the class declares several functions related to forcing conditions
+    (*e.g.* paleo-precipitation maps, tectonic (vertical and horizontal) displacements, stratigraphic
+    layers...). These functions are defined within the `UnstMesh` class as they rely heavely on the mesh
+    structure.
+
+    Finally a function to clean all PETSc variables is defined and called at the end of a simulation.
     """
 
     def __init__(self):
         """
-        Build the DMPlex.
+        The initialisation of `UnstMesh` class calls the private function **_buildMesh**.
         """
 
         self.hdisp = None
@@ -48,18 +67,23 @@ class UnstMesh(object):
         self.phiF = None
         self.phiC = None
 
+        # Let us define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
 
         return
 
     def _meshfrom_cell_list(self, dim, cells, coords):
         """
-        Create a DMPlex from a list of cells and coords.
+        Creates a DMPlex from a list of cells and coordinates.
 
-        :arg dim: The topological dimension of the mesh
-        :arg cells: The vertices of each cell
-        :arg coords: The coordinates of each vertex
-        :arg comm: communicator to build the mesh on
+        .. note::
+
+            As far as I am aware, PETSc DMPlex requires to be initialised on one
+            processor before load balancing.
+
+        :arg dim: topological dimension of the mesh
+        :arg cells: vertices of each cell
+        :arg coords: coordinates of each vertex
         """
 
         if MPIrank == 0:
@@ -87,7 +111,24 @@ class UnstMesh(object):
 
     def _meshStructure(self):
         """
-        Define the mesh structure and the associated voronoi
+        Defines the mesh structure and the associated voronoi parameter used in the
+        Finite Volume method.
+
+        .. important::
+            The mesh structure is built locally on a single partition of the global mesh.
+
+        This function uses the `meshplex` `library <https://meshplex.readthedocs.io>`_ to compute
+        from the list of coordinates and cells the volume of each voronoi and their respective
+        characteristics.
+
+        Once the voronoi definitions have been obtained a call to the fortran subroutine `defineTIN`
+        is performed to order each node and the dual mesh components, it records:
+
+        - all cells surrounding a given vertice,
+        - all edges connected to a given vertice,
+        - the triangulation edge lengths,
+        - the voronoi edge lengths.
+
         """
 
         # Create mesh structure with meshplex
@@ -125,9 +166,16 @@ class UnstMesh(object):
 
         return
 
-    def reInitialiseModel(self):
+    def reInitialiseElev(self):
         """
-        Reinitialise gospl model for paleo-fitting experiments.
+        This functions reinitialises `gospl` elevation if one wants to restart a simulation that does
+        not necessitate to rebuild the mesh structure. It can be used when running a simulation
+        from the Jupyter environment.
+
+        .. note:
+            The elevation is read directly from the mesh elevation file defined in the YAML
+            input file from the key: **npdata**.
+
         """
 
         t0step = process_time()
@@ -184,18 +232,20 @@ class UnstMesh(object):
 
     def _xyz2lonlat(self):
         """
-        Convert x,y,z representation of cartesian points of the
-        spherical triangulation to lat / lon (radians).
+        Converts local x,y,z representation of cartesian coordinates from the spherical
+        triangulation to latitude, longitude in degrees.
+
+        The latitudinal and longitudinal extend are between [0,180] and [0,360] respectively.
+        Lon/lat coordinates are used when forcing the simulation with paleo-topoography maps.
         """
 
-        self.gLatLon = np.zeros((self.gpoints, 2))
+        # self.gLatLon = np.zeros((self.gpoints, 2))
+        # self.gLatLon[:, 0] = np.arcsin(self.gCoords[:, 2] / self.radius)
+        # self.gLatLon[:, 1] = np.arctan2(self.gCoords[:, 1], self.gCoords[:, 0])
+        # self.gLatLon[:, 0] = np.mod(np.degrees(self.gLatLon[:, 0]) + 90, 180.0)
+        # self.gLatLon[:, 1] = np.mod(np.degrees(self.gLatLon[:, 1]) + 180.0, 360.0)
+
         self.lLatLon = np.zeros((self.npoints, 2))
-
-        self.gLatLon[:, 0] = np.arcsin(self.gCoords[:, 2] / self.radius)
-        self.gLatLon[:, 1] = np.arctan2(self.gCoords[:, 1], self.gCoords[:, 0])
-        self.gLatLon[:, 0] = np.mod(np.degrees(self.gLatLon[:, 0]) + 90, 180.0)
-        self.gLatLon[:, 1] = np.mod(np.degrees(self.gLatLon[:, 1]) + 180.0, 360.0)
-
         self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
         self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
         self.lLatLon[:, 0] = np.mod(np.degrees(self.lLatLon[:, 0]) + 90, 180.0)
@@ -205,7 +255,13 @@ class UnstMesh(object):
 
     def _generateVTKmesh(self, points, cells):
         """
-        Generate a global VTK mesh for coastline contouring.
+        A global VTK mesh is generated when the `shelfslope` key is set to True in the YAML
+        input file.
+
+        In this case, the distance to the coastline for every marine vertices is used to define
+        a maximum shelf slope during deposition. The coastline contours are efficiently obtained
+        from VTK contouring function. This function is performed on a VTK mesh which is built in
+        here.
         """
 
         self.vtkMesh = vtk.vtkUnstructuredGrid()
@@ -259,7 +315,7 @@ class UnstMesh(object):
             cell_array,
         )
 
-        # Cleaning function here...
+        # Cleaning function parameters here...
         del vtk_points, vtk_array, connectivity, numcells, num_local_nodes
         del cell_array, cell_connectivity, cell_offsets, cell_types
         gc.collect()
@@ -268,8 +324,25 @@ class UnstMesh(object):
 
     def _buildMesh(self):
         """
-        Construct a PETSC mesh and distribute it amongst the different
-        processors.
+        This function is at the core of the `UnstMesh` class. It encapsulates both spherical mesh
+        construction (triangulation and voronoi representation for the Finite Volume discretisation),
+        PETSc DMPlex distribution and several PETSc vectors allocation.
+
+        The function relies on several private functions from the class:
+
+        - _generateVTKmesh
+        - _meshfrom_cell_list
+        - _meshStructure
+        - _readErosionDeposition
+        - _xyz2lonlat
+        - _readStratLayers
+
+        .. note::
+
+            It is worth mentionning that partitioning and field distribution from global to local
+            PETSc DMPlex takes a lot of time for large mesh and there might be some quicker way
+            in PETSc to perform this step that I am unaware of...
+
         """
 
         # Read mesh attributes from file
@@ -301,7 +374,7 @@ class UnstMesh(object):
         if MPIrank == 0 and self.verbose:
             print("Create DMPlex (%0.02f seconds)" % (process_time() - t0), flush=True)
 
-        # Define one DoF on the nodes
+        # Define one degree of freedom on the nodes
         t0 = process_time()
         self.dm.setNumFields(1)
         origSect = self.dm.createSection(1, [1, 0, 0])
@@ -350,25 +423,12 @@ class UnstMesh(object):
         gc.collect()
         if MPIrank == 0 and self.verbose:
             print(
-                "Mesh coords/cells (%0.02f seconds)" % (process_time() - t0), flush=True
-            )
-
-        # Define local vertex & cells
-        t = process_time()
-        cStart, cEnd = self.dm.getHeightStratum(0)
-        # Dealing with triangular cells only
-        self.lcells = np.zeros((cEnd - cStart, 3), dtype=petsc4py.PETSc.IntType)
-        for c in range(cStart, cEnd):
-            point_closure = self.dm.getTransitiveClosure(c)[0]
-            self.lcells[c, :] = point_closure[-3:] - cEnd
-        del point_closure
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Defining local DMPlex (%0.02f seconds)" % (process_time() - t),
+                "Defining local DMPlex (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
         # From global values to local ones...
+        t0 = process_time()
         tree = spatial.cKDTree(self.gCoords, leafsize=10)
         distances, self.glIDs = tree.query(self.lcoords, k=1)
         nelev = gZ[self.glIDs]
@@ -476,7 +536,12 @@ class UnstMesh(object):
 
     def _readErosionDeposition(self):
         """
-        Read existing erosion depostion map if any.
+        Reads existing cumulative erosion depostion from a previous experiment if any
+        as defined in the YAML input file following the  `nperodep` key.
+
+        This functionality can be used when restarting from a previous simulation in which
+        the sperical mesh has been modified either to account for horizontal advection or
+        to refine/coarsen a specific region during a given time period.
         """
 
         # Build PETSc vectors
@@ -501,7 +566,25 @@ class UnstMesh(object):
 
     def _readStratLayers(self):
         """
-        Read stratigraphic layers from npz input file.
+        When stratigraphic layers are turned on, this function reads any initial stratigraphic
+        layers provided by within the YAML input file (key: `npstrata`).
+
+        The following variables will be read from the file:
+
+        - thickness of each stratigrapic layer `strataH` accounting for both
+          erosion & deposition events.
+        - proportion of fine sediment `strataF` contains in each stratigraphic layer.
+        - elevation at time of deposition, considered to be to the current elevation
+          for the top stratigraphic layer `strataZ`.
+        - porosity of coarse sediment `phiS` in each stratigraphic layer computed at
+          center of each layer.
+        - porosity of fine sediment `phiF` in each stratigraphic layer computed at
+          center of each layer.
+        - proportion of carbonate sediment `strataC` contains in each stratigraphic layer
+          if the carbonate module is turned on.
+        - porosity of carbonate sediment `phiC` in each stratigraphic layer computed at
+          center of each layer when the carbonate module is turned on.
+
         """
 
         if self.strataFile is not None:
@@ -557,7 +640,8 @@ class UnstMesh(object):
 
     def initExtForce(self):
         """
-        Initialise external forces.
+        Initialises the forcing conditions: sea level condition, rainfall maps and
+        tectonics.
         """
 
         self.applyForces()
@@ -568,8 +652,8 @@ class UnstMesh(object):
 
     def applyForces(self):
         """
-        Find the different values for climatic and sea-level forces that will
-        be applied to the considered time interval
+        Finds the different values for climatic and sea-level forcing that will
+        be applied at any given time interval during the simulation.
         """
 
         t0 = process_time()
@@ -592,8 +676,8 @@ class UnstMesh(object):
 
     def applyTectonics(self):
         """
-        Find the different values for tectonic forces that will be applied to
-        the considered time interval
+        Finds the different values for tectonic forces that will be applied at any given time
+        interval during the simulation.
         """
 
         t0 = process_time()
@@ -609,7 +693,10 @@ class UnstMesh(object):
 
     def updatePaleomap(self):
         """
-        Force model to match paleomaps at given time interval
+        Forces model to match provided paleomaps at specific time interval during the simulation.
+
+        This function is only used when the `paleomap` key is defined in the YAML input file. It will
+        read the paleotopography map and assign the paleo elevation on the spherical mesh.
         """
 
         for k in range(self.paleoNb):
@@ -625,7 +712,15 @@ class UnstMesh(object):
 
     def _updateRain(self):
         """
-        Find current rain values for the considered time interval.
+        Finds current rain values for the considered time interval and computes the **volume** of water
+        available for runoff on each vertex.
+
+        .. note::
+
+            It is worth noting that the precipitation maps are considered as runoff water. If one wants to
+            account for evaporation and infiltration you will need to modify the precipitation maps
+            accordingly as a pre-processing step.
+
         """
 
         nb = self.rainNb
@@ -662,7 +757,18 @@ class UnstMesh(object):
 
     def _updateTectonics(self):
         """
-        Find the current tectonic rates for the considered time interval.
+        Finds the current tectonic regimes (horizontal and vertical) for the considered time interval.
+
+        For horizontal displacements, the mesh variables will have to be first advected over the grid and then reinterpolated on the initial mesh coordinates. The approach here does not allow for mesh
+        refinement in zones of convergence and thus can be limiting but using a fixed mesh has one main
+        advantage: the mesh and Finite Volume discretisation do not have to be rebuilt each time the mesh
+        is advected.
+
+        This function calls the following 2 private functions:
+
+        - _meshAdvectorSphere
+        - _meshUpliftSubsidence
+
         """
 
         if self.tecdata is None:
@@ -707,34 +813,21 @@ class UnstMesh(object):
             gc.collect()
 
         if self.forceStep >= 0 and not self.newForcing:
-            self._forceUpliftSubsidence()
+            self._meshUpliftSubsidence(None)
 
         return
 
     def _meshUpliftSubsidence(self, tectonic):
         """
-        Apply vertical displacements based on tectonic rates.
+        Applies vertical displacements based on tectonic rates.
 
         :arg tectonic: local tectonic rates
         """
 
         # Define vertical displacements
         tmp = self.hLocal.getArray().copy()
-        self.uplift = tectonic[self.glIDs]
-        self.hLocal.setArray(tmp + self.uplift * self.dt)
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        del tmp
-        gc.collect()
-
-        return
-
-    def _forceUpliftSubsidence(self):
-        """
-        Perform tectonic uplift at given tectonic interval.
-        """
-
-        # Define vertical displacements
-        tmp = self.hLocal.getArray().copy()
+        if tectonic is not None:
+            self.uplift = tectonic[self.glIDs]
         self.hLocal.setArray(tmp + self.uplift * self.dt)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
         del tmp
@@ -744,9 +837,20 @@ class UnstMesh(object):
 
     def _meshAdvectorSphere(self, tectonic, timer):
         """
-        Advect spherical mesh horizontally and interpolate mesh information.
+        Advects the spherical mesh horizontally and interpolates mesh information.
 
-        :arg tectonic: local tectonic rates
+        The advection proceeds in each partition seprately in the following way:
+
+        1. based on the horizontal displacement velocities, the mesh coordinates and associated
+            variables (cumulative erosion deposition and stratigraphic layers composition) are
+            moved.
+        2. a kdtree is built with the advected coordinates and used to interpolate the mesh variables
+            on the initial local mesh position. The interpolation is based on a weighting distance
+            function accounting for the 3 closest advected vertices.
+        3. interpolated variables on the initial mesh coordinates are then stored in PETSc vectors and
+            class parameters are updated accordingly.
+
+        :arg tectonic: local tectonic rates in 3D
         :arg timer: tectonic time step in years
         """
 
@@ -898,7 +1002,32 @@ class UnstMesh(object):
 
     def _updateDispStrata(self):
         """
-        Build stratigraphic records after mesh advection.
+        Gets the stratigraphic records relevant to each partition after mesh advection.
+
+        The functions returns local stratigraphic layer information:
+
+        - thickness of each stratigrapic layer `loc_stratH` accounting for both
+          erosion & deposition events.
+        - proportion of fine sediment `loc_stratF` contains in each stratigraphic layer.
+        - elevation at time of deposition, considered to be to the current elevation
+          for the top stratigraphic layer `loc_stratZ`.
+        - porosity of coarse sediment `loc_phiS` in each stratigraphic layer computed at
+          center of each layer.
+        - porosity of fine sediment `loc_phiF` in each stratigraphic layer computed at
+          center of each layer.
+        - proportion of carbonate sediment `loc_strataC` contains in each stratigraphic layer
+          if the carbonate module is turned on.
+        - porosity of carbonate sediment `loc_phiC` in each stratigraphic layer computed at
+          center of each layer when the carbonate module is turned on.
+
+        .. note::
+
+            In `gospl`, the stratigraphic layers are only defined locally. For interpolation on the
+            edges of each partition it is important to ensure that all stratigraphic information on
+            the adjacent nodes of the neighbouring partition are accessible. This is done by applying
+            MPI `Allreduce` operation to the nodes parts of the overlaid ('shadow') zone.
+
+        :return: loc_stratH, loc_stratZ, loc_stratF, loc_stratC, loc_phiS, loc_phiF, loc_phiC
         """
 
         stratH = self.stratH[self.lgIDs, : self.stratStep]
@@ -1004,7 +1133,31 @@ class UnstMesh(object):
         loc_phiC,
     ):
         """
-        Build stratigraphic records for advected mesh.
+        Once the interpolation has been performed, the following function updates the
+        stratigraphic records based on the advected mesh.
+
+        The function relies on 2 fortran subroutines (for loop performance purposes):
+
+        1. strataBuild
+        2. strataBuildCarb
+
+
+        :arg indices: indices of the closest nodes used for interpolation
+        :arg weights: weights based on the distances to closest nodes
+        :arg loc_stratH: thickness of each stratigrapic layer accounting for both
+          erosion & deposition events.
+        :arg loc_stratH: proportion of fine sediment contains in each stratigraphic layer.
+        :arg loc_stratZ: elevation at time of deposition, considered to be to the current elevation
+          for the top stratigraphic layer.
+        :arg loc_phiS: porosity of coarse sediment in each stratigraphic layer computed at
+          center of each layer.
+        :arg loc_phiF: porosity of fine sediment in each stratigraphic layer computed at
+          center of each layer.
+        :arg loc_strataC: proportion of carbonate sediment contains in each stratigraphic layer
+          if the carbonate module is turned on.
+        :arg loc_phiC: porosity of carbonate sediment in each stratigraphic layer computed at
+          center of each layer when the carbonate module is turned on.
+
         """
 
         if self.carbOn:
@@ -1052,7 +1205,9 @@ class UnstMesh(object):
 
     def _localStrat(self):
         """
-        Update stratigraphic records locally for advected mesh.
+        Updates stratigraphic records after mesh advection on the edges of each partition to ensure that
+        all stratigraphic information on the adjacent nodes of the neighbouring partition are equals on
+        all processors sharing a common number of nodes.
         """
 
         stratH = self.stratH[self.lgIDs, : self.stratStep]
@@ -1139,8 +1294,8 @@ class UnstMesh(object):
 
     def destroy_DMPlex(self):
         """
-        Destroy PETSc DMPlex objects and associated Petsc local/global
-        Vectors and Matrices.
+        Destroys PETSc DMPlex objects and associated PETSc local/global
+        Vectors and Matrices at the end of the simulation.
         """
 
         t0 = process_time()
