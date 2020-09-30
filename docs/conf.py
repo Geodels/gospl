@@ -14,9 +14,10 @@
 #
 import os
 import sys
-
+import inspect
 import sphinx_rtd_theme
 
+import gospl
 from mock import Mock as MagicMock
 from sphinx.builders.html import (
     StandaloneHTMLBuilder,
@@ -35,14 +36,20 @@ SingleFileHTMLBuilder.supported_image_types = html_img_types
 
 # -- Project information -----------------------------------------------------
 
-project = u"gospl"
-copyright = u"2020, Tristan Salles"
-author = u"Tristan Salles"
+project = "gospl"
+copyright = "2020, Tristan Salles"
+author = "Tristan Salles"
+
+# version = '%s r%s' % (pandas.__version__, svn_version())
+version = str(gospl.__version__)
+
+# The full version, including alpha/beta/rc tags.
+release = version
 
 # The short X.Y version
-version = u"0.1.8"
+# version = "0.1.8"
 # The full version, including alpha/beta/rc tags
-release = u"0.1.8"
+# release = "0.1.8"
 
 
 # -- General configuration ---------------------------------------------------
@@ -182,7 +189,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, "gospl.tex", u"gospl Documentation", u"Tristan Salles", "manual"),
+    (master_doc, "gospl.tex", "gospl Documentation", "Tristan Salles", "manual"),
 ]
 
 
@@ -190,7 +197,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "gospl", u"gospl Documentation", [author], 1)]
+man_pages = [(master_doc, "gospl", "gospl Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -202,7 +209,7 @@ texinfo_documents = [
     (
         master_doc,
         "gospl",
-        u"gospl Documentation",
+        "gospl Documentation",
         author,
         "gospl",
         "Global Landscape Evolution Model.",
@@ -269,3 +276,54 @@ def skip(app, what, name, obj, would_skip, options):
 
 def setup(app):
     app.connect("autodoc-skip-member", skip)
+
+
+# based on numpy doc/source/conf.py
+def linkcode_resolve(domain, info):
+    """
+    Determine the URL corresponding to Python object
+    """
+    if domain != "py":
+        return None
+
+    modname = info["module"]
+    fullname = info["fullname"]
+
+    submod = sys.modules.get(modname)
+    if submod is None:
+        return None
+
+    obj = submod
+    for part in fullname.split("."):
+        try:
+            obj = getattr(obj, part)
+        except AttributeError:
+            return None
+
+    try:
+        fn = inspect.getsourcefile(inspect.unwrap(obj))
+    except TypeError:
+        fn = None
+    if not fn:
+        return None
+
+    try:
+        source, lineno = inspect.getsourcelines(obj)
+    except OSError:
+        lineno = None
+
+    if lineno:
+        linespec = f"#L{lineno}-L{lineno + len(source) - 1}"
+    else:
+        linespec = ""
+
+    fn = os.path.relpath(fn, start=os.path.dirname(gospl.__file__))
+
+    if "+" in gospl.__version__:
+        return f"https://github.com/Geodels/gospl/blob/master/gospl/{fn}{linespec}"
+    else:
+        return (
+            f"https://github.com/Geodels/gospl/blob/"
+            f"master/gospl/{fn}{linespec}"
+            # f"v{gospl.__version__}/gospl/{fn}{linespec}"
+        )
