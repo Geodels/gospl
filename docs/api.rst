@@ -1,7 +1,9 @@
+{{ header }}
+
 .. _api:
 
 ##################
-API Documentation
+API reference
 ##################
 
 .. image:: https://img.shields.io/badge/code%20style-black-000000.svg
@@ -16,6 +18,7 @@ API Documentation
   :target: https://lgtm.com/projects/g/Geodels/gospl/context:python
   :alt: Language grade: Python
 
+This page gives an overview of all gospl objects, functions and methods.
 
 Model class
 ------------
@@ -31,9 +34,6 @@ Flow class
     :members:
     :private-members:
 
-Flow path & erosion
-^^^^^^^^^^^^^^^^^^^^^
-
 .. automodule:: flow.flowplex
     :members:
     :private-members:
@@ -44,9 +44,6 @@ Sediment class
 .. automodule:: sed
     :members:
     :private-members:
-
-Continental & marine sedimentation
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. automodule:: sed.sedplex
     :members:
@@ -59,9 +56,6 @@ Meshing class
 .. automodule:: mesher
     :members:
     :private-members:
-
-External forcing over unstructured mesh
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. automodule:: mesher.unstructuredmesh
     :members:
