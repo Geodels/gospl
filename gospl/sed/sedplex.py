@@ -20,13 +20,24 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class SEDMesh(object):
     """
-    Performing surface evolution induced by considered processes:
+    This class encapsulates all the functions related to sediment transport, production and deposition.
+    `gospl` has the ability to track two types of clastic sediment size and one type of carbonate (still
+    under development). The following processes are considered:
 
-     - hillslope processes
-     - rivers using stream power law
+    - inland river deposition in depressions
+    - marine deposition at river mouth
+    - hillslope processes in both marine and inland areas
+    - sediment compaction as stratigraphic layers geometry and properties change
+
+    .. note::
+        All these functions are ran in parallel using the underlying PETSc library.
+
     """
 
     def __init__(self, *args, **kwargs):
+        """
+        The initialisation of `SEDMesh` class consists in the declaration of several PETSc vectors.
+        """
 
         # Petsc vectors
         self.tmp = self.hGlobal.duplicate()
@@ -52,7 +63,13 @@ class SEDMesh(object):
 
     def getSedFlux(self):
         """
-        Compute sediment flux in cubic metres per year.
+        This function computes sediment flux in cubic metres per year from incoming rivers. Like for
+        the computation of the flow discharge and erosion rates, the sediment flux is solved by an
+        implicit time integration method, the matrix system is the one obtained from the receiver
+        distributions over the unfilled elevation mesh for the flow discharge (`wMat`). The PETSc
+        *scalable linear equations solvers* (**KSP**) is used here again with an iterative method
+        obtained from PETSc Richardson solver (`richardson`) with block Jacobian preconditioning
+        (`bjacobi`).
         """
 
         t0 = process_time()
@@ -109,7 +126,8 @@ class SEDMesh(object):
 
     def sedChange(self):
         """
-        Perform continental and marine deposition induced by river fluxes.
+        This function is the main entry point to perform both continental and marine river-induced
+        deposition. It calls the private function `_sedChange`.
         """
 
         # Define points in the marine environment for filled surface
@@ -127,16 +145,29 @@ class SEDMesh(object):
 
     def _sedChange(self, stype):
         """
-        Deposition in depressions and marine environment.
+        Deposition in depressions and the marine environments.
 
         This function contains methods for the following operations:
 
-         - stream induced deposition in depression
-         - marine river sediments diffusion
-         - carbonate production from fuzzy logic
+        - stream induced deposition in depression
+        - marine river sediments diffusion
+        - carbonate production from fuzzy logic
+
+        .. note::
+
+            When dealing with multiple depressions, the calculation of sediment flux
+            over a landscape needs to be done carefully. The approach proposed here
+            consists in iteratively filling the depressions as the sediment flux is
+            transported downstream. To do so it *(1)* records the volume change in depressions
+            if any, *(2)* updates elevation changes and *(3)* recomputes the flow discharge
+            based on the `FAMesh` class functions.
+
+        Once river sediments have reached the marine environment, a marine sediment-transport
+        equations taking into account the tracking of the two different grain sizes is performed using a linear diffusion equation characterized by distinct transport coefficients.
+
         """
 
-        # Compute Continental Sediment Deposition
+        # Compute continental sediment deposition
         self.seaQs = np.zeros(self.npoints, dtype=np.float64)
         if stype == 0:
             self.vSedLocal.copy(result=self.QsL)
@@ -187,8 +218,15 @@ class SEDMesh(object):
         return
 
     def getHillslope(self):
-        """
-        Perform hillslope diffusion (linear - soil creep).
+        r"""
+        This function computes hillslope processes. The code assumes that gravity is the main driver for transport and states that the flux of sediment is proportional to the gradient of topography.
+
+        As a result, we use a linear diffusion law commonly referred to as **soil creep**:
+
+        .. math::
+          \frac{\partial z}{\partial t}= \kappa_{D} \nabla^2 z
+
+        in which :math:`\kappa_{D}` is the diffusion coefficient and can be defined with different values for the marine and land environments (set with `hillslopeKa` and `hillslopeKm` in the YAML input file). It encapsulates, in a simple formulation, processes operating on superficial sedimentary layers. Main controls on variations of :math:`\kappa_{D}` include substrate, lithology, soil depth, climate and biological activity.
         """
 
         # Compute Hillslope Diffusion Law
@@ -209,6 +247,10 @@ class SEDMesh(object):
         """
         When carbonates is turned on update carbonate thicknesses based on fuzzy logic controls.
         The carbonate thicknesses created are uncompacted ones.
+
+        .. warning::
+
+            This function is a place order and will be updated in a future version of `gospl`.
         """
 
         # Limit fuzzy controllers to possible value range
@@ -253,9 +295,17 @@ class SEDMesh(object):
         del ids, validIDs, carbH, hl
         gc.collect()
 
+        return
+
     def _moveFluxes(self, filled=False):
         """
-        Move continental sediment fluxes downstream based on depressions.
+        This function updates downstream continental sediment fluxes accounting for changes in
+        elevation induced by deposition.
+
+        As mentionned above, the PETSc *scalable linear equations solvers* (**KSP**) is used here
+        for obtaining the solution.
+
+        :arg filled: boolean to choose between unfilled and filled surface
         """
 
         t0 = process_time()
@@ -280,8 +330,20 @@ class SEDMesh(object):
 
     def _continentalDeposition(self, stype, filled=False):
         """
-        Perform continental deposition from incoming river flux. For each sediment type
-        freshly deposits are given the surface porosities given in the input file.
+        Accounting for available volume for deposition in each depression, this function records
+        the amount of sediment deposited inland and update the stratigraphic record accordingly.
+
+        For each sediment type, freshly deposits are given the surface porosities given in the
+        input file.
+
+        If a depression is overfilled the excess sediment is added to the overspill node of the
+        considered depression and is subsequently transported downstream in a subsequent iteration.
+
+        During a given time step, the process described above will be repeated iteratively until
+        all sediment transported are either deposited in depressions or are reaching the shoreline.
+
+        :arg stype: sediment type (integer)
+        :arg filled: boolean to choose between unfilled and filled surface
         """
 
         t0 = process_time()
@@ -377,7 +439,19 @@ class SEDMesh(object):
 
     def _marineDeposition(self, stype, sedK):
         """
-        Perform marine deposition from incoming river continental flux.
+        For sediment reaching the coastline, this function computes the related marine
+        deposition. The approach is based on a linear diffusion which is applied iteratively
+        over a given time step until all the sediment have been diffused.
+
+        The diffusion equation is ran for the coarser sediment first and for the finest one
+        afterwards. This mimicks the standard behaviour observed in stratigraphic architectures
+        where the fine fraction are generally transported over longer distances.
+
+        The diffusion process stops when the sediment entering the ocean at river mouths are
+        distributed and the accumulations on these specific nodes remains below water depth.
+
+        :arg stype: sediment type (integer)
+        :arg sedK: sediment diffusion coefficient for river transported sediment in the marine realm
         """
 
         t0 = process_time()
@@ -521,8 +595,18 @@ class SEDMesh(object):
         return
 
     def _hillSlope(self):
-        """
-        Perform hillslope diffusion.
+        r"""
+        This function computes hillslope using a linear diffusion law commonly referred to as **soil creep**:
+
+        .. math::
+          \frac{\partial z}{\partial t}= \kappa_{D} \nabla^2 z
+
+        in which :math:`\kappa_{D}` is the diffusion coefficient and can be defined with different values for the marine and land environments (set with `hillslopeKa` and `hillslopeKm` in the YAML input file).
+
+        .. note::
+            The hillslope processes in `gospl` are considered to be happening at the same rate for coarse
+            and fine sediment sizes.
+
         """
 
         if self.Cda == 0.0 and self.Cdm == 0.0:
@@ -582,6 +666,8 @@ class SEDMesh(object):
     def _deposeStrat(self, stype):
         """
         Add deposition on top of existing stratigraphic layer.
+
+        :arg stype: sediment type (integer)
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -764,7 +850,7 @@ class SEDMesh(object):
 
     def _elevStrat(self):
         """
-        Update current stratigraphic layer elevation.
+        This function updates the current stratigraphic layer elevation.
         """
 
         self.stratZ[:, self.stratStep] = self.hLocal.getArray()

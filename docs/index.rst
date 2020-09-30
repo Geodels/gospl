@@ -18,7 +18,7 @@ gospl documentation
 `Q&A Support <https://stackoverflow.com/questions/tagged/gospl>`__ |
 `Mailing List <https://groups.google.com/forum/#!forum/gospl>`__
 
-:mod:`gospl` is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model built to simulate paleo-landscapes and basins reconstruction at global scale.
+:mod:`gospl` is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale.
 
 .. raw:: html
 
