@@ -16,7 +16,7 @@ import os
 import sys
 import inspect
 import sphinx_rtd_theme
-import numpy
+
 import gospl
 from mock import Mock as MagicMock
 from sphinx.builders.html import (
@@ -48,6 +48,7 @@ release = version
 
 # The short X.Y version
 # version = "0.1.8"
+# The full version, including alpha/beta/rc tags
 # release = "0.1.8"
 
 

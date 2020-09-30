@@ -130,14 +130,14 @@ def configuration(parent_package="", top_path=None):
 
 if __name__ == "__main__":
 
-    import numpy.distutils.core
+    # import numpy.distutils.core
 
-    numpy.distutils.core.setup(
+    setup(
         name="gospl",
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
         url="https://github.com/Geodels/gospl",
-        version="0.1.9",
+        version="0.1.10",
         description="A Python interface to perform Global Landscape Evolution Model",
         long_description=long_description,
         long_description_content_type="text/markdown",
