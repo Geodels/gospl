@@ -1,10 +1,11 @@
-{{ header }}
-
 .. _api:
 
 ##################
 API reference
 ##################
+
+This page gives an overview of all :mod:`gospl` objects, functions and methods.
+
 
 .. image:: https://img.shields.io/badge/code%20style-black-000000.svg
   :target: https://github.com/psf/black
@@ -18,7 +19,6 @@ API reference
   :target: https://lgtm.com/projects/g/Geodels/gospl/context:python
   :alt: Language grade: Python
 
-This page gives an overview of all gospl objects, functions and methods.
 
 Model class
 ------------
