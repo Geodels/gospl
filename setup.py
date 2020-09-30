@@ -35,9 +35,10 @@ F90 = os.getenv("F90")
 # !! comment out this if statement for manual install !!
 # ------------------------------------------------------------
 if F90 is None or F90 == "":
-    l1 = "gospl requires environment variable F90 to be set. \n "
-    l2 = 'Please set to one of {"ifort", "gfortran"}'
-    raise RuntimeError(l1 + l2)
+    F90 = "gfortran"
+    # l1 = "gospl requires environment variable F90 to be set. \n "
+    # l2 = 'Please set to one of {"ifort", "gfortran"}'
+    # raise RuntimeError(l1 + l2)
 
 
 # specialize for different compilers
@@ -136,7 +137,7 @@ if __name__ == "__main__":
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
         url="https://github.com/Geodels/gospl",
-        version="0.1.8",
+        version="0.1.9",
         description="A Python interface to perform Global Landscape Evolution Model",
         long_description=long_description,
         long_description_content_type="text/markdown",
