@@ -2,7 +2,7 @@
 # BUILDING PYTHON PACKAGE PYPi
 ##############################
 # python3 -m pip install --user --upgrade setuptools wheel
-# python3 setup.py sdist bdist_wheel
+# python3 setup.py sdist
 # python3 -m pip install --user --upgrade twine
 #  /usr/local/bin/twine check dist/*
 #  /usr/local/bin/twine upload dist/*
@@ -161,9 +161,8 @@ if __name__ == "__main__":
             "meshio==4.2.1",
             "scikit-fuzzy>=0.4.2",
         ],
-        python_requires=">=3.3",
+        python_requires=">=3.6",
         classifiers=[
-            "Programming Language :: Python :: 3.5",
             "Programming Language :: Python :: 3.6",
             "Programming Language :: Python :: 3.7",
             "Programming Language :: Python :: 3.8",
