@@ -2,7 +2,7 @@
 # BUILDING PYTHON PACKAGE PYPi
 ##############################
 # python3 -m pip install --user --upgrade setuptools wheel
-# python3 setup.py sdist
+# python3 setup.py sdist bdist_wheel
 # python3 -m pip install --user --upgrade twine
 #  /usr/local/bin/twine check dist/*
 #  /usr/local/bin/twine upload dist/*
@@ -137,7 +137,7 @@ if __name__ == "__main__":
         author="Tristan Salles  ",
         author_email="tristan.salles@sydney.edu.au",
         url="https://github.com/Geodels/gospl",
-        version="0.1.10",
+        version="0.1.11",
         description="A Python interface to perform Global Landscape Evolution Model",
         long_description=long_description,
         long_description_content_type="text/markdown",
@@ -156,7 +156,7 @@ if __name__ == "__main__":
             "petsc4py>=3.13.0",
             "pre-commit==2.7.1",
             "fastfunc==0.2.3",
-            "vtk==9.0.0",
+            "vtk>=9.0.0",
             "numpy-indexed==0.3.5",
             "meshio==4.2.0",
             "scikit-fuzzy>=0.4.2",
