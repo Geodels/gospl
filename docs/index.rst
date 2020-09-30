@@ -8,7 +8,7 @@
 gospl documentation
 ********************
 
-**Date**: |today| **Version**: 1.0.0
+**Date**: |today| **Version**: |version|
 
 
 **Useful links**:

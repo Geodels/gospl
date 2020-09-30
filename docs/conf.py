@@ -40,9 +40,9 @@ copyright = u"2020, Tristan Salles"
 author = u"Tristan Salles"
 
 # The short X.Y version
-version = u""
+version = u"0.1.8"
 # The full version, including alpha/beta/rc tags
-release = u"0.0.8"
+release = u"0.1.8"
 
 
 # -- General configuration ---------------------------------------------------
@@ -88,7 +88,7 @@ language = None
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = None
+pygments_style = "sphinx"
 # pygments_style = "monokai"
 # pygments_style = "default"
 sphinxemoji_style = "twemoji"
@@ -131,7 +131,7 @@ html_css_files = [
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
 # pixels large.
-html_favicon = "favicon.ico"
+html_favicon = "images/favicon.ico"
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
