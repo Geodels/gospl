@@ -223,7 +223,7 @@ end subroutine split
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine setMaxNb(nb, maxnb)
+subroutine setmaxnb(nb, maxnb)
 !*****************************************************************************
 ! Get the maximum number of neighbours for each mesh vertice.
 ! This function is called once during the initialisation phase.
@@ -246,9 +246,9 @@ subroutine setMaxNb(nb, maxnb)
 
     return
 
-end subroutine setMaxNb
+end subroutine setmaxnb
 
-subroutine setHillslopeCoeff(nb, Kd, dcoeff)
+subroutine sethillslopecoeff(nb, Kd, dcoeff)
 !*****************************************************************************
 ! Define hillslope coefficients based on a finite volume spatial
 ! discretisation as proposed in Tucker et al. (2001).
@@ -285,9 +285,9 @@ subroutine setHillslopeCoeff(nb, Kd, dcoeff)
 
     return
 
-end subroutine setHillslopeCoeff
+end subroutine sethillslopecoeff
 
-subroutine marineCoeff(nb, Ks, dcoeff)
+subroutine marinecoeff(nb, Ks, dcoeff)
 !*****************************************************************************
 ! Define marine diffusion coefficients based on a finite volume spatial
 ! discretisation as proposed in Tucker et al. (2001).
@@ -328,7 +328,7 @@ subroutine marineCoeff(nb, Ks, dcoeff)
 
     return
 
-end subroutine marineCoeff
+end subroutine marinecoeff
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -336,7 +336,7 @@ end subroutine marineCoeff
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
+subroutine mfdreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
 ! algorithm.
@@ -429,7 +429,7 @@ subroutine MFDreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
 
   return
 
-end subroutine MFDreceivers
+end subroutine mfdreceivers
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -437,7 +437,7 @@ end subroutine MFDreceivers
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, &
+subroutine stratabuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, &
                        phif, nstrath, nstratz, nstratf, nphis, nphif)
 !*****************************************************************************
 ! Record stratigraphic layers through time.
@@ -492,9 +492,9 @@ subroutine strataBuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, 
 
   return
 
-end subroutine strataBuild
+end subroutine stratabuild
 
-subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
+subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
                            stratc, phis, phif, phic, nstrath, nstratz, nstratf, &
                            nstratc, nphis, nphif, nphic)
 !*****************************************************************************
@@ -564,7 +564,7 @@ subroutine strataBuildCarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
 
   return
 
-end subroutine strataBuildCarb
+end subroutine stratabuildcarb
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -572,7 +572,7 @@ end subroutine strataBuildCarb
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine fillPIT(sl, elev, hmax, fillz, pits, nb)
+subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
 !*****************************************************************************
 ! Perform pit filling using a priority queue approach following Barnes (2015).
 
@@ -659,9 +659,9 @@ subroutine fillPIT(sl, elev, hmax, fillz, pits, nb)
 
   return
 
-end subroutine fillPIT
+end subroutine fillpit
 
-subroutine fillLabel(sl, elev, fillz, labels, nb)
+subroutine filllabel(sl, elev, fillz, labels, nb)
 !*****************************************************************************
 ! Perform pit filling and watershed labeling using a variant of the priority
 ! queue approach following Barnes (2015).
@@ -735,7 +735,7 @@ subroutine fillLabel(sl, elev, fillz, labels, nb)
 
   return
 
-end subroutine fillLabel
+end subroutine filllabel
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -743,7 +743,7 @@ end subroutine fillLabel
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine ngbGlob( nb, ngbIDs )
+subroutine ngbglob( nb, ngbIDs )
 !*****************************************************************************
 ! Set global mesh neighbours indices.
 
@@ -760,9 +760,9 @@ subroutine ngbGlob( nb, ngbIDs )
 
   return
 
-end subroutine ngbGlob
+end subroutine ngbglob
 
-subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
+subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
                       circumcenter, ngbID, edgemax, n, nb, m)
 !*****************************************************************************
 ! Compute for a specific triangulation the characteristics of each node and
@@ -918,9 +918,9 @@ subroutine defineTIN( coords, cells_nodes, cells_edges, edges_nodes, area, &
 
   FVnID = ngbID
 
-end subroutine defineTIN
+end subroutine definetin
 
-subroutine defineGTIN( nb, cells_nodes, edges_nodes, ngbNb, ngbID, n, m)
+subroutine definegtin( nb, cells_nodes, edges_nodes, ngbNb, ngbID, n, m)
 !*****************************************************************************
 ! Compute for the global mesh, the characteristics of each node and
 ! associated voronoi for finite volume discretizations
@@ -1014,4 +1014,4 @@ subroutine defineGTIN( nb, cells_nodes, edges_nodes, ngbNb, ngbID, n, m)
 
   enddo
 
-end subroutine defineGTIN
+end subroutine definegtin

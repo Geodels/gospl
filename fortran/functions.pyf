@@ -1,9 +1,5 @@
 python module _fortran
 
-    usercode '''
-    #include "fortran/functionsmodule.h"
-    '''
-
     interface
 
         module meshparams
@@ -37,27 +33,27 @@ python module _fortran
             integer dimension(:),intent(inout) :: indices
         end subroutine split
 
-        subroutine setMaxNb(nb,maxnb) ! in :_fortran:functions.f90
+        subroutine setmaxnb(nb,maxnb) ! in :_fortran:functions.f90
             use meshparams
             integer :: nb
             integer intent(out) :: maxnb
-        end subroutine setMaxNb
+        end subroutine setmaxnb
 
-        subroutine setHillslopeCoeff(nb,kd,dcoeff)
+        subroutine sethillslopecoeff(nb,kd,dcoeff)
             use meshparams
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: kd
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
-        end subroutine setHillslopeCoeff
+        end subroutine sethillslopecoeff
 
-        subroutine marineCoeff(nb,kd,dcoeff)
+        subroutine marinecoeff(nb,kd,dcoeff)
             use meshparams
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: kd
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
-        end subroutine marineCoeff
+        end subroutine marinecoeff
 
-        subroutine MFDreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)
+        subroutine mfdreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)
             use meshparams
             integer intent(in) :: nrcv
             double precision intent(in) :: sl
@@ -67,9 +63,9 @@ python module _fortran
             double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: dist
             double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
-        end subroutine MFDreceivers
+        end subroutine mfdreceivers
 
-        subroutine strataBuild(nb,stratnb,ids,weights,strath,stratz,stratf,phis,phif,nstrath,nstratz,nstratf,nphis,nphif)
+        subroutine stratabuild(nb,stratnb,ids,weights,strath,stratz,stratf,phis,phif,nstrath,nstratz,nstratf,nphis,nphif)
             integer intent(in) :: nb
             integer intent(in) :: stratnb
             integer dimension(nb,3),intent(in),depend(nb) :: ids
@@ -84,9 +80,9 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratf
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphis
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphif
-        end subroutine strataBuild
+        end subroutine stratabuild
 
-        subroutine strataBuildCarb(nb,stratnb,ids,weights,strath,stratz,stratf,stratc,phis,phif,phic,nstrath,nstratz,nstratf,nstratc,nphis,nphif,nphic)
+        subroutine stratabuildcarb(nb,stratnb,ids,weights,strath,stratz,stratf,stratc,phis,phif,phic,nstrath,nstratz,nstratf,nstratc,nphis,nphif,nphic)
             integer intent(in) :: nb
             integer intent(in) :: stratnb
             integer dimension(nb,3),intent(in),depend(nb) :: ids
@@ -105,9 +101,9 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphis
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphif
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphic
-        end subroutine strataBuildCarb
+        end subroutine stratabuildcarb
 
-        subroutine fillPIT(sl,elev,hmax,fillz,pits,nb)
+        subroutine fillpit(sl,elev,hmax,fillz,pits,nb)
             use meshparams
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev
@@ -115,24 +111,24 @@ python module _fortran
             double precision dimension(nb),intent(out) :: fillz
             integer dimension(nb,2),intent(out) :: pits
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine fillPIT
+        end subroutine fillpit
 
-        subroutine fillLabel(sl,elev,fillz,labels,nb)
+        subroutine filllabel(sl,elev,fillz,labels,nb)
             use meshparams
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev
             double precision dimension(nb),intent(out) :: fillz
             integer dimension(nb),intent(out) :: labels
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine fillLabel
+        end subroutine filllabel
 
-        subroutine ngbGlob(nb,ngbid)
+        subroutine ngbglob(nb,ngbid)
             use meshparams
             integer intent(in) :: nb
             integer dimension(nb,6),intent(in),depend(nb) :: ngbid
-        end subroutine ngbGlob
+        end subroutine ngbglob
 
-        subroutine defineTIN(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
+        subroutine definetin(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
             use meshparams
             double precision dimension(nb,3),intent(in) :: coords
             integer dimension(n,3),intent(in) :: cells_nodes
@@ -145,9 +141,9 @@ python module _fortran
             integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
             integer, optional,check(shape(coords,0)==nb),depend(coords) :: nb=shape(coords,0)
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
-        end subroutine defineTIN
+        end subroutine definetin
 
-        subroutine defineGTIN(nb,cells_nodes,edges_nodes,ngbnb,ngbid,n,m)
+        subroutine definegtin(nb,cells_nodes,edges_nodes,ngbnb,ngbid,n,m)
             use meshparams
             integer intent(in) :: nb
             integer dimension(n,3),intent(in) :: cells_nodes
@@ -156,7 +152,7 @@ python module _fortran
             integer dimension(nb,12),intent(out),depend(nb) :: ngbid
             integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
-        end subroutine defineGTIN
+        end subroutine definegtin
 
     end interface
 

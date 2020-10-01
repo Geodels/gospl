@@ -16,10 +16,10 @@ from time import process_time
 from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import defineTIN
-    from gospl._fortran import ngbGlob
-    from gospl._fortran import strataBuild
-    from gospl._fortran import strataBuildCarb
+    from gospl._fortran import definetin
+    from gospl._fortran import ngbglob
+    from gospl._fortran import stratabuild
+    from gospl._fortran import stratabuildcarb
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -121,7 +121,7 @@ class UnstMesh(object):
         from the list of coordinates and cells the volume of each voronoi and their respective
         characteristics.
 
-        Once the voronoi definitions have been obtained a call to the fortran subroutine `defineTIN`
+        Once the voronoi definitions have been obtained a call to the fortran subroutine `definetin`
         is performed to order each node and the dual mesh components, it records:
 
         - all cells surrounding a given vertice,
@@ -146,7 +146,7 @@ class UnstMesh(object):
 
         # Finite volume discretisation
         edgeMax = np.zeros(1, dtype=np.float64)
-        self.FVmesh_ngbID, edgeMax[0] = defineTIN(
+        self.FVmesh_ngbID, edgeMax[0] = definetin(
             self.lcoords, cells_nodes, cells_edges, edges_nodes, self.area, cc.T
         )
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, edgeMax, op=MPI.MAX)
@@ -360,7 +360,7 @@ class UnstMesh(object):
 
         # Store global neighbouring on process rank 0
         if MPIrank == 0:
-            ngbGlob(self.gpoints, loadData["n"])
+            ngbglob(self.gpoints, loadData["n"])
         if MPIrank == 0 and self.verbose:
             print(
                 "Reading mesh information (%0.02f seconds)" % (process_time() - t0),
@@ -1134,8 +1134,8 @@ class UnstMesh(object):
 
         The function relies on 2 fortran subroutines (for loop performance purposes):
 
-        1. strataBuild
-        2. strataBuildCarb
+        1. stratabuild
+        2. stratabuildcarb
 
         :arg indices: indices of the closest nodes used for interpolation
         :arg weights: weights based on the distances to closest nodes
@@ -1158,7 +1158,7 @@ class UnstMesh(object):
                 self.phiS[:, : self.stratStep],
                 self.phiF[:, : self.stratStep],
                 self.phiC[:, : self.stratStep],
-            ) = strataBuildCarb(
+            ) = stratabuildcarb(
                 self.npoints,
                 self.stratStep,
                 indices,
@@ -1178,7 +1178,7 @@ class UnstMesh(object):
                 self.stratF[:, : self.stratStep],
                 self.phiS[:, : self.stratStep],
                 self.phiF[:, : self.stratStep],
-            ) = strataBuild(
+            ) = stratabuild(
                 self.npoints,
                 self.stratStep,
                 indices,

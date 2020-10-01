@@ -13,8 +13,8 @@ from time import process_time
 from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import fillPIT
-    from gospl._fortran import MFDreceivers
+    from gospl._fortran import fillpit
+    from gospl._fortran import mfdreceivers
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -175,7 +175,7 @@ class FAMesh(object):
             sl = self.sealevel - 1000.0
 
         # Define multiple flow directions for unfilled elevation
-        self.rcvID, self.distRcv, self.wghtVal = MFDreceivers(
+        self.rcvID, self.distRcv, self.wghtVal = mfdreceivers(
             self.flowDir, self.inIDs, h, sl
         )
 
@@ -292,7 +292,7 @@ class FAMesh(object):
             depending on the volume of sediment transported by upstream catchments.
 
         The function is **not parallelised** and is performed on the master processor. It calls a
-        fortran subroutine `fillPIT` that uses a *priority-flood + ϵ* variant of the algorithm proposed
+        fortran subroutine `fillpit` that uses a *priority-flood + ϵ* variant of the algorithm proposed
         in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ for unstructured meshes.
 
         The initialisation step consists of pushing all the marine nodes which are neighbours to a
@@ -323,11 +323,11 @@ class FAMesh(object):
                 hmax = 1.0e8
                 if limit:
                     hmax = self.fillmax
-                # Fillpit returns:
+                # fillpit returns:
                 # - hFill: filled elevation values
                 # - pits: 2D array containing each pit ID and
                 #         corresponding overspilling point ID
-                hFill, pits = fillPIT(self.sealevel - 1000.0, gZ, hmax)
+                hFill, pits = fillpit(self.sealevel - 1000.0, gZ, hmax)
             else:
                 hFill = np.zeros(self.gpoints, dtype=np.float64)
                 pits = np.zeros((self.gpoints, 2), dtype=np.int64)

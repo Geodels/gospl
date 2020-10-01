@@ -9,9 +9,9 @@ from mpi4py import MPI
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import setMaxNb
-    from gospl._fortran import marineCoeff
-    from gospl._fortran import setHillslopeCoeff
+    from gospl._fortran import setmaxnb
+    from gospl._fortran import marinecoeff
+    from gospl._fortran import sethillslopecoeff
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -53,7 +53,7 @@ class SEDMesh(object):
                 self.vSedc = self.hGlobal.duplicate()
                 self.vSedcLocal = self.hLocal.duplicate()
         maxnb = np.zeros(1, dtype=np.int)
-        maxnb[0] = setMaxNb(self.npoints)
+        maxnb[0] = setmaxnb(self.npoints)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, maxnb, op=MPI.MAX)
         self.maxnb = maxnb[0]
         self.scaleIDs = np.zeros(self.npoints)
@@ -495,7 +495,7 @@ class SEDMesh(object):
         maxSedVol = self.Qs.sum()
         self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
 
-        diffCoeffs = marineCoeff(self.npoints, Cd * self.dt)
+        diffCoeffs = marinecoeff(self.npoints, Cd * self.dt)
         self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
 
@@ -618,7 +618,7 @@ class SEDMesh(object):
         Cd = np.full(self.npoints, self.Cda, dtype=np.float64)
         Cd[self.seaID] = self.Cdm
 
-        diffCoeffs = setHillslopeCoeff(self.npoints, Cd * self.dt)
+        diffCoeffs = sethillslopecoeff(self.npoints, Cd * self.dt)
         self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
 

@@ -1,148 +1,71 @@
-##############################
-# BUILDING PYTHON PACKAGE PYPi
-##############################
-# python3 -m pip install --user --upgrade setuptools wheel
-# python3 setup.py sdist
-# python3 -m pip install --user --upgrade twine
-#  /usr/local/bin/twine check dist/*
-#  /usr/local/bin/twine upload dist/*
-##############################
+from setuptools import find_packages
+from numpy.distutils.core import setup, Extension
+
+try:
+    from distutils.command import bdist_conda
+except ImportError:
+    pass
+
 
 import os
 import io
-from setuptools import setup
+import subprocess
+import platform
 
-try:
-    from numpy.distutils.fcompiler import FCompiler
+# in development set version to none and ...
+PYPI_VERSION = "0.1.14"
 
-    def runtime_library_dir_option(self, dir):
-        return self.c_compiler.runtime_library_dir_option(dir)
 
-    FCompiler.runtime_library_dir_option = runtime_library_dir_option
-except Exception:
-    pass
+def git_version():
+    def _minimal_ext_cmd(cmd):
+        # construct minimal environment
+        env = {}
+        for k in ["SYSTEMROOT", "PATH"]:
+            v = os.environ.get(k)
+            if v is not None:
+                env[k] = v
+        # LANGUAGE is used on win32
+        env["LANGUAGE"] = "C"
+        env["LANG"] = "C"
+        env["LC_ALL"] = "C"
+        out = subprocess.Popen(cmd, stdout=subprocess.PIPE, env=env).communicate()[0]
+        return out
+
+    try:
+        out = _minimal_ext_cmd(["git", "rev-parse", "--short", "HEAD"])
+        GIT_REVISION = out.strip().decode("ascii")
+    except OSError:
+        GIT_REVISION = "Unknown"
+
+    return GIT_REVISION
+
+
+if PYPI_VERSION is None:
+    PYPI_VERSION = git_version()
+
+
+ext = Extension(
+    name="gospl._fortran", sources=["fortran/functions.pyf", "fortran/functions.f90"]
+)
+
 
 this_directory = os.path.abspath(os.path.dirname(__file__))
 with io.open(os.path.join(this_directory, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 
-# get F90 environment variable
-# ----------------------------------------
-F90 = os.getenv("F90")
-
-
-# raise error if F90 not defined
-# !! comment out this if statement for manual install !!
-# ------------------------------------------------------------
-if F90 is None or F90 == "":
-    F90 = "gfortran"
-    # l1 = "gospl requires environment variable F90 to be set. \n "
-    # l2 = 'Please set to one of {"ifort", "gfortran"}'
-    # raise RuntimeError(l1 + l2)
-
-
-# specialize for different compilers
-# ------------------------------------------------------------
-if F90 == "ifort":
-    f90_flags = [
-        "-fPIC",
-        "-xHost",
-        "-O3",
-        "-ipo",
-        "-funroll-loops",
-        "-heap-arrays",
-        "-mcmodel=medium",
-    ]
-
-elif F90 == "gfortran":
-    f90_flags = [
-        "-fPIC",
-        "-O3",
-        "-fbounds-check",
-        "-mtune=native",
-    ]
-
-elif F90 in ["pgfortran", "pgf90", "pgf95"]:
-    f90_flags = ["-mp"]
-
-else:
-    l1 = "F90 = " + F90 + ". \n"
-    l2 = "Environment variable F90 not recognized.  \n"
-    raise RuntimeError(l1 + l2)
-
-
-def configuration(parent_package="", top_path=None):
-    INCLUDE_DIRS = []
-    LIBRARY_DIRS = []
-    LIBRARIES = []
-
-    # PETSc
-    PETSC_DIR = os.environ["PETSC_DIR"]
-    PETSC_ARCH = os.environ.get("PETSC_ARCH", "")
-
-    if PETSC_ARCH and os.path.isdir(os.path.join(PETSC_DIR, PETSC_ARCH)):
-        INCLUDE_DIRS += [
-            os.path.join(PETSC_DIR, PETSC_ARCH, "include"),
-            os.path.join(PETSC_DIR, "include"),
-        ]
-        LIBRARY_DIRS += [os.path.join(PETSC_DIR, PETSC_ARCH, "lib")]
-    else:
-        if PETSC_ARCH:
-            pass
-        INCLUDE_DIRS += [os.path.join(PETSC_DIR, "include")]
-        LIBRARY_DIRS += [os.path.join(PETSC_DIR, "lib")]
-    LIBRARIES += ["petsc"]
-
-    import petsc4py
-
-    INCLUDE_DIRS += [petsc4py.get_include()]
-
-    # Configuration
-    from numpy.distutils.misc_util import Configuration
-
-    config = Configuration("", parent_package, top_path)
-
-    config.add_extension(
-        "gospl._fortran",
-        sources=["fortran/functions.pyf", "fortran/functions.F90"],
-        depends=["fortran/functionsmodule.h"],
-        define_macros=[],  # [('F2PY_REPORT_ON_ARRAY_COPY',0)],
-        include_dirs=INCLUDE_DIRS + [os.curdir],
-        libraries=LIBRARIES,
-        library_dirs=LIBRARY_DIRS,
-        extra_f90_compile_args=f90_flags,
-        # extra_f77_compile_args=["-fPIC", "-O3", "-Wunused-variable"],
-        # extra_f90_compile_args=[
-        #     "-fPIC",
-        #     "-O3",
-        #     "-Wunused-variable",
-        #     "-Wincompatible-pointer-types",
-        #     "-Wcpp",
-        #     "-Wunused-function",
-        # ],
-        # extra_f90_compile_args = ['-fPIC', '-O0', '-g', '-fbacktrace','-fcheck=all'],
-        extra_link_args=["-shared"],
-        runtime_library_dirs=LIBRARY_DIRS,
-    )
-
-    return config
-
 
 if __name__ == "__main__":
-
-    import numpy.distutils.core
-
-    numpy.distutils.core.setup(
+    setup(
         name="gospl",
-        author="Tristan Salles  ",
+        author="Tristan Salles",
         author_email="tristan.salles@sydney.edu.au",
         url="https://github.com/Geodels/gospl",
-        version="0.1.13",
+        version=PYPI_VERSION,
         description="A Python interface to perform Global Landscape Evolution Model",
         long_description=long_description,
         long_description_content_type="text/markdown",
-        configuration=configuration,
-        packages=["gospl", "gospl.tools", "gospl.mesher", "gospl.sed", "gospl.flow"],
+        ext_modules=[ext],
+        packages=["gospl", "gospl.tools", "gospl.flow", "gospl.mesher", "gospl.sed"],
         install_requires=[
             "pytest",
             "Cython==0.29.21",
@@ -161,7 +84,6 @@ if __name__ == "__main__":
             "meshio==4.2.1",
             "scikit-fuzzy>=0.4.2",
         ],
-        python_requires=">=3.6",
         classifiers=[
             "Programming Language :: Python :: 3.6",
             "Programming Language :: Python :: 3.7",
