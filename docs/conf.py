@@ -17,7 +17,6 @@ import sys
 import inspect
 import sphinx_rtd_theme
 
-import gospl
 from mock import Mock as MagicMock
 from sphinx.builders.html import (
     StandaloneHTMLBuilder,
@@ -41,15 +40,14 @@ copyright = "2020, Tristan Salles"
 author = "Tristan Salles"
 
 # version = '%s r%s' % (pandas.__version__, svn_version())
-version = str(gospl.__version__)
-
+# version = str(gospl.__version__)
 # The full version, including alpha/beta/rc tags.
-release = version
+# release = version
 
 # The short X.Y version
-# version = "0.1.8"
+version = "0.1.8"
 # The full version, including alpha/beta/rc tags
-# release = "0.1.8"
+release = "0.1.8"
 
 
 # -- General configuration ---------------------------------------------------
@@ -250,18 +248,18 @@ class Mock(MagicMock):
 
 
 MOCK_MODULES = [
-    # "h5py",
-    # "mpi4py",
-    # "Cython",
-    # "ruamel",
-    # "ruamel.yaml",
-    # "pandas",
-    # "scipy",
-    # "petsc4py",
-    # "meshplex",
-    # "scipy.interpolate",
-    # "vtk",
-    # "vtk.util",
+    "h5py",
+    "mpi4py",
+    "Cython",
+    "ruamel",
+    "ruamel.yaml",
+    "pandas",
+    "scipy",
+    "petsc4py",
+    "meshplex",
+    "scipy.interpolate",
+    "vtk",
+    "vtk.util",
 ]
 
 for m in MOCK_MODULES:
@@ -279,51 +277,51 @@ def setup(app):
 
 
 # based on numpy doc/source/conf.py
-def linkcode_resolve(domain, info):
-    """
-    Determine the URL corresponding to Python object
-    """
-    if domain != "py":
-        return None
-
-    modname = info["module"]
-    fullname = info["fullname"]
-
-    submod = sys.modules.get(modname)
-    if submod is None:
-        return None
-
-    obj = submod
-    for part in fullname.split("."):
-        try:
-            obj = getattr(obj, part)
-        except AttributeError:
-            return None
-
-    try:
-        fn = inspect.getsourcefile(inspect.unwrap(obj))
-    except TypeError:
-        fn = None
-    if not fn:
-        return None
-
-    try:
-        source, lineno = inspect.getsourcelines(obj)
-    except OSError:
-        lineno = None
-
-    if lineno:
-        linespec = f"#L{lineno}-L{lineno + len(source) - 1}"
-    else:
-        linespec = ""
-
-    fn = os.path.relpath(fn, start=os.path.dirname(gospl.__file__))
-
-    if "+" in gospl.__version__:
-        return f"https://github.com/Geodels/gospl/blob/master/gospl/{fn}{linespec}"
-    else:
-        return (
-            f"https://github.com/Geodels/gospl/blob/"
-            f"master/gospl/{fn}{linespec}"
-            # f"v{gospl.__version__}/gospl/{fn}{linespec}"
-        )
+# def linkcode_resolve(domain, info):
+#     """
+#     Determine the URL corresponding to Python object
+#     """
+#     if domain != "py":
+#         return None
+#
+#     modname = info["module"]
+#     fullname = info["fullname"]
+#
+#     submod = sys.modules.get(modname)
+#     if submod is None:
+#         return None
+#
+#     obj = submod
+#     for part in fullname.split("."):
+#         try:
+#             obj = getattr(obj, part)
+#         except AttributeError:
+#             return None
+#
+#     try:
+#         fn = inspect.getsourcefile(inspect.unwrap(obj))
+#     except TypeError:
+#         fn = None
+#     if not fn:
+#         return None
+#
+#     try:
+#         source, lineno = inspect.getsourcelines(obj)
+#     except OSError:
+#         lineno = None
+#
+#     if lineno:
+#         linespec = f"#L{lineno}-L{lineno + len(source) - 1}"
+#     else:
+#         linespec = ""
+#
+#     fn = os.path.relpath(fn, start=os.path.dirname(gospl.__file__))
+#
+#     if "+" in gospl.__version__:
+#         return f"https://github.com/Geodels/gospl/blob/master/gospl/{fn}{linespec}"
+#     else:
+#         return (
+#             f"https://github.com/Geodels/gospl/blob/"
+#             f"master/gospl/{fn}{linespec}"
+#             # f"v{gospl.__version__}/gospl/{fn}{linespec}"
+#         )
