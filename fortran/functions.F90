@@ -1,6 +1,6 @@
-#include "petsc/finclude/petsc.h"
-#include "petsc/finclude/petscmat.h"
-#include "petscversion.h"
+! #include "petsc/finclude/petsc.h"
+! #include "petsc/finclude/petscmat.h"
+! #include "petscversion.h"
 
 #undef  CHKERRQ
 #define CHKERRQ(n) if ((n) .ne. 0) return;
