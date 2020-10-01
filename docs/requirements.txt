@@ -18,4 +18,3 @@ sphinxcontrib-napoleon>=0.7
 sphinxemoji>=0.1.6
 pydata-sphinx-theme>=0.4.0
 mock>=4.0.2
-gospl>=0.1.15
