@@ -155,7 +155,7 @@ Requirements
 -  pandas **>= 1.1.2**
 -  ruamel.yaml **== 0.16.12**
 -  fastfunc **== 0.2.3**
--  meshio **== 4.2.1**
+-  meshio **== 4.2.2**
 -  meshplex **== 0.12.3**
 -  pre-commit **>= 2.7.1**
 -  vtk **== 9.0.0**

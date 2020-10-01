@@ -13,3 +13,4 @@ tests/output/normal
 tests/output/forward
 output
 *.so
+.eggs
