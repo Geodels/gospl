@@ -250,18 +250,18 @@ class Mock(MagicMock):
 
 
 MOCK_MODULES = [
-    "h5py",
-    "mpi4py",
-    "Cython",
-    "ruamel",
-    "ruamel.yaml",
-    "pandas",
-    "scipy",
-    "petsc4py",
-    "meshplex",
-    "scipy.interpolate",
-    "vtk",
-    "vtk.util",
+    # "h5py",
+    # "mpi4py",
+    # "Cython",
+    # "ruamel",
+    # "ruamel.yaml",
+    # "pandas",
+    # "scipy",
+    # "petsc4py",
+    # "meshplex",
+    # "scipy.interpolate",
+    # "vtk",
+    # "vtk.util",
 ]
 
 for m in MOCK_MODULES:
