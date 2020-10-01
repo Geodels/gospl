@@ -47,7 +47,7 @@ if PYPI_VERSION is None:
 
 
 ext = Extension(
-    name="gospl._fortran", sources=["fortran/functions.pyf", "fortran/functions.f90"]
+    name="gospl._fortran", sources=["fortran/functions.pyf", "fortran/functions.F90"]
 )
 
 
