@@ -13,7 +13,9 @@ import subprocess
 import platform
 
 # in development set version to none and ...
-PYPI_VERSION = "0.1.14"
+PYPI_VERSION = "0.1.15"
+
+install_requires = open("requirements.txt").read().strip().split("\n")
 
 
 def git_version():
@@ -66,23 +68,9 @@ if __name__ == "__main__":
         long_description_content_type="text/markdown",
         ext_modules=[ext],
         packages=["gospl", "gospl.tools", "gospl.flow", "gospl.mesher", "gospl.sed"],
-        install_requires=[
-            "pytest",
-            "Cython==0.29.21",
-            "numpy==1.19.2",
-            "scipy==1.5.2",
-            "h5py==2.10.0",
-            "pandas==1.1.2",
-            "ruamel.yaml==0.16.12",
-            "meshplex==0.13.3",
-            "mpi4py>=3.0.3",
-            "petsc4py>=3.13.0",
-            "pre-commit==2.7.1",
-            "fastfunc==0.2.3",
-            "vtk>=9.0.0",
-            "numpy-indexed==0.3.5",
-            "meshio==4.2.1",
-            "scikit-fuzzy>=0.4.2",
+        install_requires=install_requires,
+        setup_requires=[
+            [p for p in install_requires if p.startswith("numpy")][0],
         ],
         classifiers=[
             "Programming Language :: Python :: 3.6",
