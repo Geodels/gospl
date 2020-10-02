@@ -15,6 +15,7 @@
 import os
 import sys
 import inspect
+import subprocess
 import sphinx_rtd_theme
 
 from mock import Mock as MagicMock
@@ -23,6 +24,8 @@ from sphinx.builders.html import (
     DirectoryHTMLBuilder,
     SingleFileHTMLBuilder,
 )
+
+subprocess.call("apt-get -yq install gfortran", shell=True)
 
 sys.path.insert(0, os.path.abspath("../gospl/"))
 
