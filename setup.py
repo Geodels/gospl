@@ -1,12 +1,23 @@
 ##############################
+# BUILDING CONDA ENVIRONMENT
+##############################
+#
+# conda env export --from-history | grep -v "prefix" > conda-env.yml
+# conda env create -f conda-env.yml
+# conda activate gospl-package
+#
+##############################
 # BUILDING PYTHON PACKAGE PYPI
 ##############################
+#
 # python3 -m pip install --user --upgrade setuptools wheel
 # python3 setup.py sdist
 # python3 -m pip install --user --upgrade twine
 #  /usr/local/bin/twine check dist/*
 #  /usr/local/bin/twine upload dist/*
+#
 ##############################
+
 import os
 import io
 import sys
