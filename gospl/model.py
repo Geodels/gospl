@@ -16,15 +16,26 @@ if "READTHEDOCS" not in os.environ:
 #
 
 else:
-    _ReadYaml = object()
-    _WriteMesh = object()
-    _UnstMesh = object()
-    _FAMesh = object()
-    _SEDMesh = object()
 
-#     class parentModel(object):
-#         def __init__(self):
-#             pass
+    class _ReadYaml(object):
+        def __init__(self):
+            pass
+
+    class _UnstMesh(object):
+        def __init__(self):
+            pass
+
+    class _WriteMesh(object):
+        def __init__(self):
+            pass
+
+    class _FAMesh(object):
+        def __init__(self):
+            pass
+
+    class _SEDMesh(object):
+        def __init__(self):
+            pass
 
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
