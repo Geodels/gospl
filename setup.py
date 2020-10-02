@@ -1,5 +1,5 @@
 ##############################
-# BUILDING PYTHON PACKAGE PYPi
+# BUILDING PYTHON PACKAGE PYPI
 ##############################
 # python3 -m pip install --user --upgrade setuptools wheel
 # python3 setup.py sdist
@@ -10,13 +10,8 @@
 import os
 import io
 import sys
-import importlib
-from setuptools import find_packages
-
-# try:
-#     importlib.util.find_spec("numpy")
-# except ImportError:
 import subprocess
+from setuptools import find_packages
 
 try:
     subprocess.call([sys.executable, "-m", "pip", "install", "numpy"])
@@ -32,7 +27,7 @@ except ImportError:
     pass
 
 # in development set version to none and ...
-PYPI_VERSION = "0.1.21"
+PYPI_VERSION = "0.1.23"
 
 # Place install_requires into the text file "requirements.txt"
 with open("requirements.txt") as f2:
@@ -76,7 +71,7 @@ if PYPI_VERSION is None:
 
 
 ext = Extension(
-    name="gospl._fortran", sources=["fortran/functions.pyf", "fortran/functions.f90"]
+    name="gospl._fortran", sources=["fortran/functions.pyf", "fortran/functions.F90"]
 )
 
 

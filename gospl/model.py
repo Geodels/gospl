@@ -13,7 +13,8 @@ if "READTHEDOCS" not in os.environ:
 else:
 
     class _ReadYaml(object):
-        def __init__(self):
+        def __init__(self, filename):
+            print(filename)
             pass
 
     class _UnstMesh(object):
