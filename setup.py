@@ -15,11 +15,9 @@ try:
 except ImportError:
     pass
 
-
 import os
 import io
 import subprocess
-import platform
 
 # in development set version to none and ...
 PYPI_VERSION = "0.1.15"
