@@ -14,7 +14,8 @@ RUN apt-get update -qq && \
 RUN python3 -m pip install --no-cache-dir \
         pytest-mpi \
         pytest-cov \
-        coveralls
+        coveralls \
+        numpy-indexed
 
 # install gopspl
 WORKDIR /live/lib
