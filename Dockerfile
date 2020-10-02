@@ -25,6 +25,6 @@ RUN git clone https://github.com/Geodels/gospl.git && \
     export PETSC_DIR=/opt/petsc && \
     export PETSC_ARCH=arch-linux-c-opt && \
     python3 setup.py install && \
-    python3 -m pip install -e .
+    python3 -m pip install gospl
 
 CMD ["jupyter", "notebook", "--ip='0.0.0.0'", "--no-browser"]
