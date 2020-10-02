@@ -23,4 +23,3 @@ dependencies:
     - fastfunc
     - meshplex
     - gospl
-prefix: /Users/getafix/anaconda3/envs/gospl-package
