@@ -15,7 +15,8 @@ if "READTHEDOCS" not in os.environ:
 #             pass
 #
 #
-# else:
+else:
+    _ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh = None
 #
 #     class parentModel(object):
 #         def __init__(self):
