@@ -24,7 +24,7 @@ RUN git clone https://github.com/Geodels/gospl.git && \
     export F90=gfortran && \
     export PETSC_DIR=/opt/petsc && \
     export PETSC_ARCH=arch-linux-c-opt && \
-    python3 setup.py install && \
-    pip3 install --ignore-installed -e .
+    python3 setup.py install #&& \
+    #python3 -m pip install -e .
 
 CMD ["jupyter", "notebook", "--ip='0.0.0.0'", "--no-browser"]
