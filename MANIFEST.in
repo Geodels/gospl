@@ -3,9 +3,7 @@ include LICENSE
 include requirements.txt
 include MANIFEST
 
-include fortran/*.f90
+include fortran/*.F90
 include fortran/*.pyf
-include fortran/*.c
-include fortran/*.f
 
 include setup.py
