@@ -7,7 +7,7 @@
 #  /usr/local/bin/twine check dist/*
 #  /usr/local/bin/twine upload dist/*
 ##############################
-
+from setuptools import find_packages
 from numpy.distutils.core import setup, Extension
 
 try:
@@ -19,6 +19,7 @@ except ImportError:
 import os
 import io
 import subprocess
+import platform
 
 # in development set version to none and ...
 PYPI_VERSION = "0.1.15"
