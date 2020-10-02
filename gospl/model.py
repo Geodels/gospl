@@ -14,14 +14,14 @@ if "READTHEDOCS" not in os.environ:
 #         def __init__(self):
 #             pass
 #
-#
+
 else:
-    _ReadYaml = type("ReadYaml", (object,), {})()
-    _WriteMesh = type("WriteMesh", (object,), {})()
-    _UnstMesh = type("UnstMesh", (object,), {})()
-    _FAMesh = type("FAMesh", (object,), {})()
-    _SEDMesh = type("SEDMesh", (object,), {})()
-#
+    _ReadYaml = object()
+    _WriteMesh = object()
+    _UnstMesh = object()
+    _FAMesh = object()
+    _SEDMesh = object()
+
 #     class parentModel(object):
 #         def __init__(self):
 #             pass
