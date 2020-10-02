@@ -7,4 +7,4 @@ sphinx_rtd_theme>=0.5.0
 sphinxcontrib-napoleon>=0.7
 sphinxemoji>=0.1.6
 pydata-sphinx-theme>=0.4.0
-gospl
+gospl==0.1.20
