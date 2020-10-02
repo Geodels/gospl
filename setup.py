@@ -1,3 +1,13 @@
+##############################
+# BUILDING PYTHON PACKAGE PYPi
+##############################
+# python3 -m pip install --user --upgrade setuptools wheel
+# python3 setup.py sdist
+# python3 -m pip install --user --upgrade twine
+#  /usr/local/bin/twine check dist/*
+#  /usr/local/bin/twine upload dist/*
+##############################
+
 from numpy.distutils.core import setup, Extension
 
 try:
