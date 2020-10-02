@@ -9,11 +9,6 @@ if "READTHEDOCS" not in os.environ:
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
     from .tools import WriteMesh as _WriteMesh
-#
-#     class parentModel(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
-#         def __init__(self):
-#             pass
-#
 
 else:
 

@@ -1,0 +1,26 @@
+name: gospl-package
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - scikit-fuzzy
+  - python=3.8
+  - petsc4py
+  - pip
+  - scipy
+  - numpy-indexed
+  - pandas
+  - h5py
+  - meshio
+  - numpy
+  - vtk
+  - pre-commit
+  - ruamel.yaml
+  - mpi4py
+  - cython
+  - compilers
+  - pip:
+    - fastfunc
+    - meshplex
+    - gospl
+prefix: /Users/getafix/anaconda3/envs/gospl-package
