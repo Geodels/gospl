@@ -4,4 +4,7 @@ include requirements.txt
 
 include fortran/*.f90
 include fortran/*.pyf
+include fortran/*.c
+include fortran/*.f
+
 include setup.py

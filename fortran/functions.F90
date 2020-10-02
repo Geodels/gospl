@@ -76,7 +76,7 @@ module meshparams
     ! Pop the top element in the stack
     function PQpop(this) result (res)
       class(pqueue) :: this
-      type(node)   :: res
+      type(node) :: res
       res = this%buf(1)
       this%buf(1) = this%buf(this%n)
       this%n = this%n - 1
