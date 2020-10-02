@@ -13,12 +13,15 @@ import sys
 import importlib
 from setuptools import find_packages
 
-try:
-    importlib.util.find_spec("numpy")
-except ImportError:
-    import subprocess
+# try:
+#     importlib.util.find_spec("numpy")
+# except ImportError:
+import subprocess
 
+try:
     subprocess.call([sys.executable, "-m", "pip", "install", "numpy"])
+except ImportError:
+    pass
 
 from numpy.distutils.core import setup, Extension
 from distutils.command.sdist import sdist
@@ -29,7 +32,7 @@ except ImportError:
     pass
 
 # in development set version to none and ...
-PYPI_VERSION = "0.1.20"
+PYPI_VERSION = "0.1.21"
 
 # Place install_requires into the text file "requirements.txt"
 with open("requirements.txt") as f2:
