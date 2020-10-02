@@ -25,7 +25,7 @@ if "READTHEDOCS" not in os.environ:
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
-class Model(object):
+class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
     """
     Instantiates model object and performs surface processes evolution.
 
