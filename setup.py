@@ -23,6 +23,7 @@ import subprocess
 PYPI_VERSION = "0.1.15"
 
 install_requires = open("requirements.txt").read().strip().split("\n")
+packages = find_packages(include=["gospl", "gospl.*"])
 
 
 def git_version():
