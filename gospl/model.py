@@ -14,8 +14,7 @@ else:
 
     class _ReadYaml(object):
         def __init__(self, filename):
-            print(filename)
-            pass
+            print("Fake print statement for readthedocs", filename)
 
     class _UnstMesh(object):
         def __init__(self):
