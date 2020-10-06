@@ -92,7 +92,7 @@ meshplex                  0.13.3             Fast tools for simplex meshes
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       8.1.2              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
-scikit-fuzzy              0.4.2              c=Collection of fuzzy logic algorithms for the SciPy Stack
+scikit-fuzzy              0.4.2              Collection of fuzzy logic algorithms for the SciPy Stack
 ========================= ================== =============================================================
 
 
