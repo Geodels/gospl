@@ -45,13 +45,13 @@ gospl documentation
                 <div class="card text-center intro-card shadow">
                 <img src="_static/index_user_guide.svg" class="card-img-top" alt="gospl physics action icon" height="52">
                 <div class="card-body flex-fill">
-                    <h5 class="card-title">User guide</h5>
-                    <p class="card-text">The user guide provides in-depth information on the
+                    <h5 class="card-title">Technical guide</h5>
+                    <p class="card-text">The technical guide provides in-depth information on the
                     underlying physics of <code>gospl</code>.</p>
 
 .. container:: custom-button
 
-    :ref:`To the user guide<user_guide>`
+    :ref:`To the technical guide<tech_guide>`
 
 .. raw:: html
 
@@ -68,7 +68,7 @@ gospl documentation
 
 .. container:: custom-button
 
-    :ref:`To the development guide<development>`
+    :ref:`To the examples<example>`
 
 .. raw:: html
 
@@ -103,4 +103,5 @@ gospl documentation
     :titlesonly:
 
     getting_started/index
+    examples.rst
     api.rst

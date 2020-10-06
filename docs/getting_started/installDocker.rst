@@ -101,13 +101,13 @@ They can also be deleted::
 Kitematic
 ------------
 
-Kitematic is a program that provides a graphical user interface to
+`Kitematic <https://kitematic.com/>`_ is a program that provides a graphical user interface to
 the ``docker`` daemon and to Docker Hub.
 
 Downloading a tagged image
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The software is available for Windows, MacOS and Linux. Be aware that on
+The software is available for Windows, Mac OS X and Linux. Be aware that on
 linux the installation may differ depending on the distribution you
 are running.
 

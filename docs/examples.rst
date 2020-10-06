@@ -1,5 +1,8 @@
+.. _example:
+
+
 #################
-Hands-on examples
+Hands-on 
 #################
 
 To get started on how to use *gospl*, a series of examples and tutorials is provided in the following `Examples`_ folder.

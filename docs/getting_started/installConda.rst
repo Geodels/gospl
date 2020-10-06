@@ -4,34 +4,19 @@
 Installation via Conda
 =========================
 
-Python version support
-----------------------
-
-Officially Python 3.7.1 and above, 3.8, and 3.9.
-
-Installing pandas
------------------
-
 .. _install.anaconda:
 
-Installing with Anaconda
-~~~~~~~~~~~~~~~~~~~~~~~~
+Installing Anaconda
+--------------------------
 
-Installing pandas and the rest of the `NumPy <https://www.numpy.org/>`__ and
-`SciPy <https://www.scipy.org/>`__ stack can be a little
-difficult for inexperienced users.
+Installing :mod:`gospl` and its dependencies stack can be a tedious and
+difficult.
 
-The simplest way to install not only pandas, but Python and the most popular
-packages that make up the `SciPy <https://www.scipy.org/>`__ stack
-(`IPython <https://ipython.org/>`__, `NumPy <https://www.numpy.org/>`__,
-`Matplotlib <https://matplotlib.org/>`__, ...) is with
-`Anaconda <https://docs.continuum.io/anaconda/>`__, a cross-platform
-(Linux, Mac OS X, Windows) Python distribution for data analytics and
+One of the simplest way to install not only :mod:`gospl`, but required Python
+packages  is with `Anaconda <https://docs.continuum.io/anaconda/>`__, a cross-platform (Linux, Mac OS X, Windows) Python distribution for data analytics and
 scientific computing.
 
-After running the installer, the user will have access to pandas and the
-rest of the `SciPy <https://www.scipy.org/>`__ stack without needing to install
-anything else, and without needing to wait for any software to be compiled.
+After running the installer, the user will have already access to some essential Python packages and will be able to install a functioning :mod:`gospl` environment by following the directives below.
 
 Installation instructions for `Anaconda <https://docs.continuum.io/anaconda/>`__
 `can be found here <https://docs.continuum.io/anaconda/install.html>`__.
@@ -47,16 +32,16 @@ that folder).
 
 .. _install.miniconda:
 
-Installing with Miniconda
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Installing Miniconda
+----------------------------
 
-The previous section outlined how to get pandas installed as part of the
+The previous section outlined how to get download the
 `Anaconda <https://docs.continuum.io/anaconda/>`__ distribution.
 However this approach means you will install well over one hundred packages
 and involves downloading the installer which is a few hundred megabytes in size.
 
 If you want to have more control on which packages, or have a limited internet
-bandwidth, then installing pandas with
+bandwidth, then installing :mod:`gospl` with
 `Miniconda <https://conda.pydata.org/miniconda.html>`__ may be a better solution.
 
 `Conda <https://conda.pydata.org/docs/>`__ is the package manager that the
@@ -68,35 +53,49 @@ It is a package manager that is both cross-platform and language agnostic
 minimal self contained Python installation, and then use the
 `Conda <https://conda.pydata.org/docs/>`__ command to install additional packages.
 
+
 First you will need `Conda <https://conda.pydata.org/docs/>`__ to be installed and
 downloading and running the `Miniconda
 <https://conda.pydata.org/miniconda.html>`__
 will do this for you. The installer
 `can be found here <https://conda.pydata.org/miniconda.html>`__
 
-The next step is to create a new conda environment. A conda environment is like a
-virtualenv that allows you to specify a specific version of Python and set of libraries.
-Run the following commands from a terminal window::
+Building ``gospl`` environment
+-------------------------------
 
-    conda create -n name_of_my_env python
+The next step consists in downloading the conda environment for :mod:`gospl`.
+A conda environment is like a virtualenv that allows you to specify a specific version of Python and set of libraries.
+This is done by downloading the `conda-env.yml file <https://raw.githubusercontent.com/Geodels/gospl/master/conda-env.yml>`_. To do this you can use the ``curl``::
 
-This will create a minimal environment with only Python installed in it.
+  curl https://raw.githubusercontent.com/Geodels/gospl/master/conda-env.yml --output conda-env.yml
+
+or ``wget`` command::
+
+  wget https://raw.githubusercontent.com/Geodels/gospl/master/conda-env.yml
+
+This will save the file locally under the same name as it was on github: ``conda-env.yml``.
+
+Alternatively you can get it from your preferred web browser by clicking on the following link: `conda-env.yml <https://raw.githubusercontent.com/Geodels/gospl/master/conda-env.yml>`_ and saving it under the following name ``conda-env.yml``.
+
+.. note::
+
+  :mod:`gospl` is not directly packaged as a `Conda <https://conda.pydata.org/docs/>`__ library because some of its dependencies are not available via this installation. The use of the environment file however provides an easy installation approach.
+
+Once the `conda-env.yml <https://raw.githubusercontent.com/Geodels/gospl/master/conda-env.yml>`_ file has been downloaded on your system. The following directives provide a step-by-step guide to create a local conda environment for :mod:`gospl`.
+
+Navigate to the directory containing the `conda-env.yml <https://raw.githubusercontent.com/Geodels/gospl/master/conda-env.yml>`_ file and run the following commands from a terminal window::
+
+    conda env create -f conda-env.yml
+
+This will create an environment with the dependencies and packages required to run :mod:`gospl`.
+
 To put your self inside this environment run::
 
-    source activate name_of_my_env
+    source activate gospl-package
 
 On Windows the command is::
 
-    activate name_of_my_env
-
-The final step required is to install pandas. This can be done with the
-following command::
-
-    conda install pandas
-
-To install a specific pandas version::
-
-    conda install pandas=0.20.3
+    activate gospl-package
 
 To install other packages, IPython for example::
 
@@ -107,8 +106,19 @@ distribution::
 
     conda install anaconda
 
-If you need packages that are available to pip but not conda, then
-install pip, and then use pip to install those packages::
+If you need packages that are available to ``pip`` but not ``conda``, then
+the ``pip`` library is already installed, and can be used to install those packages::
 
-    conda install pip
     pip install django
+
+To remove the environment, in your terminal window or an Anaconda Prompt, run::
+
+    conda remove --name gospl-package --all
+
+
+To verify that the environment was removed, in your terminal window or an Anaconda Prompt, run:
+
+    conda info --envs
+
+
+The ``gospl-package`` package should not be in the list of environment anymore.

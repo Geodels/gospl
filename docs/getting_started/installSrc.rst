@@ -4,146 +4,116 @@
 Installation via Source
 =========================
 
-Python version support
-----------------------
+.. note::
 
-Officially Python 3.7.1 and above, 3.8, and 3.9.
+  Below are some of the main instructions to build :mod:`gospl` from the git source tree. This approach is mainly for experienced users working on a Linux environment. It is highly recommended to use ``docker`` or ``conda``, for quick installation and for package and dependency updates.
 
-
-See the :ref:`contributing guide <contributing>` for complete instructions on building from the git source tree. Further, see :ref:`creating a development environment <contributing.dev_env>` if you wish to create a *pandas* development environment.
-
-Running the test suite
-----------------------
-
-pandas is equipped with an exhaustive set of unit tests, covering about 97% of
-the code base as of this writing. To run it on your machine to verify that
-everything is working (and that you have all of the dependencies, soft and hard,
-installed), make sure you have `pytest
-<https://docs.pytest.org/en/latest/>`__ >= 5.0.1 and `Hypothesis
-<https://hypothesis.readthedocs.io/>`__ >= 3.58, then run:
+MPICH
+-------
 
 ::
 
-    >>> pd.test()
-    running: pytest --skip-slow --skip-network C:\Users\TP\Anaconda3\envs\py36\lib\site-packages\pandas
-    ============================= test session starts =============================
-    platform win32 -- Python 3.6.2, pytest-3.6.0, py-1.4.34, pluggy-0.4.0
-    rootdir: C:\Users\TP\Documents\Python\pandasdev\pandas, inifile: setup.cfg
-    collected 12145 items / 3 skipped
+      mkdir /tmp/mpich-build
+      wget http://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-3.3.tar.gz
+      tar xvzf mpich-3.3.tar.gz
+      cd mpich-3.3
+      ./configure --enable-fast=all,O3 --prefix=/opt/mpich
+      make -j4
+      make install
+      ldconfig
+      cd /tmp
+      rm -fr *
 
-    ..................................................................S......
-    ........S................................................................
-    .........................................................................
+      export MPI_DIR=/opt/mpich
+      export PATH=/opt/mpich/bin:$PATH
 
-    ==================== 12130 passed, 12 skipped in 368.339 seconds =====================
 
-.. _install.dependencies:
+PETSc
+-------
+
+::
+
+      mkdir /tmp/petsc-build
+      wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-3.13.0.tar.gz
+      tar zxf petsc-lite-3.13.0.tar.gz
+      cd petsc-3.13.0
+      ./configure --with-debugging=0 --prefix=/opt/petsc
+                  --COPTFLAGS="-g -O3" --CXXOPTFLAGS="-g -O3" --FOPTFLAGS="-g -O3"
+                  --with-zlib=1
+                  --download-fblaslapack=1
+                  --download-ctetgen=1
+                  --download-triangle=1
+                  --download-hdf5=1
+                  --download-mumps=1
+                  --download-parmetis=1
+                  --download-eigen=1
+                  --download-metis=1
+                  --download-hypre=1
+                  --download-scalapack=1
+                  --download-pragmatic=1
+                  --useThreads=1
+                  --with-shared-libraries
+                  --with-cxx-dialect=C++11
+        make PETSC_DIR=/tmp/petsc-build/petsc-3.13.0 PETSC_ARCH=arch-linux-c-opt all
+        make PETSC_DIR=/tmp/petsc-build/petsc-3.13.0 PETSC_ARCH=arch-linux-c-opt install
+        make PETSC_DIR=/opt/petsc PETSC_ARCH="" check
+        cd /tmp
+        rm -fr *
+        export PETSC_DIR=/opt/petsc
+        export PATH=/opt/petsc/bin:$PATH
+
 
 Dependencies
-------------
+----------------------
 
-================================================================ ==========================
-Package                                                          Minimum supported version
-================================================================ ==========================
-`setuptools <https://setuptools.readthedocs.io/en/latest/>`__    24.2.0
-`NumPy <https://www.numpy.org>`__                                1.16.5
-`python-dateutil <https://dateutil.readthedocs.io/en/stable/>`__ 2.7.3
-`pytz <https://pypi.org/project/pytz/>`__                        2017.3
-================================================================ ==========================
+:mod:`gospl` has many required dependencies. If a
+dependency is not installed, :mod:`gospl` will raise an ``ImportError`` when
+the method/class requiring that dependency is called.
 
-.. _install.recommended_dependencies:
+A dependency ``XXXX`` is installed via the following command in a terminal::
 
-Recommended dependencies
-~~~~~~~~~~~~~~~~~~~~~~~~
+      pip install XXXX
 
-* `numexpr <https://github.com/pydata/numexpr>`__: for accelerating certain numerical operations.
-  ``numexpr`` uses multiple cores as well as smart chunking and caching to achieve large speedups.
-  If installed, must be Version 2.6.8 or higher.
-
-* `bottleneck <https://github.com/pydata/bottleneck>`__: for accelerating certain types of ``nan``
-  evaluations. ``bottleneck`` uses specialized cython routines to achieve large speedups. If installed,
-  must be Version 1.2.1 or higher.
-
-.. note::
-
-   You are highly encouraged to install these libraries, as they provide speed improvements, especially
-   when working with large data sets.
-
-
-.. _install.optional_dependencies:
-
-Optional dependencies
-~~~~~~~~~~~~~~~~~~~~~
-
-Pandas has many optional dependencies that are only used for specific methods.
-For example, :func:`pandas.read_hdf` requires the ``pytables`` package, while
-:meth:`DataFrame.to_markdown` requires the ``tabulate`` package. If the
-optional dependency is not installed, pandas will raise an ``ImportError`` when
-the method requiring that dependency is called.
 
 ========================= ================== =============================================================
 Dependency                Minimum Version    Notes
 ========================= ================== =============================================================
-BeautifulSoup4            4.6.0              HTML parser for read_html (see :ref:`note <optional_html>`)
-Jinja2                    2.10               Conditional formatting with DataFrame.style
-PyQt4                                        Clipboard I/O
-PyQt5                                        Clipboard I/O
-PyTables                  3.4.4              HDF5-based reading / writing
-SQLAlchemy                1.2.8              SQL support for databases other than sqlite
-SciPy                     1.12.0             Miscellaneous statistical functions
-xlsxwriter                1.0.2              Excel writing
-blosc                     1.14.3             Compression for HDF5
-fsspec                    0.7.4              Handling files aside from local and HTTP
-fastparquet               0.3.2              Parquet reading / writing
-gcsfs                     0.6.0              Google Cloud Storage access
-html5lib                  1.0.1              HTML parser for read_html (see :ref:`note <optional_html>`)
-lxml                      4.3.0              HTML parser for read_html (see :ref:`note <optional_html>`)
-matplotlib                2.2.3              Visualization
-numba                     0.46.0             Alternative execution engine for rolling operations
-openpyxl                  2.6.0              Reading / writing for xlsx files
-pandas-gbq                0.12.0             Google Big Query access
-psycopg2                  2.7                PostgreSQL engine for sqlalchemy
-pyarrow                   0.15.0             Parquet, ORC, and feather reading / writing
-pymysql                   0.7.11             MySQL engine for sqlalchemy
-pyreadstat                                   SPSS files (.sav) reading
-pytables                  3.4.4              HDF5 reading / writing
-pyxlsb                    1.0.6              Reading for xlsb files
-qtpy                                         Clipboard I/O
-s3fs                      0.4.0              Amazon S3 access
-tabulate                  0.8.3              Printing in Markdown-friendly format (see `tabulate`_)
-xarray                    0.12.0             pandas-like API for N-dimensional data
-xclip                                        Clipboard I/O on linux
-xlrd                      1.2.0              Excel reading
-xlwt                      1.3.0              Excel writing
-xsel                                         Clipboard I/O on linux
-zlib                                         Compression for HDF5
+NumPy                     1.19.2             Numerical computing tools.
+SciPy                     1.5.2              Optimization, linear algebra, integration, interpolation
+Cython                    0.29.21            Superset of the Python programming language
+mpi4py                    3.0.3              Bindings for the Message Passing Interface standard
+petsc4py                  3.13.0             Interface to PETSc libraries
+h5py                      2.10.0             Interface to the HDF5 binary data format
+pandas                    1.1.2              Data analysis and manipulation tool
+ruamel.yaml               0.16.12            Parsing YAML to Python objects
+fastfunc                  0.2.3              Fast NumPy's own ufunc operations
+meshio                    4.2.2              I/O for mesh files.
+meshplex                  0.13.3             Fast tools for simplex meshes
+pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
+vtk                       8.1.2              Toolkit for 3D computer graphics and image processing
+numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
+scikit-fuzzy              0.4.2              c=Collection of fuzzy logic algorithms for the SciPy Stack
 ========================= ================== =============================================================
 
-.. _optional_html:
 
-Optional dependencies for parsing HTML
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-One of the following combinations of libraries is needed to use the
-top-level :func:`~pandas.read_html` function:
+Setup install
+----------------------
 
-* `BeautifulSoup4`_ and `html5lib`_
-* `BeautifulSoup4`_ and `lxml`_
-* `BeautifulSoup4`_ and `html5lib`_ and `lxml`_
-* Only `lxml`_, although see :ref:`HTML Table Parsing <io.html.gotchas>`
-  for reasons as to why you should probably **not** take this approach.
+Once all the listed dependencies above have been installed, :mod:`gospl`
+source files are available through `GitHub <https://github.com/Geodels/gospl>`_::
 
-.. warning::
+      git clone https://github.com/Geodels/gospl
 
-    * if you install `BeautifulSoup4`_ you must install either
-      `lxml`_ or `html5lib`_ or both.
-      :func:`~pandas.read_html` will **not** work with *only*
-      `BeautifulSoup4`_ installed.
-    * You are highly encouraged to read :ref:`HTML Table Parsing gotchas <io.html.gotchas>`.
-      It explains issues surrounding the installation and
-      usage of the above three libraries.
+It can then be installed locally on your system using::
 
-.. _html5lib: https://github.com/html5lib/html5lib-python
-.. _BeautifulSoup4: https://www.crummy.com/software/BeautifulSoup
-.. _lxml: https://lxml.de
-.. _tabulate: https://github.com/astanin/python-tabulate
+      python setup.py install --user
+
+If you wish to uninstall **gospl** you can do::
+
+      python3 setup.py install --record gospl-files.txt
+
+To record a list of installed files in ``gospl-files.txt``. Once you want to uninstall you can
+use ``xargs`` to proceed with the uninstall::
+
+      xargs rm -rf < gospl-files.txt

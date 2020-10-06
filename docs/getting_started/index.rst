@@ -4,6 +4,15 @@
 Getting started
 ===============
 
+
+Python version support
+----------------------
+
+Officially Python 3.7.1 and above, 3.8, and 3.9.
+
+Installation instructions
+-------------------------
+
 The easiest way to start using :mod:`gospl` is to install it as part of the
 `Docker <https://hub.docker.com/r/geodels/gospl>`__ distribution, a cross platform
 distribution for data analysis and scientific computing. This is the recommended
@@ -33,7 +42,7 @@ Instructions for installing from PyPI, Anaconda, or source are also provided.
             </div>
             <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
                 <div class="card text-center intro-card shadow">
-                <img src="../_static/Conda_logo.svg" class="card-img-top" alt="SQL logo" height="32">
+                <img src="../_static/Conda_logo.svg" class="card-img-top" alt="Conda logo" height="42">
                 <div class="card-body flex-fill">
                     <p class="card-text">For <code>Anaconda</code> users, an environment with specific collection of conda packages and <code>gospl</code> dependencies is available.</p>
 
@@ -48,16 +57,13 @@ Instructions for installing from PyPI, Anaconda, or source are also provided.
                 </div>
                 <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
                     <div class="card text-center intro-card shadow">
-                    <img src="../_static/PyPI_logo.svg" class="card-img-top" alt="STATA logo" height="62">
+                    <img src="../_static/PyPI_logo.svg" class="card-img-top" alt="PyPI logo" height="52">
                     <div class="card-body flex-fill">
-                        <p class="card-text">The <code>data set</code> included in the
-                            <a href="https://en.wikipedia.org/wiki/Stata">STATA</a> statistical software suite corresponds
-                            to the pandas <code>dataframe</code>. Many of the operations known from STATA have an equivalent
-                            in pandas.</p>
+                        <p class="card-text">For Linux user we provide a step-by-step guide on how to install <code>gospl</code> and its dependencies using <code>PyPI</code>.</p>
 
 .. container:: custom-button
 
-    :ref:`Learn more <_installPypi>`
+    :ref:`Learn more <installPypi>`
 
 .. raw:: html
 
@@ -66,16 +72,13 @@ Instructions for installing from PyPI, Anaconda, or source are also provided.
                 </div>
                 <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
                     <div class="card text-center intro-card shadow">
-                    <img src="../_static/Python_logo.svg" class="card-img-top" alt="SAS logo" height="52">
+                    <img src="../_static/Python_logo.svg" class="card-img-top" alt="Python logo" height="52">
                     <div class="card-body flex-fill">
-                        <p class="card-text">The  <a href="https://en.wikipedia.org/wiki/SAS_(software)">SAS</a> statistical software suite
-                            also provides the <code>data set</code> corresponding to the pandas <code>dataframe</code>.
-                            Also SAS vectorized operations, filtering, string processing operations, and more have similar
-                            functions in pandas.</p>
+                        <p class="card-text"><code>gospl</code> can also be installed directly from source but this requires installation of all other dependencies.</p>
 
 .. container:: custom-button
 
-    :ref:`Learn more <_installSrc>`
+    :ref:`Learn more <installSrc>`
 
 .. raw:: html
 
