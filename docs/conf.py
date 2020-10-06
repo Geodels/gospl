@@ -115,7 +115,6 @@ html_logo = "images/logo.png"
 html_theme_options = {
     "github_url": "https://github.com/Geodels/gospl",
     "search_bar_text": "Search GOSPL docs ...",
-    "show_toc_level": 3,
 }
 # html_theme_options = {
 #     "logo_only": True,

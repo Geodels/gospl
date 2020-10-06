@@ -842,8 +842,7 @@ class UnstMesh(object):
         The advection proceeds in each partition seprately in the following way:
 
         1. based on the horizontal displacement velocities, the mesh coordinates and associated variables (cumulative erosion deposition and stratigraphic layers composition) are moved.
-        2. a kdtree is built with the advected coordinates and used to interpolate the mesh variables
-        on the initial local mesh position. The interpolation is based on a weighting distance function accounting for the 3 closest advected vertices.
+        2. a kdtree is built with the advected coordinates and used to interpolate the mesh variables on the initial local mesh position. The interpolation is based on a weighting distance function accounting for the 3 closest advected vertices.
         3. interpolated variables on the initial mesh coordinates are then stored in PETSc vectors and class parameters are updated accordingly.
 
         :arg tectonic: local tectonic rates in 3D
