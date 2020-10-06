@@ -8,6 +8,17 @@ Installation via Source
 
   Below are some of the main instructions to build :mod:`gospl` from the git source tree. This approach is mainly for experienced users working on a Linux environment. It is highly recommended to use ``docker`` or ``conda``, for quick installation and for package and dependency updates.
 
+
+Update System
+--------------
+
+  apt-get update -qq
+  apt-get install -yq --no-install-recommends bash-completion build-essential
+  apt-get install -yq --no-install-recommends python3-minimal python3-dev python3-pip
+  apt-get install -yq --no-install-recommends python3-tk python3-dbg cmake
+  apt-get install -yq --no-install-recommends python3-setuptools wget gfortran
+
+
 MPICH
 -------
 
@@ -94,7 +105,6 @@ vtk                       8.1.2              Toolkit for 3D computer graphics an
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
 scikit-fuzzy              0.4.2              Collection of fuzzy logic algorithms for the SciPy Stack
 ========================= ================== =============================================================
-
 
 
 Setup install
