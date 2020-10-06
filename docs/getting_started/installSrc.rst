@@ -45,9 +45,9 @@ PETSc
 ::
 
       mkdir /tmp/petsc-build
-      wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-3.13.0.tar.gz
-      tar zxf petsc-lite-3.13.0.tar.gz
-      cd petsc-3.13.0
+      wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-3.13.5.tar.gz
+      tar zxf petsc-lite-3.13.5.tar.gz
+      cd petsc-3.13.5
       ./configure --with-debugging=0 --prefix=/opt/petsc
                   --COPTFLAGS="-g -O3" --CXXOPTFLAGS="-g -O3" --FOPTFLAGS="-g -O3"
                   --with-zlib=1
@@ -65,13 +65,13 @@ PETSc
                   --useThreads=1
                   --with-shared-libraries
                   --with-cxx-dialect=C++11
-        make PETSC_DIR=/tmp/petsc-build/petsc-3.13.0 PETSC_ARCH=arch-linux-c-opt all
-        make PETSC_DIR=/tmp/petsc-build/petsc-3.13.0 PETSC_ARCH=arch-linux-c-opt install
-        make PETSC_DIR=/opt/petsc PETSC_ARCH="" check
-        cd /tmp
-        rm -fr *
-        export PETSC_DIR=/opt/petsc
-        export PATH=/opt/petsc/bin:$PATH
+      make PETSC_DIR=/tmp/petsc-build/petsc-3.13.5 PETSC_ARCH=arch-linux-c-opt all
+      make PETSC_DIR=/tmp/petsc-build/petsc-3.13.5 PETSC_ARCH=arch-linux-c-opt install
+      make PETSC_DIR=/opt/petsc PETSC_ARCH="" check
+      cd /tmp
+      rm -fr *
+      export PETSC_DIR=/opt/petsc
+      export PATH=/opt/petsc/bin:$PATH
 
 
 Dependencies
