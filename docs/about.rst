@@ -1,8 +1,6 @@
-:notoc:
+.. _about:
 
 .. gospl documentation master file, created by
-
-.. module:: gospl
 
 ********************
 gospl documentation
@@ -111,15 +109,3 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
             </div>
         </div>
     </div>
-
-
-.. toctree::
-    :maxdepth: 3
-    :hidden:
-    :titlesonly:
-
-    About <about>
-    getting_started/index
-    tech_guide/index
-    examples.rst
-    api_ref/index
