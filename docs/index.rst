@@ -102,7 +102,7 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
 
 .. container:: custom-button
 
-    :ref:`To the reference guide<api>`
+    :ref:`To the reference guide<api_ref>`
 
 .. raw:: html
 
@@ -121,4 +121,4 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
     getting_started/index
     tech_guide/index
     examples.rst
-    api.rst
+    api_ref/index

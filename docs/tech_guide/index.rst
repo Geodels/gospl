@@ -9,7 +9,7 @@ The Technical Guide covers the implicit, iterative approaches used to solve the 
 :mod:`gospl` is mostly written in ``Python`` with some functions in ``Fortran`` and takes advantage of ``PETSc`` solvers over parallel computing architectures using ``MPI``.
 
 Further information on any specific method can be obtained in the
-:ref:`api`.
+:ref:`api_ref`.
 
 
 .. raw:: html
