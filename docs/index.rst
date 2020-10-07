@@ -112,7 +112,6 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
         </div>
     </div>
 
-
 .. toctree::
     :maxdepth: 3
     :hidden:

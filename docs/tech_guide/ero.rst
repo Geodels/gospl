@@ -120,9 +120,9 @@ The above system is **implicit** and the matrix is **sparse**. The `SciPy <https
 
 
 .. figure:: ../images/ero.png
-   :align: center
+  :align: center
 
-   Flow accumulation patterns and associated erosion based on a radially symmetric surface defined with a central, high region and a series of distal low-lying valleys. Resulting topography after 100,000 years of evolution under uniform precipitation for the multiple flow direction algorithms. Patterns of flow accumulation after 20,000 and 50,000 years are presented as well as estimated landscape erosion at the end of the simulation time.
+  Flow accumulation patterns and associated erosion based on a radially symmetric surface defined with a central, high region and a series of distal low-lying valleys. Resulting topography after 100,000 years of evolution under uniform precipitation for the multiple flow direction algorithms. Patterns of flow accumulation after 20,000 and 50,000 years are presented as well as estimated landscape erosion at the end of the simulation time.
 
 
 
