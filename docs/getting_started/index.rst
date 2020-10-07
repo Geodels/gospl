@@ -72,7 +72,7 @@ Instructions for installing from PyPI, Anaconda, or source are also provided.
                 </div>
                 <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
                     <div class="card text-center intro-card shadow">
-                    <img src="../_static/Python_logo.svg" class="card-img-top" alt="Python logo" height="52">
+                    <img src="../_static/Pythonlogo.svg" class="card-img-top" alt="Python logo" height="52">
                     <div class="card-body flex-fill">
                         <p class="card-text"><code>gospl</code> can also be installed directly from source but this requires installation of all other dependencies.</p>
 

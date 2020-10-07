@@ -6,6 +6,11 @@ Technical Guide
 
 The Technical Guide covers the implicit, iterative approaches used to solve the multiple flow direction water routing and the erosion deposition processes main algorithms implemented in :mod:`gospl`.
 
+:mod:`gospl` is mostly written in ``Python`` with some functions in ``Fortran`` and takes advantage of ``PETSc`` solvers over parallel computing architectures using ``MPI``.
+
+Further information on any specific method can be obtained in the
+:ref:`api`.
+
 
 .. raw:: html
 
@@ -27,12 +32,6 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
     </div>
 
 
-
-
-:mod:`gospl` is mostly written in ``Python`` with some functions in ``Fortran`` and takes advantage of ``PETSc`` solvers over parallel computing architectures using ``MPI``.
-
-Further information on any specific method can be obtained in the
-:ref:`api`.
 
 
 .. raw:: html
