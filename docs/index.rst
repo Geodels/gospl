@@ -103,5 +103,6 @@ gospl documentation
     :titlesonly:
 
     getting_started/index
+    tech_guide/index
     examples.rst
     api.rst
