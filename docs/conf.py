@@ -71,7 +71,6 @@ extensions = [
     "sphinx.ext.todo",
     "IPython.sphinxext.ipython_directive",
     "IPython.sphinxext.ipython_console_highlighting",
-    "matplotlib.sphinxext.plot_directive",
     "sphinx.ext.intersphinx",
     "sphinx.ext.coverage",
     "sphinx.ext.mathjax",
