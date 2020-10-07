@@ -18,7 +18,23 @@ gospl documentation
 `Q&A Support <https://stackoverflow.com/questions/tagged/gospl>`__ |
 `Mailing List <https://groups.google.com/forum/#!forum/gospl>`__
 
+
 :mod:`gospl` is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale.
+
+
+.. raw:: html
+
+    <div class="shadow gs-callout gs-callout-need">
+        <h4>Statement of need</h4>
+
+Since the '90s, many software have been designed to estimate long-term catchment dynamic, drainage evolution as well as sedimentary basins formation  in response to various mechanisms such as tectonic or climatic forcing. These models rely on a set of mathematical and physical expressions that simulate sediment erosion, transport and deposition and can reproduce the first order complexity of Earth's surface geomorphological evolution.
+
+Yet, we were still missing a tool to evaluate **global scale** evolution of Earth surface and its interaction with the atmosphere, the hydrosphere, the tectonic and mantle dynamics. :mod:`gospl` is the first model designed to address this gap. It can be used to better characterise many aspects of the Earth system ranging from the role of atmospheric circulation on physical denudation, from the influence of erosion and deposition of sediments on mantle convection, from the location and abundance of natural resources to the evolution of life.
+
+.. raw:: html
+
+    </div>
+
 
 .. raw:: html
 
@@ -106,3 +122,10 @@ gospl documentation
     tech_guide/index
     examples.rst
     api.rst
+
+
+
+License
+-------
+
+.. literalinclude:: LICENSESHORT

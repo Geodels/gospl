@@ -64,6 +64,15 @@
 .gs-callout-remember h4 {
   color: #f0ad4e;
 }
+.gs-callout-need {
+  border-left-color: #8a13df;
+  align-items: center;
+  font-size: 1.rem;
+}
+.gs-callout-need h4 {
+  color: #8a13df;
+}
+
 
 /* reference to user guide */
 .gs-torefguide {
