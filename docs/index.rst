@@ -122,10 +122,3 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
     tech_guide/index
     examples.rst
     api.rst
-
-
-
-License
--------
-
-.. literalinclude:: LICENSESHORT
