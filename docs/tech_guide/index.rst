@@ -60,16 +60,16 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
-                    In-depth instructions?
+                    Erosion rate and sediment flux
                 </div>
                 <div class="card-body">
-                    <p class="card-text">Installing a specific version?
-                      Installing from source?
-                      Check the advanced installation page.</p>
+                    <p class="card-text">Based on the stream power law
+                      (SPL), river erosion depends on local slope,
+                      discharge and erodibility coefficient.</p>
 
 .. container:: custom-button
 
-    :ref:`Learn more <flow>`
+    :ref:`Learn more <ero>`
 
 .. raw:: html
 
@@ -86,3 +86,4 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
     :hidden:
 
     flow
+    ero
