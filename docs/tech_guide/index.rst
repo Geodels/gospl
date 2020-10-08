@@ -40,7 +40,7 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
         <div class="row">
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
-                <div class="card-header">
+                <div class="card-header2">
                     River flow implementation
                 </div>
                 <div class="card-body">
@@ -59,7 +59,7 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
             </div>
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
-                <div class="card-header">
+                <div class="card-header2">
                     Erosion rate and sediment flux
                 </div>
                 <div class="card-body">
@@ -70,6 +70,62 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
 .. container:: custom-button
 
     :ref:`Learn more <ero>`
+
+.. raw:: html
+
+                </div>
+                </div>
+            </div>
+            <div class="col-12 d-flex install-block">
+                <div class="card install-card shadow w-100">
+                <div class="card-header2">
+                    Inland depressions & deposition
+                </div>
+                <div class="card-body">
+                    <p class="card-text">Computes the evolution in
+                    internally drained basins using a priority-flood
+                    algorithm.</p>
+
+.. container:: custom-button
+
+    :ref:`Learn more <dep>`
+
+.. raw:: html
+
+                </div>
+                </div>
+            </div>
+            <div class="col-12 d-flex install-block">
+                <div class="card install-card shadow w-100">
+                <div class="card-header2">
+                    Hillslope and marine deposition
+                </div>
+                <div class="card-body">
+                    <p class="card-text">Change in elevation induced by creep
+                    law and transport of river sediment in the marine realm based on diffusion equations.</p>
+
+.. container:: custom-button
+
+    :ref:`Learn more <hill>`
+
+.. raw:: html
+
+                </div>
+                </div>
+            </div>
+            <div class="col-12 d-flex install-block">
+                <div class="card install-card shadow w-100">
+                <div class="card-header2">
+                    Stratigraphy and compaction
+                </div>
+                <div class="card-body">
+                    <p class="card-text">Record stratigraphic layers through
+                    time, track two sediment types and compute porosity
+                    changes induced by deposition.</p>
+
+.. container:: custom-button
+
+    :ref:`Learn more <strat>`
 
 .. raw:: html
 
@@ -88,5 +144,5 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
     flow
     ero
     dep
-    mar
     hill
+    strat

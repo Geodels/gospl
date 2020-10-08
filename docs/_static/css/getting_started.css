@@ -169,6 +169,16 @@ ul.task-bullet > li > p:first-child {
   padding: 1rem 1rem 0rem 1rem;
 }
 
+
+.install-card .card-header2 {
+  border: none;
+  background-color:white;
+  color: #8a13df;
+  font-size: 1.1rem;
+  font-weight: bold;
+  padding: 1rem 1rem 0rem 1rem;
+}
+
 .install-card .card-footer {
   border: none;
   background-color:white;

@@ -1,9 +1,8 @@
 .. _hill:
 
-====================================
-Hillslope processes and stratigraphy
-====================================
-
+==============================================
+Hillslope and marine deposition
+==============================================
 
 Hillslope: soil creep
 -----------------------
@@ -20,14 +19,14 @@ where :math:`\mathrm{q_{ds}}` is the volumetric soil flux of transportable sedim
 
 .. math::
 
-  \mathrm{\frac{\partial \eta}{\partial t}} = \mathrm{D \Delta \eta}
+  \mathrm{\frac{\partial \eta}{\partial t}} = \mathrm{D \nabla^2 \eta}
 
 
 in which :math:`\mathrm{D}` is the diffusion coefficient that encapsulates a variety of processes operating on the superficial soil layer. As an example, :math:`\mathrm{D}` may vary as a function of substrate, lithology, soil depth, climate and biological activity.
 
 In :mod:`gospl`, hillslope processes rely on this approximation even though field evidence suggest that the creep approximation is only rarely appropriate.
 
-For a discrete element, considering a node :math:`\mathrm{i}` the implicit finite volume representation of  the above equation is:
+For a discrete element, considering a node :math:`\mathrm{i}` the implicit finite volume representation of the above equation is:
 
 .. math::
 
@@ -46,15 +45,24 @@ where :math:`\mathrm{\mathbf Q}` is sparse. The matrix terms  only depend on the
 
 In :mod:`gospl`, these parameters remain fixed  during a model run and therefore :math:`\mathrm{\mathbf Q}` needs to be created only once at initialisation. At each iteration, hillslope induced changes in elevation :math:`\mathrm{\boldsymbol \eta}` are then obtained in a similar way as for the solution of the other systems using `PETSc <https://www.mcs.anl.gov/petsc/>`_ *Richardson solver* and *block Jacobi* preconditioning.
 
+Marine deposition
+--------------------
 
-Stratigraphy evolution
--------------------------
+In the marine realm, a diffusion model is used for sediment-transport by rivers. When the dual lithology is activated, :mod:`gospl`  accounts for distinct transport coefficients for the two different grain sizes.
 
-
-Dual-lithology cases
-^^^^^^^^^^^^^^^^^^^^^
-
+Sediment transport is modelled through a diffusion equation, similar to that used for hillslopes (see above). The rate of elevation change in the marine environment is governed by:
 
 
-Porosity and compaction
-^^^^^^^^^^^^^^^^^^^^^^^^
+.. math::
+
+
+  \mathrm{\frac{\partial \eta}{\partial t}} = \mathrm{K_M \nabla^2 \eta} + Q_{sr}
+
+
+where :math:`\mathrm{K_M}` is the marine sediment transport coefficient (m2/yr), and :math:`\mathrm{Q_{sr}}` is the sediment flux coming at the river mouth. As the model progresses over time so does the shoreline position due to both offshore sedimentation and prescribed eustatic sea-level variations.
+
+As already mentioned, the distinct transport efficiency of different grain sizes is included in our algorithm for marine sediment transport and deposition by distinct transport coefficients, :math:`\mathrm{K_{M1}}` and :math:`\mathrm{K_{M2}}` for coarse and fine sediments, respectively. :mod:`gospl` considers that these transport coefficients are uniform in space and in time. When using equation above, :math:`\mathrm{Q_{sr}}` is divided in two components :math:`\mathrm{Q_{sr1}}` and :math:`\mathrm{Q_{sr2}}` which are the fully uncompacted flux of coarse and fine coming from the continental domain of the model, available for transport and deposition.
+
+During a single time step, marine sediment transport is performed until all available sediment transported by rivers to the ocean have been diffused and the accumulations on these specific nodes remains below water depth or below a prescribed slope computed based on local water depth and distance to the nearest coastline.
+
+Like for inland deposition, the coarser sediments are deposited first, followed by the finer ones. It allows for finer sediments to be deposited further and reproduce the standard behaviour observed in stratigraphic architectures. The implicit finite volume approach already presented above is implemented and the solution for elevation changes are obtained in a similar fashion as for the solution of the other matrix systems using `PETSc <https://www.mcs.anl.gov/petsc/>`_ *Richardson solver* and *block Jacobi* preconditioning.
