@@ -38,6 +38,12 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
 
     </div>
 
+
+
+Quick links to the Doc
+------------------------
+
+
 .. raw:: html
 
     <div class="container">
@@ -114,6 +120,52 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
         </div>
     </div>
 
+
+
+Citing
+------
+
+To cite ``gospl`` please use following `software paper <https://doi.org/10.21105/joss.XXXXX>`__
+published in the JOSS.
+
+Salles et al. (2020) ’gospl: Global Scalable Paleo Landscape Evolution’, Journal of Open
+Source Software, X(XX), p. XXXX. doi: 10.21105/joss.XXXXX.
+
+BibTeX::
+
+    @article{salles_2020,
+        author={Salles, Tristan and Mallard, Claire and Zahirovic, Sabin},
+        title={gospl: Global Scalable Paleo Landscape Evolution},
+        journal={Journal of Open Source Software},
+        year={2020},
+        volume={X},
+        number={XX},
+        pages={XXXXX},
+        DOI={10.21105/joss.XXXXX}
+    }
+
+Contributing to ``gospl``
+--------------------------
+
+Contributions of any kind to ``gospl`` are more than welcome. That does not mean
+new code only, but also improvements of documentation and user guide, additional
+tests (ideally filling the gaps in existing suite) or bug report or idea what
+could be added or done better.
+
+All contributions should go through our GitHub repository. Bug reports, ideas or
+even questions should be raised by opening an issue on the GitHub tracker.
+Suggestions for changes in code or documentation should be submitted as a pull
+request. However, if you are not sure what to do, feel free to open an issue.
+All discussion will then take place on GitHub to keep the development of ``gospl``
+transparent.
+
+If you decide to contribute to the codebase, ensure that you are using an
+up-to-date ``master`` branch. The latest development version will always be there,
+including the documentation (powered by ``sphinx``).
+
+Details are available in the :doc:`contributing guide <contributing>`.
+
+
 .. toctree::
     :maxdepth: 3
     :hidden:
@@ -124,3 +176,4 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
     tech_guide/index
     user_guide/index
     api_ref/index
+    Contributing <contributing>
