@@ -8,7 +8,7 @@ To get started on how to use *gospl*, a series of examples and tutorials is prov
   Be aware that the `Examples`_ folder is quite large as it comes with several global input files...
 
 
-.. image:: images/test.png
+.. image:: ../images/test.png
    :width: 90 %
    :alt: global model
    :align: center

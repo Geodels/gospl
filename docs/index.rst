@@ -80,7 +80,7 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
                 <div class="card text-center intro-card shadow">
                 <img src="_static/index_contribute.svg" class="card-img-top" alt="running gospl action icon" height="52">
                 <div class="card-body flex-fill">
-                    <h5 class="card-title">Hands-on guide</h5>
+                    <h5 class="card-title">User guide</h5>
                     <p class="card-text">Learning how to use <code>gospl</code> by running some pre- and post processing examples available as
                     <a href="https://jupyter.org">Jupyter notebooks</a>.</p>
 
@@ -119,8 +119,8 @@ Yet, we were still missing a tool to evaluate **global scale** evolution of Eart
     :hidden:
     :titlesonly:
 
-    About <about>
+    Home <self>
     getting_started/index
     tech_guide/index
-    examples.rst
+    user_guide/index
     api_ref/index
