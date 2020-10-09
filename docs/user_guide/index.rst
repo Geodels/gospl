@@ -12,5 +12,6 @@ The User Guide in :mod:`gospl`.
 .. toctree::
     :maxdepth: 3
 
-    examples.rst
     inputfile.rst
+    examples.rst
+    HPC.rst

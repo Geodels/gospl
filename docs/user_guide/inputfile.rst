@@ -1,6 +1,6 @@
-#################
-Input file
-#################
+==============================
+Input file parameters
+==============================
 
 
 .. note::
@@ -11,29 +11,49 @@ Input file
 .. role:: yaml(code)
    :language: yaml
 
+
+
 :yaml:`domain`
---------------------
+---------------
+
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseOne">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Initial mesh definition and simulation declaration
+                   </div>
+               </div>
+           </div>
+           <div id="collapseOne" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
 
 .. code:: ipython
 
-  name: Global model from 20 Ma to present
+ name: Global model from 20 Ma to present
 
-  domain:
-      npdata: 'input8/elev20Ma'
-      flowdir: 5
-      fast: False
-      backward: False
-      interp: 1
-      overlap: 1
-      rstep: 25
-      nperodep: 'strat8/erodep20Ma'
-      npstrata: 'strat8/sed20Ma'
+ domain:
+     npdata: 'input8/elev20Ma'
+     flowdir: 5
+     fast: False
+     backward: False
+     interp: 1
+     overlap: 1
+     rstep: 25
+     nperodep: 'strat8/erodep20Ma'
+     npstrata: 'strat8/sed20Ma'
 
-
-:yaml:`domain` defines the initial surface and set several simulation parameters. The following ones are **required**:
+The following parameters are **required**:
 
 a. the initial spherical surface mesh :yaml:`npdata` as well as
-b. the flow direction method to be used :yaml:`flowdir` that takes an integer value between 1 (for SFD) and 6 (for Dinf)
+b. the flow direction method to be used :yaml:`flowdir` that takes an integer value between 1 (for SFD) and 6 (for MFD)
 
 In addition the following optional parameters can be set:
 
@@ -46,13 +66,43 @@ h. to start a simulation using a previous erosion/deposition map use the :yaml:`
 i. to start a simulation using an initial stratigraphic layer use the :yaml:`npstrata` key and specify a file containing for each vertex of the mesh the stratigraphic layer thickness, the percentage of fine lithology inside each layer and the porosities of the coarse and fine sediments (the multi-lithology option is only available for model without horizontal displacement and when the `backward` key is set to `False`).
 
 
-.. important::
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
+
+
+.. warning::
+
   It is worth noting that all the input files require to run a *gospl* simulation must be defined as numpy zip array (**.npz**). This allows to directly and efficiently load the dataset during initialisation. This is specially efficient when running large models.
+
 
 :yaml:`time`
 --------------------
 
-.. code:: yaml
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseTwo">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Setting model temporal evolution
+                   </div>
+               </div>
+           </div>
+           <div id="collapseTwo" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   time:
       start: -20000000.
@@ -62,8 +112,7 @@ i. to start a simulation using an initial stratigraphic layer use the :yaml:`nps
       tec: 1000000.
       strat: 500000.
 
-
-:yaml:`time` is also required and set the model temparal evolution. The following parameters are required:
+:yaml:`time` is also a required component of every input file. The following parameters are needed:
 
 a. :yaml:`start` is the model start time in years,
 b. :yaml:`end` is the model end time in years,
@@ -72,20 +121,49 @@ d. :yaml:`dt` is the model internal time step (the approach in *gospl* uses an i
 e. :yaml:`tec` is the tectonic timestep interval used to update the tectonic meshes and perform the required displacements.
 f. :yaml:`strat` is the stratigraphic timestep interval used to update the stratigraphic record.
 
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
+
+
 .. important::
+
   In cases where the specify :yaml:`dt`, :yaml:`strat` and :yaml:`tec` parameters are greater than :yaml:`tout`, they will automatically be rescaled to match with the output interval. The :yaml:`tec` parameter should be set to similar to the temporal time step used in your reconstruction (usually around 1Ma). This time step is used to perform the horizontal displacements. The vertical displacements are updated for each time step. When turn-on the stratal records will be output at the same time as the output ones, but the file will potentially contain multiple stratigraphic layers per output if :yaml:`strat` is lower than :yaml:`tout`.
+
 
 :yaml:`spl`
 --------------------
 
-.. code:: yaml
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseThree">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Stream Power Law parameters
+                   </div>
+               </div>
+           </div>
+           <div id="collapseThree" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   spl:
       hfill: 100.
       K: 3.e-8
       Ff: 0.2
       d: 0.42
-
 
 This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
@@ -101,13 +179,42 @@ c. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never b
 .. important::
   The fraction of fines that is lost is only for the sediment reaching the coast and not for the sediments deposited in continental regions.
 
-d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following [Murphy16]_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`coeffd` (:math:`d` in the equation) is is a positive exponent that has been estimated from field-based relationships to 0.42.
+d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following `Murphy et al. (2016) <https://doi.org/10.1038/nature17449>`_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`coeffd` (:math:`d` in the equation) is is a positive exponent that has been estimated from field-based relationships to 0.42.
+
+
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
 
 
 :yaml:`diffusion`
 ----------------------
 
-.. code:: yaml
+
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseFour">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Hillslope and marine deposition parameters
+                   </div>
+               </div>
+           </div>
+           <div id="collapseFour" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   diffusion:
       shelfslope: True
@@ -126,25 +233,80 @@ d. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers en
 e. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
 
 
+
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
+
 :yaml:`sea`
 --------------------
 
-.. code:: yaml
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseFive">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Sea-level (eustatic) forcing
+                   </div>
+               </div>
+           </div>
+           <div id="collapseFive" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   sea:
       position: 0.
       curve: 'data/sealevel.csv'
+
 
 The sea-level declaration is defined with 2 optional parameters:
 
 a. the relative sea-level :yaml:`position` in meters (optional),
 b. a sea-level :yaml:`curve` *e.g.* a file containing 2 columns (time and sea-level position).
 
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
 
 :yaml:`tectonic`
 ----------------------
 
-.. code:: yaml
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseSix">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Tectonic forcing parameters
+                   </div>
+               </div>
+           </div>
+           <div id="collapseSix" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   tectonic:
     - start: -20000000.
@@ -166,15 +328,43 @@ b. a sea-level :yaml:`curve` *e.g.* a file containing 2 columns (time and sea-le
 
 Follows the tectonic forcing conditions with a sequence of events defined by a starting time (:yaml:`start`) and either a vertical only forcing (*e.g.* uplift and/or subsidence defined with :yaml:`mapV`) or a fully 3D displacement mesh :yaml:`mapH`. These displacements are set in metres per year.
 
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
 
 .. important::
+
   As mentioned above and for the next key parameter as well, these forcing files are defined as numpy zip array (**.npz**).
 
 
 :yaml:`compaction`
 --------------------
 
-.. code:: yaml
+
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseSeven">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Compaction & porosity variables defintion
+                   </div>
+               </div>
+           </div>
+           <div id="collapseSeven" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   compaction:
       phis: 0.49
@@ -184,17 +374,43 @@ Follows the tectonic forcing conditions with a sequence of events defined by a s
 
 The compaction module is turned-on when a multi-lithology model is ran (_i.e._ the :yaml:`npstrata` key is defined). We assume  different depth-porosity relationships for the 2 considered lithology types, the following parameters are required:
 
-
 a. lithology one (coarser lithology) porosity at the surface :yaml:`phis`,
 b. lithology two (finer lithology) porosity at the surface :yaml:`phif`,
 c. e-folding depth of lithology one (in metres)
 d. e-folding depth of lithology two (in metres)
 
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
+
 
 :yaml:`climate`
 --------------------
 
-.. code:: yaml
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseEight">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Climatic (rainfall) forcing conditions
+                   </div>
+               </div>
+           </div>
+           <div id="collapseEight" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   climate:
     - start: -20000000.
@@ -206,10 +422,39 @@ d. e-folding depth of lithology two (in metres)
 The climatic forcing is defined in a similar fashion as the tectonic one with again a sequence of events by a starting time (:yaml:`start`) and either an uniform rainfall over the entire mesh (:yaml:`uniform`) or with a precipitation mesh :yaml:`map`. The rainfall values have to be in metres per year.
 
 
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
+
+
 :yaml:`forcepaleo`
 -----------------------
 
-.. code:: yaml
+
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseNine">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Forcing paleo-topography definition
+                   </div>
+               </div>
+           </div>
+           <div id="collapseNine" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   forcepaleo:
       dir: 'output-backward'
@@ -221,13 +466,40 @@ a. :yaml:`dir` the directory containing the outputs of the backward model,
 b. :yaml:`steps` the steps from the model outputs that will be used to force the forward model topography.
 
 .. important::
+
   The :yaml:`steps` often correspond to the time where you have a paleotopography dataset that you want to match for example from a Scotese paleotopography map.
 
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
 
 :yaml:`output`
 --------------------
 
-.. code:: yaml
+.. raw:: html
+
+   <div class="container">
+   <div id="accordion" class="shadow tutorial-accordion">
+
+       <div class="card tutorial-card">
+           <div class="card-header collapsed card-link" data-toggle="collapse" data-target="#collapseTen">
+               <div class="d-flex flex-row tutorial-card-header-1">
+                   <div class="d-flex flex-row tutorial-card-header-2">
+                       <button class="btn btn-dark btn-sm"></button>
+                       Output folder definition
+                   </div>
+               </div>
+           </div>
+           <div id="collapseTen" class="collapse" data-parent="#accordion">
+               <div class="card-body">
+
+**Declaration example**:
+
+.. code:: ipython
 
   output:
       dir: 'forward'
@@ -239,11 +511,14 @@ a. :yaml:`dir` gives the output directory name and
 b. the option :yaml:`makedir` gives the ability to delete any existing output folder with the same name (if set to False) or to create a new folder with the given `dir` name plus a number at the end (*e.g.* outputDir_XX if set to True with XX the run number). It allows you to avoid overwriting on top of previous runs.
 
 
+.. raw:: html
+
+               </div>
+           </div>
+       </div>
+    </div>
+    </div>
+
+
 .. _`Paraview`: https://www.paraview.org/download/
 .. _`YAML`: https://circleci.com/blog/what-is-yaml-a-beginner-s-guide/
-.. _`Examples`: https://unisyd-my.sharepoint.com/:f:/g/personal/tristan_salles_sydney_edu_au/En8Wf56W_j9Jmqovx__PicgBczIcUogo6WuR-TVzZMHIMg?e=2pFtqT
-
-.. [Murphy16] Murphy, B., Johnson, J., Gasparini, N. & Sklar, L. S. -
-    Chemical weathering as a mechanism for the climatic control of bedrock river incision. **Nature**, 532, 223–227, `doi:10.1038/nature17449`_, 2016.
-
- .. _`doi:10.1038/nature17449`:  https://doi.org/10.1038/nature17449
