@@ -2,12 +2,18 @@
 HPC script example
 =====================
 
+Installation quick notes
+--------------------------
 
-Follows the installation guide for running :mod:`gospl` on HPC.
+Follows the :ref:`installation guide <installPypi>` for running :mod:`gospl` on HPC.
 
 In most cases, ``MPI``, ``PETSc`` and ``Hdf5`` libraries for ``Python3`` will be installed.
 
 Using ``pip`` you will be able to install the remaining libraries locally (``pip install XXXX --user``).
+
+
+PBS script example
+--------------------------
 
 After installation on HPC, you might be able to submit a job to the queue system using for example:
 
@@ -43,6 +49,10 @@ depend on the HPC service you are using:
   mpirun -np 96 python3 runMinimal.py
 
 
+
+A minimal python file for ``gospl``
+------------------------------------
+
 where the ``runMinimal.py`` file will be of the form:
 
 
@@ -56,3 +66,40 @@ where the ``runMinimal.py`` file will be of the form:
   model = sim(input, True, False)
   model.runProcesses()
   model.destroy()
+
+
+Runtime
+-------------------
+
+Here are some *indicative* wall times for 2 specific resolution ran for a 10 million years simulation:
+
+Case 1
+^^^^^^^
+
+Resolution min:7.6 km, max:10.3 km, mean: 9.1 km
+
+.. csv-table::
+    :header: "Pts number", "CPU number", "Wall time", "CPU nodes"
+    :widths: 25, 20, 25, 15
+
+    10612062, 8, 17:08:58, 1
+    10612062, 16, 08:58:32, 2
+    10612062, 32, 04:57:58, 4
+    10612062, 64, 03:32:15, 6
+    10612062, 128, 02:40:53, 7
+
+
+Case 2
+^^^^^^^
+
+Resolution min:4.8 km, max:7.6 km, mean: 6.0 km
+
+.. csv-table::
+    :header: "Pts number", "CPU number", "Wall time", "CPU nodes"
+    :widths: 25, 20, 25, 15
+
+    17004184, 64, 07:28:41, 4
+    17004184, 96, 06:38:11, 4
+    17004184, 128, 05:29:51, 6
+    17004184, 144, 04:59:49, 6
+    17004184, 168, 03:31:14, 7
