@@ -29,8 +29,8 @@ RUN python3 -m pip install --no-cache-dir \
         panel \
         jupyterlab
 
-RUN jupyter labextension install @jupyter-voila/jupyterlab-preview
-RUN jupyter labextension install @pyviz/jupyterlab_pyviz
+# RUN jupyter labextension install @jupyter-voila/jupyterlab-preview
+# RUN jupyter labextension install @pyviz/jupyterlab_pyviz
 
 # install JIGSAW
 RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
@@ -51,8 +51,8 @@ RUN apt-get update -qq && \
         python3-gdal
 
 
-RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager \
-    jupyter-matplotlib jupyterlab-datawidgets itkwidgets
+#RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager \
+#    jupyter-matplotlib jupyterlab-datawidgets itkwidgets
 
 # install gopspl
 WORKDIR /live/lib
@@ -79,18 +79,22 @@ ENTRYPOINT ["tini", "-g", "--", "start_xvfb.sh"]
 EXPOSE 9999
 
 RUN pip3 install lavavu
+
+RUN pip3 install rise panel
+
+
 # note we use xvfb which to mimic the X display for lavavu
 ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
 
 
 # launch jupyter
-#ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
-#RUN chmod +x /usr/local/bin/run-jupyter.sh
-#ADD bashrc-term /root/.bashrc
-#CMD /usr/local/bin/run-jupyter.sh
+ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
+RUN chmod +x /usr/local/bin/run-jupyter.sh
+ADD bashrc-term /root/.bashrc
+CMD /usr/local/bin/run-jupyter.sh
 
 # launch jupyterlab
-ADD run-jupyterlab.sh /usr/local/bin/run-jupyterlab.sh
-RUN chmod +x /usr/local/bin/run-jupyterlab.sh
-ADD bashrc-term /root/.bashrc
-CMD /usr/local/bin/run-jupyterlab.sh
+#ADD run-jupyterlab.sh /usr/local/bin/run-jupyterlab.sh
+#RUN chmod +x /usr/local/bin/run-jupyterlab.sh
+#ADD bashrc-term /root/.bashrc
+#CMD /usr/local/bin/run-jupyterlab.sh
