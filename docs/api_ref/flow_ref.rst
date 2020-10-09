@@ -1,15 +1,11 @@
 .. _flow_ref:
 
 
-.. automodule:: gospl.flow
-
-.. currentmodule:: gospl.flow
-
 ==============
 Class FAMesh
 ==============
 
-.. autoclass:: FAMesh
+.. autoclass:: flow.flowplex.FAMesh
 
    .. rubric:: Initialise
 
@@ -41,19 +37,19 @@ Class FAMesh
 Public functions
 ---------------------
 
-.. automethod:: FAMesh.flowAccumulation
-.. automethod:: FAMesh.riverIncision
+.. automethod:: flow.flowplex.FAMesh.flowAccumulation
+.. automethod:: flow.flowplex.FAMesh.riverIncision
 
 
 Private functions
 ---------------------
 
-.. automethod:: FAMesh._distanceCoasts
-.. automethod:: FAMesh._buildFlowDirection
-.. automethod:: FAMesh._depressionlessSurface
-.. automethod:: FAMesh._getErosionRate
-.. automethod:: FAMesh._matrixFA
-.. automethod:: FAMesh._matrix_build
-.. automethod:: FAMesh._matrix_build_diag
-.. automethod:: FAMesh._pitInformation
-.. automethod:: FAMesh._solve_KSP
+.. automethod:: flow.flowplex.FAMesh._distanceCoasts
+.. automethod:: flow.flowplex.FAMesh._buildFlowDirection
+.. automethod:: flow.flowplex.FAMesh._depressionlessSurface
+.. automethod:: flow.flowplex.FAMesh._getErosionRate
+.. automethod:: flow.flowplex.FAMesh._matrixFA
+.. automethod:: flow.flowplex.FAMesh._matrix_build
+.. automethod:: flow.flowplex.FAMesh._matrix_build_diag
+.. automethod:: flow.flowplex.FAMesh._pitInformation
+.. automethod:: flow.flowplex.FAMesh._solve_KSP
