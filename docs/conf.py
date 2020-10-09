@@ -14,7 +14,6 @@
 #
 import os
 import sys
-import inspect
 import sphinx_rtd_theme
 
 from mock import Mock as MagicMock
@@ -60,7 +59,6 @@ release = "0.1.8"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "sphinx.ext.viewcode",
     "sphinx.ext.todo",
     "sphinxcontrib.napoleon",
     "sphinx.ext.autodoc",
@@ -75,7 +73,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.coverage",
     "sphinx.ext.ifconfig",
-    # "sphinx.ext.linkcode",
+    "sphinx.ext.linkcode",
     "nbsphinx",
     "sphinx.ext.mathjax",
     "sphinx.ext.doctest",
@@ -321,31 +319,31 @@ nbsphinx_prolog = r"""
 """
 
 
-# def linkcode_resolve(domain, info):
-#     def find_source():
-#         # try to find the file and line number, based on code from numpy:
-#         # https://github.com/numpy/numpy/blob/master/doc/source/conf.py#L286
-#         obj = sys.modules[info["module"]]
-#         for part in info["fullname"].split("."):
-#             obj = getattr(obj, part)
-#         import inspect
-#         import os
-#
-#         fn = inspect.getsourcefile(obj)
-#         filepath = os.path.dirname(__file__)
-#         relpath = "/".join(filepath.split("/")[:-1]) + "/gospl"
-#         fn = os.path.relpath(fn, start=relpath)
-#         source, lineno = inspect.getsourcelines(obj)
-#
-#         return fn, lineno, lineno + len(source) - 1
-#
-#     if domain != "py" or not info["module"]:
-#         return None
-#     try:
-#         filename = "%s#L%d-L%d" % find_source()
-#     except Exception:
-#         filename = info["module"].replace(".", "/") + ".py"
-#     tag = "master" if "+" in release else ("v" + release)
-#     tag = "master"
-#
-#     return "https://github.com/Geodels/gospl/blob/%s/gospl/%s" % (tag, filename)
+def linkcode_resolve(domain, info):
+    def find_source():
+        # try to find the file and line number, based on code from numpy:
+        # https://github.com/numpy/numpy/blob/master/doc/source/conf.py#L286
+        obj = sys.modules[info["module"]]
+        for part in info["fullname"].split("."):
+            obj = getattr(obj, part)
+        import inspect
+        import os
+
+        fn = inspect.getsourcefile(obj)
+        filepath = os.path.dirname(__file__)
+        relpath = "/".join(filepath.split("/")[:-1]) + "/gospl"
+        fn = os.path.relpath(fn, start=relpath)
+        source, lineno = inspect.getsourcelines(obj)
+
+        return fn, lineno, lineno + len(source) - 1
+
+    if domain != "py" or not info["module"]:
+        return None
+    try:
+        filename = "%s#L%d-L%d" % find_source()
+    except Exception:
+        filename = info["module"].replace(".", "/") + ".py"
+    tag = "master" if "+" in release else ("v" + release)
+    tag = "master"
+
+    return "https://github.com/Geodels/gospl/blob/%s/gospl/%s" % (tag, filename)
