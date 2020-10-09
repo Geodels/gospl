@@ -106,7 +106,7 @@ Main classes
 
 .. container:: custom-button
 
-    :ref:`See functions and source code <io_ref>`
+    See :ref:`input <in_ref>` & :ref:`output<out_ref>` functions
 
 .. raw:: html
 
@@ -124,4 +124,5 @@ Main classes
     mesh_ref
     flow_ref
     sed_ref
-    io_ref
+    in_ref
+    out_ref
