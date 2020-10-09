@@ -28,7 +28,7 @@ Main classes
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
-                    Model Class
+                    Class Model
                 </div>
                 <div class="card-body">
                   <p class="card-text"> Instantiates model <code>object</code> and performs <code>surface processes</code> evolution. </p>
@@ -45,7 +45,7 @@ Main classes
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
-                    Mesh Class
+                    Class Mesh
                 </div>
                 <div class="card-body">
                   <p class="card-text"> Defines spherical mesh characteristics and builds <code>PETSc DMPlex</code>. </p>
@@ -63,7 +63,7 @@ Main classes
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
-                    Flow Class
+                    Class Flow
                 </div>
                 <div class="card-body">
                   <p class="card-text"> <code>Flow accumulation</code> computation for global unstructured mesh. </p>
@@ -80,7 +80,7 @@ Main classes
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
-                    Sediment Class
+                    Class Sediment
                 </div>
                 <div class="card-body">
                   <p class="card-text"> Functions related to <code>sediment transport</code> and <code>deposition</code>. </p>
@@ -98,7 +98,7 @@ Main classes
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
-                    Input/Output Classes
+                    Class Input & Class Output
                 </div>
                 <div class="card-body">
                   <p class="card-text"> Input/output methods declaration. </p>
