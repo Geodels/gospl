@@ -427,11 +427,11 @@ class FAMesh(object):
 
         It calls the following *private functions*:
 
-        1. `_depressionlessSurface <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._depressionlessSurface>`_
-        2. `_buildFlowDirection <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._buildFlowDirection>`_
-        3. `_distanceCoasts <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._distanceCoasts>`_
-        4. `_matrixFA <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._matrixFA>`_
-        5. `_solve_KSP <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._solve_KSP>`_
+        1. _depressionlessSurface
+        2. _buildFlowDirection
+        3. _distanceCoasts
+        4. _matrixFA
+        5. _solve_KSP
 
         :arg filled: boolean to turn the filling algorithm
         :arg limit: boolean to turn a limit on the maximum filling value

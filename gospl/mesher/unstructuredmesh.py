@@ -845,6 +845,7 @@ class UnstMesh(object):
         2. a kdtree is built with the advected coordinates and used to interpolate the mesh variables on the initial local mesh position. The interpolation is based on a weighting distance function accounting for the 3 closest advected vertices.
         3. interpolated variables on the initial mesh coordinates are then stored in PETSc vectors and class parameters are updated accordingly.
 
+
         :arg tectonic: local tectonic rates in 3D
         :arg timer: tectonic time step in years
         """

@@ -69,14 +69,23 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.doctest",
     "sphinx.ext.todo",
+    "sphinx.ext.autosummary",
     "IPython.sphinxext.ipython_directive",
     "IPython.sphinxext.ipython_console_highlighting",
     "sphinx.ext.intersphinx",
     "sphinx.ext.coverage",
-    "sphinx.ext.mathjax",
     "sphinx.ext.ifconfig",
+    # "sphinx.ext.linkcode",
     "nbsphinx",
+    "sphinx.ext.mathjax",
+    "sphinx.ext.doctest",
+    "sphinx.ext.intersphinx",
 ]
+
+
+# nbsphinx do not use requirejs (breaks bootstrap)
+nbsphinx_requirejs_path = ""
+
 numfig = True
 
 # Add any paths that contain templates here, relative to this directory.
@@ -286,52 +295,57 @@ def setup(app):
     app.connect("autodoc-skip-member", skip)
 
 
-# based on numpy doc/source/conf.py
+# Generate the API documentation when building
+autosummary_generate = True
+autosummary_imported_members = True
+numpydoc_show_class_members = True
+class_members_toctree = True
+numpydoc_show_inherited_class_members = True
+numpydoc_use_plots = True
+
+
+nbsphinx_prolog = r"""
+{% set docname = env.doc2path(env.docname, base=None) %}
+
+.. only:: html
+
+    .. role:: raw-html(raw)
+        :format: html
+
+    .. note::
+
+        | This page was generated from `{{ docname }}`__.
+        | Interactive online version: :raw-html:`<a href="https://mybinder.org/v2/gh/Geodels/gospl/master?urlpath=lab/tree/docs/{{ docname }}"><img alt="Binder badge" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom"></a>`
+
+        __ https://github.com/Geodels/gospl/blob/master/docs/{{ docname }}
+"""
+
+
 # def linkcode_resolve(domain, info):
-#     """
-#     Determine the URL corresponding to Python object
-#     """
-#     if domain != "py":
-#         return None
-#
-#     modname = info["module"]
-#     fullname = info["fullname"]
-#
-#     submod = sys.modules.get(modname)
-#     if submod is None:
-#         return None
-#
-#     obj = submod
-#     for part in fullname.split("."):
-#         try:
+#     def find_source():
+#         # try to find the file and line number, based on code from numpy:
+#         # https://github.com/numpy/numpy/blob/master/doc/source/conf.py#L286
+#         obj = sys.modules[info["module"]]
+#         for part in info["fullname"].split("."):
 #             obj = getattr(obj, part)
-#         except AttributeError:
-#             return None
+#         import inspect
+#         import os
 #
-#     try:
-#         fn = inspect.getsourcefile(inspect.unwrap(obj))
-#     except TypeError:
-#         fn = None
-#     if not fn:
-#         return None
-#
-#     try:
+#         fn = inspect.getsourcefile(obj)
+#         filepath = os.path.dirname(__file__)
+#         relpath = "/".join(filepath.split("/")[:-1]) + "/gospl"
+#         fn = os.path.relpath(fn, start=relpath)
 #         source, lineno = inspect.getsourcelines(obj)
-#     except OSError:
-#         lineno = None
 #
-#     if lineno:
-#         linespec = f"#L{lineno}-L{lineno + len(source) - 1}"
-#     else:
-#         linespec = ""
+#         return fn, lineno, lineno + len(source) - 1
 #
-#     fn = os.path.relpath(fn, start=os.path.dirname(gospl.__file__))
+#     if domain != "py" or not info["module"]:
+#         return None
+#     try:
+#         filename = "%s#L%d-L%d" % find_source()
+#     except Exception:
+#         filename = info["module"].replace(".", "/") + ".py"
+#     tag = "master" if "+" in release else ("v" + release)
+#     tag = "master"
 #
-#     if "+" in gospl.__version__:
-#         return f"https://github.com/Geodels/gospl/blob/master/gospl/{fn}{linespec}"
-#     else:
-#         return (
-#             f"https://github.com/Geodels/gospl/blob/"
-#             f"master/gospl/{fn}{linespec}"
-#             # f"v{gospl.__version__}/gospl/{fn}{linespec}"
-#         )
+#     return "https://github.com/Geodels/gospl/blob/%s/gospl/%s" % (tag, filename)
