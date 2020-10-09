@@ -1,5 +1,6 @@
 ## gospl / Global Scalable Paleo Landscape Evolution  /
 
+**gospl** is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale.
 
 |    |    |
 | --- | --- |
@@ -7,8 +8,6 @@
 | Latest release | [![Github release](https://img.shields.io/github/release/Geodels/gospl.svg?label=tag&colorB=11ccbb)](https://github.com/Geodels/gospl/releases) [![PyPI version](https://badge.fury.io/py/gospl.svg?colorB=cc77dd)](https://pypi.org/project/gospl)  [![Total alerts](https://img.shields.io/lgtm/alerts/g/Geodels/gospl.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Geodels/gospl/alerts/)  [![Updates](https://pyup.io/repos/github/Geodels/gospl/shield.svg)](https://pyup.io/repos/github/Geodels/gospl/) |
 | Documentation | [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Documentation Status](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/?badge=latest) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)  [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/Geodels/gospl.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Geodels/gospl/context:python)|
 
-
-> **gospl** is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale.
 
 
 ![gospl](docs/images/earth.png "gospl")
@@ -30,10 +29,10 @@ Check out the documentation:
 
 In short, it contains:
 
-1. an overview of the way to install **gospl**,
-2. some technical notes on the underlying physics and implementation,
-3. a user guide with some notebook examples, and
-4. the API references.
+1. an overview of the different ways to **install** the code,
+2. some **technical** notes on the underlying physics and implementation,
+3. an **user guide** with some notebook examples, and
+4. the **API** references.
 
 ## Contributing to gospl
 
