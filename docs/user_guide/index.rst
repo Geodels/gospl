@@ -14,4 +14,5 @@ The User Guide in :mod:`gospl`.
 
     inputfile.rst
     examples.rst
+    DualLithologies
     HPC.rst

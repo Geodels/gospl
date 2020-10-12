@@ -92,7 +92,7 @@ Quick links to the Doc
 
 .. container:: custom-button
 
-    :ref:`To the examples<example>`
+    :ref:`To the user guide<user_guide>`
 
 .. raw:: html
 

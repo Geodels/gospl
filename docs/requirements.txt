@@ -9,3 +9,6 @@ sphinxemoji>=0.1.6
 pydata-sphinx-theme>=0.4.0
 ipython>=7.18.1
 nbsphinx>=0.7.1
+sphinxcontrib.bibtex
+numpydoc>=1.1.0
+myst-parser>=0.12.10

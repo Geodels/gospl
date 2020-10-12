@@ -78,6 +78,9 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
+    # "numpydoc",
+    "myst_parser",
+    "sphinxcontrib.bibtex",
 ]
 
 
@@ -300,6 +303,7 @@ numpydoc_show_class_members = True
 class_members_toctree = True
 numpydoc_show_inherited_class_members = True
 numpydoc_use_plots = True
+myst_update_mathjax = False
 
 
 nbsphinx_prolog = r"""
