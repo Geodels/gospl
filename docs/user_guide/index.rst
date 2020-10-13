@@ -129,13 +129,13 @@ Running the stratigraphic example
 
     dualLithology
 
-Step 4 - Some advanced scripting
+Step 3 - Some advanced scripting
 -----------------------------------
 
 
 
 
-Step 5 - Setting up gospl for HPC
+Step 4 - Setting up gospl for HPC
 -----------------------------------
 
 .. toctree::
