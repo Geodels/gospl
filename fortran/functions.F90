@@ -751,11 +751,11 @@ subroutine ngbglob( nb, ngbIDs )
   implicit none
 
   integer, intent(in) :: nb
-  integer, intent(in) :: ngbIDs(nb, 6)
+  integer, intent(in) :: ngbIDs(nb, 8)
 
   nGlobal = nb
   if(allocated(gnID)) deallocate(gnID)
-  allocate(gnID(nGlobal,6))
+  allocate(gnID(nGlobal,8)) 
   gnID = ngbIDs+1
 
   return

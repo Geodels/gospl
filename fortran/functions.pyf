@@ -125,7 +125,7 @@ python module _fortran
         subroutine ngbglob(nb,ngbid)
             use meshparams
             integer intent(in) :: nb
-            integer dimension(nb,6),intent(in),depend(nb) :: ngbid
+            integer dimension(nb,8),intent(in),depend(nb) :: ngbid
         end subroutine ngbglob
 
         subroutine definetin(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
