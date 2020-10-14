@@ -3,11 +3,8 @@ import sys
 import glob
 import h5py
 import numpy as np
-import pandas as pd
 from scipy import spatial
 import ruamel.yaml as yaml
-from operator import itemgetter
-from scipy.interpolate import interp1d
 from pyevtk.hl import gridToVTK
 from scipy.ndimage import gaussian_filter
 

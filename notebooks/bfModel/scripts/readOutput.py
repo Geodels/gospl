@@ -1,10 +1,8 @@
 import gc
-import sys
 import glob
 import h5py
 import meshio
 import numpy as np
-import pandas as pd
 from scipy import spatial
 import ruamel.yaml as yaml
 

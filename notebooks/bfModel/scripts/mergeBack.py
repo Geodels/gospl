@@ -2,7 +2,6 @@ import re
 import os
 import glob
 import shutil
-import numpy as np
 import ruamel.yaml as yaml
 from shutil import copyfile
 

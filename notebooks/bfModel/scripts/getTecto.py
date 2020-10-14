@@ -1,15 +1,8 @@
-import gc
-import sys
 import glob
 import h5py
 import numpy as np
-import pandas as pd
 import ruamel.yaml as yaml
-from operator import itemgetter
-from scipy.interpolate import interp1d
 from scipy import spatial
-from pyevtk.hl import gridToVTK
-from scipy.ndimage import gaussian_filter
 
 
 class getTecto:
