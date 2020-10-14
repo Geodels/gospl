@@ -287,7 +287,7 @@ class stratal:
         zz = gaussian_filter(zz, sigma)
 
         res = 360.0 / self.nx
-        hscale = 11000.0 * res
+        hscale = 110000.0 * res
         xmax = -1.0e12
         ymax = -1.0e12
 
