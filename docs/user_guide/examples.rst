@@ -15,7 +15,7 @@
                     Example of model realisation
                 </div>
                 <div class="card-body">
-                  <p class="card-text"> Animation of a :mod:`gospl` backward/forward global scale landscape evolution model forced with plate tectonics, paleotopography & paleoclimate over 100 Ma. </p>
+                  <p class="card-text"> Animation of a <code>gospl</code> backward/forward global scale landscape evolution model forced with plate tectonics, paleotopography & paleoclimate over 100 Ma. </p>
 
                 </div>
                 </div>
