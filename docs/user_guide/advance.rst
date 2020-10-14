@@ -14,6 +14,11 @@ Remeshing workflows
 ==============================================
 
 
+The workflows described below are available from the `Github repository <https://github.com/Geodels/gospl/tree/master/notebooks>`_ but you can also directly download them as a **tar** file from `here <https://drive.google.com/file/d/1SvRj27NBF4aA2E8svyniysQtDHuiVNIf/view?usp=sharing>`_ or using the following command in your terminal::
+
+    gdown https://drive.google.com/uc?id=1SvRj27NBF4aA2E8svyniysQtDHuiVNIf
+    tar xvf notebooks.tar
+
 
 1. Initial unstructured mesh generation
 ---------------------------------------

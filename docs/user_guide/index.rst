@@ -158,13 +158,6 @@ Step 3 - Advanced workflows
 This section does not provide any dataset but some of Jupyter notebooks, post-processing functions and scripts that one can use to run and analyse complex paleo-forcing global scale models.
 
 
-.. toctree::
-    :maxdepth: 3
-    :hidden:
-
-    advance
-
-
 .. raw:: html
 
     <div class="container">
@@ -191,6 +184,12 @@ This section does not provide any dataset but some of Jupyter notebooks, post-pr
         </div>
     </div>
 
+
+
+.. toctree::
+    :maxdepth: 3
+
+    advance
 
 Step 4 - Setting up gospl for HPC
 -----------------------------------
