@@ -152,7 +152,7 @@ Running the stratigraphic example
 
     dualLithology
 
-Step 3 - Advanced models
+Step 3 - Advanced workflows
 -----------------------------------
 
 This section does not provide any dataset but some of Jupyter notebooks, post-processing functions and scripts that one can use to run and analyse complex paleo-forcing global scale models.
