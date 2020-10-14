@@ -306,20 +306,22 @@ numpydoc_use_plots = True
 myst_update_mathjax = False
 
 
+# nbsphinx_prolog = r"""
+# {% set docname = env.doc2path(env.docname, base=None) %}
+#
+# .. only:: html
+#
+#     .. role:: raw-html(raw)
+#         :format: html
+#
+#     .. note::
+#
+#         | This page was generated from `{{ docname }}`__.
+#         | Interactive online version: :raw-html:`<a href="https://mybinder.org/v2/gh/Geodels/gospl/binder?urlpath=lab/tree/{{ docname }}"><img alt="Binder badge" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom"></a>`
+#
+#         __ https://github.com/Geodels/gospl/blob/binder/{{ docname }}
+# """
 nbsphinx_prolog = r"""
-{% set docname = env.doc2path(env.docname, base=None) %}
-
-.. only:: html
-
-    .. role:: raw-html(raw)
-        :format: html
-
-    .. note::
-
-        | This page was generated from `{{ docname }}`__.
-        | Interactive online version: :raw-html:`<a href="https://mybinder.org/v2/gh/Geodels/gospl/binder?urlpath=lab/tree/{{ docname }}"><img alt="Binder badge" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom"></a>`
-
-        __ https://github.com/Geodels/gospl/blob/binder/{{ docname }}
 """
 
 
