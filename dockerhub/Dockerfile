@@ -58,7 +58,7 @@ RUN apt-get update -qq && \
 WORKDIR /live/lib
 RUN git clone https://github.com/Geodels/gospl.git   && \
     cd gospl && \
-    export F90=gfortran && \
+    export F90=gfortran  && \
     export PETSC_DIR=/opt/petsc && \
     export PETSC_ARCH=arch-linux-c-opt && \
     python3 setup.py install
