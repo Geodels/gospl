@@ -1,0 +1,96 @@
+name: Global model from 15 Ma to present
+
+domain:
+    npdata: 'input8/elev15Ma'
+    flowdir: 5
+    fast: False
+    backward: False
+    interp: 1
+    overlap: 2
+
+time:
+    start: -15000000.
+    end: 0.
+    tout: 1000000.
+    dt: 1000000.
+    tec: 1000000.
+
+spl:
+    hfill: 100.
+    K: 3.e-8
+    Ff: 0.2
+    d: 0.42
+
+diffusion:
+    shelfslope: True
+    hillslopeKa: 0.02
+    hillslopeKm: 0.2
+    sedK: 1000.
+
+sea:
+    position: 0.
+
+tectonic:
+  - start: -15000000.
+    end: -14000000.
+    mapH: 'input8/disp15Ma'
+  - start: -14000000.
+    end: -13000000.
+    mapH: 'input8/disp14Ma'
+  - start: -13000000.
+    end: -12000000.
+    mapH: 'input8/disp13Ma'
+  - start: -12000000.
+    end: -11000000.
+    mapH: 'input8/disp12Ma'
+  - start: -11000000.
+    end: -10000000.
+    mapH: 'input8/disp11Ma'
+  - start: -10000000.
+    end: -9000000.
+    mapH: 'input8/disp10Ma'
+  - start: -9000000.
+    end: -8000000.
+    mapH: 'input8/disp9Ma'
+  - start: -8000000.
+    end: -7000000.
+    mapH: 'input8/disp8Ma'
+  - start: -7000000.
+    end: -6000000.
+    mapH: 'input8/disp7Ma'
+  - start: -6000000.
+    end: -5000000.
+    mapH: 'input8/disp6Ma'
+  - start: -5000000.
+    end: -4000000.
+    mapH: 'input8/disp5Ma'
+  - start: -4000000.
+    end: -3000000.
+    mapH: 'input8/disp4Ma'
+  - start: -3000000.
+    end: -2000000.
+    mapH: 'input8/disp3Ma'
+  - start: -2000000.
+    end: -1000000.
+    mapH: 'input8/disp2Ma'
+  - start: -1000000.
+    end: 0.
+    mapH: 'input8/disp1Ma'
+
+climate:
+  - start: -15000000.
+    map: ['input8/rain15Ma','r']
+  - start: -10000000.
+    map: ['input8/rain10Ma','r']
+  - start: -5000000.
+    map: ['input8/rain5Ma','r']
+  - start: 0.
+    map: ['input8/rain0Ma','r']
+
+forcepaleo:
+    dir: 'output-backward'
+    steps: [10,5]
+
+output:
+    dir: 'forward'
+    makedir: False

@@ -75,15 +75,29 @@ On Windows the command is::
 
 We will now install some additional libraries. For ``conda``::
 
-    conda install pyvista pyevtk panel gdown
+    conda install pyvista pyevtk panel netCDF4 gdown
 
 or via ``pip``::
 
-    pip install pyvista pyevtk panel gdown
+    pip install pyvista pyevtk panel netCDF4 gdown
 
 
-Meshing library JIGSAW
+Meshing libraries
 ~~~~~~~~~~~~~~~~~~~~~~~~
+
+stripy
+***************
+
+`stripy <https://github.com/underworldcode/stripy>`_ is a Python interface to TRIPACK and STRIPACK Fortran code for (constrained) triangulation in Cartesian coordinates and on a sphere.
+
+
+The library can be installed as a ``pip`` package::
+
+    pip install stripy
+
+
+JIGSAW
+********
 
 `JIGSAW Python <https://github.com/dengwirda/jigsaw-python>`_ is an unstructured mesh generator and tessellation library; designed to generate high-quality triangulations and polyhedral decompositions of general planar, surface and volumetric domains.
 
@@ -112,11 +126,20 @@ The notebooks are available from the `Github repository <https://github.com/Geod
     tar xvf notebooks.tar
 
 
-Running the backward/forward example
+Running the paleo-constrained example
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. toctree::
     :maxdepth: 3
+
+    bfModel
+
+
+The above example is a simpler version (smaller temporal extent and coarse resolution) of the simulation presented :ref:`here <examples>`.
+
+.. toctree::
+    :maxdepth: 3
+    :hidden:
 
     examples.rst
 
@@ -129,9 +152,11 @@ Running the stratigraphic example
 
     dualLithology
 
-Step 3 - Some advanced scripting
+Step 3 - Advanced models
 -----------------------------------
 
+This section provides examples of higher resolution simulations, with some of the
+notebooks, post-processing functions and scripts that one can use to run and analyse global scale models.
 
 
 

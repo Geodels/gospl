@@ -16,7 +16,7 @@ When the stratigraphic record option is turned on in :mod:`gospl`, stratigraphic
 each partition and for each nodes and consist in the following information:
 
 - elevation at time of deposition,
-- thickness of each stratigrapic layer,
+- thickness of each stratigraphic layer,
 - proportion of fine sediment if the dual lithology module is activated,
 - porosity of coarse sediment in each stratigraphic layer computed at centre of each layer, and
 - porosity of fine sediment in each stratigraphic layer computed at centre of each layer.
