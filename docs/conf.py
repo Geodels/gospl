@@ -317,7 +317,7 @@ nbsphinx_prolog = r"""
     .. note::
 
         | This page was generated from `{{ docname }}`__.
-        | The binder version is quite slow due to memory and CPUs limitations...
+        | The binder version is quite slow due to memory and CPUs limitations and provided examples have been slightly simplified...
         | Interactive online version: :raw-html:`<a href="https://mybinder.org/v2/gh/Geodels/gospl/binder?urlpath=tree/{{ docname }}"><img alt="Binder badge" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom"></a>`
 
         __ https://github.com/Geodels/gospl/blob/master/docs/{{ docname }}
