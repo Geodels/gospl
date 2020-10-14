@@ -50,8 +50,8 @@ Considering two consecutive maps, for example a paleo-elevations at 20 Ma and on
 
 The script above will generate the input conditions required to run the surface process model over a 1 Ma time scale. You will need to specify in the ``YAML`` input file:
 
-- `npdata: inputXX/XXMa` where `XX` is the time specified above (set to 20 above). This file contains the mesh information (coordinates, neighbours, cells, elevations)
-- `map: ['inputXX/rainXXMa','r']` which is the paleo-precipitation mapped on the irregular mesh
+- ``npdata: inputXX/XXMa`` where ``XX`` is the time specified above (set to 20 above). This file contains the mesh information (coordinates, neighbours, cells, elevations)
+- ``map: ['inputXX/rainXXMa','r']`` which is the paleo-precipitation mapped on the irregular mesh.
 
 We do not use the displacement map yet. The model is ran with the following command::
 
