@@ -132,7 +132,7 @@ Running the paleo-constrained example
 .. toctree::
     :maxdepth: 3
 
-    bfModel
+    bfModel/bfModel
 
 
 The above example is a simpler version (smaller temporal extent and coarse resolution) of the simulation presented :ref:`here <examples>`.
@@ -150,7 +150,7 @@ Running the stratigraphic example
 .. toctree::
     :maxdepth: 3
 
-    dualLithology
+    dualLith/dualLithology
 
 Step 3 - Advanced workflows
 -----------------------------------
