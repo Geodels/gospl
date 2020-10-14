@@ -317,9 +317,9 @@ nbsphinx_prolog = r"""
     .. note::
 
         | This page was generated from `{{ docname }}`__.
-        | Interactive online version: :raw-html:`<a href="https://mybinder.org/v2/gh/Geodels/gospl/master?urlpath=lab/tree/docs/{{ docname }}"><img alt="Binder badge" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom"></a>`
+        | Interactive online version: :raw-html:`<a href="https://mybinder.org/v2/gh/Geodels/gospl/binder?urlpath=lab/tree/{{ docname }}"><img alt="Binder badge" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom"></a>`
 
-        __ https://github.com/Geodels/gospl/blob/master/docs/{{ docname }}
+        __ https://github.com/Geodels/gospl/blob/binder/{{ docname }}
 """
 
 
