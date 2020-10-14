@@ -141,7 +141,7 @@ The above example is a simpler version (smaller temporal extent and coarse resol
     :maxdepth: 3
     :hidden:
 
-    examples.rst
+    examples
 
 
 Running the stratigraphic example
@@ -155,9 +155,41 @@ Running the stratigraphic example
 Step 3 - Advanced models
 -----------------------------------
 
-This section provides examples of higher resolution simulations, with some of the
-notebooks, post-processing functions and scripts that one can use to run and analyse global scale models.
+This section does not provide any dataset but some of Jupyter notebooks, post-processing functions and scripts that one can use to run and analyse complex paleo-forcing global scale models.
 
+
+.. toctree::
+    :maxdepth: 3
+    :hidden:
+
+    advance
+
+
+.. raw:: html
+
+    <div class="container">
+        <div class="row">
+            <div class="col-12 d-flex install-block">
+                <div class="card install-card shadow w-100">
+                <div class="card-header">
+                    Workflows for backward / forward model on moving mesh
+                </div>
+                <div class="card-body">
+                  <p class="card-text"> A set of scripts and proposed workflows to run
+                  a model with plate motion and surface remeshing conditions. </p>
+
+.. container:: custom-button
+
+    :ref:`Look at the workflows <advance>`
+
+.. raw:: html
+
+                </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
 
 
 Step 4 - Setting up gospl for HPC
