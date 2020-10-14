@@ -107,9 +107,9 @@ class getTecto:
         self.nbPts = len(x)
 
         self.coords = np.zeros((self.nbPts, 3))
-        self.coords[:, 0] = x
-        self.coords[:, 1] = y
-        self.coords[:, 2] = z
+        self.coords[:, 0] = x.ravel()
+        self.coords[:, 1] = y.ravel()
+        self.coords[:, 2] = z.ravel()
 
         self.tree = spatial.cKDTree(self.coords, leafsize=10)
 
