@@ -46,6 +46,7 @@ For example, the commands in this table will install ``MPICH`` from your distrib
 
 Using the ``apt-get`` command. This will likely be done by::
 
+    sudo apt-get update
     sudo apt-get install mpich libmpich-dev libhdf5-mpich-dev
     sudo apt-get install libblas-dev liblapack-dev
     sudo apt-get install libscotchparmetis-dev libmetis-dev
