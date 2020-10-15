@@ -46,9 +46,9 @@ def jigsawMeshScotese(infile, outfile, key="z", res=0.1):
 
     print("Read scotese map (%0.02f seconds)" % (process_time() - t0))
 
-    t0 = process_time()
-    mLon, mLat = np.meshgrid(Lon, Lat, sparse=False, indexing="ij")
-    print("Building Jigsaw interpolation grid (%0.02f seconds)" % (process_time() - t0))
+    # t0 = process_time()
+    # mLon, mLat = np.meshgrid(Lon, Lat, sparse=False, indexing="ij")
+    # print("Building Jigsaw interpolation grid (%0.02f seconds)" % (process_time() - t0))
 
     value = np.round(img.flatten(), 3)
 

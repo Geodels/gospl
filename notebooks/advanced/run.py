@@ -96,7 +96,6 @@ for k in range(len(timeframe)):
     tecto = fac * (backMesh[backstep] - out.z.flatten())
     tecto = ndimage.gaussian_filter(tecto, sigma)
     distances, indices = tree.query(out.lonlat, k=3)
-    onIDs = np.where(distances[:, 0] == 0)[0]
     weights = np.divide(
         1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
     )
@@ -128,9 +127,9 @@ for k in range(len(timeframe)):
     cmd3 = "python3 script/npzMesh.py -t=" + str(it - 1) + " -d=data -s=100,30,15 -i="
     if it > 16:
         cmd3 += model2 + " -n=100 -a=1 -r=20"
-    elif it <= 16 and it > 11:
+    elif it > 11:
         cmd3 += model2 + " -n=100 -a=1 -r=15"
-    elif it <= 11 and it > 6:
+    elif it > 6:
         cmd3 += model2 + " -n=100 -a=1 -r=10"
     else:
         cmd3 += model2 + " -n=100 -a=1 -r=5"

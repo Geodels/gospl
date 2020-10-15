@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from netCDF4 import Dataset
-from scipy import interpolate
 from time import process_time
 from scipy.spatial import cKDTree
 

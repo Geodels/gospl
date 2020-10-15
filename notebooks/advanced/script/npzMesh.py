@@ -18,7 +18,6 @@ import argparse
 
 def buildRegElevationMesh(elev, outfile, key="z"):
 
-    t0 = process_time()
     Lon = np.linspace(-180.0, 180, 3601)
     Lat = np.linspace(-90.0, 90, 1801)
 
@@ -296,7 +295,6 @@ npzed = os.path.join(input_path, "erodep" + str(time) + "Ma")
 tree = cKDTree(mve.lonlat, leafsize=10)
 lonlat = xyz2lonlat2(coords)
 distances, indices = tree.query(lonlat, k=3)
-onIDs = np.where(distances[:, 0] == 0)[0]
 weights = np.divide(
     1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
 )

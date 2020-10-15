@@ -3,7 +3,6 @@ import os
 import glob
 import shutil
 import ruamel.yaml as yaml
-from shutil import copyfile
 
 
 def createOutputDir(output=None, makedir=False):
@@ -193,8 +192,8 @@ def getNodesElems(ndir=None, output=None, cpus=None):
 
     pathfile = ndir + "/xmf/gospl0.xmf"
 
-    def findWholeWord(w):
-        return re.compile(r"\b({0})\b".format(w), flags=re.IGNORECASE).search
+    # def findWholeWord(w):
+    #     return re.compile(r"\b({0})\b".format(w), flags=re.IGNORECASE).search
 
     elems = []
     nodes = []
@@ -221,7 +220,7 @@ def getNodesElems(ndir=None, output=None, cpus=None):
 
     # Copy topology files
     for nn in range(cpus):
-        copyfile(
+        shutil.copyfile(
             ndir + "/h5/topology.p" + str(nn) + ".h5",
             output + "/h5/topology.p" + str(nn) + ".h5",
         )
@@ -277,7 +276,7 @@ def mergeBackModels(inputs=None, output=None):
         for s in range(nbstep):
             k += 1
             for n in range(cpus):
-                copyfile(
+                shutil.copyfile(
                     ndir + "/h5/gospl." + str(s) + ".p" + str(n) + ".h5",
                     output + "/h5/gospl." + str(k) + ".p" + str(n) + ".h5",
                 )
