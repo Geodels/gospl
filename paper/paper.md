@@ -25,7 +25,7 @@ bibliography: paper.bib
 
 # Introduction
 
-The source-to-sink (S2S) concept quantifies the different components of sedimentary systems: from source areas, through dispersal systems, to deposition in a number of sedimentary sinks. When applied to ancient sedimentary systems, it can be used to make inferences or predictions about upstream control, or downstream evolution of paleo-landscapes and stratigraphic record [@Helland:16]. Such concept is of keen interest to Earth system scientists studying the role of atmospheric circulation on physical denudation, the influence of mantle convection on erosion and deposition patterns, the location and abundance of natural resources or the implications of morphological changes and catchments dynamics on the evolution of life.
+The source-to-sink (S2S) concept quantifies the different components of sedimentary systems: from source areas, through dispersal systems, to deposition in a number of sedimentary sinks. When applied to ancient sedimentary systems, it can be used to make inferences or predictions about upstream control, or downstream evolution of paleo-landscapes and stratigraphic record [@Helland:16]. Such a concept is of keen interest to Earth system scientists studying the role of atmospheric circulation on physical denudation, the influence of mantle convection on erosion and deposition patterns, the location and abundance of natural resources or the implications of morphological changes and catchments dynamics on the evolution of life.
 
 # Statement of Need
 
@@ -41,7 +41,7 @@ Yet, we are still missing a tool to evaluate global scale patterns of paleo-Eart
 # Package summary
 
 
-**gospl** is able to simulate global-scale forward model of landscape evolution, dual-lithology (coarse and fine) sediment routing and stratigraphic history forced with deforming plate tectonics, paleotopographies and paleoclimate reconstructions. It relates the complexity of the triggers and responses of sedimentary processes from the complete sediment routing perspective accounting for different scenarii of plate motion, tectonic uplift/subsidence, climate, geodynamic and sedimentary conditions.
+**gospl** is able to simulate global-scale forward models of landscape evolution, dual-lithology (coarse and fine) sediment routing and stratigraphic history forced with deforming plate tectonics, paleotopographies and paleoclimate reconstructions. It relates the complexity of the triggers and responses of sedimentary processes from the complete sediment routing perspective accounting for different scenarii of plate motion, tectonic uplift/subsidence, climate, geodynamic and sedimentary conditions.
 
 The following physical processes are considered:
 - river incision using the stream power law based on a multiple flow direction approach and an implicit parallel implicit drainage area method [@Richardson:14],
@@ -54,9 +54,9 @@ As mentioned previously, **gospl** can be forced with spatially and temporally v
 
 Internally, **gospl** is mostly written in Python and takes advantage of PETSc solvers [@Balay:12] over parallel computing architectures using MPI [@Barney:12]. For a detailed description of the physical processes and implicit numerical scheme implementation, the user is invited to read the technical guide available within the documentation.
 
-Additionally, the documentation contains some workflows and functions that helps, among others, to pre-process netCDF elevation and climate dataset, plate velocity files and to create unstructured spherical mesh used as input for **gospl**.  Outputs are generated as compressed hdf5 files [@hdf5:10] that can be simply visualise as a temporal series in Paraview [@Ahrens:05]. In addition, post-processing scripts are also provided to build the output as VTK [@Schroeder:06] or netCDF files [@Brown:93] and to extract some specific information from the results such as erosion deposition thicknesses, stratigraphic records or river sediment load over time.
+Additionally, the documentation contains some workflows and functions that helps, among others, to pre-process netCDF elevation and climate dataset, plate velocity files and to create an unstructured spherical mesh used as input for **gospl**.  Outputs are generated as compressed hdf5 files [@hdf5:10] that can be simply visualise as a temporal series in ParaView [@Ahrens:05]. In addition, post-processing scripts are also provided to build the output as VTK [@Schroeder:06] or netCDF files [@Brown:93] and to extract some specific information from the results such as erosion deposition thicknesses, stratigraphic records or river sediment load over time.
 
-Finally, we provide different approaches to get you started with **gospl** from Docker containers, to pip or conda. **gospl** depends on several libraries sometimes hard to install locally, so the recommended starting approach is with Docker to ensure compatibility of all dependencies. Eventually, pip and conda are possible considering all dependency requirements are met.
+Finally, we provide different approaches to get you started with **gospl** from Docker containers, to pip or conda. **gospl** depends on several libraries that are sometimes complicated to install locally, so the recommended starting approach is with Docker to ensure compatibility of all dependencies. Eventually, pip and conda are possible considering all dependency requirements are met.
 
 
 
