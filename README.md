@@ -28,7 +28,7 @@ In short, it contains:
 
 1. an overview of the different ways to **install** the code,
 2. some **technical** notes on the underlying physics and implementation,
-3. an **user guide** with some notebook examples, and
+3. a **user guide** with some notebook examples, and
 4. the **API** references.
 
 ## Contributing to gospl
