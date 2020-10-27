@@ -36,7 +36,7 @@ Pulling the image
 Once you have installed Docker on your system, you can ``pull`` the
 `gospl official image <https://hub.docker.com/r/geodels/gospl>`_ as follow::
 
-  docker pull geodels/gospl:petsc-3.13.0
+  docker pull geodels/gospl:v0.2.0
 
 
 You can list all the images available on your system as follow::
@@ -70,7 +70,7 @@ It is also possible to ``ssh`` into the container as follow::
   # Bash
   docker run -it -v my_vol:/live/share \
      --entrypoint /bin/bash  \
-     geodels/gospl:petsc-3.13.0
+     geodels/gospl:v0.2.0
 
 
 You can list the containers currently existing on your machine by running::
