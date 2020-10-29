@@ -1,0 +1,57 @@
+FROM geodels/gospl:latest
+MAINTAINER Tristan Salles
+
+ENV PETSC_DIR=/opt/petsc
+ENV PETSC_ARCH=arch-linux-c-opt
+
+RUN python3 -m pip install --no-cache-dir \
+        geopandas \
+        pycrs \
+        xarray
+
+RUN git clone --depth 50 https://github.com/GenericMappingTools/gmt  && \
+cd gmt && \
+mkdir build && \
+cd build && \
+cmake .. && \
+cmake --build . --target install
+
+RUN python3 -m pip install --no-cache-dir \
+        pygmt \
+        rasterio
+
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+    ghostscript
+
+RUN python3 -m pip install --no-cache-dir \
+        badlands \
+        scikit-image
+
+# setup space for working in
+VOLUME /live/share
+WORKDIR /live
+
+ENV LD_LIBRARY_PATH "$LD_LIBRARY_PATH:/live/lib/:/live/share:/usr/local/lib"
+
+EXPOSE 8888
+COPY start_xvfb.sh /usr/local/sbin/start_xvfb.sh
+RUN chmod a+x /usr/local/sbin/start_xvfb.sh
+
+ENTRYPOINT ["tini", "-g", "--", "start_xvfb.sh"]
+
+EXPOSE 9999
+
+RUN pip3 install lavavu
+
+RUN pip3 install rise panel
+
+
+# note we use xvfb which to mimic the X display for lavavu
+ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
+
+# launch jupyter
+ADD run-jupyter.sh /usr/local/bin/run-jupyter.sh
+RUN chmod +x /usr/local/bin/run-jupyter.sh
+ADD bashrc-bio /root/.bashrc
+CMD /usr/local/bin/run-jupyter.sh
