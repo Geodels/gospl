@@ -124,8 +124,17 @@ def gosplElev(coords, cells, elev, gmesh, visvtk=False):
     Gmesh = meshplex.mesh_tri.MeshTri(coords, cells)
     s = Gmesh.idx_hierarchy.shape
     a = np.sort(Gmesh.idx_hierarchy.reshape(s[0], -1).T)
-    Gmesh.edges = {"nodes": np.unique(a, axis=0)}
-    ngbNbs, ngbID = definegtin(len(coords), Gmesh.cells["nodes"], Gmesh.edges["nodes"])
+
+    if meshplex.__version__ >= "0.1.14":
+        Gmesh.edges = {"points": np.unique(a, axis=0)}
+        ngbNbs, ngbID = definegtin(
+            len(coords), Gmesh.cells["points"], Gmesh.edges["points"]
+        )
+    else:
+        Gmesh.edges = {"nodes": np.unique(a, axis=0)}
+        ngbNbs, ngbID = definegtin(
+            len(coords), Gmesh.cells["nodes"], Gmesh.edges["nodes"]
+        )
 
     np.savez_compressed(gmesh, v=coords, c=cells, n=ngbID[:, :8].astype(int), z=elev)
 
