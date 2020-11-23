@@ -109,7 +109,7 @@ to ensure compatibility of all dependencies::
     conda install numpy pip scipy numpy-indexed cython compilers
     conda install scikit-fuzzy pandas h5py meshio ruamel.yaml
     conda install vtk mpi4py petsc4py
-    pip install fastfunc meshplex
+    pip install fastfunc meshplex==0.13.4
 
 This should install all necessary dependencies.
 

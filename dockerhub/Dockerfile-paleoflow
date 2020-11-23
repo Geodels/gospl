@@ -185,7 +185,7 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     pandas \
     meshio \
     shapely \
-    meshplex \
+    meshplex==0.13.4 \
     ruamel.yaml \
     stripy
 

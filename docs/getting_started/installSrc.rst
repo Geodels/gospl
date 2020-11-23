@@ -99,7 +99,7 @@ pandas                    1.1.2              Data analysis and manipulation tool
 ruamel.yaml               0.16.12            Parsing YAML to Python objects
 fastfunc                  0.2.3              Fast NumPy's own ufunc operations
 meshio                    4.2.2              I/O for mesh files.
-meshplex                  0.13.3             Fast tools for simplex meshes
+meshplex                  0.13.4             Fast tools for simplex meshes
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       8.1.2              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
