@@ -22,10 +22,11 @@ The code is primarily a **parallel global scale landscape evolution model**, bui
 - **river incision** using stream power law,
 - inland **river deposition** in depressions,
 - **marine deposition** at river mouth,
-- **hillslope processes** in both marine and inland areas, and
-- **sediment compaction** as stratigraphic layers geometry and properties change.
+- **hillslope processes** in both marine and inland areas,
+- **sediment compaction** as stratigraphic layers geometry and properties change, and
+- spatially and temporally varying **tectonics** (horizontal and vertical displacements).
 
-It can be forced with spatially and temporally varying tectonics (horizontal and vertical displacements) and climatic forces (temporal and spatial precipitation changes and sea-level fluctuations).
+It can also be forced with varying climatic forces (temporal and spatial precipitation changes and sea-level fluctuations).
 
 .. raw:: html
 
@@ -127,6 +128,26 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
 
     :ref:`Learn more <strat>`
 
+
+.. raw:: html
+
+                </div>
+                </div>
+            </div>
+            <div class="col-12 d-flex install-block">
+                <div class="card install-card shadow w-100">
+                <div class="card-header2">
+                    Tectonic
+                </div>
+                <div class="card-body">
+                    <p class="card-text">Displacements either induced by lithospheric or mantle forcing are
+                    used to move the surface both horizontally and vertically.</p>
+
+.. container:: custom-button
+
+    :ref:`Learn more <tecto>`
+
+
 .. raw:: html
 
                 </div>
@@ -146,3 +167,4 @@ It can be forced with spatially and temporally varying tectonics (horizontal and
     dep
     hill
     strat
+    tecto
