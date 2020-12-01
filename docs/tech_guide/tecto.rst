@@ -48,6 +48,7 @@ In the first one and to avoid remeshing, the initial mesh is assumed to remain f
 
 The second option is much slower as it involves creating a completely new mesh every time the horizontal advection is applied. This new mesh is then used to perform the interpolation strategy presented above. Disregarding the chosen method, the interpolation will always *smooth* the nodes parameters. This second option however allows to use unstructured spherical mesh with refined regions that will retain their resolution as the plates motion is applied. In its current form :mod:`gospl` uses `JIGSAW <https://github.com/dengwirda/jigsaw-python>`_ to perform the refinement based on elevation range. We chose an elevation-based refinement approach with higher resolutions on the terrestrial and shelf domain as our focus is on rivers network, drainage basin reorganisation and deltaic systems representation. An example of the approach used in this case is provided in the User Guide :ref:`Remeshing Workflow <advance>` section.
 
+For regions of diverging or converging lateral movement, the elevation and stratigraphic information are first interpolated based on previous time step, and then uplift and subsidence are applied. In this sense the vertical and horizontal movement of the surface is performed *kinematically* at each time step, and subsequent erosion and deposition occuring on the modified surface lead to an update in elevation and stratigraphy information.
 
 .. note::
 
