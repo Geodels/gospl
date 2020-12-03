@@ -11,7 +11,7 @@ Stream power law
 River incision, associated sediment transport and subsequent deposition are critical elements of landscape evolution models.
 
 In :mod:`gospl`, a detachment-limited approach is implemented. The detachment-limited hypothesis supposes that erosion is not limited by a transport capacity but instead by the ability of rivers to remove material from the bed.
-The sediment erosion rate is expressed using a **stream power** formulation function of river discharge, precipitation and slope.
+The sediment erosion rate is expressed using a **stream power** formulation function of river discharge, precipitation and slope (`Howard et al., 1994 <https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/94JB00744%4010.1002/%28ISSN%292169-9356.TECTOP1>`_).
 
 
 .. note::

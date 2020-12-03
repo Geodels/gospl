@@ -48,7 +48,7 @@ In :mod:`gospl`, these parameters remain fixed  during a model run and therefore
 Marine deposition
 --------------------
 
-In the marine realm, a diffusion model is used for sediment-transport by rivers. When the dual lithology is activated, :mod:`gospl`  accounts for distinct transport coefficients for the two different grain sizes.
+In the marine realm, a diffusion model is used for sediment-transport by rivers. When the dual lithology is activated, :mod:`gospl`  accounts for distinct transport coefficients for the two different grain sizes (`Rivenaes, 1992 <https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1365-2117.1992.tb00136.x>`_).
 
 Sediment transport is modelled through a diffusion equation, similar to that used for hillslopes (see above). The rate of elevation change in the marine environment is governed by:
 
