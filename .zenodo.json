@@ -1,0 +1,23 @@
+{
+    "creators": [
+        {
+            "name": "Tristan Salles",
+            "affiliation": "School of Geosciences, The University of Sydney",
+            "orcid": "0000-0001-6095-7689"
+        },
+        {
+            "name": "Claire Mallard", 
+            "affiliation": "School of Geosciences, The University of Sydney",
+            "orcid": "0000-0003-2595-2414"
+        },      
+        {
+            "name": "Sabin Zahirovic",
+            "affiliation": "School of Geosciences, The University of Sydney",
+            "orcid": "0000-0002-6751-4976"
+        }
+    ],
+    "license": "lgpl-3.0",
+    "title": "gospl: Global Scalable Paleo Landscape Evolution",
+    "upload_type": "software",
+    "access_right": "open"
+}
