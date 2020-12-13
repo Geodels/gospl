@@ -129,7 +129,7 @@ To cite ``gospl`` please use following `software paper <https://doi.org/10.21105
 published in the JOSS.
 
 Salles et al. (2020) ’gospl: Global Scalable Paleo Landscape Evolution’, Journal of Open
-Source Software, X(XX), p. XXXX. doi: 10.21105/joss.XXXXX.
+Source Software, 5(56), p. 2804. doi: 10.21105/joss.02804.
 
 BibTeX::
 
