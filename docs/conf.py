@@ -82,7 +82,7 @@ extensions = [
     "myst_parser",
     "sphinxcontrib.bibtex",
 ]
-
+bibtex_bibfiles = ["refs.bib"]
 
 # nbsphinx do not use requirejs (breaks bootstrap)
 nbsphinx_requirejs_path = ""

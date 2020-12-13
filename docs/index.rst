@@ -138,10 +138,10 @@ BibTeX::
         title={gospl: Global Scalable Paleo Landscape Evolution},
         journal={Journal of Open Source Software},
         year={2020},
-        volume={X},
-        number={XX},
-        pages={XXXXX},
-        DOI={10.21105/joss.XXXXX}
+        volume={5},
+        number={56},
+        pages={2804},
+        DOI={10.21105/joss.02804}
     }
 
 Contributing to ``gospl``
