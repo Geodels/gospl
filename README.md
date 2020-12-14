@@ -12,6 +12,8 @@
 
 ![gospl](docs/images/earth.png "gospl")
 
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.02804/status.svg)](https://doi.org/10.21105/joss.02804)
+
 ## Statement of need
 
 > Since the ’90s, many software have been designed to estimate long-term catchment dynamic, drainage evolution as well as sedimentary basins formation in response to various mechanisms such as tectonic or climatic forcing. These models rely on a set of mathematical and physical expressions that simulates sediment erosion, transport and deposition and can reproduce the first order complexity of Earth’s surface geomorphological evolution.
