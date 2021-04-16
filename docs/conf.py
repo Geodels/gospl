@@ -35,7 +35,7 @@ SingleFileHTMLBuilder.supported_image_types = html_img_types
 # -- Project information -----------------------------------------------------
 
 project = "gospl"
-copyright = "2020, Tristan Salles"
+copyright = '2020-2024, <a href="https://earthcolab.org/#slide-0" target="_blank">EarthCodeLab Group</a>'
 author = "Tristan Salles"
 
 # version = '%s r%s' % (pandas.__version__, svn_version())
@@ -44,9 +44,9 @@ author = "Tristan Salles"
 # release = version
 
 # The short X.Y version
-version = "0.2.1"
+version = "0.2.2"
 # The full version, including alpha/beta/rc tags
-release = "0.2.1"
+release = "0.2.2"
 
 
 # -- General configuration ---------------------------------------------------

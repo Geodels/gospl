@@ -47,16 +47,20 @@ class SEDMesh(object):
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
         if self.stratNb > 0:
-            self.vSedf = self.hGlobal.duplicate()
-            self.vSedfLocal = self.hLocal.duplicate()
+            if self.stratF is not None:
+                self.vSedf = self.hGlobal.duplicate()
+                self.vSedfLocal = self.hLocal.duplicate()
+            if self.stratW is not None:
+                self.vSedw = self.hGlobal.duplicate()
+                self.vSedwLocal = self.hLocal.duplicate()
             if self.carbOn:
                 self.vSedc = self.hGlobal.duplicate()
                 self.vSedcLocal = self.hLocal.duplicate()
         maxnb = np.zeros(1, dtype=np.int)
-        maxnb[0] = setmaxnb(self.npoints)
+        maxnb[0] = setmaxnb(self.lpoints)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, maxnb, op=MPI.MAX)
         self.maxnb = maxnb[0]
-        self.scaleIDs = np.zeros(self.npoints)
+        self.scaleIDs = np.zeros(self.lpoints)
         self.scaleIDs[self.lIDs] = 1.0
 
         return
@@ -84,17 +88,29 @@ class SEDMesh(object):
             # Get the volume of sediment transported in m3 per year
             self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
             # Update local vector
-            self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
+            self.dm.globalToLocal(self.vSed, self.vSedLocal)
 
             # Fine sediment
-            # Get erosion rate (m/yr) to volume
-            self.tmpL.setArray(self.thFine)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-            # Get the volume of sediment transported in m3 per year
-            self._solve_KSP(False, self.wMat, self.tmp, self.vSedf)
-            # Update local vector
-            self.dm.globalToLocal(self.vSedf, self.vSedfLocal, 1)
+            if self.stratF is not None:
+                # Get erosion rate (m/yr) to volume
+                self.tmpL.setArray(self.thFine)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+                # Get the volume of sediment transported in m3 per year
+                self._solve_KSP(False, self.wMat, self.tmp, self.vSedf)
+                # Update local vector
+                self.dm.globalToLocal(self.vSedf, self.vSedfLocal)
+
+            # Weathered sediment
+            if self.stratW is not None:
+                # Get erosion rate (m/yr) to volume
+                self.tmpL.setArray(self.thClay)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+                # Get the volume of sediment transported in m3 per year
+                self._solve_KSP(False, self.wMat, self.tmp, self.vSedw)
+                # Update local vector
+                self.dm.globalToLocal(self.vSedw, self.vSedwLocal)
 
             # Carbonate sediment
             if self.carbOn:
@@ -105,7 +121,7 @@ class SEDMesh(object):
                 # Get the volume of sediment transported in m3 per year
                 self._solve_KSP(False, self.wMat, self.tmp, self.vSedc)
                 # Update local vector
-                self.dm.globalToLocal(self.vSedc, self.vSedcLocal, 1)
+                self.dm.globalToLocal(self.vSedc, self.vSedcLocal)
 
         else:
             # Get erosion rate (m/yr) to volume
@@ -114,7 +130,7 @@ class SEDMesh(object):
             # Get the volume of sediment transported in m3 per year
             self._solve_KSP(False, self.wMat, self.tmp, self.vSed)
             # Update local vector
-            self.dm.globalToLocal(self.vSed, self.vSedLocal, 1)
+            self.dm.globalToLocal(self.vSed, self.vSedLocal)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -137,7 +153,10 @@ class SEDMesh(object):
             self._sedChange(stype=0)
             if self.carbOn:
                 self._sedChange(stype=2)
-            self._sedChange(stype=1)
+            if self.stratF is not None:
+                self._sedChange(stype=1)
+            if self.stratW is not None:
+                self._sedChange(stype=3)
         else:
             self._sedChange(stype=0)
 
@@ -168,13 +187,15 @@ class SEDMesh(object):
         """
 
         # Compute continental sediment deposition
-        self.seaQs = np.zeros(self.npoints, dtype=np.float64)
+        self.seaQs = np.zeros(self.lpoints, dtype=np.float64)
         if stype == 0:
             self.vSedLocal.copy(result=self.QsL)
         elif stype == 1:
             self.vSedfLocal.copy(result=self.QsL)
         elif stype == 2:
             self.vSedcLocal.copy(result=self.QsL)
+        elif stype == 3:
+            self.vSedwLocal.copy(result=self.QsL)
         self.dm.localToGlobal(self.QsL, self.Qs)
 
         perc = 1.0
@@ -209,6 +230,8 @@ class SEDMesh(object):
         if sedK > 0.0:
             if stype == 1:
                 sedK = self.sedimentKf
+            if stype == 3:
+                sedK = self.sedimentKw
             self._marineDeposition(stype, sedK)
 
         # Compute Fuzzy Logic Carbonate Growth
@@ -257,8 +280,8 @@ class SEDMesh(object):
         hl = self.sealevel - self.hLocal.getArray().copy()
 
         # TO DO: this will need to be updated with additional controls...
-        carbH = np.zeros(self.npoints, dtype=np.float64)
-        validIDs = np.ones(self.npoints, dtype=np.int64)
+        carbH = np.zeros(self.lpoints, dtype=np.float64)
+        validIDs = np.ones(self.lpoints, dtype=np.int64)
         for k in range(len(self.carbCtrl.controlKeys)):
             # Accomodation control
             if self.carbCtrl.controlKeys[k] == "depth":
@@ -285,8 +308,8 @@ class SEDMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.cumED.axpy(1.0, self.tmp)
         self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         if self.stratNb > 0:
             # Update carbonate reef content in the stratigraphic layer
@@ -318,7 +341,7 @@ class SEDMesh(object):
             self._solve_KSP(False, self.wMat, self.tmp, self.Qs)
 
         # Update local vector
-        self.dm.globalToLocal(self.Qs, self.QsL, 1)
+        self.dm.globalToLocal(self.Qs, self.QsL)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -354,7 +377,7 @@ class SEDMesh(object):
 
         # Convert in volume (m3) for considered timestep
         # We only consider the nodes that are their own receivers
-        Qs = np.zeros(self.npoints, dtype=np.float64)
+        Qs = np.zeros(self.lpoints, dtype=np.float64)
         Qs[self.pitPts] = tmp[self.pitPts] * self.dt
 
         # To avoid counting twice the volume on the partition
@@ -379,7 +402,7 @@ class SEDMesh(object):
         # Find sediment load originally in a depression which are now
         # able to flow downslope
         ids = np.where(np.logical_and(self.pits[:, 0] == -1, gQ > 0))[0]
-        newgQ = np.zeros(self.gpoints, dtype=np.float64)
+        newgQ = np.zeros(self.mpoints, dtype=np.float64)
         newgQ[ids] = gQ[ids]
         gQ[ids] = 0.0
 
@@ -390,7 +413,7 @@ class SEDMesh(object):
         # Add the excess volume for each pit that needs to be distributed
         excess = np.where(depFill - self.pitVol > 0.0)[0]
         newgQ[self.outFlows[excess]] += depFill[excess] - self.pitVol[excess]
-        newQs = newgQ[self.glIDs]
+        newQs = newgQ[self.locIDs]
 
         # Scale the deposition based on available volume
         with np.errstate(divide="ignore", over="ignore"):
@@ -408,7 +431,7 @@ class SEDMesh(object):
 
         # Deposit sediment in depressions based on the volumetric scaling
         h = self.hLocal.getArray().copy()
-        dep = (self.hFill - h) * scaleV[self.pits[self.glIDs, 0]]
+        dep = (self.hFill - h) * scaleV[self.pits[self.locIDs, 0]]
 
         # Update PETSc vectors
         self.QsL.setArray(newQs / self.dt)
@@ -418,8 +441,8 @@ class SEDMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.cumED.axpy(1.0, self.tmp)
         self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         if self.stratNb > 0:
             self._deposeStrat(stype)
@@ -434,6 +457,43 @@ class SEDMesh(object):
                 % (process_time() - t0),
                 flush=True,
             )
+
+        return
+
+    def _updateMarineDiff(self, nsedK):
+        """
+        The diffusion equation for fluvial related sediment entering the marine
+        realm is increased when specific convergence iteration numbers are reached
+        to speed up underwater accumulation.
+
+        :arg nsedK: sediment diffusion coefficient for river transported sediment in the marine realm
+        """
+
+        # Diffusion matrix construction
+        Cd = np.zeros(self.lpoints, dtype=np.float64)
+        Cd[self.fillSeaID] = nsedK
+
+        diffCoeffs = marinecoeff(self.lpoints, Cd * self.dt)
+        self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+
+        for k in range(0, self.maxnb):
+            tmpMat = self._matrix_build()
+            indices = self.FVmesh_ngbID[:, k].copy()
+            data = diffCoeffs[:, k + 1]
+            ids = np.nonzero(data == 0.0)
+            indices[ids] = ids
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(
+                indptr,
+                indices.astype(petsc4py.PETSc.IntType),
+                data,
+            )
+            tmpMat.assemblyEnd()
+            self.Diff += tmpMat
+            tmpMat.destroy()
+        del ids, indices, indptr, diffCoeffs, Cd
+        gc.collect()
 
         return
 
@@ -459,20 +519,20 @@ class SEDMesh(object):
         # Get the marine volumetric sediment rate (m3 / yr) to diffuse
         # during the time step as suspended material...
         tmp = self.QsL.getArray().copy()
-        Qs = np.zeros(self.npoints, dtype=np.float64)
+        Qs = np.zeros(self.lpoints, dtype=np.float64)
 
         # Convert in volume (m3) for considered timestep
         Qs[self.fillSeaID] = tmp[self.fillSeaID] * self.dt
 
         # Diffusion matrix construction
-        Cd = np.zeros(self.npoints, dtype=np.float64)
+        Cd = np.zeros(self.lpoints, dtype=np.float64)
         Cd[self.fillSeaID] = sedK
 
         # From the distance to coastline define the upper limit
         # of the shelf to ensure a maximum slope angle
         if self.vtkMesh is not None:
-            if stype == 1:
-                toplimit = np.full((self.npoints), 0.9 * self.sealevel)
+            if stype == 3:
+                toplimit = np.full((self.lpoints), 0.9 * self.sealevel)
             else:
                 toplimit = self.sealevel - self.coastDist * 1.0e-4
                 ids = self.coastDist < 2.0 * self.edgeMax
@@ -480,14 +540,14 @@ class SEDMesh(object):
                 ids = self.coastDist < self.edgeMax
                 toplimit[ids] = self.sealevel
         else:
-            toplimit = np.full((self.npoints), 0.9 * self.sealevel)
+            toplimit = np.full((self.lpoints), 0.9 * self.sealevel)
 
         # Define maximum deposition thicknesses and initialise
         # cumulative deposits
         h0 = self.hLocal.getArray().copy()
         maxDep = toplimit - h0
         maxDep[maxDep < 0.0] = 0.0
-        cumDep = np.zeros(self.npoints, dtype=np.float64)
+        cumDep = np.zeros(self.lpoints, dtype=np.float64)
 
         # Build suspended sediment volume per unit area (m) vector
         self.tmpL.setArray(Qs)
@@ -495,9 +555,9 @@ class SEDMesh(object):
         maxSedVol = self.Qs.sum()
         self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
 
-        diffCoeffs = marinecoeff(self.npoints, Cd * self.dt)
+        diffCoeffs = marinecoeff(self.lpoints, Cd * self.dt)
         self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
-        indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
 
         for k in range(0, self.maxnb):
             tmpMat = self._matrix_build()
@@ -510,7 +570,6 @@ class SEDMesh(object):
                 indptr,
                 indices.astype(petsc4py.PETSc.IntType),
                 data,
-                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
             self.Diff += tmpMat
@@ -519,16 +578,20 @@ class SEDMesh(object):
         gc.collect()
 
         iters = 0
+        nsedK = sedK
         remainPerc = 1.0
         while (
-            iters < 500 and remainPerc > max(0.05, self.frac_fine) and maxSedVol > 0.0
+            iters < 1000 and remainPerc > max(0.005, self.frac_fine) and maxSedVol > 0.0
         ):
 
-            # Get erosion values for considered time step
-            self._solve_KSP(False, self.Diff, self.Qs, self.tmp)
+            # Get diffused values for considered time step
+            if iters == 0:
+                self._solve_KSP(False, self.Diff, self.Qs, self.tmp)
+            else:
+                self._solve_KSP(True, self.Diff, self.Qs, self.tmp)
 
             # Find overfilled nodes
-            self.dm.globalToLocal(self.tmp, self.tmpL, 1)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
             dH = self.tmpL.getArray().copy()
             dH[dH < 0] = 0.0
             overDep = dH - maxDep
@@ -556,9 +619,20 @@ class SEDMesh(object):
             self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
 
             iters += 1
-            if iters >= 500 and MPIrank == 0:
+            # Update diffusion coefficient matrix
+            if iters % 100 == 0 and nsedK / sedK < 1.0e4:
+                nsedK = nsedK * 10.0
+                # if MPIrank == 0:
+                #     print(
+                #         "%d, %d, perc: %0.01f nsedK %0.01f sedK: %0.01f"
+                #         % (iters, MPIrank, remainPerc * 100.0, nsedK, sedK),
+                #         flush=True,
+                #     )
+                self._updateMarineDiff(nsedK)
+
+            if iters >= 1000 and MPIrank == 0:
                 print(
-                    "Sediment marine diffusion not converging; decrease time step",
+                    "Sediment marine diffusion not converging; decrease time step or increase sedK",
                     flush=True,
                 )
 
@@ -574,8 +648,8 @@ class SEDMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.cumED.axpy(1.0, self.tmp)
         self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         if self.stratNb > 0:
             self._deposeStrat(stype)
@@ -615,12 +689,12 @@ class SEDMesh(object):
         t0 = process_time()
 
         # Diffusion matrix construction
-        Cd = np.full(self.npoints, self.Cda, dtype=np.float64)
+        Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
         Cd[self.seaID] = self.Cdm
 
-        diffCoeffs = sethillslopecoeff(self.npoints, Cd * self.dt)
+        diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
         self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
-        indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
 
         for k in range(0, self.maxnb):
             tmpMat = self._matrix_build()
@@ -633,7 +707,6 @@ class SEDMesh(object):
                 indptr,
                 indices.astype(petsc4py.PETSc.IntType),
                 data,
-                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
             self.Diff += tmpMat
@@ -648,12 +721,15 @@ class SEDMesh(object):
         # Update cumulative erosion/deposition and elevation
         self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
         self.cumED.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         if self.stratNb > 0:
             self.erodeStrat()
-            self._deposeStrat(1)
+            if self.stratW is not None:
+                self._deposeStrat(3)
+            else:
+                self._deposeStrat(0)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -670,9 +746,12 @@ class SEDMesh(object):
         - thickness of each stratigrapic layer `stratH` accounting for both
           erosion & deposition events.
         - proportion of fine sediment `stratF` contains in each stratigraphic layer.
+        - proportion of weathered sediment `stratW` contains in each stratigraphic layer.
         - porosity of coarse sediment `phiS` in each stratigraphic layer computed at
           center of each layer.
         - porosity of fine sediment `phiF` in each stratigraphic layer computed at
+          center of each layer.
+        - porosity of weathered sediment `phiW` in each stratigraphic layer computed at
           center of each layer.
         - proportion of carbonate sediment `stratC` contains in each stratigraphic layer
           if the carbonate module is turned on.
@@ -685,7 +764,10 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.tmp, self.tmpL)
         depo = self.tmpL.getArray().copy()
         depo[depo < 0] = 0.0
-        fineH = self.stratH[:, self.stratStep] * self.stratF[:, self.stratStep]
+        if self.stratF is not None:
+            fineH = self.stratH[:, self.stratStep] * self.stratF[:, self.stratStep]
+        if self.stratW is not None:
+            clayH = self.stratH[:, self.stratStep] * self.stratW[:, self.stratStep]
         if self.carbOn:
             carbH = self.stratH[:, self.stratStep] * self.stratC[:, self.stratStep]
         self.stratH[:, self.stratStep] += depo
@@ -693,40 +775,34 @@ class SEDMesh(object):
 
         if stype == 0:
             self.phiS[ids, self.stratStep] = self.phi0s
-            self.stratF[ids, self.stratStep] = (
-                fineH[ids] / self.stratH[ids, self.stratStep]
-            )
-            if self.carbOn:
-                self.stratC[ids, self.stratStep] = (
-                    carbH[ids] / self.stratH[ids, self.stratStep]
-                )
-                del carbH
-
         elif stype == 1:
             fineH[ids] += depo[ids]
-            self.stratF[ids, self.stratStep] = (
-                fineH[ids] / self.stratH[ids, self.stratStep]
-            )
             self.phiF[ids, self.stratStep] = self.phi0f
-            if self.carbOn:
-                self.stratC[ids, self.stratStep] = (
-                    carbH[ids] / self.stratH[ids, self.stratStep]
-                )
-                del carbH
-
         elif stype == 2:
+            carbH[ids] += depo[ids]
+            self.phiC[ids, self.stratStep] = self.phi0c
+        elif stype == 3:
+            clayH[ids] += depo[ids]
+            self.phiW[ids, self.stratStep] = self.phi0w
+
+        if self.stratF is not None:
             self.stratF[ids, self.stratStep] = (
                 fineH[ids] / self.stratH[ids, self.stratStep]
             )
-            carbH[ids] += depo[ids]
+            del fineH
+        if self.stratW is not None:
+            self.stratW[ids, self.stratStep] = (
+                clayH[ids] / self.stratH[ids, self.stratStep]
+            )
+            del clayH
+        if self.carbOn:
             self.stratC[ids, self.stratStep] = (
                 carbH[ids] / self.stratH[ids, self.stratStep]
             )
-            self.phiC[ids, self.stratStep] = self.phi0c
             del carbH
 
         # Cleaning arrays
-        del depo, fineH, ids
+        del depo, ids
         gc.collect()
 
         return
@@ -763,14 +839,25 @@ class SEDMesh(object):
         boolMask = cumThick < -ero[nids].reshape((len(nids), 1))
         mask = boolMask.astype(int)
 
-        # Get fine sediment eroded from river incision
-        thickF = (
-            self.stratH[nids, 0 : self.stratStep + 1]
-            * self.stratF[nids, 0 : self.stratStep + 1]
-        )
-        # From fine thickness extract the solid phase that is eroded
-        thFine = thickF * (1.0 - self.phiF[nids, 0 : self.stratStep + 1])
-        thFine = np.sum((thFine * mask), axis=1)
+        if self.stratF is not None:
+            # Get fine sediment eroded from river incision
+            thickF = (
+                self.stratH[nids, 0 : self.stratStep + 1]
+                * self.stratF[nids, 0 : self.stratStep + 1]
+            )
+            # From fine thickness extract the solid phase that is eroded
+            thFine = thickF * (1.0 - self.phiF[nids, 0 : self.stratStep + 1])
+            thFine = np.sum((thFine * mask), axis=1)
+
+        if self.stratW is not None:
+            # Get weathered sediment eroded from river incision
+            thickW = (
+                self.stratH[nids, 0 : self.stratStep + 1]
+                * self.stratW[nids, 0 : self.stratStep + 1]
+            )
+            # From weathered thickness extract the solid phase that is eroded
+            thClay = thickW * (1.0 - self.phiW[nids, 0 : self.stratStep + 1])
+            thClay = np.sum((thClay * mask), axis=1)
 
         # Get carbonate sediment eroded from river incision
         if self.carbOn:
@@ -782,12 +869,17 @@ class SEDMesh(object):
             thCarb = thickC * (1.0 - self.phiC[nids, 0 : self.stratStep + 1])
             thCarb = np.sum((thCarb * mask), axis=1)
             # From sand thickness extract the solid phase that is eroded
-            thickS = self.stratH[nids, 0 : self.stratStep + 1] - thickF - thickC
+            thickS = (
+                self.stratH[nids, 0 : self.stratStep + 1] - thickF - thickC - thickW
+            )
             thCoarse = thickS * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
             thCoarse = np.sum((thCoarse * mask), axis=1)
         else:
             # From sand thickness extract the solid phase that is eroded
-            thickS = self.stratH[nids, 0 : self.stratStep + 1] - thickF
+            if self.stratF is not None:
+                thickS = self.stratH[nids, 0 : self.stratStep + 1] - thickF - thickW
+            else:
+                thickS = self.stratH[nids, 0 : self.stratStep + 1]
             thCoarse = thickS * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
             thCoarse = np.sum((thCoarse * mask), axis=1)
 
@@ -802,19 +894,30 @@ class SEDMesh(object):
         eroLayNb = np.bincount(np.nonzero(cumThick)[0]) - 1
         eroVal = cumThick[np.arange(len(nids)), eroLayNb] + ero[nids]
 
-        # Get thickness of each sediment type eroded in the remaining layer
-        self.thFine = np.zeros(self.npoints)
-        # From fine thickness extract the solid phase that is eroded from this last layer
-        tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratF[nids, eroLayNb]
-        thFine += tmp * (1.0 - self.phiF[nids, eroLayNb])
-        # Define the uncompacted fine thickness that will be deposited dowstream
-        self.thFine[nids] = thFine / (1.0 - self.phi0f)
-        self.thFine[self.thFine < 0.0] = 0.0
+        if self.stratF is not None:
+            # Get thickness of each sediment type eroded in the remaining layer
+            self.thFine = np.zeros(self.lpoints)
+            # From fine thickness extract the solid phase that is eroded from this last layer
+            tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratF[nids, eroLayNb]
+            thFine += tmp * (1.0 - self.phiF[nids, eroLayNb])
+            # Define the uncompacted fine thickness that will be deposited dowstream
+            self.thFine[nids] = thFine / (1.0 - self.phi0f)
+            self.thFine[self.thFine < 0.0] = 0.0
 
-        self.thCoarse = np.zeros(self.npoints)
+        if self.stratW is not None:
+            # Get thickness of each sediment type eroded in the remaining layer
+            self.thClay = np.zeros(self.lpoints)
+            # From weathered thickness extract the solid phase that is eroded from this last layer
+            tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratW[nids, eroLayNb]
+            thClay += tmp * (1.0 - self.phiW[nids, eroLayNb])
+            # Define the uncompacted weathered thickness that will be deposited dowstream
+            self.thClay[nids] = thClay / (1.0 - self.phi0w)
+            self.thClay[self.thClay < 0.0] = 0.0
+
+        self.thCoarse = np.zeros(self.lpoints)
         if self.carbOn:
             # From carb thickness extract the solid phase that is eroded from this last layer
-            self.thCarb = np.zeros(self.npoints)
+            self.thCarb = np.zeros(self.lpoints)
             tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratC[nids, eroLayNb]
             thCarb += tmp * (1.0 - self.phiC[nids, eroLayNb])
             # Define the uncompacted carbonate thickness that will be deposited dowstream
@@ -822,7 +925,12 @@ class SEDMesh(object):
             self.thCarb[self.thCarb < 0.0] = 0.0
             # From sand thickness extract the solid phase that is eroded from this last layer
             tmp = self.stratH[nids, eroLayNb] - eroVal
-            tmp *= 1.0 - self.stratC[nids, eroLayNb] - self.stratF[nids, eroLayNb]
+            tmp *= (
+                1.0
+                - self.stratC[nids, eroLayNb]
+                - self.stratW[nids, eroLayNb]
+                - self.stratF[nids, eroLayNb]
+            )
             # Define the uncompacted sand thickness that will be deposited dowstream
             thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
             self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
@@ -830,7 +938,8 @@ class SEDMesh(object):
         else:
             # From sand thickness extract the solid phase that is eroded from this last layer
             tmp = self.stratH[nids, eroLayNb] - eroVal
-            tmp *= 1.0 - self.stratF[nids, eroLayNb]
+            if self.stratF is not None:
+                tmp *= 1.0 - self.stratF[nids, eroLayNb] - self.stratW[nids, eroLayNb]
             # Define the uncompacted sand thickness that will be deposited dowstream
             thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
             self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
@@ -840,22 +949,30 @@ class SEDMesh(object):
         self.stratH[nids, eroLayNb] = eroVal
         self.stratH[nids, 0] -= 1.0e6
         self.stratH[self.stratH <= 0] = 0.0
-        self.stratF[self.stratH <= 0] = 0.0
         self.phiS[self.stratH <= 0] = 0.0
-        self.phiF[self.stratH <= 0] = 0.0
+        if self.stratF is not None:
+            self.stratF[self.stratH <= 0] = 0.0
+            self.phiF[self.stratH <= 0] = 0.0
+        if self.stratW is not None:
+            self.stratW[self.stratH <= 0] = 0.0
+            self.phiW[self.stratH <= 0] = 0.0
         if self.carbOn:
             self.stratC[self.stratH <= 0] = 0.0
             self.phiC[self.stratH <= 0] = 0.0
 
         self.thCoarse /= self.dt
-        self.thFine /= self.dt
+        if self.stratF is not None:
+            self.thFine /= self.dt
+            del thickF, thFine
+        if self.stratW is not None:
+            self.thClay /= self.dt
+            del thickW, thClay
         if self.carbOn:
             self.thCarb /= self.dt
+            del thickC, thCarb
 
         del ero, nids, cumThick, boolMask, mask, tmp, eroLayNb, eroVal
-        del thFine, thickF, thickS, thCoarse
-        if self.carbOn:
-            del thickC, thCarb
+        del thickS, thCoarse
 
         gc.collect()
 
@@ -869,6 +986,134 @@ class SEDMesh(object):
         self.stratZ[:, self.stratStep] = self.hLocal.getArray()
 
         return
+
+    def _depthPorosity(self, depth):
+        """
+        This function uses the depth-porosity relationships to compute the porosities for each
+        lithology and then the solid phase to get each layer thickness changes due to compaction.
+
+        .. note::
+
+            We assume that porosity cannot increase after unloading.
+
+        :arg depth: depth below basement for each sedimentary layer
+
+        :return: newH updated sedimentary layer thicknesses after compaction
+        """
+
+        # Depth-porosity functions
+        phiS = self.phi0s * np.exp(depth / self.z0s)
+        phiS = np.minimum(phiS, self.phiS[:, : self.stratStep + 1])
+        if self.stratF is not None:
+            phiF = self.phi0f * np.exp(depth / self.z0f)
+            phiF = np.minimum(phiF, self.phiF[:, : self.stratStep + 1])
+            phiW = self.phi0w * np.exp(depth / self.z0w)
+            phiW = np.minimum(phiW, self.phiW[:, : self.stratStep + 1])
+        if self.carbOn:
+            phiC = self.phi0c * np.exp(depth / self.z0c)
+            phiC = np.minimum(phiC, self.phiC[:, : self.stratStep + 1])
+
+        # Compute the solid phase in each layers
+        if self.stratF is not None:
+            tmpF = (
+                self.stratH[:, : self.stratStep + 1]
+                * self.stratF[:, : self.stratStep + 1]
+            )
+            tmpF *= 1.0 - self.phiF[:, : self.stratStep + 1]
+            tmpW = (
+                self.stratH[:, : self.stratStep + 1]
+                * self.stratW[:, : self.stratStep + 1]
+            )
+            tmpW *= 1.0 - self.phiW[:, : self.stratStep + 1]
+
+        if self.carbOn:
+            tmpC = (
+                self.stratH[:, : self.stratStep + 1]
+                * self.stratC[:, : self.stratStep + 1]
+            )
+            tmpC *= 1.0 - self.phiC[:, : self.stratStep + 1]
+            tmpS = (
+                self.stratC[:, : self.stratStep + 1]
+                + self.stratF[:, : self.stratStep + 1]
+                + self.stratW[:, : self.stratStep + 1]
+            )
+            tmpS = self.stratH[:, : self.stratStep + 1] * (1.0 - tmpS)
+            tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
+            solidPhase = tmpC + tmpS + tmpF + tmpW
+        else:
+            if self.stratF is not None:
+                tmpS = self.stratH[:, : self.stratStep + 1] * (
+                    1.0
+                    - self.stratF[:, : self.stratStep + 1]
+                    - self.stratW[:, : self.stratStep + 1]
+                )
+                tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
+                solidPhase = tmpS + tmpF + tmpW
+            else:
+                tmpS = self.stratH[:, : self.stratStep + 1]
+                tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
+                solidPhase = tmpS
+
+        # Get new layer thickness after porosity change
+        if self.stratF is not None:
+            tmpF = self.stratF[:, : self.stratStep + 1] * (
+                1.0 - phiF[:, : self.stratStep + 1]
+            )
+            tmpW = self.stratW[:, : self.stratStep + 1] * (
+                1.0 - phiW[:, : self.stratStep + 1]
+            )
+        if self.carbOn:
+            tmpC = self.stratC[:, : self.stratStep + 1] * (
+                1.0 - phiC[:, : self.stratStep + 1]
+            )
+            tmpS = (
+                1.0
+                - self.stratF[:, : self.stratStep + 1]
+                - self.stratC[:, : self.stratStep + 1]
+                - self.stratW[:, : self.stratStep + 1]
+            )
+            tmpS *= 1.0 - phiS[:, : self.stratStep + 1]
+            tot = tmpS + tmpC + tmpF + tmpW
+        else:
+            if self.stratF is not None:
+                tmpS = (
+                    1.0
+                    - self.stratF[:, : self.stratStep + 1]
+                    - self.stratW[:, : self.stratStep + 1]
+                ) * (1.0 - phiS[:, : self.stratStep + 1])
+                tot = tmpS + tmpF + tmpW
+            else:
+                tot = 1.0 - phiS[:, : self.stratStep + 1]
+
+        ids = np.where(tot > 0.0)
+        newH = np.zeros(tot.shape)
+        newH[ids] = solidPhase[ids] / tot[ids]
+        newH[newH <= 0] = 0.0
+        phiS[newH <= 0] = 0.0
+        if self.stratF is not None:
+            phiF[newH <= 0] = 0.0
+            phiW[newH <= 0] = 0.0
+        if self.carbOn:
+            phiC[newH <= 0] = 0.0
+
+        # Update porosities in each sedimentary layer
+        self.phiS[:, : self.stratStep + 1] = phiS
+        if self.stratF is not None:
+            self.phiF[:, : self.stratStep + 1] = phiF
+            self.phiW[:, : self.stratStep + 1] = phiW
+        if self.carbOn:
+            self.phiC[:, : self.stratStep + 1] = phiC
+
+        del phiS, solidPhase
+        del ids, tmpS, tot
+        if self.stratF is not None:
+            del tmpF, phiF, tmpW, phiW
+        if self.carbOn:
+            del phiC, tmpC
+
+        gc.collect()
+
+        return newH
 
     def getCompaction(self):
         """
@@ -895,77 +1140,10 @@ class SEDMesh(object):
         depth = zlay - topZ
 
         # Now using depth-porosity relationships we compute the porosities
-        # We assume that porosity cannot increase after unloading
-        phiS = self.phi0s * np.exp(depth / self.z0s)
-        phiS = np.minimum(phiS, self.phiS[:, : self.stratStep + 1])
-        phiF = self.phi0f * np.exp(depth / self.z0f)
-        phiF = np.minimum(phiF, self.phiF[:, : self.stratStep + 1])
-        if self.carbOn:
-            phiC = self.phi0c * np.exp(depth / self.z0c)
-            phiC = np.minimum(phiC, self.phiC[:, : self.stratStep + 1])
+        newH = self._depthPorosity(depth)
 
-        # Compute the solid phase in each layers
-        tmpF = (
-            self.stratH[:, : self.stratStep + 1] * self.stratF[:, : self.stratStep + 1]
-        )
-        tmpF *= 1.0 - self.phiF[:, : self.stratStep + 1]
-
-        if self.carbOn:
-            tmpC = (
-                self.stratH[:, : self.stratStep + 1]
-                * self.stratC[:, : self.stratStep + 1]
-            )
-            tmpC *= 1.0 - self.phiC[:, : self.stratStep + 1]
-            tmpS = (
-                self.stratC[:, : self.stratStep + 1]
-                + self.stratF[:, : self.stratStep + 1]
-            )
-            tmpS = self.stratH[:, : self.stratStep + 1] * (1.0 - tmpS)
-            tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
-            solidPhase = tmpC + tmpS + tmpF
-        else:
-            tmpS = self.stratH[:, : self.stratStep + 1] * (
-                1.0 - self.stratF[:, : self.stratStep + 1]
-            )
-            tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
-            solidPhase = tmpS + tmpF
-
-        # Get new layer thickness after porosity change
-        tmpF = self.stratF[:, : self.stratStep + 1] * (
-            1.0 - phiF[:, : self.stratStep + 1]
-        )
-        if self.carbOn:
-            tmpC = self.stratC[:, : self.stratStep + 1] * (
-                1.0 - phiC[:, : self.stratStep + 1]
-            )
-            tmpS = (
-                1.0
-                - self.stratF[:, : self.stratStep + 1]
-                - self.stratC[:, : self.stratStep + 1]
-            )
-            tmpS *= 1.0 - phiS[:, : self.stratStep + 1]
-            tot = tmpS + tmpC + tmpF
-        else:
-            tmpS = (1.0 - self.stratF[:, : self.stratStep + 1]) * (
-                1.0 - phiS[:, : self.stratStep + 1]
-            )
-            tot = tmpS + tmpF
-        ids = np.where(tot > 0.0)
-        newH = np.zeros(tot.shape)
-        newH[ids] = solidPhase[ids] / tot[ids]
-        newH[newH <= 0] = 0.0
-        phiS[newH <= 0] = 0.0
-        phiF[newH <= 0] = 0.0
-        if self.carbOn:
-            phiC[newH <= 0] = 0.0
-
-        # Update porosities in each sedimentary layer
-        self.phiF[:, : self.stratStep + 1] = phiF
-        self.phiS[:, : self.stratStep + 1] = phiS
-        if self.carbOn:
-            self.phiC[:, : self.stratStep + 1] = phiC
-
-        # Get the total thickness changes induced by compaction and update the elevation accordingly
+        # Get the total thickness changes induced by compaction and
+        # update the elevation accordingly
         dz = totH - np.sum(newH, axis=1)
         dz[dz <= 0] = 0.0
         self.hLocal.setArray(topZ.flatten() - dz.flatten())
@@ -973,10 +1151,8 @@ class SEDMesh(object):
 
         # Update each layer thicknesses
         self.stratH[:, : self.stratStep + 1] = newH
-        del dz, newH, totH, topZ, phiS, phiF, solidPhase
-        del ids, tmpF, tmpS, tot, depth, zlay, cumZ, elev
-        if self.carbOn:
-            del phiC, tmpC
+        del dz, newH, totH, topZ
+        del depth, zlay, cumZ, elev
 
         gc.collect()
 

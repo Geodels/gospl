@@ -65,7 +65,20 @@ python module _fortran
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
         end subroutine mfdreceivers
 
-        subroutine stratabuild(nb,stratnb,ids,weights,strath,stratz,stratf,phis,phif,nstrath,nstratz,nstratf,nphis,nphif)
+        subroutine stratasimple(nb,stratnb,ids,weights,strath,stratz,phis,nstrath,nstratz,nphis)
+            integer intent(in) :: nb
+            integer intent(in) :: stratnb
+            integer dimension(nb,3),intent(in),depend(nb) :: ids
+            double precision dimension(nb,3),intent(in),depend(nb) :: weights
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: strath
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratz
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phis
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstrath
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphis
+        end subroutine stratasimple
+
+        subroutine stratabuild(nb,stratnb,ids,weights,strath,stratz,stratf,stratw,phis,phif,phiw,nstrath,nstratz,nstratf,nstratw,nphis,nphif,nphiw)
             integer intent(in) :: nb
             integer intent(in) :: stratnb
             integer dimension(nb,3),intent(in),depend(nb) :: ids
@@ -73,16 +86,20 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: strath
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratz
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratf
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratw
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phis
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phif
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phiw
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstrath
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratf
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratw
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphis
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphif
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphiw
         end subroutine stratabuild
 
-        subroutine stratabuildcarb(nb,stratnb,ids,weights,strath,stratz,stratf,stratc,phis,phif,phic,nstrath,nstratz,nstratf,nstratc,nphis,nphif,nphic)
+        subroutine stratabuildcarb(nb,stratnb,ids,weights,strath,stratz,stratf,stratw,stratc,phis,phif,phiw,phic,nstrath,nstratz,nstratf,nstratw,nstratc,nphis,nphif,nphiw,nphic)
             integer intent(in) :: nb
             integer intent(in) :: stratnb
             integer dimension(nb,3),intent(in),depend(nb) :: ids
@@ -90,16 +107,20 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: strath
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratz
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratf
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratw
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: stratc
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phis
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phif
+            double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phiw
             double precision dimension(nb,stratnb),intent(in),depend(nb,stratnb) :: phic
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstrath
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratf
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratw
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratc
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphis
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphif
+            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphiw
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphic
         end subroutine stratabuildcarb
 
@@ -128,15 +149,17 @@ python module _fortran
             integer dimension(nb,8),intent(in),depend(nb) :: ngbid
         end subroutine ngbglob
 
-        subroutine definetin(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
+        subroutine definetin(nloc,coords,lgids,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
             use meshparams
+            integer intent(in) :: nloc
             double precision dimension(nb,3),intent(in) :: coords
+            integer dimension(nb),intent(in) :: lgids
             integer dimension(n,3),intent(in) :: cells_nodes
             integer dimension(n,3),intent(in),depend(n) :: cells_edges
             integer dimension(m,2),intent(in) :: edges_nodes
             double precision dimension(nb),intent(in),depend(nb) :: area
             double precision dimension(3,n),intent(in),depend(n) :: circumcenter
-            integer dimension(nb,8),intent(out),depend(nb) :: ngbid
+            integer dimension(nloc,8),intent(out),depend(nloc) :: ngbid
             double precision intent(out) :: edgemax
             integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
             integer, optional,check(shape(coords,0)==nb),depend(coords) :: nb=shape(coords,0)

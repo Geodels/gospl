@@ -45,9 +45,9 @@ class FAMesh(object):
         self.rtol = 1.0e-8
 
         # Identity matrix construction
-        self.II = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
-        self.JJ = np.arange(0, self.npoints, dtype=petsc4py.PETSc.IntType)
-        self.iMat = self._matrix_build_diag(np.ones(self.npoints))
+        self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
+        self.iMat = self._matrix_build_diag(np.ones(self.lpoints))
 
         # Petsc vectors
         self.FAG = self.hGlobal.duplicate()
@@ -100,7 +100,9 @@ class FAMesh(object):
         # Define diagonal matrix
         matrix.assemblyBegin()
         matrix.setValuesLocalCSR(
-            self.II, self.JJ, V, petsc4py.PETSc.InsertMode.INSERT_VALUES
+            self.II,
+            self.JJ,
+            V,
         )
         matrix.assemblyEnd()
 
@@ -217,7 +219,7 @@ class FAMesh(object):
 
         t0 = process_time()
 
-        self.coastDist = np.zeros(self.npoints)
+        self.coastDist = np.zeros(self.lpoints)
         pointData = self.vtkMesh.GetPointData()
         array = numpy_support.numpy_to_vtk(data, deep=1)
         array.SetName("elev")
@@ -264,7 +266,7 @@ class FAMesh(object):
 
         # Compute pit volumes
         groupPits = npi.group_by(self.pits[:, 0])
-        pitNb, self.pitVol = groupPits.sum((hFill - gZ) * self.garea)
+        pitNb, self.pitVol = groupPits.sum((hFill - gZ) * self.marea)
         _, outids, _ = np.intersect1d(self.pits[:, 0], pitNb, return_indices=True)
         self.outFlows = self.pits[outids, 1]
 
@@ -313,7 +315,8 @@ class FAMesh(object):
         # Get global elevations for pit filling...
         t0 = process_time()
         hl = self.hLocal.getArray().copy()
-        gZ = hl[self.lgIDs]
+        gZ = np.zeros(self.mpoints)
+        gZ[self.locIDs] = hl
         gZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
 
@@ -329,12 +332,12 @@ class FAMesh(object):
                 #         corresponding overspilling point ID
                 hFill, pits = fillpit(self.sealevel - 1000.0, gZ, hmax)
             else:
-                hFill = np.zeros(self.gpoints, dtype=np.float64)
-                pits = np.zeros((self.gpoints, 2), dtype=np.int64)
+                hFill = np.zeros(self.mpoints, dtype=np.float64)
+                pits = np.zeros((self.mpoints, 2), dtype=np.int64)
             hFill = MPI.COMM_WORLD.bcast(hFill, root=0)
             self.pits = MPI.COMM_WORLD.bcast(pits, root=0)
-            self.pitID = np.where(self.pits[self.glIDs, 0] >= 0)[0]
-            self.hFill = hFill[self.glIDs]
+            self.pitID = np.where(self.pits[self.locIDs, 0] >= 0)[0]
+            self.hFill = hFill[self.locIDs]
 
             # Get depressions information
             self._pitInformation(gZ, hFill)
@@ -350,7 +353,6 @@ class FAMesh(object):
             gc.collect()
         else:
             hFill = None
-
             del hl
             gc.collect()
 
@@ -376,12 +378,12 @@ class FAMesh(object):
         """
 
         WAMat = self.iMat.copy()
-        indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
         for k in range(0, self.flowDir):
 
-            # Flow direction matrice for a specific direction
+            # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
             data = -self.wghtVal[:, k].copy()
             data[self.rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
@@ -390,7 +392,6 @@ class FAMesh(object):
                 indptr,
                 self.rcvID[:, k].astype(petsc4py.PETSc.IntType),
                 data,
-                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
 
@@ -438,6 +439,7 @@ class FAMesh(object):
         """
 
         self.isfill = filled
+        # self.dm.localToGlobal(self.hLocal, self.hGlobal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         # Fill surface to remove pits
@@ -445,7 +447,7 @@ class FAMesh(object):
 
         # Build flow direction
         if self.isfill:
-            self._buildFlowDirection(hFill[self.glIDs])
+            self._buildFlowDirection(hFill[self.locIDs])
             # Define coastal distance for marine points
             if self.vtkMesh is not None:
                 with warnings.catch_warnings():
@@ -455,7 +457,7 @@ class FAMesh(object):
             gc.collect()
 
         else:
-            self._buildFlowDirection(gZ[self.glIDs])
+            self._buildFlowDirection(gZ[self.locIDs])
             del gZ
             gc.collect()
 
@@ -469,14 +471,15 @@ class FAMesh(object):
                 self._solve_KSP(False, self.fillMat, self.bG, self.fillFAG)
             else:
                 self._solve_KSP(True, self.fillMat, self.bG, self.fillFAG)
-            self.dm.globalToLocal(self.fillFAG, self.fillFAL, 1)
+            self.dm.globalToLocal(self.fillFAG, self.fillFAL)
+
         else:
             # Solve flow accumulation for unfilled elevation
             if self.tNow == self.rStart:
                 self._solve_KSP(False, self.wMat, self.bG, self.FAG)
             else:
                 self._solve_KSP(True, self.wMat, self.bG, self.FAG)
-            self.dm.globalToLocal(self.FAG, self.FAL, 1)
+            self.dm.globalToLocal(self.FAG, self.FAL)
 
         if MPIrank == 0 and self.verbose:
             if self.isfill:
@@ -540,7 +543,7 @@ class FAMesh(object):
         # Define erosion coefficients
         for k in range(0, self.flowDir):
 
-            indptr = np.arange(0, self.npoints + 1, dtype=petsc4py.PETSc.IntType)
+            indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
             nodes = indptr[:-1]
             # Define erosion limiter to prevent formation of flat
             dh = self.hOldArray - self.hOldArray[self.rcvID[:, k]]
@@ -565,7 +568,6 @@ class FAMesh(object):
                 indptr,
                 self.rcvID[:, k].astype(petsc4py.PETSc.IntType),
                 data,
-                petsc4py.PETSc.InsertMode.INSERT_VALUES,
             )
             tmpMat.assemblyEnd()
             EbedMat += tmpMat
@@ -585,7 +587,7 @@ class FAMesh(object):
         E = np.divide(E, self.dt)
         E[E < 0.0] = 0.0
         self.Eb.setArray(E)
-        self.dm.globalToLocal(self.Eb, self.EbLocal, 1)
+        self.dm.globalToLocal(self.Eb, self.EbLocal)
         E = self.EbLocal.getArray().copy()
 
         E[self.seaID] = 0.0
@@ -598,7 +600,7 @@ class FAMesh(object):
         E[ids] = (self.hOldArray[ids] - self.sealevel - 1.0e-2) / self.dt
         E[self.hFill > self.hOldArray] = 0.0
         self.EbLocal.setArray(E)
-        self.dm.localToGlobal(self.EbLocal, self.Eb, 1)
+        self.dm.localToGlobal(self.EbLocal, self.Eb)
 
         del E, PA, Kbr, ids
         gc.collect()
@@ -629,7 +631,7 @@ class FAMesh(object):
         # Local & global vectors/arrays
         self.Eb.set(0.0)
         self.hGlobal.copy(result=self.hOld)
-        self.dm.globalToLocal(self.hOld, self.hOldLocal, 1)
+        self.dm.globalToLocal(self.hOld, self.hOldLocal)
         self.hOldArray = self.hOldLocal.getArray().copy()
 
         self._getErosionRate()
@@ -638,10 +640,10 @@ class FAMesh(object):
         Eb = self.Eb.getArray().copy()
         self.tmp.setArray(-Eb * self.dt)
         self.cumED.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal, 1)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
 
         self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal, 1)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         # Update stratigraphic layers
         if self.stratNb > 0:

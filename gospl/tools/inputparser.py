@@ -313,15 +313,15 @@ class ReadYaml(object):
                 raise ValueError("Surface Process Model: Kb coefficient not found.")
             try:
                 self.frac_fine = splDict["Ff"]
-                if self.frac_fine < 0.05:
-                    self.frac_fine = 0.05
+                if self.frac_fine < 0.005:
+                    self.frac_fine = 0.005
                     if MPIrank == 0:
                         print(
-                            "The fraction of fine has been reset to 5%, which is minimal authorised value.",
+                            "The fraction of fine has been reset to 0.5%, which is minimal authorised value.",
                             flush=True,
                         )
             except KeyError:
-                self.frac_fine = 0.05
+                self.frac_fine = 0.005
             try:
                 self.fillmax = splDict["hfill"]
             except KeyError:
@@ -343,7 +343,7 @@ class ReadYaml(object):
             self.K = 1.0e-12
             self.fillmax = 100.0
             # self.wght = 0.0
-            self.frac_fine = 0.05
+            self.frac_fine = 0.005
             self.coeffd = 0.0
 
         return
@@ -388,12 +388,17 @@ class ReadYaml(object):
                 self.sedimentKf = hillDict["sedKf"]
             except KeyError:
                 self.sedimentKf = 20000.0
+            try:
+                self.sedimentKw = hillDict["sedKw"]
+            except KeyError:
+                self.sedimentKw = 30000.0
         except KeyError:
             self.shelfslope = False
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 10000.0
             self.sedimentKf = 20000.0
+            self.sedimentKw = 30000.0
 
         return
 
@@ -467,9 +472,7 @@ class ReadYaml(object):
                 tmpE = []
                 tmpE.insert(0, {0: self.tEnd, 1: seadata[1].iloc[-1]})
                 seadata = pd.concat([seadata, pd.DataFrame(tmpE)], ignore_index=True)
-            self.seafunction = interp1d(
-                seadata[0], seadata[1] + sealevel, kind="linear"
-            )
+            self.seafunction = interp1d(seadata[0], seadata[1], kind="linear")
         else:
             year = np.linspace(self.tStart, self.tEnd + self.dt, num=11, endpoint=True)
             seaval = np.full(len(year), sealevel)
@@ -914,10 +917,32 @@ class ReadYaml(object):
                 self.phi0f = 0.63
 
             try:
+                self.phi0w = compDict["phiw"]
+            except KeyError:
+                self.phi0w = 0.63
+
+            try:
                 self.phi0c = compDict["phic"]
             except KeyError:
                 self.phi0c = 0.65
 
+        except KeyError:
+            self.phi0s = 0.49
+            self.phi0f = 0.63
+            self.phi0w = 0.63
+            self.phi0c = 0.65
+
+        self._extraCompaction()
+
+        return
+
+    def _extraCompaction(self):
+        """
+        Read compaction additional parameters.
+        """
+
+        try:
+            compDict = self.input["compaction"]
             try:
                 self.z0s = compDict["z0s"]
             except KeyError:
@@ -929,16 +954,19 @@ class ReadYaml(object):
                 self.z0f = 1960.0
 
             try:
+                self.z0w = compDict["z0w"]
+            except KeyError:
+                self.z0w = 1960.0
+
+            try:
                 self.z0c = compDict["z0c"]
             except KeyError:
                 self.z0c = 2570.0
 
         except KeyError:
-            self.phi0s = 0.49
-            self.phi0f = 0.63
-            self.phi0c = 0.65
             self.z0s = 3700.0
             self.z0f = 1960.0
+            self.z0w = 1960.0
             self.z0c = 2570.0
 
         return

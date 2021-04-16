@@ -18,6 +18,7 @@ from vtk.util import numpy_support
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import definetin
     from gospl._fortran import ngbglob
+    from gospl._fortran import stratasimple
     from gospl._fortran import stratabuild
     from gospl._fortran import stratabuildcarb
 
@@ -61,6 +62,7 @@ class UnstMesh(object):
         self.rainVal = None
         self.stratH = None
         self.stratF = None
+        self.stratW = None
         self.stratZ = None
         self.stratC = None
         self.phiS = None
@@ -88,7 +90,7 @@ class UnstMesh(object):
 
         if MPIrank == 0:
             cells = np.asarray(cells, dtype=np.int32)
-            coords = np.asarray(coords, dtype=np.double)
+            coords = np.asarray(coords, dtype=np.float)
             MPIcomm.bcast(cells.shape, root=0)
             MPIcomm.bcast(coords.shape, root=0)
             # Provide the actual data on rank 0.
@@ -104,7 +106,7 @@ class UnstMesh(object):
             self.dm = petsc4py.PETSc.DMPlex().createFromCellList(
                 dim,
                 np.zeros(cell_shape, dtype=np.int32),
-                np.zeros(coord_shape, dtype=np.double),
+                np.zeros(coord_shape, dtype=np.float),
                 comm=petsc4py.PETSc.COMM_WORLD,
             )
         return
@@ -133,9 +135,11 @@ class UnstMesh(object):
 
         # Create mesh structure with meshplex
         t0 = process_time()
-        Tmesh = meshplex.MeshTri(self.lcoords, self.lcells)
-        self.area = np.abs(Tmesh.control_volumes)
-        self.area[np.isnan(self.area)] = 1.0
+        Tmesh = meshplex.MeshTri(self.mCoords, self.mCells)
+        self.marea = np.abs(Tmesh.control_volumes)
+        self.marea[np.isnan(self.marea)] = 1.0
+        self.larea = self.marea[self.locIDs]
+        self.garea = self.marea[self.glbIDs]
 
         # Voronoi and simplices declaration
         Tmesh.create_edges()
@@ -149,16 +153,16 @@ class UnstMesh(object):
         cells_edges = Tmesh.cells["edges"]
 
         # Finite volume discretisation
-        edgeMax = np.zeros(1, dtype=np.float64)
-        self.FVmesh_ngbID, edgeMax[0] = definetin(
-            self.lcoords, cells_nodes, cells_edges, edges_nodes, self.area, cc.T
+        self.FVmesh_ngbID, self.edgeMax = definetin(
+            self.lpoints,
+            self.mCoords,
+            self.lgIDs,
+            cells_nodes,
+            cells_edges,
+            edges_nodes,
+            self.marea,
+            cc.T,
         )
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, edgeMax, op=MPI.MAX)
-        self.edgeMax = edgeMax[0]
-
-        self.garea = np.zeros(self.gpoints)
-        self.garea = self.area[self.lgIDs]
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.garea, op=MPI.MAX)
 
         del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
         gc.collect()
@@ -203,13 +207,18 @@ class UnstMesh(object):
         # Getting PETSc vectors values
         loadData = np.load(self.meshFile)
         gZ = loadData["z"]
-        self.hLocal.setArray(gZ[self.glIDs])
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        self.hLocal.setArray(gZ[self.locIDs])
+        self.hGlobal.setArray(gZ[self.glbIDs])
+        # self.dm.localToGlobal(self.hLocal, self.hGlobal)
         self.vSed.set(0.0)
         self.vSedLocal.set(0.0)
         if self.stratNb > 0:
-            self.vSedf.set(0.0)
-            self.vSedfLocal.set(0.0)
+            if self.stratF is not None:
+                self.vSedf.set(0.0)
+                self.vSedfLocal.set(0.0)
+            if self.stratW is not None:
+                self.vSedw.set(0.0)
+                self.vSedwLocal.set(0.0)
             if self.carbOn:
                 self.vSedc.set(0.0)
                 self.vSedcLocal.set(0.0)
@@ -243,13 +252,7 @@ class UnstMesh(object):
         Lon/lat coordinates are used when forcing the simulation with paleo-topoography maps.
         """
 
-        # self.gLatLon = np.zeros((self.gpoints, 2))
-        # self.gLatLon[:, 0] = np.arcsin(self.gCoords[:, 2] / self.radius)
-        # self.gLatLon[:, 1] = np.arctan2(self.gCoords[:, 1], self.gCoords[:, 0])
-        # self.gLatLon[:, 0] = np.mod(np.degrees(self.gLatLon[:, 0]) + 90, 180.0)
-        # self.gLatLon[:, 1] = np.mod(np.degrees(self.gLatLon[:, 1]) + 180.0, 360.0)
-
-        self.lLatLon = np.zeros((self.npoints, 2))
+        self.lLatLon = np.zeros((self.lpoints, 2))
         self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
         self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
         self.lLatLon[:, 0] = np.mod(np.degrees(self.lLatLon[:, 0]) + 90, 180.0)
@@ -352,19 +355,19 @@ class UnstMesh(object):
         # Read mesh attributes from file
         t0 = process_time()
         loadData = np.load(self.meshFile)
-        self.gCoords = loadData["v"]
-        self.gpoints = len(self.gCoords)
+        self.mCoords = loadData["v"]
+        self.mpoints = len(self.mCoords)
         gZ = loadData["z"]
-
+        self.mCells = loadData["c"].astype(int)
         self.vtkMesh = None
         if self.shelfslope:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore")
-                self._generateVTKmesh(self.gCoords, loadData["c"])
+                self._generateVTKmesh(self.mCoords, self.mCells)
 
         # Store global neighbouring on process rank 0
         if MPIrank == 0:
-            ngbglob(self.gpoints, loadData["n"])
+            ngbglob(self.mpoints, loadData["n"])
         if MPIrank == 0 and self.verbose:
             print(
                 "Reading mesh information (%0.02f seconds)" % (process_time() - t0),
@@ -372,7 +375,7 @@ class UnstMesh(object):
             )
 
         # Create DMPlex
-        self._meshfrom_cell_list(2, loadData["c"], self.gCoords)
+        self._meshfrom_cell_list(2, loadData["c"], self.mCoords)
         del loadData
         gc.collect()
         if MPIrank == 0 and self.verbose:
@@ -414,8 +417,12 @@ class UnstMesh(object):
 
         # Define local vertex & cells
         t0 = process_time()
+
+        self.gcoords = self.dm.getCoordinates().array.reshape(-1, 3)
         self.lcoords = self.dm.getCoordinatesLocal().array.reshape(-1, 3)
-        self.npoints = self.lcoords.shape[0]
+        self.gpoints = self.gcoords.shape[0]
+        self.lpoints = self.lcoords.shape[0]
+
         cStart, cEnd = self.dm.getHeightStratum(0)
         self.lcells = np.zeros((cEnd - cStart, 3), dtype=petsc4py.PETSc.IntType)
         point_closure = None
@@ -431,17 +438,16 @@ class UnstMesh(object):
                 flush=True,
             )
 
-        # From global values to local ones...
+        # From mesh values to local and global ones...
         t0 = process_time()
-        tree = spatial.cKDTree(self.gCoords, leafsize=10)
-        distances, self.glIDs = tree.query(self.lcoords, k=1)
-        nelev = gZ[self.glIDs]
+        tree = spatial.cKDTree(self.mCoords, leafsize=10)
+        distances, self.locIDs = tree.query(self.lcoords, k=1)
+        distances, self.glbIDs = tree.query(self.gcoords, k=1)
 
         # From local to global values...
-        self.lgIDs = -np.ones(self.gpoints, dtype=int)
-        self.lgIDs[self.glIDs] = np.arange(self.npoints)
+        self.lgIDs = -np.ones(self.mpoints, dtype=int)
+        self.lgIDs[self.locIDs] = np.arange(self.lpoints)
         self.outIDs = np.where(self.lgIDs < 0)[0]
-        self.lgIDs[self.lgIDs < 0] = 0
 
         # Local/Global mapping
         self.lgmap_row = self.dm.getLGMap()
@@ -454,7 +460,7 @@ class UnstMesh(object):
 
         # Vertex part of an unique partition
         vIS = self.dm.getVertexNumbering()
-        self.inIDs = np.zeros(self.npoints, dtype=int)
+        self.inIDs = np.zeros(self.lpoints, dtype=int)
         self.inIDs[vIS.indices >= 0] = 1
         self.lIDs = np.where(self.inIDs == 1)[0]
         vIS.destroy()
@@ -464,8 +470,8 @@ class UnstMesh(object):
         self.hLocal = self.dm.createLocalVector()
         self.sizes = self.hGlobal.getSizes(), self.hGlobal.getSizes()
 
-        self.hLocal.setArray(nelev)
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        self.hGlobal.setArray(gZ[self.glbIDs])
+        self.hLocal.setArray(gZ[self.locIDs])
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -479,19 +485,19 @@ class UnstMesh(object):
         # Find global shadow nodes indices
         self.shadow_lOuts = np.where(self.inIDs == 0)[0]
         distances, indices = tree.query(self.lcoords[self.shadow_lOuts, :], k=1)
-        tmp = -np.ones(self.gpoints, dtype=int)
+        tmp = -np.ones(self.mpoints, dtype=int)
         tmp[indices] = 1.0
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, tmp, op=MPI.MAX)
         self.shadowAlls = np.unique(np.where(tmp > 0)[0])
 
         # Find local shadow nodes global indices
-        tree = spatial.cKDTree(self.gCoords[self.shadowAlls, :], leafsize=10)
+        tree = spatial.cKDTree(self.mCoords[self.shadowAlls, :], leafsize=10)
         distances, indices = tree.query(self.lcoords, k=1)
         if MPIsize > 1:
             self.gshadowIDs = np.unique(self.shadowAlls[indices])
             tmp.fill(0.0)
             tmp[self.gshadowIDs] = 1.0
-            ltmp = tmp[self.glIDs]
+            ltmp = tmp[self.locIDs]
             self.lshadowIDs = np.unique(np.where(ltmp > 0)[0])
             distances, indices = tree.query(self.lcoords[self.shadow_lOuts], k=1)
             self.shadow_gOuts = np.unique(self.shadowAlls[indices])
@@ -500,7 +506,7 @@ class UnstMesh(object):
             self.shadowgNb = len(self.shadowAlls)
             self.gshadinIDs = np.where(np.in1d(self.shadowAlls, self.gshadowIDs))[0]
             self.gshadoutIDs = np.where(np.in1d(self.shadowAlls, self.shadow_gOuts))[0]
-            tmp = np.concatenate((self.shadow_lOuts, np.arange(self.npoints)))
+            tmp = np.concatenate((self.shadow_lOuts, np.arange(self.lpoints)))
             cbin = np.bincount(tmp)
             self.lshadinIDs = np.where(cbin == 1)[0]
             del ltmp, cbin
@@ -510,11 +516,12 @@ class UnstMesh(object):
 
         self.sealevel = self.seafunction(self.tNow)
 
-        areaLocal = self.hLocal.duplicate()
+        # areaLocal = self.hLocal.duplicate()
         self.areaGlobal = self.hGlobal.duplicate()
-        areaLocal.setArray(self.area)
-        self.dm.localToGlobal(areaLocal, self.areaGlobal)
-        areaLocal.destroy()
+        # areaLocal.setArray(self.larea)
+        self.areaGlobal.setArray(self.garea)
+        # self.dm.localToGlobal(areaLocal, self.areaGlobal)
+        # areaLocal.destroy()
         self.minArea = self.areaGlobal.min()
 
         # Forcing event number
@@ -526,7 +533,7 @@ class UnstMesh(object):
         self.flexNb = -1
 
         del tree, distances, indices, tmp
-        del l2g, offproc, nelev, gZ
+        del l2g, offproc, gZ
         gc.collect()
 
         # Map longitude/latitude coordinates
@@ -559,11 +566,11 @@ class UnstMesh(object):
             fileData = np.load(self.dataFile)
             gED = fileData["ed"]
             del fileData
-            nED = gED[self.glIDs]
 
-            self.cumEDLocal.setArray(nED)
-            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-            del nED, gED
+            self.cumEDLocal.setArray(gED[self.locIDs])
+            self.cumED.setArray(gED[self.glbIDs])
+            # self.dm.localToGlobal(self.cumEDLocal, self.cumED)
+            del gED
             gc.collect()
 
         return
@@ -578,11 +585,14 @@ class UnstMesh(object):
         - thickness of each stratigrapic layer `strataH` accounting for both
           erosion & deposition events.
         - proportion of fine sediment `strataF` contains in each stratigraphic layer.
+        - proportion of weathered sediment `strataW` contains in each stratigraphic layer.
         - elevation at time of deposition, considered to be to the current elevation
           for the top stratigraphic layer `strataZ`.
         - porosity of coarse sediment `phiS` in each stratigraphic layer computed at
           center of each layer.
         - porosity of fine sediment `phiF` in each stratigraphic layer computed at
+          center of each layer.
+        - porosity of weathered sediment `phiW` in each stratigraphic layer computed at
           center of each layer.
         - proportion of carbonate sediment `strataC` contains in each stratigraphic layer
           if the carbonate module is turned on.
@@ -598,47 +608,50 @@ class UnstMesh(object):
             self.stratNb += self.initLay
 
             # Create stratigraphic arrays
-            self.stratH = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.stratH[:, 0 : self.initLay] = stratVal[self.glIDs, 0 : self.initLay]
+            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratH[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["strataF"]
-            self.stratF = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.stratF[:, 0 : self.initLay] = stratVal[self.glIDs, 0 : self.initLay]
+            self.stratF = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratF[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
+
+            stratVal = fileData["strataW"]
+            self.stratW = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratW[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["strataZ"]
-            self.stratZ = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.stratZ[:, 0 : self.initLay] = stratVal[self.glIDs, 0 : self.initLay]
+            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratZ[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["phiS"]
-            self.phiS = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.phiS[:, 0 : self.initLay] = stratVal[self.glIDs, 0 : self.initLay]
+            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.phiS[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["phiF"]
-            self.phiF = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.phiF[:, 0 : self.initLay] = stratVal[self.glIDs, 0 : self.initLay]
+            self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.phiF[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
+
+            stratVal = fileData["phiW"]
+            self.phiW = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.phiW[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             if self.carbOn:
                 stratVal = fileData["strataC"]
-                self.stratC = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
+                self.stratC = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
                 self.stratC[:, 0 : self.initLay] = stratVal[
-                    self.glIDs, 0 : self.initLay
+                    self.locIDs, 0 : self.initLay
                 ]
 
                 stratVal = fileData["phiC"]
-                self.phiC = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-                self.phiC[:, 0 : self.initLay] = stratVal[self.glIDs, 0 : self.initLay]
+                self.phiC = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+                self.phiC[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             del fileData, stratVal
             gc.collect()
         else:
-            self.stratH = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.stratF = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.stratZ = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.phiS = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            self.phiF = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-            if self.carbOn:
-                self.stratC = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
-                self.phiC = np.zeros((self.npoints, self.stratNb), dtype=np.float64)
+            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
 
         return
 
@@ -707,8 +720,8 @@ class UnstMesh(object):
             if self.tNow == self.paleodata.iloc[k, 0]:
                 loadData = np.load(self.paleodata.iloc[k, 1])
                 gZ = loadData["z"]
-                self.hLocal.setArray(gZ[self.glIDs])
-                self.dm.localToGlobal(self.hLocal, self.hGlobal)
+                self.hLocal.setArray(gZ[self.locIDs])
+                self.hGlobal.setArray(gZ[self.glbIDs])
                 del loadData, gZ
                 gc.collect()
 
@@ -743,18 +756,22 @@ class UnstMesh(object):
                 rainArea = loadData[self.raindata.iloc[nb, 3]]
                 del loadData
             else:
-                rainArea = np.full(self.gpoints, self.raindata.iloc[nb, 1])
-            self.rainArea = rainArea[self.glIDs] * self.area
+                rainArea = np.full(self.mpoints, self.raindata.iloc[nb, 1])
 
-        self.rainVal = self.rainArea / self.area
-        localZ = self.hLocal.getArray()
-        rainArea = self.rainArea.copy()
-        rainArea[localZ < self.sealevel] = 0.0
+            self.rainArea = rainArea * self.marea
 
+        self.rainVal = self.rainArea[self.locIDs] / self.marea[self.locIDs]
+        tmpZ = self.hLocal.getArray()
+        rainArea = self.rainArea[self.locIDs]
+        rainArea[tmpZ < self.sealevel] = 0.0
         self.bL.setArray(rainArea)
-        self.dm.localToGlobal(self.bL, self.bG, 1)
 
-        del rainArea, localZ
+        tmpZ = self.hGlobal.getArray()
+        rainArea = self.rainArea[self.glbIDs]
+        rainArea[tmpZ < self.sealevel] = 0.0
+        self.bG.setArray(rainArea)
+
+        del rainArea, tmpZ
         gc.collect()
 
         return
@@ -798,7 +815,7 @@ class UnstMesh(object):
             mdata = None
             if self.tecdata.iloc[nb, 1] != "empty":
                 mdata = np.load(self.tecdata.iloc[nb, 1])
-                self.hdisp = mdata["xyz"][self.glIDs, :]
+                self.hdisp = mdata["xyz"][self.locIDs, :]
                 self._meshAdvectorSphere(mdata["xyz"], timer)
 
             if self.tecdata.iloc[nb, 2] != "empty":
@@ -831,7 +848,7 @@ class UnstMesh(object):
         # Define vertical displacements
         tmp = self.hLocal.getArray().copy()
         if tectonic is not None:
-            self.uplift = tectonic[self.glIDs]
+            self.uplift = tectonic[self.locIDs]
         self.hLocal.setArray(tmp + self.uplift * self.dt)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
         del tmp
@@ -857,7 +874,7 @@ class UnstMesh(object):
         t1 = process_time()
 
         # Move local coordinates
-        XYZ = self.lcoords + tectonic[self.glIDs, :] * timer
+        XYZ = self.lcoords + tectonic[self.locIDs, :] * timer
 
         # Update local elevation
         tmp = self.hLocal.getArray().copy()
@@ -868,9 +885,9 @@ class UnstMesh(object):
             temp[self.gshadoutIDs] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             elev[self.shadowAlls] = temp
-            loc_elev = elev[self.glIDs]
+            loc_elev = elev[self.locIDs]
         else:
-            loc_elev = elev[self.glIDs]
+            loc_elev = elev[self.locIDs]
 
         # Update local erosion/deposition
         tmp = self.cumEDLocal.getArray().copy()
@@ -881,9 +898,9 @@ class UnstMesh(object):
             temp[self.gshadoutIDs] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             erodep[self.shadowAlls] = temp
-            loc_erodep = erodep[self.glIDs]
+            loc_erodep = erodep[self.locIDs]
         else:
-            loc_erodep = erodep[self.glIDs]
+            loc_erodep = erodep[self.locIDs]
 
         # Update local stratal dataset after displacements
         if self.stratNb > 0 and self.stratStep > 0:
@@ -892,9 +909,11 @@ class UnstMesh(object):
                     loc_stratH,
                     loc_stratZ,
                     loc_stratF,
+                    loc_stratW,
                     loc_stratC,
                     loc_phiS,
                     loc_phiF,
+                    loc_phiW,
                     loc_phiC,
                 ) = self._updateDispStrata()
             else:
@@ -902,8 +921,10 @@ class UnstMesh(object):
                     loc_stratH,
                     loc_stratZ,
                     loc_stratF,
+                    loc_stratW,
                     loc_phiS,
                     loc_phiF,
+                    loc_phiW,
                 ) = self._updateDispStrata()
 
         # Build and query local kd-tree
@@ -938,9 +959,11 @@ class UnstMesh(object):
                     loc_stratH,
                     loc_stratZ,
                     loc_stratF,
+                    loc_stratW,
                     loc_stratC,
                     loc_phiS,
                     loc_phiF,
+                    loc_phiW,
                     loc_phiC,
                 )
             else:
@@ -950,9 +973,11 @@ class UnstMesh(object):
                     loc_stratH,
                     loc_stratZ,
                     loc_stratF,
+                    loc_stratW,
                     None,
                     loc_phiS,
                     loc_phiF,
+                    loc_phiW,
                     None,
                 )
 
@@ -963,9 +988,17 @@ class UnstMesh(object):
             if self.stratNb > 0 and self.stratStep > 0:
                 self.stratZ[onIDs, : self.stratStep] = loc_stratZ[indices[onIDs, 0], :]
                 self.stratH[onIDs, : self.stratStep] = loc_stratH[indices[onIDs, 0], :]
-                self.stratF[onIDs, : self.stratStep] = loc_stratF[indices[onIDs, 0], :]
                 self.phiS[onIDs, : self.stratStep] = loc_phiS[indices[onIDs, 0], :]
-                self.phiF[onIDs, : self.stratStep] = loc_phiF[indices[onIDs, 0], :]
+                if self.stratF is not None:
+                    self.stratF[onIDs, : self.stratStep] = loc_stratF[
+                        indices[onIDs, 0], :
+                    ]
+                    self.phiF[onIDs, : self.stratStep] = loc_phiW[indices[onIDs, 0], :]
+                if self.stratW is not None:
+                    self.stratW[onIDs, : self.stratStep] = loc_stratW[
+                        indices[onIDs, 0], :
+                    ]
+                    self.phiW[onIDs, : self.stratStep] = loc_phiF[indices[onIDs, 0], :]
                 if self.carbOn:
                     self.stratC[onIDs, : self.stratStep] = loc_stratC[
                         indices[onIDs, 0], :
@@ -973,15 +1006,16 @@ class UnstMesh(object):
                     self.phiC[onIDs, : self.stratStep] = loc_phiC[indices[onIDs, 0], :]
 
         self.hLocal.setArray(nelev)
-        self.dm.localToGlobal(self.hLocal, self.hGlobal, 1)
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
         self.cumEDLocal.setArray(nerodep)
-        self.dm.localToGlobal(self.cumEDLocal, self.cumED, 1)
+        self.dm.localToGlobal(self.cumEDLocal, self.cumED)
 
         # Update local stratal dataset
         if self.stratNb > 0 and self.stratStep > 0:
             self._localStrat()
-            del loc_stratH, loc_stratZ, loc_stratF, loc_phiS, loc_phiF
+            del loc_stratH, loc_stratZ, loc_stratF, loc_stratW
+            del loc_phiS, loc_phiF, loc_phiW
             if self.carbOn:
                 del loc_stratC, loc_phiC
 
@@ -1009,11 +1043,14 @@ class UnstMesh(object):
         - thickness of each stratigrapic layer `loc_stratH` accounting for both
           erosion & deposition events.
         - proportion of fine sediment `loc_stratF` contains in each stratigraphic layer.
+        - proportion of weathered sediment `loc_stratW` contains in each stratigraphic layer.
         - elevation at time of deposition, considered to be to the current elevation
           for the top stratigraphic layer `loc_stratZ`.
         - porosity of coarse sediment `loc_phiS` in each stratigraphic layer computed at
           center of each layer.
         - porosity of fine sediment `loc_phiF` in each stratigraphic layer computed at
+          center of each layer.
+        - porosity of waethered sediment `loc_phiW` in each stratigraphic layer computed at
           center of each layer.
         - proportion of carbonate sediment `loc_strataC` contains in each stratigraphic layer
           if the carbonate module is turned on.
@@ -1027,7 +1064,7 @@ class UnstMesh(object):
             the adjacent nodes of the neighbouring partition are accessible. This is done by applying
             MPI `Allreduce` operation to the nodes parts of the overlaid ('shadow') zone.
 
-        :return: loc_stratH, loc_stratZ, loc_stratF, loc_stratC, loc_phiS, loc_phiF, loc_phiC
+        :return: loc_stratH, loc_stratZ, loc_stratF, loc_stratW, loc_stratC, loc_phiS, loc_phiF, loc_phiW, loc_phiC
         """
 
         stratH = self.stratH[self.lgIDs, : self.stratStep]
@@ -1037,9 +1074,9 @@ class UnstMesh(object):
             temp[self.gshadoutIDs, :] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             stratH[self.shadowAlls, :] = temp
-            loc_stratH = stratH[self.glIDs, :]
+            loc_stratH = stratH[self.locIDs, :]
         else:
-            loc_stratH = stratH[self.glIDs, :]
+            loc_stratH = stratH[self.locIDs, :]
 
         stratZ = self.stratZ[self.lgIDs, : self.stratStep]
         if MPIsize > 1:
@@ -1048,20 +1085,9 @@ class UnstMesh(object):
             temp[self.gshadoutIDs, :] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             stratZ[self.shadowAlls, :] = temp
-            loc_stratZ = stratZ[self.glIDs, :]
+            loc_stratZ = stratZ[self.locIDs, :]
         else:
-            loc_stratZ = stratZ[self.glIDs, :]
-
-        stratF = self.stratF[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratF[self.shadowAlls, :] = temp
-            loc_stratF = stratF[self.glIDs, :]
-        else:
-            loc_stratF = stratF[self.glIDs, :]
+            loc_stratZ = stratZ[self.locIDs, :]
 
         phiS = self.phiS[self.lgIDs, : self.stratStep]
         if MPIsize > 1:
@@ -1070,20 +1096,61 @@ class UnstMesh(object):
             temp[self.gshadoutIDs, :] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             phiS[self.shadowAlls, :] = temp
-            loc_phiS = phiS[self.glIDs, :]
+            loc_phiS = phiS[self.locIDs, :]
         else:
-            loc_phiS = phiS[self.glIDs, :]
+            loc_phiS = phiS[self.locIDs, :]
 
-        phiF = self.phiF[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            phiF[self.shadowAlls, :] = temp
-            loc_phiF = phiF[self.glIDs, :]
+        if self.stratF is not None:
+            stratF = self.stratF[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratF[self.shadowAlls, :] = temp
+                loc_stratF = stratF[self.locIDs, :]
+            else:
+                loc_stratF = stratF[self.locIDs, :]
+
+            phiF = self.phiF[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                phiF[self.shadowAlls, :] = temp
+                loc_phiF = phiF[self.locIDs, :]
+            else:
+                loc_phiF = phiF[self.locIDs, :]
         else:
-            loc_phiF = phiF[self.glIDs, :]
+            loc_stratF = None
+            loc_phiF = None
+
+        if self.stratW is not None:
+            stratW = self.stratW[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratW[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratW[self.shadowAlls, :] = temp
+                loc_stratW = stratW[self.locIDs, :]
+            else:
+                loc_stratW = stratW[self.locIDs, :]
+
+            phiW = self.phiW[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = phiW[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                phiW[self.shadowAlls, :] = temp
+                loc_phiW = phiW[self.locIDs, :]
+            else:
+                loc_phiW = phiW[self.locIDs, :]
+        else:
+            loc_stratW = None
+            loc_phiW = None
 
         if self.carbOn:
             stratC = self.stratC[self.lgIDs, : self.stratStep]
@@ -1093,9 +1160,9 @@ class UnstMesh(object):
                 temp[self.gshadoutIDs, :] = -1.0e8
                 MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
                 stratC[self.shadowAlls, :] = temp
-                loc_stratC = stratC[self.glIDs, :]
+                loc_stratC = stratC[self.locIDs, :]
             else:
-                loc_stratC = stratC[self.glIDs, :]
+                loc_stratC = stratC[self.locIDs, :]
 
             phiC = self.phiC[self.lgIDs, : self.stratStep]
             if MPIsize > 1:
@@ -1104,21 +1171,31 @@ class UnstMesh(object):
                 temp[self.gshadoutIDs, :] = -1.0e8
                 MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
                 phiC[self.shadowAlls, :] = temp
-                loc_phiC = phiC[self.glIDs, :]
+                loc_phiC = phiC[self.locIDs, :]
             else:
-                loc_phiC = phiC[self.glIDs, :]
+                loc_phiC = phiC[self.locIDs, :]
 
             return (
                 loc_stratH,
                 loc_stratZ,
                 loc_stratF,
+                loc_stratW,
                 loc_stratC,
                 loc_phiS,
                 loc_phiF,
+                loc_phiW,
                 loc_phiC,
             )
         else:
-            return loc_stratH, loc_stratZ, loc_stratF, loc_phiS, loc_phiF
+            return (
+                loc_stratH,
+                loc_stratZ,
+                loc_stratF,
+                loc_stratW,
+                loc_phiS,
+                loc_phiF,
+                loc_phiW,
+            )
 
     def _stratalRecord(
         self,
@@ -1127,27 +1204,32 @@ class UnstMesh(object):
         loc_stratH,
         loc_stratZ,
         loc_stratF,
+        loc_stratW,
         loc_stratC,
         loc_phiS,
         loc_phiF,
+        loc_phiW,
         loc_phiC,
     ):
         """
         Once the interpolation has been performed, the following function updates the
         stratigraphic records based on the advected mesh.
 
-        The function relies on 2 fortran subroutines (for loop performance purposes):
+        The function relies on 3 fortran subroutines (for loop performance purposes):
 
-        1. stratabuild
-        2. stratabuildcarb
+        1. stratasimple
+        2. stratabuild
+        3. stratabuildcarb
 
         :arg indices: indices of the closest nodes used for interpolation
         :arg weights: weights based on the distances to closest nodes
         :arg loc_stratH: thickness of each stratigrapic layer accounting for both erosion & deposition events.
-        :arg loc_stratH: proportion of fine sediment contains in each stratigraphic layer.
+        :arg loc_stratF: proportion of fine sediment contains in each stratigraphic layer.
+        :arg loc_stratW: proportion of weathered sediment contains in each stratigraphic layer.
         :arg loc_stratZ: elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer.
         :arg loc_phiS: porosity of coarse sediment in each stratigraphic layer computed at center of each layer.
         :arg loc_phiF: porosity of fine sediment in each stratigraphic layer computed at center of each layer.
+        :arg loc_phiW: porosity of weathered sediment in each stratigraphic layer computed at center of each layer.
         :arg loc_strataC: proportion of carbonate sediment contains in each stratigraphic layer if the carbonate module is turned on.
         :arg loc_phiC: porosity of carbonate sediment in each stratigraphic layer computed at center of each layer when the carbonate module is turned on.
 
@@ -1158,40 +1240,62 @@ class UnstMesh(object):
                 self.stratH[:, : self.stratStep],
                 self.stratZ[:, : self.stratStep],
                 self.stratF[:, : self.stratStep],
+                self.stratW[:, : self.stratStep],
                 self.stratC[:, : self.stratStep],
                 self.phiS[:, : self.stratStep],
                 self.phiF[:, : self.stratStep],
+                self.phiW[:, : self.stratStep],
                 self.phiC[:, : self.stratStep],
             ) = stratabuildcarb(
-                self.npoints,
+                self.lpoints,
                 self.stratStep,
                 indices,
                 weights,
                 loc_stratH,
                 loc_stratZ,
                 loc_stratF,
+                loc_stratW,
                 loc_stratC,
                 loc_phiS,
                 loc_phiF,
+                loc_phiW,
                 loc_phiC,
+            )
+        elif self.stratF is not None:
+            (
+                self.stratH[:, : self.stratStep],
+                self.stratZ[:, : self.stratStep],
+                self.stratF[:, : self.stratStep],
+                self.stratW[:, : self.stratStep],
+                self.phiS[:, : self.stratStep],
+                self.phiF[:, : self.stratStep],
+                self.phiW[:, : self.stratStep],
+            ) = stratabuild(
+                self.lpoints,
+                self.stratStep,
+                indices,
+                weights,
+                loc_stratH,
+                loc_stratZ,
+                loc_stratF,
+                loc_stratW,
+                loc_phiS,
+                loc_phiF,
+                loc_phiW,
             )
         else:
             (
                 self.stratH[:, : self.stratStep],
                 self.stratZ[:, : self.stratStep],
-                self.stratF[:, : self.stratStep],
                 self.phiS[:, : self.stratStep],
-                self.phiF[:, : self.stratStep],
-            ) = stratabuild(
-                self.npoints,
+            ) = stratasimple(
+                self.lpoints,
                 self.stratStep,
                 indices,
                 weights,
                 loc_stratH,
                 loc_stratZ,
-                loc_stratF,
                 loc_phiS,
-                loc_phiF,
             )
 
         return
@@ -1210,10 +1314,9 @@ class UnstMesh(object):
             temp[self.gshadoutIDs, :] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             stratH[self.shadowAlls, :] = temp
-            self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
+            self.stratH[:, : self.stratStep] = stratH[self.locIDs, :]
         else:
-            self.stratH[:, : self.stratStep] = stratH[self.glIDs, :]
-
+            self.stratH[:, : self.stratStep] = stratH[self.locIDs, :]
         stratZ = self.stratZ[self.lgIDs, : self.stratStep]
         if MPIsize > 1:
             temp.fill(-1.0e8)
@@ -1221,21 +1324,9 @@ class UnstMesh(object):
             temp[self.gshadoutIDs, :] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             stratZ[self.shadowAlls, :] = temp
-            self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
+            self.stratZ[:, : self.stratStep] = stratZ[self.locIDs, :]
         else:
-            self.stratZ[:, : self.stratStep] = stratZ[self.glIDs, :]
-
-        stratF = self.stratF[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratF[self.shadowAlls, :] = temp
-            self.stratF[:, : self.stratStep] = stratF[self.glIDs, :]
-        else:
-            self.stratF[:, : self.stratStep] = stratF[self.glIDs, :]
-
+            self.stratZ[:, : self.stratStep] = stratZ[self.locIDs, :]
         phiS = self.phiS[self.lgIDs, : self.stratStep]
         if MPIsize > 1:
             temp.fill(-1.0e8)
@@ -1243,21 +1334,56 @@ class UnstMesh(object):
             temp[self.gshadoutIDs, :] = -1.0e8
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
             phiS[self.shadowAlls, :] = temp
-            self.phiS[:, : self.stratStep] = phiS[self.glIDs, :]
+            self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
         else:
-            self.phiS[:, : self.stratStep] = phiS[self.glIDs, :]
+            self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
+        del stratH, stratZ, phiS
 
-        phiF = self.phiF[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            phiF[self.shadowAlls, :] = temp
-            self.phiF[:, : self.stratStep] = phiF[self.glIDs, :]
-        else:
-            self.phiF[:, : self.stratStep] = phiF[self.glIDs, :]
-        del stratH, stratZ, stratF, phiS, phiF
+        if self.stratF is not None:
+            stratF = self.stratF[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratF[self.shadowAlls, :] = temp
+                self.stratF[:, : self.stratStep] = stratF[self.locIDs, :]
+            else:
+                self.stratF[:, : self.stratStep] = stratF[self.locIDs, :]
+            phiF = self.phiF[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                phiF[self.shadowAlls, :] = temp
+                self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
+            else:
+                self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
+            del stratF, phiF
+
+        if self.stratW is not None:
+            stratW = self.stratW[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = stratW[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                stratW[self.shadowAlls, :] = temp
+                self.stratW[:, : self.stratStep] = stratW[self.locIDs, :]
+            else:
+                self.stratW[:, : self.stratStep] = stratW[self.locIDs, :]
+            phiW = self.phiW[self.lgIDs, : self.stratStep]
+            if MPIsize > 1:
+                temp.fill(-1.0e8)
+                temp[self.gshadinIDs, :] = phiW[self.gshadowIDs, :]
+                temp[self.gshadoutIDs, :] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
+                phiW[self.shadowAlls, :] = temp
+                self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
+            else:
+                self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
+            del stratW, phiW
 
         if self.carbOn:
             stratC = self.stratC[self.lgIDs, : self.stratStep]
@@ -1267,10 +1393,9 @@ class UnstMesh(object):
                 temp[self.gshadoutIDs, :] = -1.0e8
                 MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
                 stratC[self.shadowAlls, :] = temp
-                self.stratC[:, : self.stratStep] = stratC[self.glIDs, :]
+                self.stratC[:, : self.stratStep] = stratC[self.locIDs, :]
             else:
-                self.stratC[:, : self.stratStep] = stratC[self.glIDs, :]
-
+                self.stratC[:, : self.stratStep] = stratC[self.locIDs, :]
             phiC = self.phiC[self.lgIDs, : self.stratStep]
             if MPIsize > 1:
                 temp.fill(-1.0e8)
@@ -1278,9 +1403,9 @@ class UnstMesh(object):
                 temp[self.gshadoutIDs, :] = -1.0e8
                 MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
                 phiC[self.shadowAlls, :] = temp
-                self.phiC[:, : self.stratStep] = phiC[self.glIDs, :]
+                self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
             else:
-                self.phiC[:, : self.stratStep] = phiC[self.glIDs, :]
+                self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
             del stratC, phiC
 
         return
@@ -1304,8 +1429,12 @@ class UnstMesh(object):
         self.vSed.destroy()
         self.vSedLocal.destroy()
         if self.stratNb > 0:
-            self.vSedf.destroy()
-            self.vSedfLocal.destroy()
+            if self.stratF is not None:
+                self.vSedf.destroy()
+                self.vSedfLocal.destroy()
+            if self.stratW is not None:
+                self.vSedw.destroy()
+                self.vSedwLocal.destroy()
             if self.carbOn:
                 self.vSedc.destroy()
                 self.vSedcLocal.destroy()
@@ -1333,22 +1462,21 @@ class UnstMesh(object):
         self.lgmap_row.destroy()
         self.dm.destroy()
 
-        del self.lcoords
-        del self.lcells
-        del self.inIDs
-        del self.stratH
-        del self.stratZ
-        del self.stratF
-        del self.phiS
-        del self.phiF
+        del self.lcoords, self.lcells, self.inIDs
+
+        del self.stratH, self.stratZ, self.phiS
+
+        if self.stratF is not None:
+            del self.stratF, self.phiF
+
+        if self.stratW is not None:
+            del self.stratW, self.phiW
+
         if self.carbOn:
-            del self.stratC
-            del self.phiC
+            del self.stratC, self.phiC
 
         if not self.fast:
-            del self.distRcv
-            del self.wghtVal
-            del self.rcvID
+            del self.distRcv, self.wghtVal, self.rcvID
 
         gc.collect()
 

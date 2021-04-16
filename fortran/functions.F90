@@ -437,8 +437,9 @@ end subroutine mfdreceivers
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine stratabuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, &
-                       phif, nstrath, nstratz, nstratf, nphis, nphif)
+
+subroutine stratasimple(nb, stratnb, ids, weights, strath, stratz, phis, &
+                        nstrath, nstratz, nphis)
 !*****************************************************************************
 ! Record stratigraphic layers through time.
 
@@ -451,19 +452,14 @@ subroutine stratabuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, 
   double precision,intent(in) :: weights(nb,3)
   double precision, intent(in) :: stratz(nb,stratnb)
   double precision, intent(in) :: strath(nb,stratnb)
-  double precision, intent(in) :: stratf(nb,stratnb)
   double precision, intent(in) :: phis(nb,stratnb)
-  double precision, intent(in) :: phif(nb,stratnb)
 
   double precision, intent(out) :: nstratz(nb,stratnb)
   double precision, intent(out) :: nstrath(nb,stratnb)
-  double precision, intent(out) :: nstratf(nb,stratnb)
   double precision, intent(out) :: nphis(nb,stratnb)
-  double precision, intent(out) :: nphif(nb,stratnb)
 
   integer :: k, p, kk
-  double precision :: tmp1, tmp2, tmp3
-  double precision :: tmp4, tmp5, sum_weight
+  double precision :: tmp1, tmp2, tmp3, sum_weight
 
   do k = 1, nb
     sum_weight = weights(k,1) + weights(k,2) + weights(k,3)
@@ -471,34 +467,26 @@ subroutine stratabuild(nb, stratnb, ids, weights, strath, stratz, stratf, phis, 
       tmp1 = 0.0
       tmp2 = 0.0
       tmp3 = 0.0
-      tmp4 = 0.0
-      tmp5 = 0.0
       do p = 1, 3
         tmp1 = tmp1 + weights(k,p)*stratz(ids(k,p)+1,kk)
         tmp2 = tmp2 + weights(k,p)*strath(ids(k,p)+1,kk)
-        tmp3 = tmp3 + weights(k,p)*stratf(ids(k,p)+1,kk)
-        tmp4 = tmp4 + weights(k,p)*phis(ids(k,p)+1,kk)
-        tmp5 = tmp5 + weights(k,p)*phif(ids(k,p)+1,kk)
+        tmp3 = tmp3 + weights(k,p)*phis(ids(k,p)+1,kk)
       enddo
       nstratz(k,kk) = tmp1/sum_weight
       nstrath(k,kk) = tmp2/sum_weight
-      nstratf(k,kk) = tmp3/sum_weight
-      nphis(k,kk) = tmp4/sum_weight
-      nphif(k,kk) = tmp5/sum_weight
-      if(nstratf(k,kk)<0.) nstratf(k,kk) = 0.0
-      if(nstratf(k,kk)>1.) nstratf(k,kk) = 1.0
+      nphis(k,kk) = tmp3/sum_weight
     enddo
   enddo
 
   return
 
-end subroutine stratabuild
+end subroutine stratasimple
 
-subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
-                           stratc, phis, phif, phic, nstrath, nstratz, nstratf, &
-                           nstratc, nphis, nphif, nphic)
+subroutine stratabuild(nb, stratnb, ids, weights, strath, stratz, stratf, &
+                       stratw, phis, phif, phiw, nstrath, nstratz, nstratf, &
+                       nstratw, nphis, nphif, nphiw)
 !*****************************************************************************
-! Record stratigraphic layers through time with carbonate module turned on.
+! Record stratigraphic layers through time with multiple lithologies.
 
   implicit none
 
@@ -510,22 +498,22 @@ subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
   double precision, intent(in) :: stratz(nb,stratnb)
   double precision, intent(in) :: strath(nb,stratnb)
   double precision, intent(in) :: stratf(nb,stratnb)
-  double precision, intent(in) :: stratc(nb,stratnb)
+  double precision, intent(in) :: stratw(nb,stratnb)
   double precision, intent(in) :: phis(nb,stratnb)
   double precision, intent(in) :: phif(nb,stratnb)
-  double precision, intent(in) :: phic(nb,stratnb)
+  double precision, intent(in) :: phiw(nb,stratnb)
 
   double precision, intent(out) :: nstratz(nb,stratnb)
   double precision, intent(out) :: nstrath(nb,stratnb)
   double precision, intent(out) :: nstratf(nb,stratnb)
-  double precision, intent(out) :: nstratc(nb,stratnb)
+  double precision, intent(out) :: nstratw(nb,stratnb)
   double precision, intent(out) :: nphis(nb,stratnb)
   double precision, intent(out) :: nphif(nb,stratnb)
-  double precision, intent(out) :: nphic(nb,stratnb)
+  double precision, intent(out) :: nphiw(nb,stratnb)
 
   integer :: k, p, kk
-  double precision :: tmp1, tmp2, tmp3, tmp4
-  double precision :: tmp5, tmp6, tmp7, sum_weight
+  double precision :: tmp1, tmp2, tmp3, tmp4, tmp5
+  double precision :: tmp6, tmp7, sum_weight, tot
 
   do k = 1, nb
     sum_weight = weights(k,1) + weights(k,2) + weights(k,3)
@@ -541,24 +529,113 @@ subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
         tmp1 = tmp1 + weights(k,p)*stratz(ids(k,p)+1,kk)
         tmp2 = tmp2 + weights(k,p)*strath(ids(k,p)+1,kk)
         tmp3 = tmp3 + weights(k,p)*stratf(ids(k,p)+1,kk)
+        tmp4 = tmp4 + weights(k,p)*phis(ids(k,p)+1,kk)
+        tmp5 = tmp5 + weights(k,p)*phif(ids(k,p)+1,kk)
+        tmp6 = tmp6 + weights(k,p)*stratw(ids(k,p)+1,kk)
+        tmp7 = tmp7 + weights(k,p)*phiw(ids(k,p)+1,kk)
+      enddo
+      nstratz(k,kk) = tmp1/sum_weight
+      nstrath(k,kk) = tmp2/sum_weight
+      nstratf(k,kk) = tmp3/sum_weight
+      nphis(k,kk) = tmp4/sum_weight
+      nphif(k,kk) = tmp5/sum_weight
+      nstratw(k,kk) = tmp6/sum_weight
+      nphiw(k,kk) = tmp7/sum_weight
+      if(nstratf(k,kk)<0.) nstratf(k,kk) = 0.0
+      if(nstratw(k,kk)<0.) nstratw(k,kk) = 0.0
+      tot = nstratw(k,kk)+nstratf(k,kk)
+      if(tot>1.0)then
+        nstratf(k,kk) = nstratf(k,kk)/tot
+        nstratw(k,kk) = nstratw(k,kk)/tot
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine stratabuild
+
+subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
+                           stratw, stratc, phis, phif, phiw, phic, nstrath, &
+                           nstratz, nstratf, nstratw, nstratc, nphis, nphif, &
+                           nphiw, nphic)
+!*****************************************************************************
+! Record stratigraphic layers through time with carbonate module turned on.
+
+  implicit none
+
+  integer, intent(in) :: nb
+  integer, intent(in) :: stratnb
+
+  integer, intent(in) :: ids(nb,3)
+  double precision,intent(in) :: weights(nb,3)
+  double precision, intent(in) :: stratz(nb,stratnb)
+  double precision, intent(in) :: strath(nb,stratnb)
+  double precision, intent(in) :: stratf(nb,stratnb)
+  double precision, intent(in) :: stratw(nb,stratnb)
+  double precision, intent(in) :: stratc(nb,stratnb)
+  double precision, intent(in) :: phis(nb,stratnb)
+  double precision, intent(in) :: phif(nb,stratnb)
+  double precision, intent(in) :: phiw(nb,stratnb)
+  double precision, intent(in) :: phic(nb,stratnb)
+
+  double precision, intent(out) :: nstratz(nb,stratnb)
+  double precision, intent(out) :: nstrath(nb,stratnb)
+  double precision, intent(out) :: nstratf(nb,stratnb)
+  double precision, intent(out) :: nstratw(nb,stratnb)
+  double precision, intent(out) :: nstratc(nb,stratnb)
+  double precision, intent(out) :: nphis(nb,stratnb)
+  double precision, intent(out) :: nphif(nb,stratnb)
+  double precision, intent(out) :: nphiw(nb,stratnb)
+  double precision, intent(out) :: nphic(nb,stratnb)
+
+  integer :: k, p, kk
+  double precision :: tmp1, tmp2, tmp3, tmp4, tmp5, tmp6
+  double precision :: tmp7, tmp8, tmp9, sum_weight, tot
+
+  do k = 1, nb
+    sum_weight = weights(k,1) + weights(k,2) + weights(k,3)
+    do kk = 1, stratnb
+      tmp1 = 0.0
+      tmp2 = 0.0
+      tmp3 = 0.0
+      tmp4 = 0.0
+      tmp5 = 0.0
+      tmp6 = 0.0
+      tmp7 = 0.0
+      tmp8 = 0.0
+      tmp9 = 0.0
+      do p = 1, 3
+        tmp1 = tmp1 + weights(k,p)*stratz(ids(k,p)+1,kk)
+        tmp2 = tmp2 + weights(k,p)*strath(ids(k,p)+1,kk)
+        tmp3 = tmp3 + weights(k,p)*stratf(ids(k,p)+1,kk)
+        tmp8 = tmp8 + weights(k,p)*stratw(ids(k,p)+1,kk)
         tmp4 = tmp4 + weights(k,p)*stratc(ids(k,p)+1,kk)
         tmp5 = tmp5 + weights(k,p)*phis(ids(k,p)+1,kk)
         tmp6 = tmp6 + weights(k,p)*phif(ids(k,p)+1,kk)
         tmp7 = tmp7 + weights(k,p)*phic(ids(k,p)+1,kk)
+        tmp9 = tmp9 + weights(k,p)*phiw(ids(k,p)+1,kk)
       enddo
       nstratz(k,kk) = tmp1/sum_weight
       nstrath(k,kk) = tmp2/sum_weight
       nstratf(k,kk) = tmp3/sum_weight
       nstratc(k,kk) = tmp4/sum_weight
+      nstratw(k,kk) = tmp8/sum_weight
+
       if(nstratf(k,kk)<0.) nstratf(k,kk) = 0.0
       if(nstratc(k,kk)<0.) nstratc(k,kk) = 0.0
-      if(nstratf(k,kk)+nstratc(k,kk)>1.)then
-        nstratf(k,kk) = nstratf(k,kk)/(nstratf(k,kk)+nstratc(k,kk))
-        nstratc(k,kk) = nstratc(k,kk)/(nstratf(k,kk)+nstratc(k,kk))
+      if(nstratw(k,kk)<0.) nstratw(k,kk) = 0.0
+
+      tot = nstratw(k,kk)+nstratf(k,kk)+nstratc(k,kk)
+      if(tot>1.)then
+        nstratf(k,kk) = nstratf(k,kk)/tot
+        nstratw(k,kk) = nstratw(k,kk)/tot
+        nstratc(k,kk) = nstratc(k,kk)/tot
       endif
       nphis(k,kk) = tmp5/sum_weight
       nphif(k,kk) = tmp6/sum_weight
       nphic(k,kk) = tmp7/sum_weight
+      nphiw(k,kk) = tmp9/sum_weight
     enddo
   enddo
 
@@ -755,15 +832,15 @@ subroutine ngbglob( nb, ngbIDs )
 
   nGlobal = nb
   if(allocated(gnID)) deallocate(gnID)
-  allocate(gnID(nGlobal,8)) 
+  allocate(gnID(nGlobal,8))
   gnID = ngbIDs+1
 
   return
 
 end subroutine ngbglob
 
-subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
-                      circumcenter, ngbID, edgemax, n, nb, m)
+subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes, &
+                      area, circumcenter, ngbID, edgemax, n, nb, m)
 !*****************************************************************************
 ! Compute for a specific triangulation the characteristics of each node and
 ! associated voronoi for finite volume discretizations
@@ -772,6 +849,8 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
   implicit none
 
   integer :: m, n, nb
+  integer, intent(in) :: nloc
+  integer, intent(in) :: lgIDs(nb)
   integer, intent(in) :: cells_nodes(n, 3)
   integer, intent(in) :: cells_edges(n,3)
   integer, intent(in) :: edges_nodes(m, 2)
@@ -780,20 +859,44 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
   double precision, intent(in) :: area(nb)
   double precision, intent(in) :: circumcenter(3,n)
 
-  integer, intent(out) :: ngbID(nb, 8)
+  integer, intent(out) :: ngbID(nloc, 8)
   double precision, intent(out) :: edgemax
 
-  integer :: i, n1, n2, k, l, p, eid, cid, e, id
+  integer :: i, n1, n2, k, l, p, eid, cid
+  integer :: e, id, lid, lid2, nbngbs, ngbIDv
   integer :: nid(2), nc(3), edge(nb, 8)
   integer :: edgeNb(3), edges(3,2), cell_ids(nb, 8)
 
   double precision :: coords0(3), coordsID(3)
   double precision :: midpoint(3), dist
 
+  integer, dimension(:), allocatable :: gFVnNb
+  integer, dimension(:,:), allocatable :: gngbID
+  ! integer, dimension(:,:), allocatable :: FVnID
+  double precision, dimension(:,:), allocatable :: gFVeLgt
+  double precision, dimension(:,:), allocatable :: gFVvDist
+
   logical :: inside
 
   ! Define fortran global parameters
-  nLocal = nb
+  nLocal = nloc
+
+  if(nLocal < nb)then
+    if(allocated(gFVnNb)) deallocate(gFVnNb)
+    if(allocated(gngbID)) deallocate(gngbID)
+    if(allocated(gFVeLgt)) deallocate(gFVeLgt)
+    if(allocated(gFVvDist)) deallocate(gFVvDist)
+
+    allocate(gFVnNb(nb))
+    allocate(gngbID(nb,8))
+    allocate(gFVeLgt(nb,8))
+    allocate(gFVvDist(nb,8))
+
+    gFVnNb = 0
+    gngbID = -1
+    gFVeLgt = 0.
+    gFVvDist = 0.
+  endif
 
   if(allocated(FVarea)) deallocate(FVarea)
   if(allocated(FVnID)) deallocate(FVnID)
@@ -807,7 +910,6 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
   allocate(FVeLgt(nLocal,8))
   allocate(FVvDist(nLocal,8))
 
-  FVarea = area
   cell_ids = -1
   edge = -1
   FVnNb = 0
@@ -850,7 +952,11 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
     enddo lp0
     if( inside )then
       edge(n1,k)  = i-1
-      FVnNb(n1) = FVnNb(n1) + 1
+      if(nLocal < nb)then
+        gFVnNb(n1) = gFVnNb(n1) + 1
+      else
+        FVnNb(n1) = FVnNb(n1) + 1
+      endif
     endif
     inside = .False.
     lp1: do k = 1, 8
@@ -863,28 +969,54 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
     enddo lp1
     if( inside )then
       edge(n2,k)  = i-1
-      FVnNb(n2) = FVnNb(n2) + 1
+      if(nLocal < nb)then
+        gFVnNb(n2) = gFVnNb(n2) + 1
+      else
+        FVnNb(n2) = FVnNb(n2) + 1
+      endif
     endif
   enddo
 
   do k = 1, nb
+
     ! Get triangulation edge lengths
     coords0 = coords(k,1:3)
     l = 0
-    do eid = 1, FVnNb(k)
+
+    if(nLocal < nb)then
+      nbngbs = gFVnNb(k)
+    else
+      nbngbs = FVnNb(k)
+    endif
+
+    do eid = 1, nbngbs
       nid = edges_nodes(edge(k,eid)+1,1:2)
       if( nid(1) == k-1)then
         l = l + 1
-        ngbID(k,l) = nid(2)
+        if(nLocal < nb)then
+          gngbID(k,l) = nid(2)
+        else
+          ngbID(k,l) = nid(2)
+        endif
         coordsID = coords(nid(2)+1,1:3)
       else
         l = l + 1
-        ngbID(k,l) = nid(1)
+        if(nLocal < nb)then
+          gngbID(k,l) = nid(1)
+        else
+          ngbID(k,l) = nid(1)
+        endif
         coordsID = coords(nid(1)+1,1:3)
       endif
-      call euclid( coords0, coordsID, FVeLgt(k,l) )
-      edgemax = max(edgemax, FVeLgt(k,l))
+      if(nLocal < nb)then
+        call euclid( coords0, coordsID, gFVeLgt(k,l) )
+        edgemax = max(edgemax, gFVeLgt(k,l))
+      else
+        call euclid( coords0, coordsID, FVeLgt(k,l) )
+        edgemax = max(edgemax, FVeLgt(k,l))
+      endif
     enddo
+
     ! Get voronoi edge lengths
     lp2: do cid = 1, 8
       if( cell_ids(k,cid) == -1 ) exit lp2
@@ -895,28 +1027,75 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, area, &
           midpoint(1:3) = 0.5 * (coords(edges(e,1)+1,1:3)+coords(edges(e,2)+1,1:3))
           id = -1
           if( edges(e,1) == k-1 )then
-            lp3: do i = 1, FVnNb(k)
-              if(ngbID(k,i) == edges(e,2))then
+            lp3: do i = 1, nbngbs
+              if(nLocal < nb)then
+                ngbIDv = gngbID(k,i)
+              else
+                ngbIDv = ngbID(k,i)
+              endif
+              if(ngbIDv == edges(e,2))then
                 id = i
                 exit lp3
               endif
             enddo lp3
           else
-            lp4: do i = 1, FVnNb(k)
-              if(ngbID(k,i) == edges(e,1))then
+            lp4: do i = 1, nbngbs
+              if(nLocal < nb)then
+                ngbIDv = gngbID(k,i)
+              else
+                ngbIDv = ngbID(k,i)
+              endif
+              if(ngbIDv == edges(e,1))then
                 id = i
                 exit lp4
               endif
             enddo lp4
           endif
-          call euclid( midpoint(1:3), circumcenter(1:3,cell_ids(k,cid)+1),  dist)
-          FVvDist(k,id) = FVvDist(k,id) + dist
+          call euclid(midpoint(1:3), circumcenter(1:3, cell_ids(k,cid)+1),  dist)
+          if(nLocal < nb)then
+            gFVvDist(k,id) = gFVvDist(k,id) + dist
+          else
+            FVvDist(k,id) = FVvDist(k,id) + dist
+          endif
         endif
       enddo
     enddo lp2
+
+    ! In case of parallel simulation only allocate local arrays
+    if(nLocal < nb)then
+      ! Is the vertex in the partition
+      if(lgIDs(k)>-1)then
+        lid = lgIDs(k) + 1
+        FVnNb(lid) = gFVnNb(k)
+        FVarea(lid) = area(k)
+        p = 1
+        do i = 1, gFVnNb(k)
+          ngbIDv = gngbID(k, i)
+          lid2 = lgIDs(ngbIDv + 1) + 1
+          if(lid2 > 0)then
+            ngbID(lid, p) =  lid2 - 1
+            FVeLgt(lid, p) = gFVeLgt(k, i)
+            FVvDist(lid, p) = gFVvDist(k, i)
+            FVnID(lid, p) = ngbID(lid, p)
+            p = p+1
+          else
+            FVnNb(lid) = FVnNb(lid) - 1
+          endif
+        enddo
+      endif
+    endif
   enddo
 
-  FVnID = ngbID
+
+  if(nLocal < nb)then
+    deallocate(gFVnNb)
+    deallocate(gngbID)
+    deallocate(gFVeLgt)
+    deallocate(gFVvDist)
+  else
+    FVnID = ngbID
+    FVarea = area
+  endif
 
 end subroutine definetin
 
