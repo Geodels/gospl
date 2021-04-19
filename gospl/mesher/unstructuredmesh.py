@@ -90,7 +90,7 @@ class UnstMesh(object):
 
         if MPIrank == 0:
             cells = np.asarray(cells, dtype=np.int32)
-            coords = np.asarray(coords, dtype=np.float)
+            coords = np.asarray(coords, dtype=np.float64)
             MPIcomm.bcast(cells.shape, root=0)
             MPIcomm.bcast(coords.shape, root=0)
             # Provide the actual data on rank 0.
@@ -106,7 +106,7 @@ class UnstMesh(object):
             self.dm = petsc4py.PETSc.DMPlex().createFromCellList(
                 dim,
                 np.zeros(cell_shape, dtype=np.int32),
-                np.zeros(coord_shape, dtype=np.float),
+                np.zeros(coord_shape, dtype=np.float64),
                 comm=petsc4py.PETSc.COMM_WORLD,
             )
         return
@@ -608,50 +608,50 @@ class UnstMesh(object):
             self.stratNb += self.initLay
 
             # Create stratigraphic arrays
-            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.stratH[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["strataF"]
-            self.stratF = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.stratF[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["strataW"]
-            self.stratW = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratW = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.stratW[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["strataZ"]
-            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.stratZ[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["phiS"]
-            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiS[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["phiF"]
-            self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiF[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             stratVal = fileData["phiW"]
-            self.phiW = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.phiW = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiW[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             if self.carbOn:
                 stratVal = fileData["strataC"]
-                self.stratC = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+                self.stratC = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 self.stratC[:, 0 : self.initLay] = stratVal[
                     self.locIDs, 0 : self.initLay
                 ]
 
                 stratVal = fileData["phiC"]
-                self.phiC = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+                self.phiC = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 self.phiC[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
             del fileData, stratVal
             gc.collect()
         else:
-            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
-            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
-            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float)
+            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
 
         return
 

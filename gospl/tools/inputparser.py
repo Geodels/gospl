@@ -437,7 +437,7 @@ class ReadYaml(object):
                             engine="c",
                             header=None,
                             na_filter=False,
-                            dtype=np.float,
+                            dtype=np.float64,
                             low_memory=False,
                         )
 
@@ -449,7 +449,7 @@ class ReadYaml(object):
                                 engine="c",
                                 header=None,
                                 na_filter=False,
-                                dtype=np.float,
+                                dtype=np.float64,
                                 low_memory=False,
                             )
 

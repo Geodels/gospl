@@ -141,7 +141,7 @@ class moveElev:
             skiprows=[0, 1, 2, 3, 4, 5, maxlines],
             error_bad_lines=True,
             na_filter=False,
-            dtype=np.float,
+            dtype=np.float64,
             low_memory=False,
         )
 

@@ -122,10 +122,10 @@ def test_gospl_carbonate_run():
     normal = Model(input, True, False, carbctrl)
 
     # Run model
-    normal.runProcesses()
+    # normal.runProcesses()
 
     # Reinitialise model
     normal.reInitialiseZ()
 
     # Destroy model
-    normal.destroy()
+    # normal.destroy()

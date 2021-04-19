@@ -214,7 +214,7 @@ def gosplRain(coords, cells, paleorain, rainmesh, visvtk=False, filter=2):
 
     # Interpolate the paleogrid on global mesh
     meshd = ndimage.map_coordinates(paleorain, rcoords, order=2, mode="nearest").astype(
-        np.float
+        np.float64,
     )
 
     # Conversion from mm/day to m/yr
@@ -249,7 +249,7 @@ def gosplDisp(coords, lonlat, cells, paleodisp, dispmesh, visvtk=False, reverse=
         skiprows=[0, 1, 2, 3, 4, 5, maxlines],
         error_bad_lines=True,
         na_filter=False,
-        dtype=np.float,
+        dtype=np.float64,
         low_memory=False,
     )
 

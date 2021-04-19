@@ -28,6 +28,7 @@ diffusion:
     hillslopeKm: 0.1
     sedK: 1000.
     sedKf: 2000.
+    sedKw: 3000.
 
 sea:
     position: 0.
@@ -39,9 +40,12 @@ climate:
 compaction:
     phis: 0.49
     phif: 0.63
+    phiw: 0.65
     z0s: 3700.0
     z0f: 1960.0
+    z0w: 1680.0
 
 output:
     dir: 'output/strat'
     makedir: False
+

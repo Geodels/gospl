@@ -56,7 +56,7 @@ class SEDMesh(object):
             if self.carbOn:
                 self.vSedc = self.hGlobal.duplicate()
                 self.vSedcLocal = self.hLocal.duplicate()
-        maxnb = np.zeros(1, dtype=np.int)
+        maxnb = np.zeros(1, dtype=np.int64)
         maxnb[0] = setmaxnb(self.lpoints)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, maxnb, op=MPI.MAX)
         self.maxnb = maxnb[0]
@@ -162,6 +162,23 @@ class SEDMesh(object):
 
         return
 
+    def _getSed(self, stype):
+        """
+        Pick the relevant PETSc array for the specified sediment type.
+        """
+
+        if stype == 0:
+            self.vSedLocal.copy(result=self.QsL)
+        elif stype == 1:
+            self.vSedfLocal.copy(result=self.QsL)
+        elif stype == 2:
+            self.vSedcLocal.copy(result=self.QsL)
+        elif stype == 3:
+            self.vSedwLocal.copy(result=self.QsL)
+        self.dm.localToGlobal(self.QsL, self.Qs)
+
+        return
+
     def _sedChange(self, stype):
         """
         Deposition in depressions and the marine environments.
@@ -188,18 +205,10 @@ class SEDMesh(object):
 
         # Compute continental sediment deposition
         self.seaQs = np.zeros(self.lpoints, dtype=np.float64)
-        if stype == 0:
-            self.vSedLocal.copy(result=self.QsL)
-        elif stype == 1:
-            self.vSedfLocal.copy(result=self.QsL)
-        elif stype == 2:
-            self.vSedcLocal.copy(result=self.QsL)
-        elif stype == 3:
-            self.vSedwLocal.copy(result=self.QsL)
-        self.dm.localToGlobal(self.QsL, self.Qs)
+        self._getSed(stype)
 
         perc = 1.0
-        minperc = 1.0e-3
+        minperc = 1.0e-4
         iters = 0
         fill = False
         totQs = self.Qs.sum()
@@ -216,12 +225,31 @@ class SEDMesh(object):
                     fill = True
                 self._moveFluxes(filled=fill)
                 iters += 1
+
             if MPIrank == 0 and self.verbose:
                 print(
                     "Remaining percentage to transport: %0.01f %d"
                     % (perc * 100.0, iters),
                     flush=True,
                 )
+
+            if stype == 0:
+                self.vSedLocal.axpy(1.0, self.QsL)
+            if stype == 1:
+                self.vSedfLocal.axpy(1.0, self.QsL)
+            if stype == 2:
+                self.vSedcLocal.axpy(1.0, self.QsL)
+            if stype == 3:
+                self.vSedwLocal.axpy(1.0, self.QsL)
+
+        if stype == 0:
+            self.dm.localToGlobal(self.vSedLocal, self.vSed)
+        if stype == 1:
+            self.dm.localToGlobal(self.vSedfLocal, self.vSedf)
+        if stype == 2:
+            self.dm.localToGlobal(self.vSedcLocal, self.vSedc)
+        if stype == 3:
+            self.dm.localToGlobal(self.vSedwLocal, self.vSedw)
 
         # Compute Marine Sediment Deposition
         self.QsL.setArray(self.seaQs)
@@ -763,7 +791,7 @@ class SEDMesh(object):
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
         depo = self.tmpL.getArray().copy()
-        depo[depo < 0] = 0.0
+        depo[depo < 1.0e-4] = 0.0
         if self.stratF is not None:
             fineH = self.stratH[:, self.stratStep] * self.stratF[:, self.stratStep]
         if self.stratW is not None:
@@ -899,6 +927,7 @@ class SEDMesh(object):
             self.thFine = np.zeros(self.lpoints)
             # From fine thickness extract the solid phase that is eroded from this last layer
             tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratF[nids, eroLayNb]
+            tmp[tmp < 1.0e-8] = 0.0
             thFine += tmp * (1.0 - self.phiF[nids, eroLayNb])
             # Define the uncompacted fine thickness that will be deposited dowstream
             self.thFine[nids] = thFine / (1.0 - self.phi0f)
@@ -909,6 +938,7 @@ class SEDMesh(object):
             self.thClay = np.zeros(self.lpoints)
             # From weathered thickness extract the solid phase that is eroded from this last layer
             tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratW[nids, eroLayNb]
+            tmp[tmp < 1.0e-8] = 0.0
             thClay += tmp * (1.0 - self.phiW[nids, eroLayNb])
             # Define the uncompacted weathered thickness that will be deposited dowstream
             self.thClay[nids] = thClay / (1.0 - self.phi0w)
@@ -919,6 +949,7 @@ class SEDMesh(object):
             # From carb thickness extract the solid phase that is eroded from this last layer
             self.thCarb = np.zeros(self.lpoints)
             tmp = (self.stratH[nids, eroLayNb] - eroVal) * self.stratC[nids, eroLayNb]
+            tmp[tmp < 1.0e-8] = 0.0
             thCarb += tmp * (1.0 - self.phiC[nids, eroLayNb])
             # Define the uncompacted carbonate thickness that will be deposited dowstream
             self.thCarb[nids] = thCarb / (1.0 - self.phi0c)
@@ -940,6 +971,7 @@ class SEDMesh(object):
             tmp = self.stratH[nids, eroLayNb] - eroVal
             if self.stratF is not None:
                 tmp *= 1.0 - self.stratF[nids, eroLayNb] - self.stratW[nids, eroLayNb]
+            tmp[tmp < 1.0e-8] = 0.0
             # Define the uncompacted sand thickness that will be deposited dowstream
             thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
             self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
