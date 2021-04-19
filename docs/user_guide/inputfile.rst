@@ -222,8 +222,9 @@ d. Studies have shown that the physical strength of bedrock which varies with th
       shelfslope: True
       hillslopeKa: 0.02
       hillslopeKm: 0.2
-      sedK: 1000.
-      sedKf: 2000.
+      sedK: 100.
+      sedKf: 200.
+      sedKw: 300.
 
 
 Hillslope processes in *gospl* is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
@@ -233,6 +234,7 @@ b. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
 c. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
 d. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
 e. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
+f. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
 
 
 
@@ -371,15 +373,19 @@ Follows the tectonic forcing conditions with a sequence of events defined by a s
   compaction:
       phis: 0.49
       phif: 0.63
+      phiw: 0.65
       z0s: 3700.0
       z0f: 1960.0
+      z0w: 1580.0
 
-The compaction module is turned-on when a multi-lithology model is ran (_i.e._ the :yaml:`npstrata` key is defined). We assume  different depth-porosity relationships for the 2 considered lithology types, the following parameters are required:
+The compaction module is turned-on when a multi-lithology model is ran (_i.e._ the :yaml:`npstrata` key is defined). We assume  different depth-porosity relationships for the 3 considered lithology types, the following parameters are required:
 
 a. lithology one (coarser lithology) porosity at the surface :yaml:`phis`,
 b. lithology two (finer lithology) porosity at the surface :yaml:`phif`,
-c. e-folding depth of lithology one (in metres)
-d. e-folding depth of lithology two (in metres)
+c. lithology three (weathered lithology) porosity at the surface :yaml:`phiw`,
+d. e-folding depth of lithology one (in metres)
+e. e-folding depth of lithology two (in metres)
+f. e-folding depth of lithology three (in metres)
 
 .. raw:: html
 
