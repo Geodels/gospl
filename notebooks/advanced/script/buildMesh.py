@@ -125,7 +125,12 @@ def gosplElev(coords, cells, elev, gmesh, visvtk=False):
     s = Gmesh.idx_hierarchy.shape
     a = np.sort(Gmesh.idx_hierarchy.reshape(s[0], -1).T)
 
-    if meshplex.__version__ >= "0.14.0":
+    if meshplex.__version__ >= "0.16.0":
+        Gmesh.edges = {"points": np.unique(a, axis=0)}
+        ngbNbs, ngbID = definegtin(
+            len(coords), Gmesh.cells("points"), Gmesh.edges["points"]
+        )
+    elif meshplex.__version__ >= "0.14.0":
         Gmesh.edges = {"points": np.unique(a, axis=0)}
         ngbNbs, ngbID = definegtin(
             len(coords), Gmesh.cells["points"], Gmesh.edges["points"]
