@@ -147,13 +147,15 @@ class UnstMesh(object):
         if meshplex.__version__ >= "0.16.0":
             edges_nodes = Tmesh.edges["points"]
             cells_nodes = Tmesh.cells("points")
+            cells_edges = Tmesh.cells("edges")
         elif meshplex.__version__ >= "0.14.0":
             edges_nodes = Tmesh.edges["points"]
             cells_nodes = Tmesh.cells["points"]
+            cells_edges = Tmesh.cells["edges"]
         else:
             edges_nodes = Tmesh.edges["nodes"]
             cells_nodes = Tmesh.cells["nodes"]
-        cells_edges = Tmesh.cells["edges"]
+            cells_edges = Tmesh.cells["edges"]
 
         # Finite volume discretisation
         self.FVmesh_ngbID, self.edgeMax = definetin(
