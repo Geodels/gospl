@@ -9,8 +9,11 @@ from mpi4py import MPI
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import fillpit
     from gospl._fortran import setmaxnb
+    from gospl._fortran import marinediff
     from gospl._fortran import marinecoeff
+    from gospl._fortran import mfdreceivers
     from gospl._fortran import sethillslopecoeff
 
 petsc4py.init(sys.argv)
@@ -42,6 +45,8 @@ class SEDMesh(object):
         # Petsc vectors
         self.tmp = self.hGlobal.duplicate()
         self.tmpL = self.hLocal.duplicate()
+        self.tmp1 = self.hGlobal.duplicate()
+        self.tmp1L = self.hLocal.duplicate()
         self.Qs = self.hGlobal.duplicate()
         self.QsL = self.hLocal.duplicate()
         self.vSed = self.hGlobal.duplicate()
@@ -62,6 +67,9 @@ class SEDMesh(object):
         self.maxnb = maxnb[0]
         self.scaleIDs = np.zeros(self.lpoints)
         self.scaleIDs[self.lIDs] = 1.0
+
+        # Clinoforms slopes for each sediment type
+        self.slps = [6.0, 5.0, 3.0, 1.0]
 
         return
 
@@ -252,6 +260,7 @@ class SEDMesh(object):
             self.dm.localToGlobal(self.vSedwLocal, self.vSedw)
 
         # Compute Marine Sediment Deposition
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
         self.QsL.setArray(self.seaQs)
         self.dm.localToGlobal(self.QsL, self.Qs)
         sedK = self.sedimentK
@@ -488,6 +497,86 @@ class SEDMesh(object):
 
         return
 
+    def _nonlinearMarineDiff(self, base, sedK):
+        """
+        Non-linear diffusion dependent on thicknesses of freshly deposited sediment in
+        the marine realm is solved implicitly using a Picard iteration approach.
+
+        Sediments transported is limited by the underlying bathymentry. Depending on the
+        user defined diffusion coefficients and time-steps a small portion of the underlying
+        bedrock might be eroded during the process...
+
+        :arg base: numpy array representing local basement elevations
+        :arg sedK: sediment diffusion coefficient for river transported sediment in the marine realm
+        """
+
+        err = 1.0e8
+        error = np.zeros(1, dtype=np.float64)
+
+        # Specify the elevation defined by the sum of basement plus
+        # marine sediment flux thickness as hOld
+        hOld = self.tmp1L.getArray().copy()
+
+        # Update non-linear diffusion coefficients iteratively until convergence
+        step = 0
+        while err > 1.0e-2 and step < 10:
+
+            # Get marine diffusion coefficients
+            diffCoeffs = marinediff(
+                self.lpoints, base, hOld, sedK * self.dt, self.sealevel
+            )
+
+            # Build the diffusion matrix
+            self.Diff = self._matrix_build_diag(diffCoeffs[:, 0])
+            indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+
+            for k in range(0, self.maxnb):
+                tmpMat = self._matrix_build()
+                indices = self.FVmesh_ngbID[:, k].copy()
+                data = diffCoeffs[:, k + 1]
+                ids = np.nonzero(data == 0.0)
+                indices[ids] = ids
+                tmpMat.assemblyBegin()
+                tmpMat.setValuesLocalCSR(
+                    indptr,
+                    indices.astype(petsc4py.PETSc.IntType),
+                    data,
+                )
+                tmpMat.assemblyEnd()
+                self.Diff += tmpMat
+                tmpMat.destroy()
+            del ids, indices, indptr, diffCoeffs
+            gc.collect()
+
+            # Get diffused values for considered time step and diffusion coefficients
+            if step == 0:
+                self._solve_KSP(False, self.Diff, self.tmp1, self.tmp)
+            else:
+                self._solve_KSP(True, self.Diff, self.tmp1, self.tmp)
+
+            # Get global error
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            newH = self.tmpL.getArray().copy()
+            newH[newH < base] = base[newH < base]
+            hOld[hOld < base] = base[hOld < base]
+
+            error[0] = np.max(np.abs(newH - hOld)) / np.max(np.abs(newH))
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, error, op=MPI.MAX)
+            err = error[0]
+            self.tmpL.setArray(newH)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            step += 1
+
+            # Update sedH and old elevation values
+            self.tmp.copy(result=self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmp1L)
+            hOld = self.tmp1L.getArray().copy()
+
+        del newH
+        gc.collect()
+
+        return hOld
+
     def _updateMarineDiff(self, nsedK):
         """
         The diffusion equation for fluvial related sediment entering the marine
@@ -559,20 +648,20 @@ class SEDMesh(object):
         # From the distance to coastline define the upper limit
         # of the shelf to ensure a maximum slope angle
         if self.vtkMesh is not None:
-            if stype == 3:
-                toplimit = np.full((self.lpoints), 0.9 * self.sealevel)
-            else:
-                toplimit = self.sealevel - self.coastDist * 1.0e-4
-                ids = self.coastDist < 2.0 * self.edgeMax
-                toplimit[ids] = self.sealevel - self.coastDist[ids] * 1.0e-5
-                ids = self.coastDist < self.edgeMax
-                toplimit[ids] = self.sealevel
+            toplimit = self.sealevel - self.coastDist * self.slps[stype] * 1.0e-5
         else:
             toplimit = np.full((self.lpoints), 0.9 * self.sealevel)
+        toplimit[self.fillSeaID] = np.maximum(
+            toplimit[self.fillSeaID], self.hFill[self.fillSeaID]
+        )
+        self.fillLandID = np.where(self.hFill > self.sealevel)[0]
+        toplimit[self.fillLandID] = self.hFill[self.fillLandID]
 
         # Define maximum deposition thicknesses and initialise
         # cumulative deposits
         h0 = self.hLocal.getArray().copy()
+        self.hGlobal.copy(result=self.tmp1)
+        self.hLocal.copy(result=self.tmp1L)
         maxDep = toplimit - h0
         maxDep[maxDep < 0.0] = 0.0
         cumDep = np.zeros(self.lpoints, dtype=np.float64)
@@ -607,14 +696,16 @@ class SEDMesh(object):
 
         iters = 0
         nsedK = sedK
+        guess = False
         remainPerc = 1.0
         while (
             iters < 1000 and remainPerc > max(0.005, self.frac_fine) and maxSedVol > 0.0
         ):
 
             # Get diffused values for considered time step
-            if iters == 0:
+            if not guess:
                 self._solve_KSP(False, self.Diff, self.Qs, self.tmp)
+                guess = True
             else:
                 self._solve_KSP(True, self.Diff, self.Qs, self.tmp)
 
@@ -644,19 +735,43 @@ class SEDMesh(object):
             self.Qs.pointwiseMult(self.Qs, self.areaGlobal)
             sedVol = self.Qs.sum()
             remainPerc = sedVol / maxSedVol
-            self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
 
             iters += 1
             # Update diffusion coefficient matrix
-            if iters % 100 == 0 and nsedK / sedK < 1.0e4:
-                nsedK = nsedK * 10.0
-                # if MPIrank == 0:
-                #     print(
-                #         "%d, %d, perc: %0.01f nsedK %0.01f sedK: %0.01f"
-                #         % (iters, MPIrank, remainPerc * 100.0, nsedK, sedK),
-                #         flush=True,
-                #     )
-                self._updateMarineDiff(nsedK)
+            if iters % 50 == 0:
+
+                guess = False
+                dH = h0 + cumDep
+
+                gZ = np.zeros(self.mpoints)
+                gZ[self.locIDs] = dH
+                gZ[self.outIDs] = -1.0e8
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
+                if MPIrank == 0:
+                    hFill, pits = fillpit(self.sealevel - 1000.0, gZ, 1.0e8)
+                else:
+                    hFill = np.zeros(self.mpoints, dtype=np.float64)
+                hFill = MPI.COMM_WORLD.bcast(hFill, root=0)
+                hFill = hFill[self.locIDs]
+                hFill = np.maximum(hFill, toplimit)
+
+                # Distribute excess sediment volume by moving it on the
+                # new surface
+                ids = np.where(np.logical_and(hFill > dH, hFill < self.sealevel))[0]
+                hFill[ids] = -1.1e6
+
+                # Define the new elevation to diffuse with the excess
+                # volume pushed on the edges of the clinoforms
+                self._moveMarineSed(hFill)
+
+                if iters % 50 == 0:
+                    nsedK = nsedK * 10.0
+                    # ids = np.where(toplimit <= dH)[0]
+                    # nsedK[toplimit <= dH] = 0.0
+                    self._updateMarineDiff(nsedK)
+            else:
+                self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
+                self.dm.globalToLocal(self.Qs, self.QsL)
 
             if iters >= 1000 and MPIrank == 0:
                 print(
@@ -670,26 +785,141 @@ class SEDMesh(object):
                     flush=True,
                 )
 
-        # Update cumulative erosion/deposition and elevation
-        cumDep[cumDep < 0] = 0.0
-        self.tmpL.setArray(cumDep)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self.cumED.axpy(1.0, self.tmp)
-        self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        # Diffuse deposited sediment
+        if maxSedVol > 0.0:
+            cumDep[cumDep < 0] = 0.0
+            self.tmpL.setArray(cumDep)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            maxSedVol = self.tmp.sum()
+            self.tmp.pointwiseDivide(self.tmp, self.areaGlobal)
+            self.tmp1.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.tmp1, self.tmp1L)
+            # step = 0
+            # while step < 1:
+            dH = self._nonlinearMarineDiff(h0, sedK)
+            self.tmp1L.setArray(dH)
+            self.dm.localToGlobal(self.tmp1L, self.tmp1)
+            # step += 1
+
+            # Update cumulative erosion/deposition and elevation
+            cumDep = self.tmp1L.getArray().copy() - h0
+            cumDep[cumDep < 0] = 0.0
+
+            # Ensure volume conservation
+            self.tmpL.setArray(cumDep)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            sedVol = self.tmp.sum()
+            if sedVol > maxSedVol:
+                self.tmp.scale(maxSedVol / sedVol)
+                self.tmp.pointwiseDivide(self.tmp, self.areaGlobal)
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+            else:
+                self.tmp.pointwiseDivide(self.tmp, self.areaGlobal)
+
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.cumED.axpy(1.0, self.tmp)
+            self.hGlobal.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         if self.stratNb > 0:
             self._deposeStrat(stype)
 
-        del h0, cumDep, maxDep, Qs
+        del h0, cumDep, maxDep, Qs, toplimit
         if maxSedVol > 0.0:
             del dH, overDep
+        if iters > 25:
+            del ids
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Marine Sediment Diffusion (%0.02f seconds)"
+                % (process_time() - t0),
+                flush=True,
+            )
+
+        return
+
+    def _moveMarineSed(self, h):
+        """
+        This function moves downstream river sediment fluxes based on clinorform slopes
+        accounting for changes in elevation induced by marine deposition.
+
+        Here again, the PETSc *scalable linear equations solvers* (**KSP**) is used
+        to obtain the solution.
+
+        :arg h: numpy array representing filled elevations up to maximum clinoforms heights
+        """
+
+        t0 = process_time()
+
+        # Define multiple sediment distributions
+        sedDir = 1
+        rcvID, distRcv, wghtVal = mfdreceivers(sedDir, self.inIDs, h, -1.0e6)
+
+        # Get recievers
+        rcID = np.where(h <= -1.0e6)[0]
+
+        # Set marine nodes
+        rcvID[rcID, :] = np.tile(rcID, (sedDir, 1)).T
+        distRcv[rcID, :] = 0.0
+        wghtVal[rcID, :] = 0.0
+
+        self.Qs.copy(result=self.tmp)
+
+        sedMat = self.iMat.copy()
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        nodes = indptr[:-1]
+
+        for k in range(0, sedDir):
+
+            # Flow direction matrix for a specific direction
+            tmpMat = self._matrix_build()
+            data = -wghtVal[:, k].copy()
+            data[rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(
+                indptr,
+                rcvID[:, k].astype(petsc4py.PETSc.IntType),
+                data,
+            )
+            tmpMat.assemblyEnd()
+
+            # Add the weights from each direction
+            sedMat += tmpMat
+            tmpMat.destroy()
+
+        del data, indptr, nodes, rcvID, distRcv, wghtVal
+        gc.collect()
+
+        # Transport sediment volume in m3
+        self._solve_KSP(False, sedMat.transpose(), self.tmp, self.Qs)
+
+        # Update local vector
+        self.dm.globalToLocal(self.Qs, self.QsL)
+
+        sedMat.destroy()
+
+        # Remaining sediment volumes on the edges of the clinoforms
+        tmp = self.QsL.getArray().copy()
+        data = np.zeros(len(tmp))
+        data[rcID] = tmp[rcID]
+        self.QsL.setArray(data)
+        self.dm.localToGlobal(self.QsL, self.Qs)
+
+        # Set the corresponding thicknesses
+        self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
+        self.dm.globalToLocal(self.Qs, self.QsL)
+
+        del rcID, tmp, data
+        gc.collect()
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Move River Sediment Downstream (%0.02f seconds)"
                 % (process_time() - t0),
                 flush=True,
             )

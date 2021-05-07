@@ -53,6 +53,16 @@ python module _fortran
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine marinecoeff
 
+        subroutine marinediff(nb,zb,sedh,ks,sl,dcoeff)
+            use meshparams
+            integer intent(in) :: nb
+            double precision intent(in) :: ks
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in),depend(nb) :: zb
+            double precision dimension(nb),intent(in),depend(nb) :: sedh
+            double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
+        end subroutine marinediff
+
         subroutine mfdreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)
             use meshparams
             integer intent(in) :: nrcv

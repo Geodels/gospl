@@ -23,7 +23,6 @@ spl:
     d: 0.42
 
 diffusion:
-    shelfslope: True
     hillslopeKa: 0.01
     hillslopeKm: 0.1
     sedK: 1000.

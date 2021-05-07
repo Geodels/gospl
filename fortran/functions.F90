@@ -287,6 +287,7 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
+
 subroutine marinecoeff(nb, Ks, dcoeff)
 !*****************************************************************************
 ! Define marine diffusion coefficients based on a finite volume spatial
@@ -329,6 +330,59 @@ subroutine marinecoeff(nb, Ks, dcoeff)
     return
 
 end subroutine marinecoeff
+
+subroutine marinediff(nb, zb, sedh, ks, sl, dcoeff)
+!*****************************************************************************
+! Define non-linear marine diffusion coefficients based on a finite volume
+! spatial discretisation as proposed in Tucker et al. (2001).
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    double precision, intent(in) :: zb(nb)
+    double precision, intent(in) :: sedh(nb)
+    double precision,intent(in) :: Ks
+    double precision,intent(in) :: sl
+    double precision, intent(out) :: dcoeff(nb,9)
+
+    integer :: k, p, n
+    double precision :: s1, c, sk, sn, v, tmpz, tmph
+
+    dcoeff = 0.
+    do k = 1, nb
+      s1 = 0.
+      if(FVarea(k)>0)then
+          do p = 1, FVnNb(k)
+            n = FVnID(k,p)+1
+            tmpz = 0.5*(zb(n)+zb(k))
+            if(tmpz < sl .and. FVvDist(k,p)>0.)then
+              sk = sedh(k)-zb(k)
+              sn = sedh(n)-zb(n)
+              tmph = 0.5*(sk+sn)
+              if(tmph > 0.1)then
+                c = ks*(1.-exp(-tmph/1.e2))/FVarea(k)
+                if(sedh(k)<sedh(n) .and. sn == 0.)then
+                  c = 0.0
+                elseif(sedh(k)>sedh(n) .and. sk == 0.)then
+                  c = 0.0
+                endif
+                v = c*FVvDist(k,p)/FVeLgt(k,p)
+                s1 = s1 + v
+                dcoeff(k,p+1) = -v
+              endif
+            endif
+          enddo
+          dcoeff(k,1) = 1.0 + s1
+        else
+          dcoeff(k,1) = 1.0
+        endif
+    enddo
+
+    return
+
+end subroutine marinediff
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!

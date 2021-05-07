@@ -357,10 +357,6 @@ class ReadYaml(object):
             hillDict = self.input["diffusion"]
 
             try:
-                self.shelfslope = hillDict["shelfslope"]
-            except KeyError:
-                self.shelfslope = False
-            try:
                 self.Cda = hillDict["hillslopeKa"]
             except KeyError:
                 print(
@@ -393,7 +389,6 @@ class ReadYaml(object):
             except KeyError:
                 self.sedimentKw = 30000.0
         except KeyError:
-            self.shelfslope = False
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 10000.0

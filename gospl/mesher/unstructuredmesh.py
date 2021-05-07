@@ -267,13 +267,13 @@ class UnstMesh(object):
 
     def _generateVTKmesh(self, points, cells):
         """
-        A global VTK mesh is generated when the `shelfslope` key is set to True in the YAML
-        input file.
+        A global VTK mesh is generated to compute the distance between mesh vertices and coastlines
+        position.
 
-        In this case, the distance to the coastline for every marine vertices is used to define
+        The distance to the coastline for every marine vertices is used to define
         a maximum shelf slope during deposition. The coastline contours are efficiently obtained
         from VTK contouring function. This function is performed on a VTK mesh which is built in
-        here.
+        this function.
         """
 
         self.vtkMesh = vtk.vtkUnstructuredGrid()
@@ -365,10 +365,9 @@ class UnstMesh(object):
         gZ = loadData["z"]
         self.mCells = loadData["c"].astype(int)
         self.vtkMesh = None
-        if self.shelfslope:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                self._generateVTKmesh(self.mCoords, self.mCells)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
+            self._generateVTKmesh(self.mCoords, self.mCells)
 
         # Store global neighbouring on process rank 0
         if MPIrank == 0:
@@ -1451,6 +1450,8 @@ class UnstMesh(object):
         self.Qs.destroy()
         self.tmpL.destroy()
         self.tmp.destroy()
+        self.tmp1L.destroy()
+        self.tmp1.destroy()
         self.stepED.destroy()
         self.Eb.destroy()
         self.EbLocal.destroy()
