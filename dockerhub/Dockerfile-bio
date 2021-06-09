@@ -5,6 +5,9 @@ ENV PETSC_DIR=/opt/petsc
 ENV PETSC_ARCH=arch-linux-c-opt
 
 RUN python3 -m pip install --no-cache-dir \
+        pyproj==2.3.0
+
+RUN python3 -m pip install --no-cache-dir \
         geopandas \
         pycrs \
         xarray
@@ -26,13 +29,18 @@ RUN apt-get update -qq && \
 
 RUN python3 -m pip install --no-cache-dir \
         badlands \
-        scikit-image
+        scikit-image \
+        libpysal \
+        esda \
+        seaborn
 
 # setup space for working in
 VOLUME /live/share
 WORKDIR /live
 
 ENV LD_LIBRARY_PATH "$LD_LIBRARY_PATH:/live/lib/:/live/share:/usr/local/lib"
+
+RUN git clone https://github.com/badlands-model/badlands-sundaland.git
 
 EXPOSE 8888
 COPY start_xvfb.sh /usr/local/sbin/start_xvfb.sh

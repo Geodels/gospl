@@ -738,7 +738,7 @@ class SEDMesh(object):
 
             iters += 1
             # Update diffusion coefficient matrix
-            if iters % 50 == 0:
+            if iters % 25 == 0:
 
                 guess = False
                 dH = h0 + cumDep
@@ -764,10 +764,8 @@ class SEDMesh(object):
                 # volume pushed on the edges of the clinoforms
                 self._moveMarineSed(hFill)
 
-                if iters % 50 == 0:
+                if iters % 25 == 0 and nsedK / sedK < 1.0e3:
                     nsedK = nsedK * 10.0
-                    # ids = np.where(toplimit <= dH)[0]
-                    # nsedK[toplimit <= dH] = 0.0
                     self._updateMarineDiff(nsedK)
             else:
                 self.Qs.pointwiseDivide(self.Qs, self.areaGlobal)
@@ -831,7 +829,7 @@ class SEDMesh(object):
         if maxSedVol > 0.0:
             del dH, overDep
         if iters > 25:
-            del ids
+            del ids, hFill, gZ
         gc.collect()
 
         if MPIrank == 0 and self.verbose:

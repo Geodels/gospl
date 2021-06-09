@@ -38,7 +38,7 @@ except ImportError:
     pass
 
 # in development set version to none and ...
-PYPI_VERSION = "0.2.4"
+PYPI_VERSION = "0.2.5"
 
 # Place install_requires into the text file "requirements.txt"
 with open("requirements.txt") as f2:
@@ -120,9 +120,7 @@ if __name__ == "__main__":
         # packages=["gospl", "gospl.tools", "gospl.flow", "gospl.mesher", "gospl.sed"],
         packages=packs,
         install_requires=requirements,
-        setup_requires=[
-            [p for p in requirements if p.startswith("numpy")][0],
-        ],
+        setup_requires=[[p for p in requirements if p.startswith("numpy")][0]],
         python_requires=">=3",
         classifiers=[
             "Intended Audience :: Science/Research",
