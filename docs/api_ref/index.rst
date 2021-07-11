@@ -98,6 +98,24 @@ Main classes
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
+                    Class Sediment
+                </div>
+                <div class="card-body">
+                  <p class="card-text"> Functions related to <code>stratigraphic</code> architecture and <code>compaction</code>. </p>
+
+
+.. container:: custom-button
+
+    :ref:`See functions and source code <stra_ref>`
+
+.. raw:: html
+
+                </div>
+                </div>
+            </div>
+            <div class="col-12 d-flex install-block">
+                <div class="card install-card shadow w-100">
+                <div class="card-header">
                     Class Input & Class Output
                 </div>
                 <div class="card-body">
