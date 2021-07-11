@@ -4,7 +4,7 @@
 Class StraMesh
 ==============
 
-.. autoclass:: sed.statplex.STRAMesh
+.. autoclass:: sed.stratplex.STRAMesh
 
    .. rubric:: Initialise
 
@@ -34,17 +34,17 @@ Class StraMesh
 Public functions
 ---------------------
 
-.. automethod:: sed.statplex.STRAMesh.deposeStrat
-.. automethod:: sed.statplex.STRAMesh.erodeStrat
-.. automethod:: sed.statplex.STRAMesh.elevStrat
-.. automethod:: sed.statplex.STRAMesh.getCompaction
-.. automethod:: sed.statplex.STRAMesh.localStrat
-.. automethod:: sed.statplex.STRAMesh.readStratLayers
-.. automethod:: sed.statplex.STRAMesh.stratalRecord
-.. automethod:: sed.statplex.STRAMesh.updateDispStrata
+.. automethod:: sed.stratplex.STRAMesh.deposeStrat
+.. automethod:: sed.stratplex.STRAMesh.erodeStrat
+.. automethod:: sed.stratplex.STRAMesh.elevStrat
+.. automethod:: sed.stratplex.STRAMesh.getCompaction
+.. automethod:: sed.stratplex.STRAMesh.localStrat
+.. automethod:: sed.stratplex.STRAMesh.readStratLayers
+.. automethod:: sed.stratplex.STRAMesh.stratalRecord
+.. automethod:: sed.stratplex.STRAMesh.updateDispStrata
 
 
 Private functions
 ---------------------
 
-.. automethod:: sed.statplex.STRAMesh._depthPorosity
+.. automethod:: sed.stratplex.STRAMesh._depthPorosity

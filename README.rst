@@ -31,7 +31,7 @@ In short, it contains:
 3. a **user guide** with some notebook examples, and
 4. the **API** references.
 
-## Contributing to `gospl`
+## Contributing to gospl
 
 Contributions of any kind to **gospl** are more than welcome. That does not mean new code only, but also improvements of documentation and user guide, additional tests (ideally filling the gaps in existing suite) or bug report or idea what could be added or done better.
 
