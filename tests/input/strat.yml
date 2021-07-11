@@ -6,7 +6,7 @@ domain:
     fast: False
     backward: False
     interp: 1
-    npstrata: '/live/lib/gospl/tests/data/strat/sed15Ma'
+    npstrata: '/live/lib/gospl/tests/data/strat/strat15Ma'
 
 time:
     start: -15000000.
@@ -17,15 +17,16 @@ time:
     strat: 500000.
 
 spl:
-    hfill: 100.
+    wfill: 100.
+    sfill: 10.
     K: 3.e-9
-    Ff: 0.2
-    d: 0.42
+    d: 0.
 
 diffusion:
     hillslopeKa: 0.01
     hillslopeKm: 0.1
     sedK: 1000.
+    dstep: 5
     sedKf: 2000.
     sedKw: 3000.
 
