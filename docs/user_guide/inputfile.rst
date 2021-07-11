@@ -44,6 +44,7 @@ Input file parameters
  domain:
      npdata: 'input8/elev20Ma'
      flowdir: 5
+     flowexp: 0.5
      fast: False
      backward: False
      interp: 1
@@ -56,16 +57,17 @@ The following parameters are **required**:
 
 a. the initial spherical surface mesh :yaml:`npdata` as well as
 b. the flow direction method to be used :yaml:`flowdir` that takes an integer value between 1 (for SFD) and 6 (for MFD)
+c. the exponent used in the flow direction approach. Default value is set to 0.42.
 
 In addition the following optional parameters can be set:
 
-c. the :yaml:`fast` key allows you to run a model without applying any surface processes on top. This is used to run backward model in a quick way, but can also potential be set to *True* if you want to check your input files prior to running a forward model with all options.
-d. when running a backward model the :yaml:`backward` key has to be set to *True* as well!
-e. the :yaml:`interp` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. The key has 2 possible values: **1** or **3**. A value of **3** will take the 3 closest nodes to perform the interpolation and will tend to smooth the topography over time. A value of **1** will pick the closest point when performing the interpolation thus limiting the smoothing but potentially increasing the distorsion.
-f. the :yaml:`overlap` key is set when running model with 3D cartesian displacements and specifies the number of ghost nodes used when defining the PETSc partition. It needs to be set so that all the points belonging to a single processors will not move further than the distances between the maximum horizontal displacement distance. The value will change depending of the resolution of your mesh.
-g. to restart a simulation use the :yaml:`rstep` key and specify the time step number.
-h. to start a simulation using a previous erosion/deposition map use the :yaml:`nperodep` key and specify a file containing for each vertex of the mesh the cumulative erosion deposition values in metres.
-i. to start a simulation using an initial stratigraphic layer use the :yaml:`npstrata` key and specify a file containing for each vertex of the mesh the stratigraphic layer thickness, the percentage of fine lithology inside each layer and the porosities of the coarse and fine sediments (the multi-lithology option is only available for model without horizontal displacement and when the `backward` key is set to `False`).
+d. the :yaml:`fast` key allows you to run a model without applying any surface processes on top. This is used to run backward model in a quick way, but can also potential be set to *True* if you want to check your input files prior to running a forward model with all options.
+e. when running a backward model the :yaml:`backward` key has to be set to *True* as well!
+f. the :yaml:`interp` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. The key has 2 possible values: **1** or **3**. A value of **3** will take the 3 closest nodes to perform the interpolation and will tend to smooth the topography over time. A value of **1** will pick the closest point when performing the interpolation thus limiting the smoothing but potentially increasing the distorsion.
+g. the :yaml:`overlap` key is set when running model with 3D cartesian displacements and specifies the number of ghost nodes used when defining the PETSc partition. It needs to be set so that all the points belonging to a single processors will not move further than the distances between the maximum horizontal displacement distance. The value will change depending of the resolution of your mesh.
+h. to restart a simulation use the :yaml:`rstep` key and specify the time step number.
+i. to start a simulation using a previous erosion/deposition map use the :yaml:`nperodep` key and specify a file containing for each vertex of the mesh the cumulative erosion deposition values in metres.
+j. to start a simulation using an initial stratigraphic layer use the :yaml:`npstrata` key and specify a file containing for each vertex of the mesh the stratigraphic layer thickness, the percentage of fine lithology inside each layer and the porosities of the coarse and fine sediments (the multi-lithology option is only available for model without horizontal displacement and when the `backward` key is set to `False`).
 
 
 .. raw:: html
@@ -162,24 +164,21 @@ f. :yaml:`strat` is the stratigraphic timestep interval used to update the strat
 .. code:: ipython
 
   spl:
-      hfill: 100.
+      wfill: 100.
+      sfill: 10.
       K: 3.e-8
-      Ff: 0.2
       d: 0.42
 
 This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
-a. :yaml:`hfill` the maximum filling elevation for depressions in the continental domain. This can be seen as a maximum lake elevation. This parameter has a default value of 100 m. It is used to avoid by-passing large depressions and to ensure deposition in endorheic basins.
+a. :yaml:`wfill` this can be seen as a minimum topographic elevation that a river will not be able to flow over in a given time step (except if sufficient water is filling the sink). This parameter has a default value of 100 m. It is used to by-pass small depressions.
 
-b. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics. It is used in the SPL law: :math:`E = K (\bar{P}A)^m S^n`
+b. :yaml:`sfill` similar to previous parameter but for sediment. This parameter has a default value of 50 m.
+
+c. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics. It is used in the SPL law: :math:`E = K (\bar{P}A)^m S^n`
 
 .. warning::
   It is worth noting that the coefficient *m* and *n* are fixed in this version of *gospl* and take the value of *0.5* & *1* respectively.
-
-c. :yaml:`Ff` is the fraction of fine sediment which are eroded and will never be deposited in the marine environment either due to resuspension or dissolution. The minimal value is hard-coded to be at least 0.5% of the sediment load reaching the ocean. The user can chose an higher value if necessary.
-
-.. important::
-  The fraction of fines that is lost is only for the sediment reaching the coast and not for the sediments deposited in continental regions.
 
 d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following `Murphy et al. (2016) <https://doi.org/10.1038/nature17449>`_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`coeffd` (:math:`d` in the equation) is is a positive exponent that has been estimated from field-based relationships to 0.42.
 
@@ -221,6 +220,7 @@ d. Studies have shown that the physical strength of bedrock which varies with th
   diffusion:
       hillslopeKa: 0.02
       hillslopeKm: 0.2
+      dstep: 5
       sedK: 100.
       sedKf: 200.
       sedKw: 300.
@@ -230,9 +230,10 @@ Hillslope processes in *gospl* is defined using a classical *diffusion law* in w
 
 a. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
 b. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
-c. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
-d. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
-e. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
+b. :yaml:`dstep` is the number of diffusion steps used to distribute sediments delivered by rivers in open ocean,
+d. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
+e. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
+f. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
 
 
 

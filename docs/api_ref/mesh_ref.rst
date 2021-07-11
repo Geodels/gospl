@@ -29,14 +29,13 @@ Class UnstMesh
 
       ~UnstMesh._buildMesh
       ~UnstMesh._generateVTKmesh
-      ~UnstMesh._localStrat
+      ~UnstMesh._get_boundary
       ~UnstMesh._meshAdvectorSphere
       ~UnstMesh._meshUpliftSubsidence
       ~UnstMesh._meshfrom_cell_list
+      ~UnstMesh._meshStructure
       ~UnstMesh._readErosionDeposition
-      ~UnstMesh._readStratLayers
-      ~UnstMesh._stratalRecord
-      ~UnstMesh._updateDispStrata
+      ~UnstMesh._set_DMPlex_boundary_points
       ~UnstMesh._updateRain
       ~UnstMesh._updateTectonics
       ~UnstMesh._xyz2lonlat
@@ -57,14 +56,13 @@ Private functions
 
 .. automethod:: mesher.unstructuredmesh.UnstMesh._buildMesh
 .. automethod:: mesher.unstructuredmesh.UnstMesh._generateVTKmesh
-.. automethod:: mesher.unstructuredmesh.UnstMesh._localStrat
+.. automethod:: mesher.unstructuredmesh.UnstMesh._get_boundary
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshAdvectorSphere
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshUpliftSubsidence
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshfrom_cell_list
+.. automethod:: mesher.unstructuredmesh.UnstMesh._meshStructure
 .. automethod:: mesher.unstructuredmesh.UnstMesh._readErosionDeposition
-.. automethod:: mesher.unstructuredmesh.UnstMesh._readStratLayers
-.. automethod:: mesher.unstructuredmesh.UnstMesh._stratalRecord
-.. automethod:: mesher.unstructuredmesh.UnstMesh._updateDispStrata
+.. automethod:: mesher.unstructuredmesh.UnstMesh._set_DMPlex_boundary_points
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateRain
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateTectonics
 .. automethod:: mesher.unstructuredmesh.UnstMesh._xyz2lonlat

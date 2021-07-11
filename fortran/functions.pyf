@@ -7,6 +7,7 @@ python module _fortran
             integer, allocatable,dimension(:,:) :: gnid
             integer, allocatable,dimension(:,:) :: fvnid
             integer, allocatable,dimension(:) :: fvnnb
+            double precision, allocatable,dimension(:) :: gfvarea
             double precision, allocatable,dimension(:) :: fvarea
             double precision, allocatable,dimension(:,:) :: fvelgt
             double precision, allocatable,dimension(:,:) :: fvvdist
@@ -46,6 +47,106 @@ python module _fortran
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine sethillslopecoeff
 
+        subroutine seaparams(elev,sl,grp,pit,ins,out,vol,nb,nbg)
+            double precision dimension(nb),intent(in) :: elev
+            double precision,intent(in) :: sl
+            integer dimension(nbg),intent(in) :: grp
+            integer dimension(nb,2),intent(in),depend(nb) :: pit
+            integer dimension(nb),intent(out),depend(nb) :: ins
+            integer dimension(nbg),intent(out),depend(nbg) :: out
+            double precision dimension(nbg),intent(out),depend(nbg) :: vol
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+            integer, optional,check(len(grp)>=nbg),depend(grp) :: nbg=len(grp)
+        end subroutine seaparams
+
+        subroutine distributeland(nrcv,sid,flux,rcv,wght,flx,nb)
+            use meshparams
+            integer :: nrcv
+            integer dimension(nb),intent(in) :: sid
+            double precision dimension(nb),intent(in),depend(nb) :: flux
+            integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcv
+            double precision dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: wght
+            double precision dimension(nb),intent(out),depend(nb) :: flx
+            integer, optional,check(len(sid)>=nb),depend(sid) :: nb=len(sid)
+        end subroutine distributeland
+
+        subroutine distexcess(flux,elev,felev,pit,vol,ovol,sout,lins,flx,depo,nb,nbg,nbs)
+            double precision dimension(nb),intent(in) :: flux
+            double precision dimension(nb),intent(in),depend(nb) :: elev
+            double precision dimension(nb),intent(in),depend(nb) :: felev
+            integer dimension(nb,2),intent(in),depend(nb) :: pit
+            double precision dimension(nbg),intent(in) :: vol
+            double precision dimension(nbs),intent(in) :: ovol
+            integer dimension(nbs),intent(in),depend(nbs) :: sout
+            integer dimension(nb),intent(in),depend(nb) :: lins
+            double precision dimension(nb),intent(out),depend(nb) :: flx
+            double precision dimension(nb),intent(out),depend(nb) :: depo
+            integer, optional,check(len(flux)>=nb),depend(flux) :: nb=len(flux)
+            integer, optional,check(len(ovol)>=nbs),depend(ovol) :: nbs=len(ovol)
+            integer, optional,check(len(vol)>=nbg),depend(vol) :: nbg=len(vol)
+        end subroutine distexcess
+
+        subroutine distsea(flux,elev,sl,grp,pit,vol,sout,flx,depo,ovol,nb,nbg)
+            double precision dimension(nb),intent(in) :: flux
+            double precision dimension(nb),intent(in),depend(nb) :: elev
+            double precision,intent(in) :: sl
+            integer dimension(nbg),intent(in) :: grp
+            integer dimension(nb,2),intent(in),depend(nb) :: pit
+            double precision dimension(nbg),intent(in),depend(nbg) :: vol
+            integer dimension(nbg),intent(in),depend(nb) :: sout
+            double precision dimension(nb),intent(out),depend(nb) :: flx
+            double precision dimension(nb),intent(out),depend(nb) :: depo
+            double precision dimension(nbg),intent(out),depend(nbg) :: ovol
+            integer, optional,check(len(flux)>=nb),depend(flux) :: nb=len(flux)
+            integer, optional,check(len(grp)>=nbg),depend(grp) :: nbg=len(grp)
+        end subroutine distsea
+
+        subroutine distland(flux,elev,felev,grp,pit,vol,flx,depo,nb,nbg)
+            double precision dimension(nb),intent(in) :: flux
+            double precision dimension(nb),intent(in),depend(nb) :: elev
+            double precision dimension(nb),intent(in),depend(nb) :: felev
+            integer dimension(nbg),intent(in) :: grp
+            integer dimension(nb,2),intent(in),depend(nb) :: pit
+            double precision dimension(nbg),intent(in),depend(nbg) :: vol
+            double precision dimension(nb),intent(out),depend(nb) :: flx
+            double precision dimension(nb),intent(out),depend(nb) :: depo
+            integer, optional,check(len(flux)>=nb),depend(flux) :: nb=len(flux)
+            integer, optional,check(len(grp)>=nbg),depend(grp) :: nbg=len(grp)
+        end subroutine distland
+
+        subroutine distocean(nrcv,sid,flux,rcv,wght,area,depth,dep,nb,nbi)
+            use meshparams
+            integer :: nrcv
+            integer dimension(nbi),intent(in) :: sid
+            double precision dimension(nb),intent(in) :: flux
+            integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcv
+            double precision dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: wght
+            double precision dimension(nb),intent(in),depend(nb) :: area
+            double precision dimension(nb),intent(in),depend(nb) :: depth
+            double precision dimension(nb),intent(out),depend(nb) :: dep
+            integer, optional,check(len(sid)>=nbi),depend(sid) :: nbi=len(sid)
+            integer, optional,check(len(flux)>=nb),depend(flux) :: nb=len(flux)
+        end subroutine distocean
+
+        subroutine distocean2(sid,elev,flux,dvol,depth,dep,nid,nb)
+            use meshparams
+            integer dimension(nid),intent(in) :: sid
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(in),depend(nb) :: flux
+            double precision dimension(nb),intent(in),depend(nb) :: dvol
+            double precision dimension(nb),intent(in),depend(nb) :: depth
+            double precision dimension(nb),intent(out),depend(nb) :: dep
+            integer, optional,check(len(sid)>=nid),depend(sid) :: nid=len(sid)
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine distocean2
+
+        subroutine averageslope(elev,aslp,nb)
+            use meshparams
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(out),depend(nb) :: aslp
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine averageslope
+
         subroutine marinecoeff(nb,kd,dcoeff)
             use meshparams
             integer :: nb
@@ -63,9 +164,22 @@ python module _fortran
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine marinediff
 
-        subroutine mfdreceivers(nrcv,inids,elev,sl,rcv,dist,wgt,nb)
+        subroutine mfdrcvs(nrcv,exp,inids,elev,sl,rcv,wgt,nb)
             use meshparams
             integer intent(in) :: nrcv
+            double precision intent(in) :: exp
+            double precision intent(in) :: sl
+            integer dimension(nb),intent(in) :: inids
+            double precision dimension(nb),intent(in),depend(nb) :: elev
+            integer dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: rcv
+            double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
+            integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
+        end subroutine mfdrcvs
+
+        subroutine mfdreceivers(nrcv,exp, inids,elev,sl,rcv,dist,wgt,nb)
+            use meshparams
+            integer intent(in) :: nrcv
+            double precision intent(in) :: exp
             double precision intent(in) :: sl
             integer dimension(nb),intent(in) :: inids
             double precision dimension(nb),intent(in),depend(nb) :: elev
@@ -134,6 +248,14 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphic
         end subroutine stratabuildcarb
 
+        subroutine fillpit2(sl,elev,fillz,nb)
+            use meshparams
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(out) :: fillz
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine fillpit2
+
         subroutine fillpit(sl,elev,hmax,fillz,pits,nb)
             use meshparams
             double precision intent(in) :: sl
@@ -143,6 +265,16 @@ python module _fortran
             integer dimension(nb,2),intent(out) :: pits
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine fillpit
+
+        subroutine fillseapit(pitid,insea,elev,fillz,m,nb)
+            use meshparams
+            integer dimension(m), intent(in) :: pitid
+            integer dimension(nb),intent(in) :: insea
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(out) :: fillz
+            integer, optional,check(len(pitid)>=m),depend(pitid) :: m=len(pitid)
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine fillseapit
 
         subroutine filllabel(sl,elev,fillz,labels,nb)
             use meshparams

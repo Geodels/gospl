@@ -124,5 +124,6 @@ Main classes
     mesh_ref
     flow_ref
     sed_ref
+    stra_ref
     in_ref
     out_ref

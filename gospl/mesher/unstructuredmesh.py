@@ -18,9 +18,6 @@ from vtk.util import numpy_support
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import definetin
     from gospl._fortran import ngbglob
-    from gospl._fortran import stratasimple
-    from gospl._fortran import stratabuild
-    from gospl._fortran import stratabuildcarb
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -30,24 +27,18 @@ MPIcomm = MPI.COMM_WORLD
 
 class UnstMesh(object):
     """
-    This class defines the spherical mesh characteristics and builds a PETSc DMPlex that
-    encapsulates this unstructured mesh, with interfaces for both topology and geometry.
-    The PETSc DMPlex is used for parallel redistribution for load balancing.
+    This class defines the spherical mesh characteristics and builds a PETSc DMPlex that encapsulates this unstructured mesh, with interfaces for both topology and geometry. The PETSc DMPlex is used for parallel redistribution for load balancing.
 
     .. note::
 
-        `gospl` is built around a **Finite-Volume** method (FVM) for representing and evaluating
-        partial differential equations. It requires the definition of several mesh variables such as:
+        `gospl` is built around a **Finite-Volume** method (FVM) for representing and evaluating  partial differential equations. It requires the definition of several mesh variables such as:
 
             - the number of neighbours surrounding every node,
             - the cell area defined using  Voronoi area,
             - the length of the edge connecting every nodes, and
             - the length of the Voronoi faces shared by each node with his neighbours.
 
-    In addition to mesh defintions, the class declares several functions related to forcing conditions
-    (*e.g.* paleo-precipitation maps, tectonic (vertical and horizontal) displacements, stratigraphic
-    layers...). These functions are defined within the `UnstMesh` class as they rely heavely on the mesh
-    structure.
+    In addition to mesh defintions, the class declares several functions related to forcing conditions (*e.g.* paleo-precipitation maps, tectonic (vertical and horizontal) displacements, stratigraphic layers...). These functions are defined within the `UnstMesh` class as they rely heavely on the mesh structure.
 
     Finally a function to clean all PETSc variables is defined and called at the end of a simulation.
     """
@@ -60,14 +51,6 @@ class UnstMesh(object):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
-        self.stratH = None
-        self.stratF = None
-        self.stratW = None
-        self.stratZ = None
-        self.stratC = None
-        self.phiS = None
-        self.phiF = None
-        self.phiC = None
 
         # Let us define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
@@ -80,8 +63,7 @@ class UnstMesh(object):
 
         .. note::
 
-            As far as I am aware, PETSc DMPlex requires to be initialised on one
-            processor before load balancing.
+            As far as I am aware, PETSc DMPlex requires to be initialised on one processor before load balancing.
 
         :arg dim: topological dimension of the mesh
         :arg cells: vertices of each cell
@@ -113,18 +95,14 @@ class UnstMesh(object):
 
     def _meshStructure(self):
         """
-        Defines the mesh structure and the associated voronoi parameter used in the
-        Finite Volume method.
+        Defines the mesh structure and the associated voronoi parameter used in the Finite Volume method.
 
         .. important::
             The mesh structure is built locally on a single partition of the global mesh.
 
-        This function uses the `meshplex` `library <https://meshplex.readthedocs.io>`_ to compute
-        from the list of coordinates and cells the volume of each voronoi and their respective
-        characteristics.
+        This function uses the `meshplex` `library <https://meshplex.readthedocs.io>`_ to compute from the list of coordinates and cells the volume of each voronoi and their respective characteristics.
 
-        Once the voronoi definitions have been obtained a call to the fortran subroutine `definetin`
-        is performed to order each node and the dual mesh components, it records:
+        Once the voronoi definitions have been obtained a call to the fortran subroutine `definetin` is performed to order each node and the dual mesh components, it records:
 
         - all cells surrounding a given vertice,
         - all edges connected to a given vertice,
@@ -181,13 +159,10 @@ class UnstMesh(object):
 
     def reInitialiseElev(self):
         """
-        This functions reinitialises `gospl` elevation if one wants to restart a simulation that does
-        not necessitate to rebuild the mesh structure. It can be used when running a simulation
-        from the Jupyter environment.
+        This functions reinitialises `gospl` elevation if one wants to restart a simulation that does not necessitate to rebuild the mesh structure. It can be used when running a simulation from the Jupyter environment.
 
         .. note:
-            The elevation is read directly from the mesh elevation file defined in the YAML
-            input file from the key: **npdata**.
+            The elevation is read directly from the mesh elevation file defined in the YAML input file from the key: **npdata**.
 
         """
 
@@ -250,11 +225,9 @@ class UnstMesh(object):
 
     def _xyz2lonlat(self):
         """
-        Converts local x,y,z representation of cartesian coordinates from the spherical
-        triangulation to latitude, longitude in degrees.
+        Converts local x,y,z representation of cartesian coordinates from the spherical triangulation to latitude, longitude in degrees.
 
-        The latitudinal and longitudinal extend are between [0,180] and [0,360] respectively.
-        Lon/lat coordinates are used when forcing the simulation with paleo-topoography maps.
+        The latitudinal and longitudinal extend are between [0,180] and [0,360] respectively. Lon/lat coordinates are used when forcing the simulation with paleo-topoography maps.
         """
 
         self.lLatLon = np.zeros((self.lpoints, 2))
@@ -267,13 +240,9 @@ class UnstMesh(object):
 
     def _generateVTKmesh(self, points, cells):
         """
-        A global VTK mesh is generated to compute the distance between mesh vertices and coastlines
-        position.
+        A global VTK mesh is generated to compute the distance between mesh vertices and coastlines position.
 
-        The distance to the coastline for every marine vertices is used to define
-        a maximum shelf slope during deposition. The coastline contours are efficiently obtained
-        from VTK contouring function. This function is performed on a VTK mesh which is built in
-        this function.
+        The distance to the coastline for every marine vertices is used to define a maximum shelf slope during deposition. The coastline contours are efficiently obtained from VTK contouring function. This function is performed on a VTK mesh which is built in this function.
         """
 
         self.vtkMesh = vtk.vtkUnstructuredGrid()
@@ -336,9 +305,7 @@ class UnstMesh(object):
 
     def _buildMesh(self):
         """
-        This function is at the core of the `UnstMesh` class. It encapsulates both spherical mesh
-        construction (triangulation and voronoi representation for the Finite Volume discretisation),
-        PETSc DMPlex distribution and several PETSc vectors allocation.
+        This function is at the core of the `UnstMesh` class. It encapsulates both spherical mesh construction (triangulation and voronoi representation for the Finite Volume discretisation), PETSc DMPlex distribution and several PETSc vectors allocation.
 
         The function relies on several private functions from the class:
 
@@ -347,13 +314,11 @@ class UnstMesh(object):
         - _meshStructure
         - _readErosionDeposition
         - _xyz2lonlat
-        - _readStratLayers
+        - readStratLayers
 
         .. note::
 
-            It is worth mentionning that partitioning and field distribution from global to local
-            PETSc DMPlex takes a lot of time for large mesh and there might be some quicker way
-            in PETSc to perform this step that I am unaware of...
+            It is worth mentionning that partitioning and field distribution from global to local PETSc DMPlex takes a lot of time for large mesh and there might be some quicker way in PETSc to perform this step that I am unaware of...
 
         """
 
@@ -365,6 +330,9 @@ class UnstMesh(object):
         gZ = loadData["z"]
         self.mCells = loadData["c"].astype(int)
         self.vtkMesh = None
+        self.flatModel = False
+        if self.mCoords[:, 2].max() == 0.0:
+            self.flatModel = True
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             self._generateVTKmesh(self.mCoords, self.mCells)
@@ -467,6 +435,20 @@ class UnstMesh(object):
         self.inIDs = np.zeros(self.lpoints, dtype=int)
         self.inIDs[vIS.indices >= 0] = 1
         self.lIDs = np.where(self.inIDs == 1)[0]
+
+        if self.flatModel:
+            # Local mesh boundary points in 2D model
+            localBound = self._get_boundary()
+            idLocal = np.where(vIS.indices >= 0)[0]
+            self.idBorders = np.where(np.isin(idLocal, localBound))[0]
+            self.glBorders = np.zeros(self.mpoints, dtype=int)
+            idLocal = self.glBorders.copy()
+            localBound = np.zeros(self.lpoints, dtype=int)
+            localBound[self.idBorders] = 1
+            idLocal[self.locIDs] = localBound
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, idLocal, op=MPI.MAX)
+            self.glBorders = np.where(idLocal == 1)[0]
+            del idLocal, localBound
         vIS.destroy()
 
         # Local/Global vectors
@@ -519,13 +501,8 @@ class UnstMesh(object):
         self._readErosionDeposition()
 
         self.sealevel = self.seafunction(self.tNow)
-
-        # areaLocal = self.hLocal.duplicate()
         self.areaGlobal = self.hGlobal.duplicate()
-        # areaLocal.setArray(self.larea)
         self.areaGlobal.setArray(self.garea)
-        # self.dm.localToGlobal(areaLocal, self.areaGlobal)
-        # areaLocal.destroy()
         self.minArea = self.areaGlobal.min()
 
         # Forcing event number
@@ -545,18 +522,71 @@ class UnstMesh(object):
 
         # Build stratigraphic data if any
         if self.stratNb > 0:
-            self._readStratLayers()
+            self.readStratLayers()
 
         return
 
+    def _set_DMPlex_boundary_points(self, label):
+        """
+        In case of a flat mesh (non global), this function finds the points that join the edges that have been marked as "boundary" faces in the DAG then sets them as boundaries.
+        """
+
+        self.dm.createLabel(label)
+        self.dm.markBoundaryFaces(label)
+
+        pStart, pEnd = self.dm.getDepthStratum(0)  # points
+        eStart, eEnd = self.dm.getDepthStratum(1)  # edges
+        edgeIS = self.dm.getStratumIS(label, 1)
+
+        if edgeIS and eEnd - eStart > 0:
+            edge_mask = np.logical_and(edgeIS.indices >= eStart, edgeIS.indices < eEnd)
+            boundary_edges = edgeIS.indices[edge_mask]
+
+            # Query the DAG  (directed acyclic graph) for points that join an edge
+            for edge in boundary_edges:
+                vertices = self.dm.getCone(edge)
+                # mark the boundary points
+                for vertex in vertices:
+                    self.dm.setLabelValue(label, vertex, 1)
+            del vertices
+
+        edgeIS.destroy()
+
+        return
+
+    def _get_boundary(self, label="boundary"):
+        """
+        In case of a flat mesh (non global), this function finds the nodes on the boundary from the DM.
+        """
+
+        label = "boundary"
+        self._set_DMPlex_boundary_points(label)
+
+        pStart, pEnd = self.dm.getDepthStratum(0)
+
+        labels = []
+        for i in range(self.dm.getNumLabels()):
+            labels.append(self.dm.getLabelName(i))
+
+        if label not in labels:
+            raise ValueError("There is no {} label in the DM".format(label))
+
+        stratSize = self.dm.getStratumSize(label, 1)
+        if stratSize > 0:
+            labelIS = self.dm.getStratumIS(label, 1)
+            pt_range = np.logical_and(labelIS.indices >= pStart, labelIS.indices < pEnd)
+            indices = labelIS.indices[pt_range] - pStart
+            labelIS.destroy()
+        else:
+            indices = np.zeros((0,), dtype=np.int)
+
+        return indices
+
     def _readErosionDeposition(self):
         """
-        Reads existing cumulative erosion depostion from a previous experiment if any
-        as defined in the YAML input file following the  `nperodep` key.
+        Reads existing cumulative erosion depostion from a previous experiment if any as defined in the YAML input file following the  `nperodep` key.
 
-        This functionality can be used when restarting from a previous simulation in which
-        the sperical mesh has been modified either to account for horizontal advection or
-        to refine/coarsen a specific region during a given time period.
+        This functionality can be used when restarting from a previous simulation in which the sperical mesh has been modified either to account for horizontal advection or to refine/coarsen a specific region during a given time period.
         """
 
         # Build PETSc vectors
@@ -579,90 +609,9 @@ class UnstMesh(object):
 
         return
 
-    def _readStratLayers(self):
-        """
-        When stratigraphic layers are turned on, this function reads any initial stratigraphic
-        layers provided by within the YAML input file (key: `npstrata`).
-
-        The following variables will be read from the file:
-
-        - thickness of each stratigrapic layer `strataH` accounting for both
-          erosion & deposition events.
-        - proportion of fine sediment `strataF` contains in each stratigraphic layer.
-        - proportion of weathered sediment `strataW` contains in each stratigraphic layer.
-        - elevation at time of deposition, considered to be to the current elevation
-          for the top stratigraphic layer `strataZ`.
-        - porosity of coarse sediment `phiS` in each stratigraphic layer computed at
-          center of each layer.
-        - porosity of fine sediment `phiF` in each stratigraphic layer computed at
-          center of each layer.
-        - porosity of weathered sediment `phiW` in each stratigraphic layer computed at
-          center of each layer.
-        - proportion of carbonate sediment `strataC` contains in each stratigraphic layer
-          if the carbonate module is turned on.
-        - porosity of carbonate sediment `phiC` in each stratigraphic layer computed at
-          center of each layer when the carbonate module is turned on.
-
-        """
-
-        if self.strataFile is not None:
-            fileData = np.load(self.strataFile)
-            stratVal = fileData["strataH"]
-            self.initLay = stratVal.shape[1]
-            self.stratNb += self.initLay
-
-            # Create stratigraphic arrays
-            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.stratH[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            stratVal = fileData["strataF"]
-            self.stratF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.stratF[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            stratVal = fileData["strataW"]
-            self.stratW = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.stratW[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            stratVal = fileData["strataZ"]
-            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.stratZ[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            stratVal = fileData["phiS"]
-            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.phiS[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            stratVal = fileData["phiF"]
-            self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.phiF[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            stratVal = fileData["phiW"]
-            self.phiW = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.phiW[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            if self.carbOn:
-                stratVal = fileData["strataC"]
-                self.stratC = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-                self.stratC[:, 0 : self.initLay] = stratVal[
-                    self.locIDs, 0 : self.initLay
-                ]
-
-                stratVal = fileData["phiC"]
-                self.phiC = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-                self.phiC[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
-
-            del fileData, stratVal
-            gc.collect()
-        else:
-            self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-
-        return
-
     def initExtForce(self):
         """
-        Initialises the forcing conditions: sea level condition, rainfall maps and
-        tectonics.
+        Initialises the forcing conditions: sea level condition, rainfall maps and tectonics.
         """
 
         self.applyForces()
@@ -673,8 +622,7 @@ class UnstMesh(object):
 
     def applyForces(self):
         """
-        Finds the different values for climatic and sea-level forcing that will
-        be applied at any given time interval during the simulation.
+        Finds the different values for climatic and sea-level forcing that will be applied at any given time interval during the simulation.
         """
 
         t0 = process_time()
@@ -697,8 +645,7 @@ class UnstMesh(object):
 
     def applyTectonics(self):
         """
-        Finds the different values for tectonic forces that will be applied at any given time
-        interval during the simulation.
+        Finds the different values for tectonic forces that will be applied at any given time interval during the simulation.
         """
 
         t0 = process_time()
@@ -716,8 +663,7 @@ class UnstMesh(object):
         """
         Forces model to match provided paleomaps at specific time interval during the simulation.
 
-        This function is only used when the `paleomap` key is defined in the YAML input file. It will
-        read the paleotopography map and assign the paleo elevation on the spherical mesh.
+        This function is only used when the `paleomap` key is defined in the YAML input file. It will read the paleotopography map and assign the paleo elevation on the spherical mesh.
         """
 
         for k in range(self.paleoNb):
@@ -733,14 +679,11 @@ class UnstMesh(object):
 
     def _updateRain(self):
         """
-        Finds current rain values for the considered time interval and computes the **volume** of water
-        available for runoff on each vertex.
+        Finds current rain values for the considered time interval and computes the **volume** of water available for runoff on each vertex.
 
         .. note::
 
-            It is worth noting that the precipitation maps are considered as runoff water. If one wants to
-            account for evaporation and infiltration you will need to modify the precipitation maps
-            accordingly as a pre-processing step.
+            It is worth noting that the precipitation maps are considered as runoff water. If one wants to account for evaporation and infiltration you will need to modify the precipitation maps accordingly as a pre-processing step.
 
         """
 
@@ -784,10 +727,7 @@ class UnstMesh(object):
         """
         Finds the current tectonic regimes (horizontal and vertical) for the considered time interval.
 
-        For horizontal displacements, the mesh variables will have to be first advected over the grid and then reinterpolated on the initial mesh coordinates. The approach here does not allow for mesh
-        refinement in zones of convergence and thus can be limiting but using a fixed mesh has one main
-        advantage: the mesh and Finite Volume discretisation do not have to be rebuilt each time the mesh
-        is advected.
+        For horizontal displacements, the mesh variables will have to be first advected over the grid and then reinterpolated on the initial mesh coordinates. The approach here does not allow for mesh refinement in zones of convergence and thus can be limiting but using a fixed mesh has one main advantage: the mesh and Finite Volume discretisation do not have to be rebuilt each time the mesh is advected.
 
         This function calls the following 2 private functions:
 
@@ -919,7 +859,7 @@ class UnstMesh(object):
                     loc_phiF,
                     loc_phiW,
                     loc_phiC,
-                ) = self._updateDispStrata()
+                ) = self.updateDispStrata()
             else:
                 (
                     loc_stratH,
@@ -929,7 +869,7 @@ class UnstMesh(object):
                     loc_phiS,
                     loc_phiF,
                     loc_phiW,
-                ) = self._updateDispStrata()
+                ) = self.updateDispStrata()
 
         # Build and query local kd-tree
         tree = spatial.cKDTree(XYZ, leafsize=10)
@@ -957,7 +897,7 @@ class UnstMesh(object):
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:
             if self.carbOn:
-                self._stratalRecord(
+                self.stratalRecord(
                     indices,
                     weights,
                     loc_stratH,
@@ -971,7 +911,7 @@ class UnstMesh(object):
                     loc_phiC,
                 )
             else:
-                self._stratalRecord(
+                self.stratalRecord(
                     indices,
                     weights,
                     loc_stratH,
@@ -1017,7 +957,7 @@ class UnstMesh(object):
 
         # Update local stratal dataset
         if self.stratNb > 0 and self.stratStep > 0:
-            self._localStrat()
+            self.localStrat()
             del loc_stratH, loc_stratZ, loc_stratF, loc_stratW
             del loc_phiS, loc_phiF, loc_phiW
             if self.carbOn:
@@ -1038,386 +978,9 @@ class UnstMesh(object):
 
         return
 
-    def _updateDispStrata(self):
-        """
-        Gets the stratigraphic records relevant to each partition after mesh advection.
-
-        The functions returns local stratigraphic layer information:
-
-        - thickness of each stratigrapic layer `loc_stratH` accounting for both
-          erosion & deposition events.
-        - proportion of fine sediment `loc_stratF` contains in each stratigraphic layer.
-        - proportion of weathered sediment `loc_stratW` contains in each stratigraphic layer.
-        - elevation at time of deposition, considered to be to the current elevation
-          for the top stratigraphic layer `loc_stratZ`.
-        - porosity of coarse sediment `loc_phiS` in each stratigraphic layer computed at
-          center of each layer.
-        - porosity of fine sediment `loc_phiF` in each stratigraphic layer computed at
-          center of each layer.
-        - porosity of waethered sediment `loc_phiW` in each stratigraphic layer computed at
-          center of each layer.
-        - proportion of carbonate sediment `loc_strataC` contains in each stratigraphic layer
-          if the carbonate module is turned on.
-        - porosity of carbonate sediment `loc_phiC` in each stratigraphic layer computed at
-          center of each layer when the carbonate module is turned on.
-
-        .. note::
-
-            In `gospl`, the stratigraphic layers are only defined locally. For interpolation on the
-            edges of each partition it is important to ensure that all stratigraphic information on
-            the adjacent nodes of the neighbouring partition are accessible. This is done by applying
-            MPI `Allreduce` operation to the nodes parts of the overlaid ('shadow') zone.
-
-        :return: loc_stratH, loc_stratZ, loc_stratF, loc_stratW, loc_stratC, loc_phiS, loc_phiF, loc_phiW, loc_phiC
-        """
-
-        stratH = self.stratH[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratH[self.shadowAlls, :] = temp
-            loc_stratH = stratH[self.locIDs, :]
-        else:
-            loc_stratH = stratH[self.locIDs, :]
-
-        stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratZ[self.shadowAlls, :] = temp
-            loc_stratZ = stratZ[self.locIDs, :]
-        else:
-            loc_stratZ = stratZ[self.locIDs, :]
-
-        phiS = self.phiS[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = phiS[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            phiS[self.shadowAlls, :] = temp
-            loc_phiS = phiS[self.locIDs, :]
-        else:
-            loc_phiS = phiS[self.locIDs, :]
-
-        if self.stratF is not None:
-            stratF = self.stratF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratF[self.shadowAlls, :] = temp
-                loc_stratF = stratF[self.locIDs, :]
-            else:
-                loc_stratF = stratF[self.locIDs, :]
-
-            phiF = self.phiF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiF[self.shadowAlls, :] = temp
-                loc_phiF = phiF[self.locIDs, :]
-            else:
-                loc_phiF = phiF[self.locIDs, :]
-        else:
-            loc_stratF = None
-            loc_phiF = None
-
-        if self.stratW is not None:
-            stratW = self.stratW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratW[self.shadowAlls, :] = temp
-                loc_stratW = stratW[self.locIDs, :]
-            else:
-                loc_stratW = stratW[self.locIDs, :]
-
-            phiW = self.phiW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiW[self.shadowAlls, :] = temp
-                loc_phiW = phiW[self.locIDs, :]
-            else:
-                loc_phiW = phiW[self.locIDs, :]
-        else:
-            loc_stratW = None
-            loc_phiW = None
-
-        if self.carbOn:
-            stratC = self.stratC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratC[self.shadowAlls, :] = temp
-                loc_stratC = stratC[self.locIDs, :]
-            else:
-                loc_stratC = stratC[self.locIDs, :]
-
-            phiC = self.phiC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiC[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiC[self.shadowAlls, :] = temp
-                loc_phiC = phiC[self.locIDs, :]
-            else:
-                loc_phiC = phiC[self.locIDs, :]
-
-            return (
-                loc_stratH,
-                loc_stratZ,
-                loc_stratF,
-                loc_stratW,
-                loc_stratC,
-                loc_phiS,
-                loc_phiF,
-                loc_phiW,
-                loc_phiC,
-            )
-        else:
-            return (
-                loc_stratH,
-                loc_stratZ,
-                loc_stratF,
-                loc_stratW,
-                loc_phiS,
-                loc_phiF,
-                loc_phiW,
-            )
-
-    def _stratalRecord(
-        self,
-        indices,
-        weights,
-        loc_stratH,
-        loc_stratZ,
-        loc_stratF,
-        loc_stratW,
-        loc_stratC,
-        loc_phiS,
-        loc_phiF,
-        loc_phiW,
-        loc_phiC,
-    ):
-        """
-        Once the interpolation has been performed, the following function updates the
-        stratigraphic records based on the advected mesh.
-
-        The function relies on 3 fortran subroutines (for loop performance purposes):
-
-        1. stratasimple
-        2. stratabuild
-        3. stratabuildcarb
-
-        :arg indices: indices of the closest nodes used for interpolation
-        :arg weights: weights based on the distances to closest nodes
-        :arg loc_stratH: thickness of each stratigrapic layer accounting for both erosion & deposition events.
-        :arg loc_stratF: proportion of fine sediment contains in each stratigraphic layer.
-        :arg loc_stratW: proportion of weathered sediment contains in each stratigraphic layer.
-        :arg loc_stratZ: elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer.
-        :arg loc_phiS: porosity of coarse sediment in each stratigraphic layer computed at center of each layer.
-        :arg loc_phiF: porosity of fine sediment in each stratigraphic layer computed at center of each layer.
-        :arg loc_phiW: porosity of weathered sediment in each stratigraphic layer computed at center of each layer.
-        :arg loc_strataC: proportion of carbonate sediment contains in each stratigraphic layer if the carbonate module is turned on.
-        :arg loc_phiC: porosity of carbonate sediment in each stratigraphic layer computed at center of each layer when the carbonate module is turned on.
-
-        """
-
-        if self.carbOn:
-            (
-                self.stratH[:, : self.stratStep],
-                self.stratZ[:, : self.stratStep],
-                self.stratF[:, : self.stratStep],
-                self.stratW[:, : self.stratStep],
-                self.stratC[:, : self.stratStep],
-                self.phiS[:, : self.stratStep],
-                self.phiF[:, : self.stratStep],
-                self.phiW[:, : self.stratStep],
-                self.phiC[:, : self.stratStep],
-            ) = stratabuildcarb(
-                self.lpoints,
-                self.stratStep,
-                indices,
-                weights,
-                loc_stratH,
-                loc_stratZ,
-                loc_stratF,
-                loc_stratW,
-                loc_stratC,
-                loc_phiS,
-                loc_phiF,
-                loc_phiW,
-                loc_phiC,
-            )
-        elif self.stratF is not None:
-            (
-                self.stratH[:, : self.stratStep],
-                self.stratZ[:, : self.stratStep],
-                self.stratF[:, : self.stratStep],
-                self.stratW[:, : self.stratStep],
-                self.phiS[:, : self.stratStep],
-                self.phiF[:, : self.stratStep],
-                self.phiW[:, : self.stratStep],
-            ) = stratabuild(
-                self.lpoints,
-                self.stratStep,
-                indices,
-                weights,
-                loc_stratH,
-                loc_stratZ,
-                loc_stratF,
-                loc_stratW,
-                loc_phiS,
-                loc_phiF,
-                loc_phiW,
-            )
-        else:
-            (
-                self.stratH[:, : self.stratStep],
-                self.stratZ[:, : self.stratStep],
-                self.phiS[:, : self.stratStep],
-            ) = stratasimple(
-                self.lpoints,
-                self.stratStep,
-                indices,
-                weights,
-                loc_stratH,
-                loc_stratZ,
-                loc_phiS,
-            )
-
-        return
-
-    def _localStrat(self):
-        """
-        Updates stratigraphic records after mesh advection on the edges of each partition to ensure that
-        all stratigraphic information on the adjacent nodes of the neighbouring partition are equals on
-        all processors sharing a common number of nodes.
-        """
-
-        stratH = self.stratH[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratH[self.shadowAlls, :] = temp
-            self.stratH[:, : self.stratStep] = stratH[self.locIDs, :]
-        else:
-            self.stratH[:, : self.stratStep] = stratH[self.locIDs, :]
-        stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratZ[self.shadowAlls, :] = temp
-            self.stratZ[:, : self.stratStep] = stratZ[self.locIDs, :]
-        else:
-            self.stratZ[:, : self.stratStep] = stratZ[self.locIDs, :]
-        phiS = self.phiS[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = phiS[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            phiS[self.shadowAlls, :] = temp
-            self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
-        else:
-            self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
-        del stratH, stratZ, phiS
-
-        if self.stratF is not None:
-            stratF = self.stratF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratF[self.shadowAlls, :] = temp
-                self.stratF[:, : self.stratStep] = stratF[self.locIDs, :]
-            else:
-                self.stratF[:, : self.stratStep] = stratF[self.locIDs, :]
-            phiF = self.phiF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiF[self.shadowAlls, :] = temp
-                self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
-            else:
-                self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
-            del stratF, phiF
-
-        if self.stratW is not None:
-            stratW = self.stratW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratW[self.shadowAlls, :] = temp
-                self.stratW[:, : self.stratStep] = stratW[self.locIDs, :]
-            else:
-                self.stratW[:, : self.stratStep] = stratW[self.locIDs, :]
-            phiW = self.phiW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiW[self.shadowAlls, :] = temp
-                self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
-            else:
-                self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
-            del stratW, phiW
-
-        if self.carbOn:
-            stratC = self.stratC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratC[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratC[self.shadowAlls, :] = temp
-                self.stratC[:, : self.stratStep] = stratC[self.locIDs, :]
-            else:
-                self.stratC[:, : self.stratStep] = stratC[self.locIDs, :]
-            phiC = self.phiC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiC[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiC[self.shadowAlls, :] = temp
-                self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
-            else:
-                self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
-            del stratC, phiC
-
-        return
-
     def destroy_DMPlex(self):
         """
-        Destroys PETSc DMPlex objects and associated PETSc local/global
-        Vectors and Matrices at the end of the simulation.
+        Destroys PETSc DMPlex objects and associated PETSc local/global Vectors and Matrices at the end of the simulation.
         """
 
         t0 = process_time()
@@ -1426,7 +989,6 @@ class UnstMesh(object):
         self.hGlobal.destroy()
         self.FAG.destroy()
         self.FAL.destroy()
-        self.fillFAG.destroy()
         self.fillFAL.destroy()
         self.cumED.destroy()
         self.cumEDLocal.destroy()
@@ -1450,7 +1012,6 @@ class UnstMesh(object):
         self.Qs.destroy()
         self.tmpL.destroy()
         self.tmp.destroy()
-        self.tmp1L.destroy()
         self.tmp1.destroy()
         self.stepED.destroy()
         self.Eb.destroy()
@@ -1460,10 +1021,7 @@ class UnstMesh(object):
 
         self.iMat.destroy()
         if not self.fast:
-            self.wMat.destroy()
-            self.fillMat.destroy()
-            if self.Cda > 0.0 or self.Cdm > 0.0:
-                self.Diff.destroy()
+            self.fMat.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
         self.dm.destroy()

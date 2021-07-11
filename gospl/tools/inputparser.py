@@ -94,15 +94,20 @@ class ReadYaml(object):
             )
             raise KeyError("Key domain is required in the input file!")
 
-        try:
-            self.radius = domainDict["radius"]
-        except KeyError:
-            self.radius = 6378137.0
+        # try:
+        #     self.radius = domainDict["radius"]
+        # except KeyError:
+        #     self.radius = 6378137.0
 
         try:
             self.flowDir = domainDict["flowdir"]
         except KeyError:
             self.flowDir = 6
+
+        try:
+            self.flowExp = domainDict["flowexp"]
+        except KeyError:
+            self.flowExp = 0.42
 
         try:
             meshFile = domainDict["npdata"]
@@ -312,20 +317,13 @@ class ReadYaml(object):
                 )
                 raise ValueError("Surface Process Model: Kb coefficient not found.")
             try:
-                self.frac_fine = splDict["Ff"]
-                if self.frac_fine < 0.005:
-                    self.frac_fine = 0.005
-                    if MPIrank == 0:
-                        print(
-                            "The fraction of fine has been reset to 0.5%, which is minimal authorised value.",
-                            flush=True,
-                        )
+                self.waterfill = splDict["wfill"]
             except KeyError:
-                self.frac_fine = 0.005
+                self.waterfill = 100.0
             try:
-                self.fillmax = splDict["hfill"]
+                self.sedfill = splDict["sfill"]
             except KeyError:
-                self.fillmax = 100.0
+                self.sedfill = 50.0
             try:
                 self.coeffd = splDict["d"]
             except KeyError:
@@ -341,9 +339,9 @@ class ReadYaml(object):
 
         except KeyError:
             self.K = 1.0e-12
-            self.fillmax = 100.0
+            self.waterfill = 100.0
+            self.sedfill = 50.0
             # self.wght = 0.0
-            self.frac_fine = 0.005
             self.coeffd = 0.0
 
         return
@@ -388,12 +386,17 @@ class ReadYaml(object):
                 self.sedimentKw = hillDict["sedKw"]
             except KeyError:
                 self.sedimentKw = 30000.0
+            try:
+                self.diffstep = hillDict["dstep"]
+            except KeyError:
+                self.diffstep = 3
         except KeyError:
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 10000.0
             self.sedimentKf = 20000.0
             self.sedimentKw = 30000.0
+            self.diffstep = 3
 
         return
 

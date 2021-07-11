@@ -23,14 +23,13 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class FAMesh(object):
     """
-    This class calculates **drainage area** in an implicit, iterative manner using PETSc solvers. It accounts
-    for multiple flow direction paths (SFD to MFD) based on user input declaration.
+    This class calculates **drainage area** in an implicit, iterative manner using PETSc solvers. It accounts  for multiple flow direction paths (SFD to MFD) based on user input declaration.
 
     .. note::
 
         The class follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ where the iterative nature of the computational algorithms used to solve the linear system creates the possibility of accelerating the solution by providing an initial guess.
 
-    For drainage computation, the class requires to compute depressionless surfaces and the *priority-flood + ϵ* variant of the algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ is used. It provides a solution to remove automatically flat surfaces, and it produces surfaces for which each cell has a defined gradient from which flow directions can be determined.
+    For drainage computation, the class requires to compute depressionless surfaces and the *priority-flood + ϵ* variant of the algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ is used. It provides a solution to remove flat surfaces, and it produces surfaces for which each cell has a defined gradient from which flow directions can be determined.
 
     Finally, the class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
 
@@ -49,16 +48,24 @@ class FAMesh(object):
         self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
         self.iMat = self._matrix_build_diag(np.ones(self.lpoints))
 
+        # Empty matrix construction
+        self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
+        self.zMat = self._matrix_build_diag(np.zeros(self.lpoints))
+
         # Petsc vectors
+        # self.fillFAG = self.hGlobal.duplicate()
+        self.fillFAL = self.hLocal.duplicate()
         self.FAG = self.hGlobal.duplicate()
         self.FAL = self.hLocal.duplicate()
-        self.fillFAG = self.hGlobal.duplicate()
-        self.fillFAL = self.hLocal.duplicate()
         self.hOld = self.hGlobal.duplicate()
         self.hOldLocal = self.hLocal.duplicate()
         self.Eb = self.hGlobal.duplicate()
         self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
+
+        # Clinoforms slopes for each sediment type
+        self.slps = [6.0, 5.0, 3.0, 1.0]
 
         return
 
@@ -68,8 +75,7 @@ class FAMesh(object):
 
         .. note::
 
-            To achieve good performance during matrix assembly, the function preallocates
-            the matrix storage by setting the array nnz.
+            To achieve good performance during matrix assembly, the function preallocates the matrix storage by setting the array nnz.
 
         :arg nnz: array containing the number of nonzeros in the various rows
 
@@ -172,27 +178,25 @@ class FAMesh(object):
 
         t0 = process_time()
 
-        sl = self.sealevel
-        if self.isfill:
-            sl = self.sealevel - 1000.0
-
         # Define multiple flow directions for unfilled elevation
         self.rcvID, self.distRcv, self.wghtVal = mfdreceivers(
-            self.flowDir, self.inIDs, h, sl
+            self.flowDir, self.flowExp, self.inIDs, h, self.sealevel
         )
-
-        if not self.isfill:
-            # Get nodes that have no receivers
-            sum_weight = np.sum(self.wghtVal, axis=1)
-            self.pitPts = sum_weight == 0.0
-
         # Get marine regions
         self.seaID = np.where(h <= self.sealevel)[0]
 
         # Set marine nodes
-        self.rcvID[self.seaID, :] = np.tile(self.seaID, (self.flowDir, 1)).T
-        self.distRcv[self.seaID, :] = 0.0
-        self.wghtVal[self.seaID, :] = 0.0
+        if self.flatModel:
+            self.rcvID[self.idBorders, :] = np.tile(self.idBorders, (self.flowDir, 1)).T
+            self.distRcv[self.idBorders, :] = 0.0
+            self.wghtVal[self.idBorders, :] = 0.0
+
+        # Get global nodes that have no receivers
+        sum_weight = np.sum(self.wghtVal, axis=1)
+        tmpw = np.zeros(self.mpoints, dtype=np.float64)
+        tmpw[self.locIDs] = sum_weight
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, tmpw, op=MPI.MAX)
+        self.pitPts = tmpw == 0.0
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -242,267 +246,255 @@ class FAMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Construct distance to coast (%0.02f seconds)" % (process_time() - t0),
+                "Construct Distance to Coast (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
         return
 
-    def _pitInformation(self, gZ, hFill):
-        """
-
-        Function to extract the volume of all depressions based on current elevation, depressionless
-        one and voronoi cell areas. It also stores the spillover vertices indices for each of the depression. It is ran over the global mesh.
-
-        .. note::
-
-            This function uses the **numpy-indexed** library which contains functionality for indexed
-            operations on numpy ndarrays and provides efficient vectorized functionality such as
-            grouping and set operations.
-
-        :arg gZ: global elevation numpy array
-        :arg hFill: global depressionless elevation numpy array
-        """
-
-        # Compute pit volumes
-        groupPits = npi.group_by(self.pits[:, 0])
-        pitNb, self.pitVol = groupPits.sum((hFill - gZ) * self.marea)
-        _, outids, _ = np.intersect1d(self.pits[:, 0], pitNb, return_indices=True)
-        self.outFlows = self.pits[outids, 1]
-
-        del groupPits, pitNb, outids
-        gc.collect()
-
-        return
-
-    def _depressionlessSurface(self, limit=False):
+    def _flowSurface(self):
         """
         This function computes the depression less surface.
 
         .. note::
 
-            In most landscape evolution models, internally draining regions (*e.g.* depressions
-            and pits) are usually filled before the calculation of flow discharge and erosion–deposition
-            rates. This ensures that all flows conveniently reach the coast or the boundary of the
-            simulated domain. In models intended to simulate purely erosional features, such depressions
-            are usually treated as transient features and often ignored.
+            In most landscape evolution models, internally draining regions (*e.g.* depressions and pits) are usually filled before the calculation of flow discharge and erosion–deposition rates. This ensures that all flows conveniently reach the coast or the boundary of the simulated domain. In models intended to simulate purely erosional features, such depressions are usually treated as transient features and often ignored.
 
-            However, `gospl` is designed to not only address erosion problems but also to simulate
-            source-to-sink transfer and sedimentary basins formation and evolution in potentially
-            complex tectonic settings. In such cases, depressions may be formed at different periods
-            during runtime and may be filled or remain internally drained (*e.g.* endorheic basins)
-            depending on the volume of sediment transported by upstream catchments.
+            However, `gospl` is designed to not only address erosion problems but also to simulate source-to-sink transfer and sedimentary basins formation and evolution in potentially complex tectonic settings. In such cases, depressions may be formed at different periods during runtime and may be filled or remain internally drained (*e.g.* endorheic basins) depending on the volume of sediment transported by upstream catchments.
 
-        The function is **not parallelised** and is performed on the master processor. It calls a
-        fortran subroutine `fillpit` that uses a *priority-flood + ϵ* variant of the algorithm proposed
-        in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ for unstructured meshes.
+        The function is **not parallelised** and is performed on the master processor. It calls a fortran subroutine `fillpit` that uses a *priority-flood + ϵ* variant of the algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ for unstructured meshes.
 
-        The initialisation step consists of pushing all the marine nodes which are neighbours to a
-        deep ocean node (*i.e.* nodes at water depth below 1000 m) onto a priority queue. The
-        priority queue rearranges these nodes so that the ones with the lowest elevations in the
-        queue are always processed first. The algorithm then proceeds incrementally by adding new vertices
-        in the queue and defines filled elevations in the ascending order of their spill elevations + ϵ.
+        The initialisation step consists of pushing all the marine nodes which are neighbours to a deep ocean node (*i.e.* nodes at water depth below 8000 m) onto a priority queue. The priority queue rearranges these nodes so that the ones with the lowest elevations in the queue are always processed first. The algorithm then proceeds incrementally by adding new vertices in the queue and defines filled elevations in the ascending order of their spill elevations + ϵ.
 
-        At the end of the function, the global unfilled and filled elevations are returned as well as
-        the depressions charcateristics (*i.e.* a unique indice for each depressions, their volumes and
-        the positions of the spill-over global vertices).
+        At the end of the function, the global fill-limited elevations are returned as well as the depressions charcateristics (*i.e.* a unique indice for each depressions, their volumes and the positions of the spill-over global vertices).
 
-        :arg limit: boolean to turn a limit on the maximum filling value
-
-        :return: gZ hFill (global and depressionless elevations numpy arrays)
+        :return: gZ hFill (global and filled elevations numpy arrays)
         """
 
         # Get global elevations for pit filling...
         t0 = process_time()
         hl = self.hLocal.getArray().copy()
-        gZ = np.zeros(self.mpoints)
+        gZ = np.zeros(self.mpoints, dtype=np.float64)
         gZ[self.locIDs] = hl
         gZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
 
-        if self.isfill:
-            # Perform pit filling on process rank 0
-            if MPIrank == 0:
-                hmax = 1.0e8
-                if limit:
-                    hmax = self.fillmax
-                # fillpit returns:
-                # - hFill: filled elevation values
-                # - pits: 2D array containing each pit ID and
-                #         corresponding overspilling point ID
-                hFill, pits = fillpit(self.sealevel - 1000.0, gZ, hmax)
-            else:
-                hFill = np.zeros(self.mpoints, dtype=np.float64)
-                pits = np.zeros((self.mpoints, 2), dtype=np.int64)
-            hFill = MPI.COMM_WORLD.bcast(hFill, root=0)
-            self.pits = MPI.COMM_WORLD.bcast(pits, root=0)
-            self.pitID = np.where(self.pits[self.locIDs, 0] >= 0)[0]
-            self.hFill = hFill[self.locIDs]
+        # Perform pit filling on process rank 0
+        if MPIrank == 0:
+            # fillpit returns:
+            # - hFill: filled elevation values
+            # - pits: 2D array containing each pit ID and
+            #         corresponding overspilling point ID
+            hFill, _ = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
 
-            # Get depressions information
-            self._pitInformation(gZ, hFill)
-
-            if MPIrank == 0 and self.verbose:
-                print(
-                    "Get pit filling information (%0.02f seconds)"
-                    % (process_time() - t0),
-                    flush=True,
-                )
-
-            del hl, pits
-            gc.collect()
         else:
-            hFill = None
-            del hl
-            gc.collect()
+            hFill = np.zeros(self.mpoints, dtype=np.float64)
+        hFill = MPI.COMM_WORLD.bcast(hFill, root=0)
+        self.hFill = hFill[self.locIDs]
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Get pit filling information (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        del hl
+        gc.collect()
 
         return gZ, hFill
 
-    def _matrixFA(self):
+    def matrixFlow(self, flow=True):
         """
-        This function defines the transport direction matrices for both filled and unfilled elevations.
+        This function defines the flow direction matrices for filled-limited elevations.
 
         .. note::
 
-            Each matrix is built incrementally looping through the number of flow direction paths
-            defined by the user. It proceeds by assembling a local Compressed Sparse Row (**CSR**)
-            matrix to a global PETSc matrix.
+            The matrix is built incrementally looping through the number of flow direction paths defined by the user. It proceeds by assembling a local Compressed Sparse Row (**CSR**) matrix to a global PETSc matrix.
 
-            When setting up transport direction matrix in PETSc, we preallocate the non-zero entries
-            of the matrix before starting filling in the values. Using PETSc sparse matrix storage
-            scheme has the advantage that matrix-vector multiplication is extremely fast.
+            When setting up the flow matrix in PETSc, we preallocate the non-zero entries of the matrix before starting filling in the values. Using PETSc sparse matrix storage scheme has the advantage that matrix-vector multiplication is extremely fast.
 
-        The  matrix coefficients consist of weights (comprised between 0 and 1) calculated based on
-        the number of downslope neighbours and proportional to the slope.
+        The  matrix coefficients consist of weights (comprised between 0 and 1) calculated based on the number of downslope neighbours and proportional to the slope.
+
+        :arg flow: boolean to compute matrix for either downstream water or sediment transport
 
         """
 
-        WAMat = self.iMat.copy()
+        flowMat = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
+
+        if flow:
+            wght = self.wghtVal
+            rcv = self.rcvID
+        else:
+            wght = self.lWght
+            rcv = self.lRcv
 
         for k in range(0, self.flowDir):
 
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
-            data = -self.wghtVal[:, k].copy()
-            data[self.rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+            data = -wght[:, k].copy()
+            data[rcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                self.rcvID[:, k].astype(petsc4py.PETSc.IntType),
+                rcv[:, k].astype(petsc4py.PETSc.IntType),
                 data,
             )
             tmpMat.assemblyEnd()
 
             # Add the weights from each direction
-            WAMat += tmpMat
+            flowMat += tmpMat
             tmpMat.destroy()
 
         del data, indptr, nodes
         gc.collect()
 
-        # Store flow accumulation matrices
-        if self.isfill:
-            self.fillMat = WAMat.transpose().copy()
-        else:
-            self.wMat = WAMat.transpose().copy()
+        # Store flow accumulation matrix
+        self.fMat = flowMat.transpose().copy()
 
-        WAMat.destroy()
+        flowMat.destroy()
 
         return
 
-    def flowAccumulation(self, filled=False, limit=False):
+    def _distributeFlowExcess(self):
+        """
+        In cases where rivers flow in depressions, they might fill the sink completely and overspill or a portion of it forming a lake. This function computes the lake elevation and the excess of water (if any) able to flow dowstream.
+
+        .. important::
+
+            The excess water is then added to the downstream flow accumulation (`FA`) and used to estimate rivers' erosion.
+
+        """
+
+        t0 = process_time()
+        self.hierarchicalSink(True, True, False, None)
+        lFA = self.FAL.getArray().copy()
+        nFA = np.zeros(self.mpoints, dtype=np.float64)
+        nFA[self.locIDs] = lFA
+        nFA[self.outIDs] = 0.0
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nFA, op=MPI.MAX)
+        FA = np.zeros(self.mpoints, dtype=np.float64)
+        FA[self.pitPts] = nFA[self.pitPts]
+        FA[self.sinkID] = 0.0
+        if self.flatModel:
+            FA[self.glBorders] = 0.0
+        self.depo = np.zeros(self.mpoints, dtype=np.float64)
+        inFA = np.where(FA > 0)[0]
+
+        if len(inFA) == 0:
+            del lFA, FA, nFA, inFA
+            gc.collect()
+            return
+
+        step = 0
+        self.flowDist = True
+        while (FA > 0).any():
+
+            # Check if FA are in closed sea
+            insea = np.zeros(1, dtype=np.int64)
+            if MPIrank == 0:
+                if (self.sIns[inFA] > -1).any():
+                    insea[0] = 1
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, insea, op=MPI.MAX)
+
+            if insea[0] > 0:
+                # Distribute sediments in closed sea
+                FA = self.distributeSea(FA)
+                # Remove flux that flow into open sea
+                FA[self.sinkID] = 0.0
+                # In case of 2D model remove flow on mesh borders
+                if self.flatModel:
+                    FA[self.glBorders] = 0.0
+
+            # At this point excess water are all in continental regions
+            if (FA > 0).any():
+                FA = self.distributeContinent(FA, None)
+                if self.flatModel:
+                    FA[self.glBorders] = 0.0
+            step += 1
+            if step > 20:
+                break
+
+        # Store lake water volume for each node
+        self.fillFAL.setArray(self.depo[self.locIDs] * self.marea[self.locIDs])
+        self.flowDist = False
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Distribute Excess Flow Downstream (%0.02f seconds)"
+                % (process_time() - t0),
+                flush=True,
+            )
+
+        del FA, nFA, inFA, lFA
+        gc.collect()
+
+        return
+
+    def flowAccumulation(self):
         """
         This function is the **main entry point** for flow accumulation computation.
 
         .. note::
 
-            Flow accumulation (`FA`) calculations are a core component of landscape evolution models as
-            they are often used as proxy to estimate flow discharge, sediment load, river width, bedrock
-            erosion, and sediment deposition. Until recently, conventional `FA` algorithms were serial
-            and limited to small spatial problems.
+            Flow accumulation (`FA`) calculations are a core component of landscape evolution models as they are often used as proxy to estimate flow discharge, sediment load, river width, bedrock erosion, and sediment deposition. Until recently, conventional `FA` algorithms were serial and limited to small spatial problems.
 
-        `gospl` model computes the flow discharge from `FA` and the net precipitation rate using a
-        **parallel implicit drainage area (IDA) method** proposed by `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ but adapted to unstructured grids.
+        `gospl` model computes the flow discharge from `FA` and the net precipitation rate using a **parallel implicit drainage area (IDA) method** proposed by `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ but adapted to unstructured grids.
 
         It calls the following *private functions*:
 
-        1. _depressionlessSurface
+        1. _flowSurface
         2. _buildFlowDirection
         3. _distanceCoasts
-        4. _matrixFA
-        5. _solve_KSP
+        4. _solve_KSP
+        5. _distributeFlowExcess
 
-        :arg filled: boolean to turn the filling algorithm
-        :arg limit: boolean to turn a limit on the maximum filling value
         """
 
-        self.isfill = filled
         # self.dm.localToGlobal(self.hLocal, self.hGlobal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        # Fill surface to remove pits
-        gZ, hFill = self._depressionlessSurface(limit)
+        # Filled-limited surface used to move river flow downstream
+        gZ, hFill = self._flowSurface()
 
         # Build flow direction
-        if self.isfill:
-            self._buildFlowDirection(hFill[self.locIDs])
-            # Define coastal distance for marine points
-            if self.vtkMesh is not None:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore")
-                    self._distanceCoasts(gZ)
-            del hFill, gZ
-            gc.collect()
+        self._buildFlowDirection(hFill[self.locIDs])
 
-        else:
-            self._buildFlowDirection(gZ[self.locIDs])
-            del gZ
-            gc.collect()
+        # Define coastal distance for marine points
+        if self.vtkMesh is not None:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                self._distanceCoasts(gZ)
+
+        del hFill, gZ
+        gc.collect()
 
         # Build transport direction matrices
         t0 = process_time()
-        self._matrixFA()
+        self.matrixFlow(True)
 
-        if self.isfill:
-            # Solve flow accumulation for filled elevation
-            if self.tNow == self.rStart:
-                self._solve_KSP(False, self.fillMat, self.bG, self.fillFAG)
-            else:
-                self._solve_KSP(True, self.fillMat, self.bG, self.fillFAG)
-            self.dm.globalToLocal(self.fillFAG, self.fillFAL)
-
+        # Solve flow accumulation for filled-limited elevation
+        if self.tNow == self.rStart:
+            self._solve_KSP(False, self.fMat, self.bG, self.FAG)
         else:
-            # Solve flow accumulation for unfilled elevation
-            if self.tNow == self.rStart:
-                self._solve_KSP(False, self.wMat, self.bG, self.FAG)
-            else:
-                self._solve_KSP(True, self.wMat, self.bG, self.FAG)
-            self.dm.globalToLocal(self.FAG, self.FAL)
+            self._solve_KSP(True, self.fMat, self.bG, self.FAG)
+        self.dm.globalToLocal(self.FAG, self.FAL)
 
         if MPIrank == 0 and self.verbose:
-            if self.isfill:
-                print(
-                    "Compute Filled Flow Accumulation (%0.02f seconds)"
-                    % (process_time() - t0),
-                    flush=True,
-                )
-            else:
-                print(
-                    "Compute Flow Accumulation (%0.02f seconds)"
-                    % (process_time() - t0),
-                    flush=True,
-                )
+            print(
+                "Compute Flow Accumulation (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        # Distribute excess flow
+        self._distributeFlowExcess()
 
         return
 
     def _getErosionRate(self):
         r"""
-        This function computes erosion rates in metres per year. This is done on the filled elevation.
-        We use the filled-limited elevation to ensure that erosion is not going to be underestimate by
-        small depressions which are likely to be filled (either by sediments or water) during a single
-        time step.
+        This function computes erosion rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion is not going to be underestimate by small depressions which are likely to be filled (either by sediments or water) during a single time step.
 
         The simplest law to simulate fluvial incision is based on the detachment-limited stream power law, in which erosion rate  depends on drainage area :math:`A`, net precipitation :math:`P` and local slope :math:`S` and takes the form:
 
@@ -516,20 +508,14 @@ class FAMesh(object):
 
         .. important::
 
-            In `gospl`, the coefficients `m` and `n` are fixed and the only variables that the user can
-            tune are the coefficient `d` and the erodibility :math:`\kappa`. E is in m/yr and therefore the erodibility dimension is :math:`(m yr)^{−0.5}`.
+            In `gospl`, the coefficients `m` and `n` are fixed and the only variables that the user can tune are the coefficient `d` and the erodibility :math:`\kappa`. E is in m/yr and therefore the erodibility dimension is :math:`(m yr)^{−0.5}`.
 
-        The erosion rate is solved by an implicit time integration method, the matrix system is
-        based on the receiver distributions and is assembled from local Compressed Sparse Row
-        (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers*
-        (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution
-        is obtained using PETSc Richardson solver (`richardson`) with block Jacobian
-        preconditioning (`bjacobi`).
+        The erosion rate is solved by an implicit time integration method, the matrix system is based on the receiver distributions and is assembled from local Compressed Sparse Row (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers* (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
         """
 
         # Upstream-averaged mean annual precipitation rate and the drainage area
-        PA = self.fillFAL.getArray()
+        PA = self.FAL.getArray()
 
         # Incorporate the effect of local mean annual precipitation rate on erodibility
         Kbr = self.K * (self.rainVal ** self.coeffd)
@@ -547,9 +533,9 @@ class FAMesh(object):
             nodes = indptr[:-1]
             # Define erosion limiter to prevent formation of flat
             dh = self.hOldArray - self.hOldArray[self.rcvID[:, k]]
-            # Set places with have been filled (e.g. depression/lakes) as no slope regions
-            dh[self.hFill > self.hOldArray] = 0.0
-            dh[dh < 0.0] = 0.0
+            # Set places which have been filled (e.g. depression/lakes) as no slope regions
+            # dh[self.hFill > self.hOldArray] = 0.0
+            # dh[dh < 0.0] = 0.0
             limiter = np.divide(dh, dh + 1.0e-3, out=np.zeros_like(dh), where=dh != 0)
 
             # Bedrock erosion processes SPL computation (maximum bedrock incision)
@@ -592,13 +578,13 @@ class FAMesh(object):
 
         E[self.seaID] = 0.0
         ids = np.where(
-            np.logical_and(
-                self.hOldArray > self.sealevel + 1.0e-2,
-                self.hOldArray - E * self.dt < self.sealevel + 1.0e-2,
-            )
+            (self.hOldArray > self.sealevel + 1.0e-2)
+            & (self.hOldArray - E * self.dt < self.sealevel + 1.0e-2)
         )[0]
         E[ids] = (self.hOldArray[ids] - self.sealevel - 1.0e-2) / self.dt
-        E[self.hFill > self.hOldArray] = 0.0
+        if self.flatModel:
+            E[self.idBorders] = 0.0
+        # E[self.hFill > self.hOldArray] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)
 
@@ -612,17 +598,13 @@ class FAMesh(object):
         River incision is based on a standard form of the **stream power law** assuming
         **detachment-limited behaviour**.
 
-        It calls the private function `_getErosionRate <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._getErosionRate>`_ described above.
-        Once erosion rates have been calculated, the function computes local eroded thicknesses for
-        the considered time step and update local elevation and cumulative erosion, deposition values.
+        It calls the private function `_getErosionRate <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._getErosionRate>`_ described above. Once erosion rates have been calculated, the function computes local eroded thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
 
-        If multiple lithologies are considered, the stratigraphic record is updated based on eroded
-        thicknesses.
+        If multiple lithologies are considered, the stratigraphic record is updated based on eroded thicknesses.
 
         .. important::
 
-            The approach assumes that the volume of rock eroded using the stream power law accounts
-            for both the solid and void phase.
+            The approach assumes that the volume of rock eroded using the stream power law accounts for both the solid and void phase.
 
         """
 

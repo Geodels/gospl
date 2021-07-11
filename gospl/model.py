@@ -6,6 +6,7 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from .flow import FAMesh as _FAMesh
     from .sed import SEDMesh as _SEDMesh
+    from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
     from .tools import WriteMesh as _WriteMesh
@@ -32,11 +33,15 @@ else:
         def __init__(self):
             pass
 
+    class _STRAMesh(object):
+        def __init__(self):
+            pass
+
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
-class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
+class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh, _STRAMesh):
     """
     Instantiates model object and performs surface processes evolution.
 
@@ -69,6 +74,9 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
 
         # Read input dataset
         _ReadYaml.__init__(self, filename)
+
+        # Stratigraphy initialisation
+        _STRAMesh.__init__(self)
 
         # Define unstructured mesh
         _UnstMesh.__init__(self)
@@ -120,9 +128,7 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
 
             if not self.fast:
                 # Compute Flow Accumulation
-                _FAMesh.flowAccumulation(self, filled=False)
-                # Compute Flow Accumulation
-                _FAMesh.flowAccumulation(self, filled=True, limit=True)
+                _FAMesh.flowAccumulation(self)
 
             # Output time step for first step
             if self.tNow == self.tStart:
@@ -133,9 +139,7 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
                 _FAMesh.riverIncision(self)
                 # Find Continental Sediment Fluxes
                 _SEDMesh.getSedFlux(self)
-                # Compute Filled Elevation Flow Accumulation
-                _FAMesh.flowAccumulation(self, filled=True, limit=False)
-                # Continental and Marine Deposition and Sedimentation
+                # Downstream sediment deposition
                 _SEDMesh.sedChange(self)
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
@@ -147,7 +151,7 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
             # Create new stratal layer
             if self.tNow >= self.saveStrat:
                 # Stratigraphic Layer Porosity and Thicknesses under Compaction
-                _SEDMesh.getCompaction(self)
+                _STRAMesh.getCompaction(self)
                 self.stratStep += 1
                 self.saveStrat += self.strat
 
@@ -179,8 +183,7 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
         """
         Reinitialise model elevation.
 
-        This function clears PETSc vectors and forcing conditions without
-        having to reset the mesh structure.
+        This function clears PETSc vectors and forcing conditions without having to reset the mesh structure.
         """
 
         _UnstMesh.reInitialiseElev(self)
@@ -189,8 +192,7 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh):
 
     def destroy(self):
         """
-        Destroy PETSc DMPlex objects and associated Petsc local/global
-        Vectors and Matrices.
+        Destroy PETSc DMPlex objects and associated Petsc local/global Vectors and Matrices.
 
         Safely quit model.
         """

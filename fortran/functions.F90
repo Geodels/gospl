@@ -25,6 +25,7 @@ module meshparams
   integer, dimension(:,:), allocatable :: gnID
   integer, dimension(:,:), allocatable :: FVnID
 
+  double precision, dimension(:), allocatable :: gFVarea
   double precision, dimension(:), allocatable :: FVarea
   double precision, dimension(:,:), allocatable :: FVeLgt
   double precision, dimension(:,:), allocatable :: FVvDist
@@ -287,6 +288,441 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
+subroutine seaparams(elev, sl, grp, pit, ins, out, vol, nb, nbg)
+!*****************************************************************************
+! Find closed sea parameters.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  integer :: nbg
+
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: sl
+  integer,intent(in) :: grp(nbg)
+  integer,intent(in) :: pit(nb,2)
+  integer,intent(out) :: ins(nb)
+  integer,intent(out) :: out(nbg)
+  double precision,intent(out) :: vol(nbg)
+
+  integer :: k, g
+  double precision :: minh
+
+  ins = -1
+  out = -1
+  vol = 0.
+
+  do g = 1, nbg
+    minh = sl
+    do k = 1, nb
+      if(pit(k,1)==grp(g) .and. elev(k)<sl)then
+        vol(g) = vol(g)+(sl-elev(k))*gFVarea(k)
+        ins(k) = grp(g)
+        if(minh>elev(k))then
+          out(g) = k-1
+          minh = elev(k)
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine seaparams
+
+subroutine distributeland(nrcv, sid, flux, rcv, wght, flx, nb)
+!*****************************************************************************
+! Distribute land sediment downstream.
+
+  implicit none
+
+  integer :: nb
+  integer :: nrcv
+  integer,intent(in) :: sid(nb)
+  double precision,intent(in) :: flux(nb)
+  integer,intent(in) :: rcv(nb,nrcv)
+  double precision,intent(in) :: wght(nb,nrcv)
+  double precision,intent(out) :: flx(nb)
+
+  integer :: k, i, p, n
+
+  flx = 0.
+
+  do k = 1, nb
+    i = sid(k)+1
+    if(flux(i)>0.)then
+      do p = 1, nrcv
+        if(wght(i,p)>0.)then
+          n = rcv(i,p)+1
+          flx(n) = flx(n)+wght(i,p)*flux(i)
+        endif
+      enddo
+    endif
+  enddo
+
+  return
+
+end subroutine distributeland
+
+
+subroutine distocean2(sid, elev, flux, dvol, depth, dep, nid, nb)
+!*****************************************************************************
+! Distribute marine sediment downstream in open water.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  integer :: nid
+  integer,intent(in) :: sid(nid)
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: flux(nb)
+  double precision,intent(in) :: dvol(nb)
+  double precision,intent(in) :: depth(nb)
+  double precision,intent(out) :: dep(nb)
+
+  integer :: k, i, p, n, nn, ids(8)
+  double precision :: flx(nb), vol(nb), nflx, addflx
+  logical :: flag(nb)
+
+  dep = 0.
+  vol = dvol
+  flx = flux
+  flag = .True.
+
+  do k = 1, nid
+    i = sid(k)
+    ! if(flag(i))
+    flag(i) = .False.
+    if(flx(i)<=vol(i))then
+      dep(i) = dep(i)+flx(i)/gFVarea(i)
+      vol(i) = vol(i)-flx(i)
+      flx(i) = 0.
+    else
+      dep(i) = depth(i)
+      nflx = flx(i)-vol(i)
+      nn = 0
+      ids = 0
+      do p = 1, 8
+        n = gnID(i,p)
+        if(n>0)then
+          if(elev(n)<=0. .and. flag(n))then
+            nn = nn+1
+            ids(nn) = n
+          endif
+        endif
+      enddo
+      if(nb>0)then
+        addflx = nflx/nn
+        do p = 1, nn
+          n = ids(p)
+          flx(n) = flx(n)+addflx
+        enddo
+      endif
+      flx(i) = 0.
+      vol(i) = 0.
+    endif
+  enddo
+
+  return
+
+end subroutine distocean2
+
+subroutine distocean(nrcv, sid, flux, rcv, wght, area, depth, dep, nb, nbi)
+!*****************************************************************************
+! Distribute marine sediment downstream in open water.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  integer :: nbi
+  integer :: nrcv
+  integer,intent(in) :: sid(nbi)
+  double precision,intent(in) :: flux(nb)
+  integer,intent(in) :: rcv(nb,nrcv)
+  double precision,intent(in) :: wght(nb,nrcv)
+  double precision,intent(in) :: area(nb)
+  double precision,intent(in) :: depth(nb)
+  double precision,intent(out) :: dep(nb)
+
+  integer :: k, i, p, n
+  double precision :: flx(nb), vol(nb), nflx
+
+  dep = 0.
+  vol = area*depth
+  flx = flux
+
+  do k = 1, nbi
+    i = sid(k)+1
+    if(flx(i)>0.)then
+      nflx = 0.
+      if(flx(i)>vol(i))then
+        dep(i) = depth(i)
+        nflx = flx(i)-vol(i)
+        vol(i) = 0.
+        do p = 1, nrcv
+          if(wght(i,p)>0.)then
+            n = rcv(i,p)+1
+            flx(n) = flx(n)+wght(i,p)*nflx
+          endif
+        enddo
+        flx(i) = 0.
+      else
+        dep(i) = dep(i)+flx(i)/area(i)
+        vol(i) = vol(i)-flx(i)
+        flx(i) = 0.
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine distocean
+
+subroutine distexcess(flux, elev, felev, pit, vol, ovol, sout, lins, flx, depo, nb, nbg, nbs)
+!*****************************************************************************
+! Distribute land sediment in closed depressions.
+
+  implicit none
+
+  integer :: nb
+  integer :: nbg
+  integer :: nbs
+
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: felev(nb)
+  double precision,intent(in) :: flux(nb)
+  integer,intent(in) :: pit(nb,2)
+  double precision,intent(in) :: vol(nbg)
+  double precision,intent(in) :: ovol(nbs)
+  integer,intent(in) :: sout(nbs)
+  integer,intent(in) :: lins(nb)
+
+  double precision,intent(out) :: flx(nb)
+  double precision,intent(out) :: depo(nb)
+
+  integer :: k, g, i, p
+  double precision :: scale, nvol(nbg)
+
+  flx = flux
+  depo = 0.
+  nvol = vol
+
+  do g = 1, nbs
+
+    if(ovol(g)>0.)then
+
+      p = sout(g)+1
+      i = lins(p)+1
+
+      if(pit(p,1)>-1)then
+
+        if(nvol(i)>=ovol(g))then
+          scale = ovol(g)/nvol(i)
+          nvol(i) = nvol(i)-ovol(g)
+          flx(p) = 0.
+          do k = 1, nb
+            if(lins(k) == i-1)then
+              depo(k) = depo(k)+(felev(k)-elev(k))*scale
+            endif
+          enddo
+        else
+          flx(pit(p,2)+1) = flx(pit(p,2)+1)+ovol(g)-nvol(i)
+          flx(p) = 0.
+          nvol(i) = 0.
+          do k = 1, nb
+            if(lins(k) == i-1)then
+              depo(k) = depo(k)+felev(k)-elev(k)
+            endif
+          enddo
+        endif
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine distexcess
+
+subroutine distsea(flux, elev, sl, grp, pit, vol, sout, flx, depo, ovol, nb, nbg)
+!*****************************************************************************
+! Distribute sediment in closed ocean.
+
+  implicit none
+
+  integer :: nb
+  integer :: nbg
+
+  double precision,intent(in) :: sl
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: flux(nb)
+  integer,intent(in) :: grp(nbg)
+  integer,intent(in) :: pit(nb,2)
+  integer,intent(in) :: sout(nbg)
+  double precision,intent(in) :: vol(nbg)
+
+  double precision,intent(out) :: flx(nb)
+  double precision,intent(out) :: depo(nb)
+  double precision,intent(out) :: ovol(nbg)
+
+  integer :: k, g, i, nloc
+  integer :: ingrp(nb)
+  double precision :: totflx, scale, nvol(nbg)
+
+  flx = flux
+  depo = 0.
+  ovol = 0.
+  nvol = vol
+
+  do g = 1, nbg
+
+    totflx = 0.
+
+    if(grp(g)>-1)then
+
+      nloc = 0
+      ingrp = 0
+      do k = 1, nb
+        if(pit(k,1)==grp(g) .and. sl>elev(k))then
+          totflx = totflx+flux(k)
+          nloc = nloc+1
+          ingrp(nloc) = k
+        endif
+      enddo
+
+      if(totflx>0.)then
+        if(totflx>vol(g))then
+          ovol(g) = totflx-vol(g)
+          flx(sout(g)+1) = totflx-vol(g)
+          do k = 1, nloc
+            i = ingrp(k)
+            flx(i) = 0.
+            depo(i) = sl-elev(i)
+          enddo
+          nvol(g) = 0.
+        else
+          scale = totflx/vol(g)
+          nvol(g) = nvol(g) - totflx
+          do k = 1, nloc
+            i = ingrp(k)
+            flx(i) = 0.
+            depo(i) = (sl-elev(i))*scale
+          enddo
+        endif
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine distsea
+
+subroutine distland(flux, elev, felev, grp, pit, vol, flx, depo, nb, nbg)
+!*****************************************************************************
+! Distribute land sediment in closed depressions.
+
+  implicit none
+
+  integer :: nb
+  integer :: nbg
+
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: felev(nb)
+  double precision,intent(in) :: flux(nb)
+  integer,intent(in) :: pit(nb,2)
+  integer,intent(in) :: grp(nbg)
+  double precision,intent(in) :: vol(nbg)
+
+  double precision,intent(out) :: flx(nb)
+  double precision,intent(out) :: depo(nb)
+
+  integer :: k, g, i, out, nloc
+  integer :: ingrp(nb)
+  double precision :: totflx, scale, nvol(nbg)
+
+  flx = flux
+  depo = 0.
+  nvol = vol
+
+  do g = 1, nbg
+
+    totflx = 0.
+    out = -1
+
+    if(grp(g)>-1)then
+
+      nloc = 0
+      ingrp = 0
+      do k = 1, nb
+        if(pit(k,1)==grp(g))then
+          totflx = totflx+flux(k)
+          if(out==-1) out = pit(k,2)+1
+          nloc = nloc+1
+          ingrp(nloc) = k
+        endif
+      enddo
+
+      if(totflx>0.)then
+        if(totflx>vol(g))then
+          do k = 1, nloc
+            i = ingrp(k)
+            flx(i) = 0.
+            depo(i) = felev(i)-elev(i)
+          enddo
+          flx(out) = totflx-nvol(g)
+          nvol(g) = 0.
+        else
+          scale = totflx/vol(g)
+          do k = 1, nloc
+            i = ingrp(k)
+            flx(i) = 0.
+            depo(i) = (felev(i)-elev(i))*scale
+          enddo
+          nvol(g) = nvol(g) - totflx
+        endif
+      endif
+
+    endif
+  enddo
+
+  return
+
+end subroutine distland
+
+subroutine averageslope(elev, aslp, nb)
+!*****************************************************************************
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    double precision, intent(in) :: elev(nb)
+    double precision, intent(out) :: aslp(nb)
+
+    integer :: k, p, n, nn
+    double precision :: totslp, slp
+
+    aslp = 0.
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        nn = 0
+        totslp = 0.
+        do p = 1, FVnNb(k)
+          nn = nn+1
+          n = FVnID(k,p)+1
+          slp = (elev(n)-elev(k))/FVeLgt(k,p)
+          totslp = totslp+slp
+        enddo
+        if(nb>0) aslp(k) = totslp/nn
+      endif
+    enddo
+
+    return
+
+end subroutine averageslope
 
 subroutine marinecoeff(nb, Ks, dcoeff)
 !*****************************************************************************
@@ -390,7 +826,7 @@ end subroutine marinediff
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine mfdreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
+subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
 ! algorithm.
@@ -409,6 +845,7 @@ subroutine mfdreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
   integer :: nb
 
   integer, intent(in) :: nRcv
+  double precision, intent(in) :: exp
   integer, intent(in) :: inIDs(nb)
   double precision,intent(in) :: sl
   double precision, intent(in) :: elev(nb)
@@ -437,7 +874,7 @@ subroutine mfdreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
         do p = 1, FVnNb(k)
           n = FVnID(k,p)+1
           if(n>0 .and. FVeLgt(k,p)>0.)then
-            val = (elev(k) - elev(n))/FVeLgt(k,p)
+            val = (elev(k) - elev(n))**exp/FVeLgt(k,p)
             if(val>0.)then
               kk = kk + 1
               slp(kk) = val
@@ -484,6 +921,98 @@ subroutine mfdreceivers( nRcv, inIDs, elev, sl, rcv, dist, wgt, nb)
   return
 
 end subroutine mfdreceivers
+
+
+subroutine mfdrcvs( nRcv, exp, inIDs, elev, sl, rcv, wgt, nb)
+!*****************************************************************************
+! Compute receiver characteristics based on multiple flow direction
+! algorithm.
+
+  use meshparams
+  implicit none
+
+  interface
+    recursive subroutine quicksort(array, first, last, indices)
+      double precision, dimension(:), intent(inout) :: array
+      integer, intent(in)  :: first, last
+      integer, dimension(:), intent(inout) :: indices
+    end subroutine quicksort
+  end interface
+
+  integer :: nb
+
+  double precision,intent(in) :: exp
+  integer, intent(in) :: nRcv
+  integer, intent(in) :: inIDs(nb)
+  double precision,intent(in) :: sl
+  double precision, intent(in) :: elev(nb)
+
+  integer, intent(out) :: rcv(nb,nRcv)
+  double precision, intent(out) :: wgt(nb,nRcv)
+
+  integer :: k, n, p, kk
+  double precision :: slp(8),val,slope(8)
+  integer :: id(8)
+
+  rcv = -1
+  wgt = 0.
+
+  do k = 1, nb
+    if(inIDs(k)>0)then
+      if(elev(k)<=sl)then
+        rcv(k,1:nRcv) = k-1
+      else
+        slp = 0.
+        id = 0
+        val = 0.
+        kk = 0
+        do p = 1, FVnNb(k)
+          n = FVnID(k,p)+1
+          if(n>0 .and. FVeLgt(k,p)>0.)then
+            val = (elev(k) - elev(n))**exp/FVeLgt(k,p)
+            if(val>0.)then
+              kk = kk + 1
+              slp(kk) = val
+              id(kk) = n-1
+            endif
+          endif
+        enddo
+
+        if(kk == 0)then
+          rcv(k,1:nRcv) = k-1
+        elseif(kk <= nRcv)then
+          val = 0.
+          rcv(k,1:nRcv) = k-1
+          do p = 1, kk
+            rcv(k,p) = id(p)
+            val = val + slp(p)
+          enddo
+          do p = 1, nRcv
+            wgt(k,p) = slp(p) / val
+          enddo
+        else
+          rcv(k,1:nRcv) = k-1
+          call quicksort(slp,1,kk,id)
+          n = 0
+          val = 0.
+          slope = 0.
+          do p = kk,kk-nRcv+1,-1
+            n = n + 1
+            slope(n) = slp(p)
+            rcv(k,n) = id(p)
+            val = val + slp(p)
+          enddo
+          do p = 1, nRcv
+            wgt(k,p) = slope(p)/val
+          enddo
+        endif
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine mfdrcvs
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -733,7 +1262,7 @@ subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
   do i = 1, nb
     if(fillz(i)<sl)then
       flag(i) = .True.
-      lp: do k = 1, 6
+      lp: do k = 1, 8
         c = gnID(i,k)
         if(c>0)then
           if(fillz(c)>=sl)then
@@ -750,7 +1279,7 @@ subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
   do while(priorityqueue%n>0)
     ptID = priorityqueue%PQpop()
     i = ptID%id
-    do k = 1, 6
+    do k = 1, 8
       c = gnID(i,k)
       if(c>0)then
         if(.not.flag(c))then
@@ -792,6 +1321,128 @@ subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
 
 end subroutine fillpit
 
+
+subroutine fillpit2(sl, elev, fillz, nb)
+!*****************************************************************************
+! Perform pit filling using a priority queue approach following Barnes (2015).
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision,intent(in) :: sl
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(out) :: fillz(nb)
+  logical :: flag(nb)
+
+  integer :: i, k, c
+
+  type (node)  :: ptID
+  double precision :: h
+
+  fillz = elev
+
+  ! Push marine edges nodes to priority queue
+  flag = .False.
+  do i = 1, nb
+    if(fillz(i)<sl)then
+      flag(i) = .True.
+      lp: do k = 1, 8
+        c = gnID(i,k)
+        if(c>0)then
+          if(fillz(c)>=sl)then
+            call priorityqueue%PQpush(fillz(i), i)
+            exit lp
+          endif
+        endif
+      enddo lp
+    endif
+  enddo
+
+  ! Perform pit filling using priority total queue
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    do k = 1, 8
+      c = gnID(i,k)
+      if(c>0)then
+        if(.not.flag(c))then
+          flag(c) = .True.
+          h = nearest(fillz(i), 1.0)
+          ! Not a depression
+          if(fillz(c)>h)then
+            call priorityqueue%PQpush(fillz(c), c)
+          ! Find a depression
+          else
+            fillz(c) = h
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine fillpit2
+
+subroutine fillseapit(pitid, insea, elev, fillz, m, nb)
+!*****************************************************************************
+! Perform pit filling for epicontinental sea using a priority queue approach following Barnes (2015).
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer :: nb
+  integer,intent(in) :: pitid(m)
+  integer,intent(in) :: insea(nb)
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(out) :: fillz(nb)
+  logical :: flag(nb)
+
+  integer :: i, k, c
+
+  type (node)  :: ptID
+  double precision :: h
+
+  fillz = elev
+
+  ! Push each pit minimum nodes to priority queue
+  flag = .False.
+  do k = 1, m
+    i = pitid(k)+1
+    flag(i) = .True.
+    call priorityqueue%PQpush(fillz(i), i)
+  enddo
+
+  ! Perform pit filling using priority total queue
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    do k = 1, 8
+      c = gnID(i,k)
+      if(c>0 .and. insea(c)>0)then
+        if(.not.flag(c))then
+          flag(c) = .True.
+          h = nearest(fillz(i), 1.0)
+          ! Not a depression
+          if(fillz(c)>h)then
+            call priorityqueue%PQpush(fillz(c), c)
+          ! Find a depression
+          else
+            fillz(c) = h
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine fillseapit
+
 subroutine filllabel(sl, elev, fillz, labels, nb)
 !*****************************************************************************
 ! Perform pit filling and watershed labeling using a variant of the priority
@@ -822,7 +1473,7 @@ subroutine filllabel(sl, elev, fillz, labels, nb)
     if(fillz(i)<sl)then
       flag(i) = .True.
       labels(i) = 0
-      lp: do k = 1, 6
+      lp: do k = 1, 8
         c = gnID(i,k)
         if(c>0)then
           if(fillz(c)>=sl)then
@@ -843,7 +1494,7 @@ subroutine filllabel(sl, elev, fillz, labels, nb)
       label = label + 1
       labels(i) = label
     endif
-    do k = 1, 6
+    do k = 1, 8
       c = gnID(i,k)
       if(c>0)then
         if(.not.flag(c))then
@@ -952,12 +1603,14 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
     gFVvDist = 0.
   endif
 
+  if(allocated(gFVarea)) deallocate(gFVarea)
   if(allocated(FVarea)) deallocate(FVarea)
   if(allocated(FVnID)) deallocate(FVnID)
   if(allocated(FVnNb)) deallocate(FVnNb)
   if(allocated(FVeLgt)) deallocate(FVeLgt)
   if(allocated(FVvDist)) deallocate(FVvDist)
 
+  allocate(gFVarea(nb))
   allocate(FVarea(nLocal))
   allocate(FVnNb(nLocal))
   allocate(FVnID(nLocal,8))
@@ -971,6 +1624,8 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
   FVeLgt = 0.
   FVvDist = 0.
   edgemax = 0.
+
+  gFVarea = area
 
   ! Find all cells surrounding a given vertice
   do i = 1, n
