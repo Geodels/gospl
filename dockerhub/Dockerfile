@@ -1,4 +1,4 @@
-FROM geodels/gospl-base:petsc-3.13.0
+FROM geodels/gospl-base:latest
 MAINTAINER Tristan Salles
 
 ENV PETSC_DIR=/opt/petsc
@@ -8,6 +8,8 @@ RUN apt-get update -qq && \
     DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
         libgl1-mesa-dev
 
+RUN python3 -m pip install --upgrade pip
+
 # install extras in a new layer
 RUN python3 -m pip install --no-cache-dir \
         pytest-mpi \
@@ -16,6 +18,7 @@ RUN python3 -m pip install --no-cache-dir \
         twine \
         https://github.com/j08lue/pycpt/archive/master.zip \
         pyevtk
+
 
 RUN apt-get update -qq && \
     DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
