@@ -16,15 +16,16 @@ time:
     tec: 1000000.
 
 spl:
-    hfill: 100.
+    wfill: 100.
+    sfill: 10.
     K: 3.e-8
-    Ff: 0.2
     d: 0.42
 
 diffusion:
     hillslopeKa: 0.02
     hillslopeKm: 0.2
     sedK: 1000.
+    dstep: 5
 
 sea:
     position: 0.

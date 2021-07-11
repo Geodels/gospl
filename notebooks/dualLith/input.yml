@@ -17,14 +17,15 @@ time:
     strat: 20000.
 
 spl:
-    hfill: 20.
+    wfill: 100.
+    sfill: 10.
     K: 2.0e-6
-    Ff: 0.4
     d: 0.
 
 diffusion:
     hillslopeKa: 10.
     hillslopeKm: 20.
+    dstep: 5
     sedK: 75000.
     sedKf: 100000.
 
