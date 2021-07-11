@@ -177,8 +177,9 @@ class SEDMesh(object):
 
             tmpMat.destroy()
 
-        del data, indptr, nodes
-        gc.collect()
+        if self.memclear:
+            del data, indptr, nodes
+            gc.collect()
 
         # Store flow accumulation matrix
         self.dMat = dirMat.transpose().copy()
@@ -246,8 +247,9 @@ class SEDMesh(object):
         self.depo += ndepo
         self.gZ += ndepo
 
-        del ndepo
-        gc.collect()
+        if self.memclear:
+            del ndepo
+            gc.collect()
 
         return Qs
 
@@ -332,10 +334,12 @@ class SEDMesh(object):
                 Qs[self.glBorders] = 0.0
             self.depo += ndepo
             self.gZ += ndepo
-            del ndepo
+            if self.memclear:
+                del ndepo
 
-        del nQs
-        gc.collect()
+        if self.memclear:
+            del nQs
+            gc.collect()
 
         if sinkFlx is not None:
             return Qs, sinkFlx
@@ -388,8 +392,9 @@ class SEDMesh(object):
 
         diff.destroy()
 
-        del ids, indices, indptr, data, diffCoeffs, Cd, seaID, hl
-        gc.collect()
+        if self.memclear:
+            del ids, indices, indptr, data, diffCoeffs, Cd, seaID, hl
+            gc.collect()
 
         return topo
 
@@ -429,8 +434,9 @@ class SEDMesh(object):
         hclino[self.outIDs] = 1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, hclino, op=MPI.MIN)
 
-        del depo, clinoH, shelfIDs
-        gc.collect()
+        if self.memclear:
+            del depo, clinoH, shelfIDs
+            gc.collect()
 
         return smthZ, hclino
 
@@ -467,7 +473,8 @@ class SEDMesh(object):
         diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
         seaDiff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-        del Cd, scale
+        if self.memclear:
+            del Cd, scale
 
         for k in range(0, self.maxnb):
             tmpMat = self._matrix_build()
@@ -485,8 +492,9 @@ class SEDMesh(object):
             seaDiff += tmpMat
             tmpMat.destroy()
 
-        del ids, data, indices, indptr, diffCoeffs
-        gc.collect()
+        if self.memclear:
+            del ids, data, indices, indptr, diffCoeffs
+            gc.collect()
 
         # Perform diffusion equation
         self.tmp1.setArray(h[self.glbIDs])
@@ -504,8 +512,9 @@ class SEDMesh(object):
         if self.flatModel:
             h[self.glBorders] = zb[self.glBorders]
 
-        del hl
-        gc.collect()
+        if self.memclear:
+            del hl
+            gc.collect()
 
         return ndepo, h
 
@@ -585,11 +594,12 @@ class SEDMesh(object):
         self.depo += ndep  # gZ - self.oldh
         self.gZ = gZ.copy()
 
-        del hclino, coastDist, gZ, smthZ, zsmth
-        del sinkFlx, ndep, ndepo, sRcvs, sWghts, val
-        if MPIrank == 0:
-            del sid, vdepth
-        gc.collect()
+        if self.memclear:
+            del hclino, coastDist, gZ, smthZ, zsmth
+            del sinkFlx, ndep, ndepo, sRcvs, sWghts, val
+            if MPIrank == 0:
+                del sid, vdepth
+            gc.collect()
 
         return
 
@@ -606,8 +616,9 @@ class SEDMesh(object):
         self.gZ = gZ.copy()
         self.oldh = gZ.copy()
 
-        del hl
-        gc.collect()
+        if self.memclear:
+            del hl
+            gc.collect()
 
         return gZ
 
@@ -622,8 +633,9 @@ class SEDMesh(object):
         fill[self.glBorders] = elev[self.glBorders]
         pits[self.glBorders] = -1
 
-        del nelev
-        gc.collect()
+        if self.memclear:
+            del nelev
+            gc.collect()
 
         return fill, pits
 
@@ -647,7 +659,8 @@ class SEDMesh(object):
         tmpw[self.locIDs] = sum_weight
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, tmpw, op=MPI.MAX)
         self.lnoRcv = tmpw == 0.0
-        del tmpw
+        if self.memclear:
+            del tmpw
 
         if MPIrank == 0:
             # Compute continental pit volumes
@@ -656,7 +669,8 @@ class SEDMesh(object):
             pitNb, self.lVol = self.grpSink.sum((self.lFill - self.gZ) * self.marea)
             _, outids, _ = np.intersect1d(self.lPits[:, 0], pitNb, return_indices=True)
             self.lOut = self.lPits[outids, 1]
-            del pitNb, outids
+            if self.memclear:
+                del pitNb, outids
 
         return
 
@@ -678,7 +692,8 @@ class SEDMesh(object):
             self.sIns, self.sOut, self.sVol = seaparams(
                 self.gZ, self.sealevel, self.sGrp, self.sPits
             )
-            del closeIDs, grpSink
+            if self.memclear:
+                del closeIDs, grpSink
 
         return
 
@@ -749,11 +764,9 @@ class SEDMesh(object):
             )
             if self.flatModel:
                 self.sRcv, self.sWght = self._nullitfyBorders(self.sRcv, self.sWght)
-            del sFill
 
         if land or limited:
             self.lFill = MPI.COMM_WORLD.bcast(lFill, root=0)
-            del lFill
             # Define multiple flow directions for filled elevation
             self.lRcv, _, self.lWght = mfdreceivers(
                 self.flowDir,
@@ -770,8 +783,6 @@ class SEDMesh(object):
                 self.matrixFlow(False)
             # Get depression parameters
             self._getDepressions()
-
-        gc.collect()
 
         return
 
@@ -828,7 +839,6 @@ class SEDMesh(object):
         if self.flatModel:
             Qs[self.glBorders] = 0.0
         Qs[self.pitPts] = nQs[self.pitPts]
-        del nQs, lQs
 
         # Update all flux in the main sink
         sinkFlx = np.zeros(self.mpoints, dtype=np.float64)
@@ -846,7 +856,8 @@ class SEDMesh(object):
                 if (self.sIns[inQs] > -1).any():
                     insea[0] = 1
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, insea, op=MPI.MAX)
-            del inQs
+            if self.memclear:
+                del inQs
             if insea[0] > 0:
                 # Distribute sediments in closed sea
                 Qs = self.distributeSea(Qs)
@@ -868,7 +879,7 @@ class SEDMesh(object):
                     print("Forced Distribution to Ocean")
                 sinkFlx += Qs
                 break
-        del Qs
+
         if MPIrank == 0 and self.verbose:
             print("Distribution step nb:", step)
             print(
@@ -889,9 +900,6 @@ class SEDMesh(object):
                     % (process_time() - t0),
                     flush=True,
                 )
-
-        del sinkFlx
-        gc.collect()
 
         # Update cumed and elev
         self.tmpL.setArray(self.depo[self.locIDs])
@@ -946,9 +954,9 @@ class SEDMesh(object):
         # Update layer elevation
         if self.stratNb > 0:
             self.elevStrat()
-
-        del h
-        gc.collect()
+        if self.memclear:
+            del h
+            gc.collect()
 
         return
 
@@ -1000,8 +1008,9 @@ class SEDMesh(object):
             # Update carbonate reef content in the stratigraphic layer
             self.deposeStrat(2)
 
-        del ids, validIDs, carbH, hl
-        gc.collect()
+        if self.memclear:
+            del ids, validIDs, carbH, hl
+            gc.collect()
 
         return
 
@@ -1047,8 +1056,10 @@ class SEDMesh(object):
             tmpMat.assemblyEnd()
             diffMat += tmpMat
             tmpMat.destroy()
-        del ids, indices, indptr, diffCoeffs, Cd
-        gc.collect()
+
+        if self.memclear:
+            del ids, indices, indptr, diffCoeffs, Cd
+            gc.collect()
 
         # Get elevation values for considered time step
         self.hGlobal.copy(result=self.hOld)

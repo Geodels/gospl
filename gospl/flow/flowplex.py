@@ -241,8 +241,10 @@ class FAMesh(object):
         self.coastDist[self.seaID], indices = tree.query(
             self.lcoords[self.seaID, :], k=k_neighbors
         )
-        del array, pointData, cf, tree, indices, coastXYZ
-        gc.collect()
+
+        if self.memclear:
+            del array, pointData, cf, tree, indices, coastXYZ
+            gc.collect()
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -298,8 +300,9 @@ class FAMesh(object):
                 flush=True,
             )
 
-        del hl
-        gc.collect()
+        if self.memclear:
+            del hl
+            gc.collect()
 
         return gZ, hFill
 
@@ -348,8 +351,9 @@ class FAMesh(object):
             flowMat += tmpMat
             tmpMat.destroy()
 
-        del data, indptr, nodes
-        gc.collect()
+        if self.memclear:
+            del data, indptr, nodes
+            gc.collect()
 
         # Store flow accumulation matrix
         self.fMat = flowMat.transpose().copy()
@@ -384,8 +388,9 @@ class FAMesh(object):
         inFA = np.where(FA > 0)[0]
 
         if len(inFA) == 0:
-            del lFA, FA, nFA, inFA
-            gc.collect()
+            if self.memclear:
+                del lFA, FA, nFA, inFA
+                gc.collect()
             return
 
         step = 0
@@ -427,8 +432,9 @@ class FAMesh(object):
                 flush=True,
             )
 
-        del FA, nFA, inFA, lFA
-        gc.collect()
+        if self.memclear:
+            del FA, nFA, inFA, lFA
+            gc.collect()
 
         return
 
@@ -467,8 +473,9 @@ class FAMesh(object):
                 warnings.filterwarnings("ignore")
                 self._distanceCoasts(gZ)
 
-        del hFill, gZ
-        gc.collect()
+        if self.memclear:
+            del hFill, gZ
+            gc.collect()
 
         # Build transport direction matrices
         t0 = process_time()
@@ -560,8 +567,9 @@ class FAMesh(object):
             EbedMat -= self._matrix_build_diag(data)
             tmpMat.destroy()
 
-        del dh, limiter, wght, data
-        gc.collect()
+        if self.memclear:
+            del dh, limiter, wght, data
+            gc.collect()
 
         # Solve bedrock erosion thickness
         self._solve_KSP(True, EbedMat, self.hOld, self.stepED)
@@ -588,8 +596,9 @@ class FAMesh(object):
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)
 
-        del E, PA, Kbr, ids
-        gc.collect()
+        if self.memclear:
+            del E, PA, Kbr, ids
+            gc.collect()
 
         return
 
@@ -637,7 +646,8 @@ class FAMesh(object):
                 flush=True,
             )
 
-        del Eb
-        gc.collect()
+        if self.memclear:
+            del Eb
+            gc.collect()
 
         return

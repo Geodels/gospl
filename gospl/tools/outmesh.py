@@ -426,8 +426,9 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["rain"][:, 0] = self.rainVal
-
-            del data
+            if self.memclear:
+                del data
+                gc.collect()
 
         if self.stratNb > 0 and self.stratStep > 0:
             self._outputStrat()
@@ -447,7 +448,6 @@ class WriteMesh(object):
             print("+++ Output Simulation Time: %0.02f years" % (self.tNow), flush=True)
 
         self.step += 1
-        gc.collect()
 
         return
 
@@ -672,10 +672,11 @@ class WriteMesh(object):
         self.uplift *= alpha / self.tecStep
         hf.close()
 
-        del diffreg, filter, lfilter, gfilter, ldiff, hf
-        if MPIsize > 1:
-            del temp
-        gc.collect()
+        if self.memclear:
+            del diffreg, filter, lfilter, gfilter, ldiff, hf
+            if MPIsize > 1:
+                del temp
+            gc.collect()
 
         return
 

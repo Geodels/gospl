@@ -51,7 +51,7 @@ class UnstMesh(object):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
-
+        self.memclear = True
         # Let us define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
 
@@ -718,8 +718,9 @@ class UnstMesh(object):
         rainArea[tmpZ < self.sealevel] = 0.0
         self.bG.setArray(rainArea)
 
-        del rainArea, tmpZ
-        gc.collect()
+        if self.memclear:
+            del rainArea, tmpZ
+            gc.collect()
 
         return
 

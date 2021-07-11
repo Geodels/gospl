@@ -104,8 +104,9 @@ class STRAMesh(object):
                 self.phiC = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 self.phiC[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
-            del fileData, stratVal
-            gc.collect()
+            if self.memclear:
+                del fileData, stratVal
+                gc.collect()
         else:
             self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
@@ -157,21 +158,25 @@ class STRAMesh(object):
             self.stratF[ids, self.stratStep] = (
                 fineH[ids] / self.stratH[ids, self.stratStep]
             )
-            del fineH
+            if self.memclear:
+                del fineH
         if self.stratW is not None:
             self.stratW[ids, self.stratStep] = (
                 clayH[ids] / self.stratH[ids, self.stratStep]
             )
-            del clayH
+            if self.memclear:
+                del clayH
         if self.carbOn:
             self.stratC[ids, self.stratStep] = (
                 carbH[ids] / self.stratH[ids, self.stratStep]
             )
-            del carbH
+            if self.memclear:
+                del carbH
 
         # Cleaning arrays
-        del depo, ids
-        gc.collect()
+        if self.memclear:
+            del depo, ids
+            gc.collect()
 
         return
 
@@ -193,8 +198,6 @@ class STRAMesh(object):
         # Nodes experiencing erosion
         nids = np.where(ero < 0)[0]
         if len(nids) == 0:
-            del ero, nids
-            gc.collect()
             return
 
         # Cumulative thickness for each node
@@ -331,18 +334,10 @@ class STRAMesh(object):
         self.thCoarse /= self.dt
         if self.stratF is not None:
             self.thFine /= self.dt
-            del thickF, thFine
         if self.stratW is not None:
             self.thClay /= self.dt
-            del thickW, thClay
         if self.carbOn:
             self.thCarb /= self.dt
-            del thickC, thCarb
-
-        del ero, nids, cumThick, boolMask, mask, tmp, eroLayNb, eroVal
-        del thickS, thCoarse
-
-        gc.collect()
 
         return
 
@@ -471,14 +466,14 @@ class STRAMesh(object):
         if self.carbOn:
             self.phiC[:, : self.stratStep + 1] = phiC
 
-        del phiS, solidPhase
-        del ids, tmpS, tot
-        if self.stratF is not None:
-            del tmpF, phiF, tmpW, phiW
-        if self.carbOn:
-            del phiC, tmpC
-
-        gc.collect()
+        if self.memclear:
+            del phiS, solidPhase
+            del ids, tmpS, tot
+            if self.stratF is not None:
+                del tmpF, phiF, tmpW, phiW
+            if self.carbOn:
+                del phiC, tmpC
+            gc.collect()
 
         return newH
 
@@ -516,10 +511,10 @@ class STRAMesh(object):
 
         # Update each layer thicknesses
         self.stratH[:, : self.stratStep + 1] = newH
-        del dz, newH, totH, topZ
-        del depth, zlay, cumZ, elev
-
-        gc.collect()
+        if self.memclear:
+            del dz, newH, totH, topZ
+            del depth, zlay, cumZ, elev
+            gc.collect()
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -820,7 +815,8 @@ class STRAMesh(object):
             self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
         else:
             self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
-        del stratH, stratZ, phiS
+        if self.memclear:
+            del stratH, stratZ, phiS
 
         if self.stratF is not None:
             stratF = self.stratF[self.lgIDs, : self.stratStep]
@@ -843,7 +839,8 @@ class STRAMesh(object):
                 self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
             else:
                 self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
-            del stratF, phiF
+            if self.memclear:
+                del stratF, phiF
 
         if self.stratW is not None:
             stratW = self.stratW[self.lgIDs, : self.stratStep]
@@ -866,7 +863,8 @@ class STRAMesh(object):
                 self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
             else:
                 self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
-            del stratW, phiW
+            if self.memclear:
+                del stratW, phiW
 
         if self.carbOn:
             stratC = self.stratC[self.lgIDs, : self.stratStep]
@@ -889,6 +887,7 @@ class STRAMesh(object):
                 self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
             else:
                 self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
-            del stratC, phiC
+            if self.memclear:
+                del stratC, phiC
 
         return

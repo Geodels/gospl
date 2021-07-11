@@ -38,7 +38,7 @@ except ImportError:
     pass
 
 # in development set version to none and ...
-PYPI_VERSION = "0.2.6"
+PYPI_VERSION = "0.2.7"
 
 # Place install_requires into the text file "requirements.txt"
 with open("requirements.txt") as f2:
