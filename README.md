@@ -32,6 +32,7 @@ In short, it contains:
 2. some **technical** notes on the underlying physics and implementation,
 3. a **user guide** with some notebook examples, and
 4. the **API** references.
+5. a user group [Slack channel](https://join.slack.com/t/gosplworkspace/shared_invite/zt-svd9ioyr-xPQTS0Z0ml4pKseIZZ7N6A)
 
 ## Contributing to gospl
 
