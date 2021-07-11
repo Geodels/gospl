@@ -54,7 +54,7 @@ RUN apt-get update -qq && \
 #RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager \
 #    jupyter-matplotlib jupyterlab-datawidgets itkwidgets
 
-# install gopspl
+# install gospl
 WORKDIR /live/lib
 RUN git clone https://github.com/Geodels/gospl.git   && \
     cd gospl && \
