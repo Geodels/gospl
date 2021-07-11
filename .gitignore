@@ -11,6 +11,7 @@ tests/.coverage
 .coverage
 tests/output/normal
 tests/output/forward
+tests/output/backward
 output
 *.so
 .eggs
