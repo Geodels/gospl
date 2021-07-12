@@ -3,12 +3,12 @@ scipy>=1.5.2
 pandas>=1.1.2
 numpy-indexed==0.3.5
 ruamel.yaml>=0.16.12
-sphinx_rtd_theme==0.5.0
-sphinxcontrib-napoleon==0.7
-sphinxemoji==0.1.6
-pydata-sphinx-theme==0.4.0
+sphinx_rtd_theme>=0.5.0
+sphinxcontrib-napoleon>=0.7
+sphinxemoji>=0.1.6
+pydata-sphinx-theme>=0.4.0
 ipython>=7.18.1
-nbsphinx==0.7.1
+nbsphinx>=0.7.1
 sphinxcontrib.bibtex
 numpydoc>=1.1.0
 myst-parser>=0.12.10

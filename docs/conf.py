@@ -19,7 +19,7 @@ import sphinx_rtd_theme
 from mock import Mock as MagicMock
 from sphinx.builders.html import (
     StandaloneHTMLBuilder,
-    DirectoryHTMLBuilder,
+    # DirectoryHTMLBuilder,
     SingleFileHTMLBuilder,
 )
 
@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.abspath("../gospl/"))
 # Redefine supported_image_types for the HTML builder
 html_img_types = ["image/gif", "image/svg+xml", "image/png", "image/jpeg"]
 StandaloneHTMLBuilder.supported_image_types = html_img_types
-DirectoryHTMLBuilder.supported_image_types = html_img_types
+# DirectoryHTMLBuilder.supported_image_types = html_img_types
 SingleFileHTMLBuilder.supported_image_types = html_img_types
 
 
