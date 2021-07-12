@@ -135,9 +135,9 @@ todo_include_todos = False
 # html_theme = "classic"
 # html_theme = "sphinx_rtd_theme"
 html_theme = "pydata_sphinx_theme"
+html_logo = "_static/gospl.svg"
 
 # html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
-html_logo = "_static/logo.svg"
 html_theme_options = {
     "github_url": "https://github.com/Geodels/gospl",
     "search_bar_text": "Search GOSPL docs ...",
