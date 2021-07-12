@@ -20,7 +20,7 @@ from mock import Mock as MagicMock
 from sphinx.builders.html import (
     StandaloneHTMLBuilder,
     # DirectoryHTMLBuilder,
-    SingleFileHTMLBuilder,
+    # SingleFileHTMLBuilder,
 )
 
 sys.path.insert(0, os.path.abspath("../gospl/"))
@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.abspath("../gospl/"))
 html_img_types = ["image/gif", "image/svg+xml", "image/png", "image/jpeg"]
 StandaloneHTMLBuilder.supported_image_types = html_img_types
 # DirectoryHTMLBuilder.supported_image_types = html_img_types
-SingleFileHTMLBuilder.supported_image_types = html_img_types
+# SingleFileHTMLBuilder.supported_image_types = html_img_types
 
 
 # -- Project information -----------------------------------------------------
