@@ -97,7 +97,6 @@ petsc4py                  3.13.0             Interface to PETSc libraries
 h5py                      2.10.0             Interface to the HDF5 binary data format
 pandas                    1.1.2              Data analysis and manipulation tool
 ruamel.yaml               0.16.12            Parsing YAML to Python objects
-fastfunc                  0.2.3              Fast NumPy's own ufunc operations
 meshio                    4.2.2              I/O for mesh files.
 meshplex                  0.13.4             Fast tools for simplex meshes
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks

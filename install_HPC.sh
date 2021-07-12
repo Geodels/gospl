@@ -5,7 +5,6 @@ export F90=gfortran
 export F77FLAGS=-fPIC
 export FCFLAGS=-fPIC
 
-pip3 install -U fastfunc
 pip3 install -U meshplex
 
 python3 setup.py install --user

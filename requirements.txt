@@ -6,7 +6,6 @@ petsc4py>=3.13.0
 h5py>=2.10.0
 pandas>=1.1.2
 ruamel.yaml>=0.16.12
-fastfunc==0.2.3
 meshio>=4.2.2
 meshplex>=0.13.4
 pre-commit>=2.7.1
