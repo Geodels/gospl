@@ -17,16 +17,18 @@ import sys
 import sphinx_rtd_theme
 
 from mock import Mock as MagicMock
-from sphinx.builders.html import StandaloneHTMLBuilder
-from sphinx.builders.html import DirectoryHTMLBuilder
-from sphinx.builders.html import SingleFileHTMLBuilder
 
-# from sphinx.builders.html import (
-#     StandaloneHTMLBuilder,
-#     DirectoryHTMLBuilder,
-#     SingleFileHTMLBuilder,
-# )
-
+try:
+    # Available from Sphinx 2.0
+    from sphinx.builders.dirhtml import DirectoryHTMLBuilder
+    from sphinx.builders.html import StandaloneHTMLBuilder
+    from sphinx.builders.singlehtml import SingleFileHTMLBuilder
+except ImportError:
+    from sphinx.builders.html import (
+        DirectoryHTMLBuilder,
+        SingleFileHTMLBuilder,
+        StandaloneHTMLBuilder,
+    )
 sys.path.insert(0, os.path.abspath("../gospl/"))
 
 # Redefine supported_image_types for the HTML builder
