@@ -331,8 +331,8 @@ class UnstMesh(object):
         self.mCells = loadData["c"].astype(int)
         self.vtkMesh = None
         self.flatModel = False
-        if self.mCoords[:, 2].max() == 0.0:
-            self.flatModel = True
+        # if self.mCoords[:, 2].max() == 0.0:
+        #     self.flatModel = True
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             self._generateVTKmesh(self.mCoords, self.mCells)
@@ -436,11 +436,12 @@ class UnstMesh(object):
         self.inIDs[vIS.indices >= 0] = 1
         self.lIDs = np.where(self.inIDs == 1)[0]
 
-        if self.flatModel:
-            # Local mesh boundary points in 2D model
-            localBound = self._get_boundary()
-            idLocal = np.where(vIS.indices >= 0)[0]
-            self.idBorders = np.where(np.isin(idLocal, localBound))[0]
+        # Local mesh boundary points in 2D model
+        localBound = self._get_boundary()
+        idLocal = np.where(vIS.indices >= 0)[0]
+        self.idBorders = np.where(np.isin(idLocal, localBound))[0]
+        if len(self.idBorders) > 0:
+            self.flatModel = True
             self.glBorders = np.zeros(self.mpoints, dtype=int)
             idLocal = self.glBorders.copy()
             localBound = np.zeros(self.lpoints, dtype=int)
@@ -448,7 +449,8 @@ class UnstMesh(object):
             idLocal[self.locIDs] = localBound
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, idLocal, op=MPI.MAX)
             self.glBorders = np.where(idLocal == 1)[0]
-            del idLocal, localBound
+            del localBound
+        del idLocal
         vIS.destroy()
 
         # Local/Global vectors

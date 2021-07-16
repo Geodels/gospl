@@ -230,7 +230,7 @@ Hillslope processes in *gospl* is defined using a classical *diffusion law* in w
 
 a. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
 b. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
-b. :yaml:`dstep` is the number of diffusion steps used to distribute sediments delivered by rivers in open ocean,
+c. :yaml:`dstep` is the number of diffusion steps used to distribute sediments delivered by rivers in open ocean,
 d. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
 e. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
 f. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.

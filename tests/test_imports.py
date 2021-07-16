@@ -32,12 +32,6 @@ def test_h5py_import():
     print("\t\t You have h5py version {}".format(h5py.__version__))
 
 
-def test_fastfunc_import():
-    import fastfunc
-
-    print("\t\t You have fastfunc version {}".format(fastfunc.__version__))
-
-
 def test_pandas_import():
     import pandas
 

@@ -358,9 +358,9 @@ class SEDMesh(object):
         # Diffusion matrix construction
         Cd = np.full(self.lpoints, 1.0e-4, dtype=np.float64)
         seaID = np.where(topo[self.locIDs] < self.sealevel)
-        Cd[seaID] = 1.0e5  # this is an hardcoded value for now...
+        Cd[seaID] = 1.0e6  # this is an hardcoded value for now...
 
-        diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
+        diffCoeffs = sethillslopecoeff(self.lpoints, Cd)
         diff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
 
@@ -470,7 +470,7 @@ class SEDMesh(object):
         scale = np.divide(ndepo[self.locIDs], ndepo[self.locIDs] + 500.0)
         Cd *= scale
 
-        diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
+        diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt / self.diffstep)
         seaDiff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         if self.memclear:
