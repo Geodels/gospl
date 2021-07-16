@@ -253,7 +253,7 @@ class SEDMesh(object):
 
         return Qs
 
-    def distributeContinent(self, Qs, sinkFlx):
+    def distributeContinent(self, Qs, sinkFlx, stype=0):
         """
         This function takes the incoming sediment volume for each continental depression and finds the volume requires to fill the sinks up to overspilling as well as the volume available for distribution in downstream regions.
 
@@ -263,6 +263,7 @@ class SEDMesh(object):
 
         :arg Qs: numpy array of incoming sediment volume entering depressions
         :arg sinkFlx: numpy array of incoming sediment volume entering open ocean
+        :arg stype: sediment type (integer)
 
         :return: Qs, sinkFlx (updated outflowing continental and open ocean sediment volumes numpy arrays)
         """
@@ -294,10 +295,20 @@ class SEDMesh(object):
         nQs[self.lnoRcv] = 0.0
 
         if sinkFlx is not None:
-            # Update sediment volume available in downstream portion of the rivers
-            self.tmpL.setArray(nQs[self.locIDs])
-            self.vSedLocal.axpy(1.0, self.tmpL)
-            self.dm.localToGlobal(self.vSedLocal, self.vSed)
+            # Update sediment volume available in downstream portion of the rivers in m3 per year
+            self.tmpL.setArray(nQs[self.locIDs] / self.dt)
+            if stype == 0:
+                self.vSedLocal.axpy(1.0, self.tmpL)
+                self.dm.localToGlobal(self.vSedLocal, self.vSed)
+            if stype == 1:
+                self.vSedfLocal.axpy(1.0, self.tmpL)
+                self.dm.localToGlobal(self.vSedfLocal, self.vSedf)
+            if stype == 3:
+                self.vSedwLocal.axpy(1.0, self.tmpL)
+                self.dm.localToGlobal(self.vSedwLocal, self.vSedw)
+            if stype == 2:
+                self.vSedcLocal.axpy(1.0, self.tmpL)
+                self.dm.localToGlobal(self.vSedcLocal, self.vSedc)
         else:
             # Update water volume available in downstream portion of the rivers
             self.tmpL.setArray(nQs[self.locIDs])
@@ -358,7 +369,7 @@ class SEDMesh(object):
         # Diffusion matrix construction
         Cd = np.full(self.lpoints, 1.0e-4, dtype=np.float64)
         seaID = np.where(topo[self.locIDs] < self.sealevel)
-        Cd[seaID] = 1.0e6  # this is an hardcoded value for now...
+        Cd[seaID] = 1.0e8  # this is an hardcoded value for now...
 
         diffCoeffs = sethillslopecoeff(self.lpoints, Cd)
         diff = self._matrix_build_diag(diffCoeffs[:, 0])
@@ -423,8 +434,8 @@ class SEDMesh(object):
         clinoH = self.sealevel - 1.0 - self.coastDist * self.slps[stype] * 1.0e-5
 
         # Get the maximum marine deposition heights
-        depo = smthZ[self.locIDs] + 500.0 - h
-        shelfIDs = smthZ[self.locIDs] + 500.0 > clinoH
+        depo = smthZ[self.locIDs] + 100.0 - h
+        shelfIDs = smthZ[self.locIDs] + 100.0 > clinoH
         depo[shelfIDs] = clinoH[shelfIDs] - h[shelfIDs]
         depo[depo < 0.0] = 0.0
 
@@ -450,7 +461,7 @@ class SEDMesh(object):
         :arg ndepo: numpy array of incoming marine depositional thicknesses
         :arg stype: sediment type (integer)
 
-        :return: ndepo, h (updated elevations and diffused depositions numpy arrays)
+        :return: ndepo, h, zb (updated elevations and diffused depositions numpy arrays)
         """
 
         # Get diffusion coefficients based on sediment type
@@ -467,9 +478,10 @@ class SEDMesh(object):
         # Diffusion matrix construction
         Cd = np.zeros(self.lpoints, dtype=np.float64)
         Cd[self.seaID] = sedK
-        scale = np.divide(ndepo[self.locIDs], ndepo[self.locIDs] + 500.0)
+        scale = np.divide(ndepo[self.locIDs], ndepo[self.locIDs] + 10.0)
         Cd *= scale
-
+        if self.flatModel:
+            Cd[self.idBorders] = 0.0
         diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt / self.diffstep)
         seaDiff = self._matrix_build_diag(diffCoeffs[:, 0])
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
@@ -505,18 +517,18 @@ class SEDMesh(object):
         h[self.locIDs] = hl
         h[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, h, op=MPI.MAX)
-        ndepo = h - zb
-        ndepo[ndepo < 0.0] = 0.0
-
         seaDiff.destroy()
         if self.flatModel:
             h[self.glBorders] = zb[self.glBorders]
+        ndepo = h - zb
+        zb = h - ndepo
+        ndepo[ndepo < 0.0] = 0.0
 
         if self.memclear:
             del hl
             gc.collect()
 
-        return ndepo, h
+        return ndepo, h, zb
 
     def _distributeOcean(self, sinkFlx, stype=0):
         """
@@ -549,11 +561,11 @@ class SEDMesh(object):
         gZ = self.gZ.copy()
         smthZ[ins] = -3.0e4
         zsmth = smthZ.copy()
-        sinkFlx = sinkFlx / float(self.diffstep)
+        sinkFlx = sinkFlx / float(self.marinestep)
 
         ndep = np.zeros(self.mpoints, dtype=np.float64)
         ndepo = np.zeros(self.mpoints, dtype=np.float64)
-        for step in range(self.diffstep):
+        for step in range(self.marinestep):
             ndepo.fill(0.0)
             sRcvs, sWghts = mfdrcvs(
                 flowDir, exp, self.inIDs, smthZ[self.locIDs], -2.9e4
@@ -586,12 +598,17 @@ class SEDMesh(object):
             if self.flatModel:
                 ndepo[self.glBorders] = 0.0
             ndep += ndepo
-            ndep, gZ = self._diffuseOcean(zb, ndep, stype)
+            # ndep, gZ = self._diffuseOcean(zb, ndep, stype)
+            gZ = zb + ndep
             if self.flatModel:
                 ndep[self.glBorders] = 0.0
             smthZ = zsmth + ndep
 
-        self.depo += ndep  # gZ - self.oldh
+        # Diffuse freshly deposited marine sediments
+        ndep = gZ - self.oldh
+        for step in range(self.diffstep):
+            ndep, gZ, zb = self._diffuseOcean(zb, ndep, stype)
+        self.depo += gZ - self.oldh
         self.gZ = gZ.copy()
 
         if self.memclear:
@@ -869,7 +886,7 @@ class SEDMesh(object):
 
             # At this point excess sediments are all in continental regions
             if (Qs > 0).any():
-                Qs, sinkFlx = self.distributeContinent(Qs, sinkFlx)
+                Qs, sinkFlx = self.distributeContinent(Qs, sinkFlx, stype)
                 if self.flatModel:
                     Qs[self.glBorders] = 0.0
 

@@ -387,16 +387,21 @@ class ReadYaml(object):
             except KeyError:
                 self.sedimentKw = 30000.0
             try:
+                self.marinestep = hillDict["mstep"]
+            except KeyError:
+                self.marinestep = 3
+            try:
                 self.diffstep = hillDict["dstep"]
             except KeyError:
-                self.diffstep = 3
+                self.diffstep = 5
         except KeyError:
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 10000.0
             self.sedimentKf = 20000.0
             self.sedimentKw = 30000.0
-            self.diffstep = 3
+            self.marinestep = 3
+            self.marinestep = 5
 
         return
 
