@@ -6,7 +6,6 @@ import warnings
 import petsc4py
 import numpy as np
 from scipy import spatial
-import numpy_indexed as npi
 
 from mpi4py import MPI
 from time import process_time

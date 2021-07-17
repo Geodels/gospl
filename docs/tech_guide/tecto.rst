@@ -25,7 +25,7 @@ For particular experiments, where :mod:`gospl` is ran in **forcing paleo-topogra
 Horizontal advection
 ---------------------------------
 
-The second, more complex, option consists in adding horizontal displacements (:yaml:`mapH`). In this case, the user has to defined for each point of the grid the associated spherical velocities (represented by displacement fields in both X,Y and Z coordinates).
+The second, more complex, option consists in adding horizontal displacements (:yaml:`mapH`). In this case, the user has to defined for each point of the grid the associated spherical velocities (represented by displacement fields in both X,Y and Z coordinates) and advection is performed using a **semi-lagrangian scheme**.
 
 Considering the spatial resolution of :mod:`gospl` mesh (above 5 km), the horizontal advection often corresponds to plate motions and can be obtained from plate-tectonic reconstruction software.
 
@@ -37,7 +37,7 @@ Considering the spatial resolution of :mod:`gospl` mesh (above 5 km), the horizo
 .. figure:: ../images/tecto.png
   :align: center
 
-  Illustration of interpolation between mesh vertices induced by horizontal velocities.
+  Illustration of interpolation between mesh vertices induced by horizontal velocities based on a semi-lagrangian scheme.
 
 
 Due to tectonic advection, the density of the surface nodes evolves over time, which leads to areas showing rarefaction or accumulation of nodes. In order for the finite volume schema to remain accurate, local addition and deletion of nodes and remeshing of the triangulated spherical surface are therefore required. However, the remeshing process is computationally expensive and requires to rebuild not only the delaunay mesh but also the associated voronoi one and to redistribute, balance the mesh and its vertices parameters with `PETSc <https://www.mcs.anl.gov/petsc/>`_.

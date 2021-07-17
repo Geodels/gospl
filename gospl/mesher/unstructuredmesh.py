@@ -536,7 +536,7 @@ class UnstMesh(object):
         self.dm.createLabel(label)
         self.dm.markBoundaryFaces(label)
 
-        pStart, pEnd = self.dm.getDepthStratum(0)  # points
+        # pStart, pEnd = self.dm.getDepthStratum(0)  # points
         eStart, eEnd = self.dm.getDepthStratum(1)  # edges
         edgeIS = self.dm.getStratumIS(label, 1)
 
