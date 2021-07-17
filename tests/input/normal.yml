@@ -27,6 +27,7 @@ diffusion:
     hillslopeKm: 0.1
     sedK: 1000.
     dstep: 5
+    mstep: 5
 
 sea:
     curve: '/live/lib/gospl/tests/data/sealevel.csv'
