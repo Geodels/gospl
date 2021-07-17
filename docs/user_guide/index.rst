@@ -12,7 +12,7 @@ This user guide covers essential features of :mod:`gospl`, mostly in the form of
 - how to run sequence of backward/forward gospl models using Python functions,
 - how to set a script for running gospl on HPC.
 
-Notebooks cover just a small selection of functions as an illustration of principles. For a full overview of ``gospl`` capabilities, head to the `API reference <https://gospl.readthedocs.io/en/latest/api_ref/index.html>`_.
+Notebooks cover just a small selection of functions as an illustration of principles. For a full overview of ``gospl`` capabilities, head to the `API reference <https://gospl.readthedocs.io/en/latest/api_ref/index.html>`_. For additional examples, you might be interested in the following set of examples available from the **`Stellar-SFM project <https://geodels.github.io/stellar-sfm/welcome.html>`_**.
 
 Step 1 - The input file
 ------------------------------

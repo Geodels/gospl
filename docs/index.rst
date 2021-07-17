@@ -19,7 +19,7 @@ gospl documentation
 `Mailing List <https://groups.google.com/forum/#!forum/gospl>`__
 
 
-:mod:`gospl` (short for ``Global Scalable Paleo Landscape Evolution`` and pronounced: **/ˈɡospel/**, **[ˈɡo̞s̠pe̞l]**) is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale.
+:mod:`gospl` (short for ``Global Scalable Paleo Landscape Evolution`` and pronounced: **/ˈɡospel/**, **[ˈɡo̞s̠pe̞l]**) is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale. :mod:`gospl` is developed by the **`EarthCodeLab Group <https://earthcolab.org>`__** at the University of Sydney.
 
 .. image:: images/earth.png
   :align: center
@@ -125,11 +125,9 @@ Quick links to the Doc
 Citing
 ------
 
-To cite ``gospl`` please use following `software paper <https://doi.org/10.21105/joss.XXXXX>`__
-published in the JOSS.
+To cite ``gospl`` please use following `software paper <https://joss.theoj.org/papers/10.21105/joss.02804>`__ published in the JOSS.
 
-Salles et al. (2020) ’gospl: Global Scalable Paleo Landscape Evolution’, Journal of Open
-Source Software, 5(56), p. 2804. doi: 10.21105/joss.02804.
+Salles et al. (2020) ’gospl: Global Scalable Paleo Landscape Evolution’, Journal of Open Source Software, 5(56), p. 2804. doi: 10.21105/joss.02804.
 
 BibTeX::
 
