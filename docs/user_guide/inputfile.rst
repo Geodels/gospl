@@ -122,7 +122,7 @@ a. :yaml:`start` is the model start time in years,
 b. :yaml:`end` is the model end time in years,
 c. :yaml:`tout` is the output interval used to create model outputs,
 d. :yaml:`dt` is the model internal time step (the approach in *gospl* uses an implicit time step.
-e. :yaml:`tec` is the tectonic timestep interval used to update the tectonic meshes and perform the required displacements.
+e. :yaml:`tec` is the tectonic timestep interval used to update the tectonic meshes and perform the required horizontal displacements (vertical displacements are done every :yaml:`dt`).
 f. :yaml:`strat` is the stratigraphic timestep interval used to update the stratigraphic record.
 
 .. raw:: html
@@ -180,7 +180,7 @@ c. :yaml:`K` representing the erodibility coefficient which is scale-dependent a
 .. warning::
   It is worth noting that the coefficient *m* and *n* are fixed in this version of *gospl* and take the value of *0.5* & *1* respectively.
 
-d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following `Murphy et al. (2016) <https://doi.org/10.1038/nature17449>`_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`coeffd` (:math:`d` in the equation) is is a positive exponent that has been estimated from field-based relationships to 0.42.
+d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following `Murphy et al. (2016) <https://doi.org/10.1038/nature17449>`_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`d` (:math:`d` in the equation) is a positive exponent that has been estimated from field-based relationships to 0.42. Its default value is set to 0.
 
 
 .. raw:: html
