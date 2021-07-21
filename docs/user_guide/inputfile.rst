@@ -384,9 +384,9 @@ The compaction module is turned-on when a multi-lithology model is ran (_i.e._ t
 a. lithology one (coarser lithology) porosity at the surface :yaml:`phis`,
 b. lithology two (finer lithology) porosity at the surface :yaml:`phif`,
 c. lithology three (weathered lithology) porosity at the surface :yaml:`phiw`,
-d. e-folding depth of lithology one (in metres)
-e. e-folding depth of lithology two (in metres)
-f. e-folding depth of lithology three (in metres)
+d. e-folding depth :yaml:`z0s` of lithology one (in metres)
+e. e-folding depth :yaml:`z0f` of lithology two (in metres)
+f. e-folding depth :yaml:`z0w` of lithology three (in metres)
 
 .. raw:: html
 
