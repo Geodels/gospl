@@ -41,7 +41,7 @@ def test_pandas_import():
 def test_yaml_import():
     import ruamel.yaml
 
-    print("\t\t You have shapely version {}".format(ruamel.yaml.__version__))
+    print("\t\t You have yaml version {}".format(ruamel.yaml.__version__))
 
 
 def test_meshio_import():
@@ -56,10 +56,16 @@ def test_meshplex_import():
     print("\t\t You have meshio version {}".format(meshplex.__version__))
 
 
-def test_skfuzzy_import():
-    import skfuzzy
+# def test_skfuzzy_import():
+#     import skfuzzy
+#
+#     print("\t\t You have skfuzzy version {}".format(skfuzzy.__version__))
 
-    print("\t\t You have skfuzzy version {}".format(skfuzzy.__version__))
+
+def test_vtk_import():
+    import vtk
+
+    print("\t\t You have vtk version {}".format(vtk.__version__))
 
 
 def test_gospl_modules():
