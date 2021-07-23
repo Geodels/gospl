@@ -440,7 +440,6 @@ class UnstMesh(object):
         localBound = self._get_boundary()
         idLocal = np.where(vIS.indices >= 0)[0]
         self.idBorders = np.where(np.isin(idLocal, localBound))[0]
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, idLocal, op=MPI.MAX)
         nib = np.zeros(1, dtype=np.int64)
         nib[0] = len(self.idBorders)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nib, op=MPI.MAX)
