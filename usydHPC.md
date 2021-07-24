@@ -35,11 +35,11 @@ usyd@hpc$ chmod 777 install_HPC.sh
 usyd@hpc$ ./install_HPC.sh
 ```
 
-If it fails again then follow the steps below:
+If it fails again then follow the steps below.
 
 ### Harder way
 
-In Artemis, the `petsc` and `petsc4py` (version 3.11.0) have been installed with `Python3.6.5` and we will need to install `goSPL` with this version. You can check that you have the right `Python` version:
+In Artemis HPC, the `petsc` and `petsc4py` (version 3.11.0) have been installed with `Python3.6.5` and we will need to install `goSPL` with this version. You can check that you have the right `Python` version:
 
 ```bash
 usyd@hpc$ which python
@@ -48,15 +48,18 @@ usyd@hpc$ which python
 
 Then you might want to install manually all the dependencies and see the ones that fails. The libraries versions that work are listed below:
 
-| Package | version nb |  |  |  |
-|:-------:|:----------:|:-:| |  |
-|  numpy  |  1.19.5    | | h5py |  2.9.0 |
-|  numpy-indexed  |  0.3.5 | | pandas | 1.0.3 |
-|  scipy  |  1.5.4    | | ruamel.yaml | 0.16.5 |
-|  mpi4py  |  3.0.0    | | meshio | 3.3.1 |
-|  petsc4py  |  3.11.0    | | meshplex | 0.11.6 |
-|  scikit-fuzzy  |  0.4.2    |  | vtk | 9.0.1 |
-
++ numpy | 1.19.5  
++ h5py | 2.9.0 
++ numpy-indexed | 0.3.5 
++ pandas | 1.0.3 
++ scipy | 1.5.4   
++ ruamel.yaml | 0.16.5 
++ mpi4py | 3.0.0 
++ meshio | 3.3.1 
++ petsc4py | 3.11.0 
++ meshplex | 0.11.6 
++ scikit-fuzzy | 0.4.2 
++ vtk | 9.0.1 
 
 To install them successively run:
 
