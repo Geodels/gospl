@@ -203,7 +203,7 @@ class SEDMesh(object):
         :return: Qs (outflowing sediment volume numpy array)
         """
 
-        ndepo = np.zeros(self.mpoints, dtype=np.float64)
+        ndepo = np.empty(self.mpoints, dtype=np.float64)
 
         # Distribute sediments to next sink
         if MPIrank == 0:
@@ -279,7 +279,7 @@ class SEDMesh(object):
         self._solve_KSP(False, self.fMat, self.tmp1, self.tmp)
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
-        nQs = np.zeros(self.mpoints)
+        nQs = np.empty(self.mpoints)
         nQs[self.locIDs] = self.tmpL.getArray().copy()
         nQs[self.outIDs] = 0.0
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nQs, op=MPI.MAX)
@@ -317,7 +317,7 @@ class SEDMesh(object):
 
         # Are the fluxes ending in continental sinks? If so find the overspilling volume if any.
         if (Qs > 0).any():
-            ndepo = np.zeros(self.mpoints, dtype=np.float64)
+            ndepo = np.empty(self.mpoints, dtype=np.float64)
             if MPIrank == 0:
                 ids = np.where((Qs > 0.0) & (self.lPits[:, 1] == -1))[0]
                 nQs = Qs[ids]
@@ -424,7 +424,7 @@ class SEDMesh(object):
         """
 
         # Marine smoothed bathymetry
-        smthZ = np.zeros(self.mpoints)
+        smthZ = np.empty(self.mpoints)
         smthZ[self.locIDs] = h
         smthZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, smthZ, op=MPI.MAX)
@@ -513,7 +513,7 @@ class SEDMesh(object):
         self._solve_KSP(False, seaDiff, self.tmp1, self.tmp)
         self.dm.globalToLocal(self.tmp, self.tmpL)
         hl = self.tmpL.getArray().copy()
-        h = np.zeros(self.mpoints)
+        h = np.empty(self.mpoints)
         h[self.locIDs] = hl
         h[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, h, op=MPI.MAX)
@@ -551,7 +551,7 @@ class SEDMesh(object):
         smthZ, hclino = self._marineDeposition(zb[self.locIDs], stype)
 
         maxDist = 2.0e6
-        coastDist = np.zeros(self.mpoints, dtype=np.float64)
+        coastDist = np.empty(self.mpoints, dtype=np.float64)
         coastDist[self.locIDs] = self.coastDist
         coastDist[self.outIDs] = 0.0
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, coastDist, op=MPI.MAX)
@@ -564,7 +564,7 @@ class SEDMesh(object):
         sinkFlx = sinkFlx / float(self.marinestep)
 
         ndep = np.zeros(self.mpoints, dtype=np.float64)
-        ndepo = np.zeros(self.mpoints, dtype=np.float64)
+        ndepo = np.empty(self.mpoints, dtype=np.float64)
         for step in range(self.marinestep):
             ndepo.fill(0.0)
             sRcvs, sWghts = mfdrcvs(
@@ -626,7 +626,7 @@ class SEDMesh(object):
         """
 
         hl = self.hLocal.getArray().copy()
-        gZ = np.zeros(self.mpoints)
+        gZ = np.empty(self.mpoints)
         gZ[self.locIDs] = hl
         gZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
@@ -763,9 +763,9 @@ class SEDMesh(object):
                     lFill, self.lPits = fillpit(self.sealevel, gZ, fill)
         else:
             if offshore:
-                sFill = np.zeros(self.mpoints, dtype=np.float64)
+                sFill = np.empty(self.mpoints, dtype=np.float64)
             if land or limited:
-                lFill = np.zeros(self.mpoints, dtype=np.float64)
+                lFill = np.empty(self.mpoints, dtype=np.float64)
 
         if offshore:
             self.sFill = MPI.COMM_WORLD.bcast(sFill, root=0)
@@ -848,7 +848,7 @@ class SEDMesh(object):
 
         # Get the volumetric sediment rate (m3/yr) to distribute during the time step and convert in volume (m3) for considered timestep
         lQs = self.QsL.getArray().copy()
-        nQs = np.zeros(self.mpoints, dtype=np.float64)
+        nQs = np.empty(self.mpoints, dtype=np.float64)
         nQs[self.locIDs] = lQs * self.dt
         nQs[self.outIDs] = 0.0
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nQs, op=MPI.MAX)

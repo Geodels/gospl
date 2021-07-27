@@ -331,8 +331,6 @@ class UnstMesh(object):
         self.mCells = loadData["c"].astype(int)
         self.vtkMesh = None
         self.flatModel = False
-        # if self.mCoords[:, 2].max() == 0.0:
-        #     self.flatModel = True
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             self._generateVTKmesh(self.mCoords, self.mCells)

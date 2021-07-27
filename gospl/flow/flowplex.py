@@ -275,7 +275,7 @@ class FAMesh(object):
         # Get global elevations for pit filling...
         t0 = process_time()
         hl = self.hLocal.getArray().copy()
-        gZ = np.zeros(self.mpoints, dtype=np.float64)
+        gZ = np.empty(self.mpoints, dtype=np.float64)
         gZ[self.locIDs] = hl
         gZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
@@ -289,7 +289,7 @@ class FAMesh(object):
             hFill, _ = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
 
         else:
-            hFill = np.zeros(self.mpoints, dtype=np.float64)
+            hFill = np.empty(self.mpoints, dtype=np.float64)
         hFill = MPI.COMM_WORLD.bcast(hFill, root=0)
         self.hFill = hFill[self.locIDs]
 
@@ -374,7 +374,7 @@ class FAMesh(object):
         t0 = process_time()
         self.hierarchicalSink(True, True, False, None)
         lFA = self.FAL.getArray().copy()
-        nFA = np.zeros(self.mpoints, dtype=np.float64)
+        nFA = np.empty(self.mpoints, dtype=np.float64)
         nFA[self.locIDs] = lFA
         nFA[self.outIDs] = 0.0
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nFA, op=MPI.MAX)
@@ -404,7 +404,7 @@ class FAMesh(object):
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, insea, op=MPI.MAX)
 
             if insea[0] > 0:
-                # Distribute sediments in closed sea
+                # Distribute water in closed sea
                 FA = self.distributeSea(FA)
                 # Remove flux that flow into open sea
                 FA[self.sinkID] = 0.0
