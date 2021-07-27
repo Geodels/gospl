@@ -401,7 +401,7 @@ class ReadYaml(object):
             self.sedimentKf = 20000.0
             self.sedimentKw = 30000.0
             self.marinestep = 3
-            self.marinestep = 5
+            self.diffstep = 5
 
         return
 
