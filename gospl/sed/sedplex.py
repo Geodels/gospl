@@ -440,7 +440,7 @@ class SEDMesh(object):
         depo[depo < 0.0] = 0.0
 
         # From the marine deposition heights define the marine deposition elevations
-        hclino = np.zeros(self.mpoints, dtype=np.float64) + 1.0e8
+        hclino = np.empty(self.mpoints, dtype=np.float64)
         hclino[self.locIDs] = h + depo
         hclino[self.outIDs] = 1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, hclino, op=MPI.MIN)
