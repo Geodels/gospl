@@ -51,7 +51,7 @@ class UnstMesh(object):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
-        self.memclear = True
+        self.memclear = False
         # Let us define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
 
@@ -479,6 +479,13 @@ class UnstMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, tmp, op=MPI.MAX)
         self.shadowAlls = np.unique(np.where(tmp > 0)[0])
 
+        # Get local mesh borders not included in the shadow regions for parallel pit filling
+        masknodes = ~np.isin(self.lcells, self.shadow_lOuts)
+        tmp2 = np.sum(masknodes.astype(int), axis=1)
+        out = np.where(np.logical_and(tmp2 > 0, tmp2 < 3))[0]
+        ptscells = self.lcells[out, :].flatten()
+        self.idLBounds = np.setdiff1d(ptscells, self.shadow_lOuts)
+
         # Find local shadow nodes global indices
         tree = spatial.cKDTree(self.mCoords[self.shadowAlls, :], leafsize=10)
         distances, indices = tree.query(self.lcoords, k=1)
@@ -516,8 +523,8 @@ class UnstMesh(object):
         self.tecNb = -1
         self.flexNb = -1
 
-        del tree, distances, indices, tmp
-        del l2g, offproc, gZ
+        del tree, distances, indices, tmp, tmp2
+        del l2g, offproc, gZ, out, ptscells
         gc.collect()
 
         # Map longitude/latitude coordinates

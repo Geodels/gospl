@@ -36,6 +36,49 @@ module meshparams
     double precision :: Z
   end type
 
+  ! Pit queue node definition: index pit1 and pit2
+  type pnode
+    integer :: p1
+    integer :: p2
+  end type
+
+  ! Watershed node definition: index of connected watersheds and lowest elevation
+  type wnode
+    integer :: id
+    integer :: w1
+    integer :: w2
+    double precision :: Z
+  end type
+
+  ! Definition of plain queue (no priority)
+  type queue
+    type(node), allocatable :: buf(:)
+    integer :: n = 0
+  contains
+    procedure :: pop
+    procedure :: push
+  end type
+  type (queue) :: plainqueue
+
+  ! Definition of pit plain queue (no priority)
+  type ptqueue
+    type(pnode), allocatable :: buf(:)
+    integer :: n = 0
+  contains
+    procedure :: ppop
+    procedure :: ppush
+  end type
+  type (ptqueue) :: pitqueue
+
+  type wgraph
+    type(wnode), allocatable :: buf(:)
+    integer :: n = 0
+  contains
+    procedure :: wpop
+    procedure :: wpush
+  end type
+  type (wgraph) :: graph
+
   ! Definition of priority queue functions
   ! The priority is based on the mesh elevation
   type pqueue
@@ -46,12 +89,11 @@ module meshparams
     procedure :: PQpush
     procedure :: shiftdown
   end type pqueue
-
   type(pqueue) :: priorityqueue
 
   contains
 
-    ! Move the new element down the stack
+    ! Move the new element down the priority queue
     subroutine shiftdown(this, a)
       class (pqueue)  :: this
       integer :: a, parent, child
@@ -73,8 +115,7 @@ module meshparams
       end do
       end associate
     end subroutine shiftdown
-
-    ! Pop the top element in the stack
+    ! Pop the top element in the priority queue
     function PQpop(this) result (res)
       class(pqueue) :: this
       type(node) :: res
@@ -83,8 +124,7 @@ module meshparams
       this%n = this%n - 1
       call this%shiftdown(1)
     end function PQpop
-
-    ! Add a new element to the stack
+    ! Add a new element to the priority queue
     subroutine PQpush(this, Z, id)
       class(pqueue), intent(inout) :: this
       double precision :: Z
@@ -109,6 +149,105 @@ module meshparams
         call this%shiftdown(ii)
       end do
     end subroutine PQpush
+
+    ! Pops first values in the watershed graph
+    function wpop(this) result (res)
+      class(wgraph) :: this
+      type(wnode)   :: res
+      res = this%buf(1)
+      this%buf(1) = this%buf(this%n)
+      this%n = this%n - 1
+    end function wpop
+    ! Pushes new values in the  watershed graph
+    subroutine wpush(this, w1, w2, Z, id)
+      class(wgraph), intent(inout) :: this
+      double precision :: Z
+      integer  :: w1, w2, id, k
+      type(wnode)  :: x
+      type(wnode), allocatable  :: tmp(:)
+      logical :: add
+      if (.not.allocated(this%buf)) allocate(this%buf(1))
+      add = .True.
+      lp: do k = 1, this%n
+        x = this%buf(k)
+        if(w1 == x%w1 .and. w2 == x%w2)then
+          if(Z < x%Z)then
+            x%Z = Z
+            x%id = id
+            this%buf(k) = x
+          endif
+          add = .False.
+          exit lp
+        endif
+      enddo lp
+      if(add .or. this%n == 0)then
+        x%Z = Z
+        x%id = id
+        x%w1 = w1
+        x%w2 = w2
+        this%n = this%n+1
+        if (size(this%buf)<this%n) then
+          allocate(tmp(2*size(this%buf)))
+          tmp(1:this%n-1) = this%buf
+          call move_alloc(tmp, this%buf)
+        end if
+        this%buf(this%n) = x
+      endif
+    end subroutine wpush
+
+    ! Pops first values in pit plain queue
+    function ppop(this) result (res)
+      class(ptqueue) :: this
+      type(pnode)   :: res
+      res = this%buf(1)
+      this%buf(1) = this%buf(this%n)
+      this%n = this%n - 1
+    end function ppop
+    ! Pushes new values in pit plain queue
+    subroutine ppush(this, p1, p2)
+      class(ptqueue), intent(inout) :: this
+      integer  :: p1
+      integer  :: p2
+      type(pnode)  :: x
+      type(pnode), allocatable  :: tmp(:)
+      x%p1 = p1
+      x%p2 = p2
+      this%n = this%n +1
+      if (.not.allocated(this%buf)) allocate(this%buf(1))
+      if (size(this%buf)<this%n) then
+        allocate(tmp(2*size(this%buf)))
+        tmp(1:this%n-1) = this%buf
+        call move_alloc(tmp, this%buf)
+      end if
+      this%buf(this%n) = x
+    end subroutine ppush
+
+    ! Pops first values in a plain queue
+    function pop(this) result (res)
+      class(queue) :: this
+      type(node)   :: res
+      res = this%buf(1)
+      this%buf(1) = this%buf(this%n)
+      this%n = this%n - 1
+    end function pop
+    ! Pushes new values in a plain queue
+    subroutine push(this, Z, id)
+      class(queue), intent(inout) :: this
+      double precision :: Z
+      integer  :: id
+      type(node)  :: x
+      type(node), allocatable  :: tmp(:)
+      x%Z = Z
+      x%id = id
+      this%n = this%n +1
+      if (.not.allocated(this%buf)) allocate(this%buf(1))
+      if (size(this%buf)<this%n) then
+        allocate(tmp(2*size(this%buf)))
+        tmp(1:this%n-1) = this%buf
+        call move_alloc(tmp, this%buf)
+      end if
+      this%buf(this%n) = x
+    end subroutine push
 
 end module meshparams
 
@@ -729,7 +868,6 @@ subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
 
 end subroutine mfdreceivers
 
-
 subroutine mfdrcvs( nRcv, exp, inIDs, elev, sl, rcv, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
@@ -1042,6 +1180,7 @@ end subroutine stratabuildcarb
 subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
 !*****************************************************************************
 ! Perform pit filling using a priority queue approach following Barnes (2015).
+! This function is done on a single processors.
 
   use meshparams
   implicit none
@@ -1128,81 +1267,488 @@ subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
 
 end subroutine fillpit
 
-subroutine filllabel(sl, elev, fillz, labels, nb)
+subroutine fill_tile(edge, elev, inids, fillz, labels, graphnb, m, nb)
 !*****************************************************************************
-! Perform pit filling and watershed labeling using a variant of the priority
-! queue approach following Barnes (2015).
+! Perform pit filling using a priority queue approach following Barnes (2015).
+! This algorithm is ran on each mesh belonging to a single processor.
 
   use meshparams
   implicit none
 
+  integer :: m
   integer :: nb
-  double precision,intent(in) :: sl
+  integer,intent(in) :: edge(m,2)
   double precision,intent(in) :: elev(nb)
+  integer,intent(in) :: inids(nb)
   double precision,intent(out) :: fillz(nb)
-  ! Pit number and overspilling point ID
   integer,intent(out) :: labels(nb)
-  logical :: flag(nb)
+  integer, intent(out) :: graphnb
 
-  integer :: i, k, c, label
-
+  integer :: i, k, c, lb1, lb2, nblab
   type (node)  :: ptID
-  double precision :: h
 
-  fillz = elev
   labels = -1
+  fillz = elev
 
-  ! Push marine edges nodes to priority queue
-  flag = .False.
-  do i = 1, nb
-    if(fillz(i)<sl)then
-      flag(i) = .True.
-      labels(i) = 0
-      lp: do k = 1, 8
-        c = gnID(i,k)
-        if(c>0)then
-          if(fillz(c)>=sl)then
-            call priorityqueue%PQpush(fillz(i), i)
-            exit lp
+  ! Push edge nodes
+  do i = 1, m
+    c = edge(i,1) +  1
+    call priorityqueue%PQpush(fillz(c), c)
+  enddo
+
+  nblab = 1
+  do while(priorityqueue%n>0 .or. plainqueue%n>0)
+
+    if(plainqueue%n>0)then
+      ptID = plainqueue%pop()
+    else
+      ptID = priorityqueue%PQpop()
+    endif
+
+    i = ptID%id
+    if(labels(i)<=0)then
+      do k = 1, FVnNb(i)
+        c = FVnID(i,k)+1
+        if(c>0 .and. inids(c)>0)then
+          if(labels(c)>0 .and. fillz(c) <= fillz(i))then
+            labels(i) = labels(c)
           endif
         endif
-      enddo lp
+      enddo
+      if(labels(i) <= 0)then
+        labels(i) = nblab
+        nblab = nblab + 1
+      endif
+    endif
+
+    do k = 1, FVnNb(i)
+      c = FVnID(i,k)+1
+      if(c>0 .and. inids(c)>0)then
+        if(labels(c)>0)then
+          if(labels(c) .ne. labels(i))then
+            lb1 = labels(c)
+            lb2 = labels(i)
+            if(labels(c)>labels(i))then
+              lb1 = labels(i)
+              lb2 = labels(c)
+            endif
+            if(fillz(c)>fillz(i))then
+              call graph%wpush(lb1, lb2, fillz(c), c)
+            else
+              call graph%wpush(lb1, lb2, fillz(i), i)
+            endif
+          endif
+        else
+          labels(c) = labels(i)
+          if(fillz(c) <= fillz(i))then
+            fillz(c) = fillz(i)
+            call plainqueue%push(fillz(c), c)
+          else
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
+        endif
+      endif
+    enddo
+
+  enddo
+
+  ! Push border nodes
+  do i = 1, m
+    if(edge(i,2) == 1)then
+      c = edge(i,1) +  1
+      call graph%wpush(labels(c), 0, fillz(c), c)
     endif
   enddo
 
-  ! Perform pit filling using priority total queue
-  label = 0
-  do while(priorityqueue%n>0)
+  graphnb = graph%n
+
+  return
+
+end subroutine fill_tile
+
+subroutine fill_edges(nb, cgraph, maxnghbs, nelev, spillrank, spillnodes, spillid, m)
+!*****************************************************************************
+! This function returns filled graph based on priority flood algorithm.
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer, intent(in) :: nb, maxnghbs
+  double precision,intent(in) :: cgraph(m,5)
+
+  integer,intent(out) :: spillrank(nb)
+  integer,intent(out) :: spillnodes(nb)
+  integer,intent(out) :: spillid(nb)
+  double precision,intent(out) :: nelev(nb)
+
+  integer :: k, c, nc, n1, n2, p
+  logical :: inFlag(nb)
+  integer :: ngbNb(nb)
+  type (node)  :: ptID
+
+  integer :: rank(nb,maxnghbs)
+  integer :: ranknode(nb)
+  integer :: tmp(nb)
+  integer :: ngbhArr(nb,maxnghbs)
+  integer :: spillnode(nb,maxnghbs)
+  double precision :: spill(nb,maxnghbs)
+  double precision :: spillz(nb)
+
+  ! Initialise graph as a mesh
+  inFlag = .False.
+  ngbNb = 0
+  ngbhArr = -1
+  spillnodes = -1
+  spillrank = -1
+  nelev = 1.e8
+  nelev(1) = -1.e8
+  spillnode = -1
+  spillz = 1.e8
+  ranknode = -1
+  spillid = -1
+  rank = -1
+  tmp = -1
+  do k = 1, m
+    n1 = int(cgraph(k,1))+1
+    n2 = int(cgraph(k,2))+1
+    ranknode(n1) = int(cgraph(k,5))
+    ngbNb(n1) = ngbNb(n1)+1
+    ngbNb(n2) = ngbNb(n2)+1
+    ngbhArr(n1,ngbNb(n1)) = n2
+    ngbhArr(n2,ngbNb(n2)) = n1
+    spill(n1,ngbNb(n1)) = cgraph(k,3)
+    spill(n2,ngbNb(n2)) = cgraph(k,3)
+    spillnode(n1,ngbNb(n1)) = int(cgraph(k,4))
+    spillnode(n2,ngbNb(n2)) = int(cgraph(k,4))
+    rank(n1,ngbNb(n1)) = int(cgraph(k,5))
+    rank(n2,ngbNb(n2)) = int(cgraph(k,5))
+  enddo
+
+  ! Perform pit filling using priority flood algorithm
+  inFlag = .False.
+  call priorityqueue%PQpush(nelev(1), 1)
+  p = 0
+  do while(priorityqueue%n > 0)
     ptID = priorityqueue%PQpop()
-    i = ptID%id
-    if(labels(i)==0)then
-      label = label + 1
-      labels(i) = label
-    endif
-    do k = 1, 8
-      c = gnID(i,k)
-      if(c>0)then
-        if(.not.flag(c))then
-          flag(c) = .True.
-          h = nearest(fillz(i), 1.0)
-          ! Not a depression
-          if(fillz(c)>h)then
-            call priorityqueue%PQpush(fillz(c), c)
-          ! Find a depression
-          else
-            ! This is a new one update information
-            fillz(c) = h
-            call priorityqueue%PQpush(fillz(c), c)
+    c = ptID%id
+    if(.not.inFlag(c))then
+      p = p+1
+      tmp(p) = c
+      nelev(c) = ptID%Z
+      inFlag(c) = .True.
+      do k = 1, ngbNb(c)
+        nc = ngbhArr(c,k)
+        if(nc>0)then
+          if(.not.inFlag(nc))then
+            call priorityqueue%PQpush(max(spill(c,k),nelev(c)), nc)
+            if(spillid(nc)>=0 .and. max(spill(c,k),nelev(c))<spillz(nc))then
+              if(ranknode(c)==rank(c,k))then
+                spillnodes(nc) = spillnode(c,k)
+                spillid(nc) = c-1
+                spillrank(nc) = rank(c,k)
+                spillz(nc) = max(spill(c,k),nelev(c))
+              endif
+            elseif(spillid(nc)<0)then
+              if(c==1)then
+                spillnodes(nc) = spillnode(c,k)
+                spillid(nc) = c-1
+                spillrank(nc) = rank(c,k)
+                spillz(nc) = max(spill(c,k),nelev(c))
+              elseif(ranknode(c)==rank(c,k))then
+                spillnodes(nc) = spillnode(c,k)
+                spillid(nc) = c-1
+                spillrank(nc) = rank(c,k)
+                spillz(nc) = max(spill(c,k),nelev(c))
+              endif
+            endif
           endif
-          labels(c) = labels(i)
+        endif
+      enddo
+    endif
+  enddo
+
+  return
+
+end subroutine fill_edges
+
+subroutine fill_depressions(dem, fillp, wsh, ggraph, elev, m, nb)
+!*****************************************************************************
+! Find the fill elevation for each depressions per processors, returning the
+! global mesh solution.
+
+  use meshparams
+  implicit none
+
+  integer :: m, nb
+  integer, intent(in) :: wsh(m)
+  double precision, intent(in) :: dem(m)
+  double precision, intent(in) :: fillp(m)
+  double precision, intent(in) :: ggraph(nb)
+
+  double precision, intent(out) :: elev(m)
+
+  integer :: k, n
+
+  do k = 1, m
+    n = wsh(k)+1
+    if(dem(k) < fillp(k) .and. fillp(k) > ggraph(n))then
+      elev(k) = fillp(k)
+    elseif(dem(k) <= ggraph(n))then
+      elev(k) = ggraph(n)
+    else
+      elev(k) = dem(k)
+    endif
+  enddo
+
+  return
+
+end subroutine fill_depressions
+
+subroutine combine_edges(elev, labels, ins, outs, newgraph, graphnb, m, n)
+!*****************************************************************************
+! Combine unstructured grids along each edges based on watershed numbers and elevations
+
+  use meshparams
+  implicit none
+
+  integer :: m, n
+  double precision, intent(in) :: elev(m)
+  integer, intent(in) :: labels(m)
+  integer, intent(in) :: ins(n)
+  integer, intent(in) :: outs(m)
+
+  integer,intent(out) :: graphnb
+  double precision,intent(out) :: newgraph(n*8,4)
+
+  integer :: i, c, p, nc, lb1, lb2
+
+  type(wnode)  :: wID
+  double precision :: eo
+
+  ! Local edges
+  do i = 1, n
+    c = ins(i)+1
+    do p = 1, FVnNb(c)
+      nc = FVnID(c,p)+1
+      if(nc > 0)then
+        if(outs(nc) > 0)then
+          if(labels(c) .ne. labels(nc))then
+            eo = max(elev(c),elev(nc))
+            if(labels(c)<labels(nc))then
+              lb1 = labels(c)
+              lb2 = labels(nc)
+            else
+              lb2 = labels(nc)
+              lb1 = labels(c)
+            endif
+            if(elev(c)>elev(nc))then
+              call graph%wpush(lb1, lb2, eo, c)
+            else
+              call graph%wpush(lb1, lb2, eo, nc)
+            endif
+          endif
         endif
       endif
     enddo
   enddo
 
+  i = 1
+  graphnb = graph%n
+  do while(graph%n >0)
+    wID = graph%wpop()
+    newgraph(i,1) = wID%w1
+    newgraph(i,2) = wID%w2
+    newgraph(i,3) = wID%Z
+    newgraph(i,4) = wID%id-1
+    i = i+1
+  enddo
+
   return
 
-end subroutine filllabel
+end subroutine combine_edges
+
+subroutine graph_nodes(graphnb, newwgraph)
+!*****************************************************************************
+! This function returns local pit/depression graph.
+
+  use meshparams
+  implicit none
+
+  integer,intent(in) :: graphnb
+  double precision,intent(out) :: newwgraph(graphnb,4)
+  type(wnode)  :: wID
+  integer :: p
+
+  p = 1
+  do while(graph%n >0)
+    wID = graph%wpop()
+    newwgraph(p,1) = wID%w1
+    newwgraph(p,2) = wID%w2
+    newwgraph(p,3) = wID%Z
+    newwgraph(p,4) = wID%id-1
+    p = p+1
+  enddo
+
+  return
+
+end subroutine graph_nodes
+
+subroutine label_pits(elev, fill, labels, pitnbs, nb)
+!*****************************************************************************
+! This function finds local depression ids based on neighbors labels.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: fill(nb)
+
+  ! Pit number and labels
+  integer,intent(out) :: labels(nb)
+  integer, intent(out) :: pitnbs
+
+  integer :: i, k, c, nblab, lbl, p
+  integer,dimension(8) :: lbls
+  type (node)  :: ptID
+
+  labels = -1
+
+  do i = 1, nb
+    if(fill(i)>elev(i))then
+      call priorityqueue%PQpush(elev(i), i)
+    endif
+  enddo
+
+  nblab = 1
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    lbl = -1
+    p = 0
+    lbls = -1
+    do k = 1, FVnNb(i)
+      c = FVnID(i,k)+1
+      if(c>0)then
+        if(labels(c)>0)then
+          p = p+1
+          lbls(p) = labels(c)
+        endif
+      endif
+    enddo
+
+    lbl = lbls(1)
+    if(p>1)then
+      do k = 1, p
+        if(lbls(k)>lbl)then
+          call pitqueue%ppush(lbl, lbls(k))
+        elseif(lbls(k)<lbl)then
+          call pitqueue%ppush(lbls(k),lbl)
+        endif
+        lbl = min(lbl,lbls(k))
+      enddo
+    endif
+
+    labels(i) = lbl
+    if(lbl<=0)then
+      labels(i) = nblab
+      nblab = nblab+1
+    endif
+  enddo
+
+  pitnbs = pitqueue%n
+
+  return
+
+end subroutine label_pits
+
+subroutine spill_pts(nb, pitids, pitval, elev, borders, inids, spill, n, m)
+!*****************************************************************************
+! Find for each depression its spillover point id.
+
+  use meshparams
+  implicit none
+
+  integer :: n
+  integer :: m
+  integer :: nb
+  integer,intent(in) :: pitids(n)
+  integer,intent(in) :: pitval(n)
+  integer,intent(in) :: borders(m)
+  integer,intent(in) :: inids(m)
+  double precision,intent(in) :: elev(m)
+
+  ! Spill point ID
+  integer, intent(out) :: spill(nb)
+
+  integer :: i, k, kk, c, cc, p, val
+  double precision :: z
+
+  spill = -1
+
+  do p = 1, n
+    i = pitids(p)+1
+    if(inids(i)>0)then
+      val = pitval(p)
+      z = elev(i)
+      if(spill(val) == -1)then
+        lp: do k = 1, FVnNb(i)
+          c = FVnID(i,k)+1
+          if(c>0)then
+            if(z>elev(c))then
+              if(inids(c)>0)then
+                spill(val) = c-1
+                exit lp
+              endif
+            elseif((z-elev(c))<1.e-6)then
+              do kk = 1, FVnNb(c)
+                cc = FVnID(c,kk)+1
+                if(inids(cc)>0)then
+                  if(z>elev(cc))then
+                    spill(val) = cc-1
+                    exit lp
+                  elseif(z == elev(cc) .and. borders(cc) == 1)then
+                    spill(val) = cc-1
+                    exit lp
+                  endif
+                endif
+              enddo
+            endif
+          endif
+        enddo lp
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine spill_pts
+
+subroutine pit_nodes(pitnb, pitarray)
+!*****************************************************************************
+! This function returns local depression ids that will be merged as they
+! represent the same pit.
+
+  use meshparams
+  implicit none
+
+  integer,intent(in) :: pitnb
+  integer,intent(out) :: pitarray(pitnb,2)
+  type(pnode)  :: pitID
+  integer :: p
+
+  p = 1
+  do while(pitqueue%n >0)
+    pitID = pitqueue%ppop()
+    pitarray(p,1) = pitID%p1
+    pitarray(p,2) = pitID%p2
+    p = p+1
+  enddo
+
+  return
+
+end subroutine  pit_nodes
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!

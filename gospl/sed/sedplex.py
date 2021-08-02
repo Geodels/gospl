@@ -162,12 +162,12 @@ class SEDMesh(object):
         for k in range(0, self.flowDir):
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
-            data = self.lWght[:, k].copy()
-            data[self.lRcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+            data = self.cWght[:, k].copy()
+            data[self.cRcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                self.lRcv[:, k].astype(petsc4py.PETSc.IntType),
+                self.cRcv[:, k].astype(petsc4py.PETSc.IntType),
                 data,
             )
             tmpMat.assemblyEnd()
@@ -193,10 +193,6 @@ class SEDMesh(object):
         From evaluation of enclosed seas (or endorheic basins with elevation below sea-level), this function computes the amount of incoming sediment which are deposited as well as the sediment volume able to flow downstream.
 
         The function calls the fortran subroutines `distsea` that takes the depressions parameters (sink IDs and overspilling node ID) to compute the different volumes and `distexcess` that moves excess sediment volumes to the overspilling nodes.
-
-        It also calls the following *function*:
-
-        - hierarchicalSink
 
         :arg Qs: numpy array of incoming sediment volume entering depressions
 
@@ -224,7 +220,12 @@ class SEDMesh(object):
 
         # Was the elevation updated? if so update the downstream parameters
         if (ndepo > 0).any():
-            self.hierarchicalSink(False, True, False, self.gZ)
+            # self.hierarchicalSink(False, True, False, self.gZ)
+            if MPIrank == 0:
+                _, self.cVol = self.grpcSink.sum((self.cFill - self.gZ) * self.marea)
+                dh = self.sealevel - self.gZ
+                dh[dh < 0.0] = 0.0
+                _, self.sVol = self.grpsSink.sum(dh * self.marea)
 
         # Are there excess sea deposits to distribute?
         if MPIrank == 0:
@@ -232,12 +233,12 @@ class SEDMesh(object):
                 Qs, ndepo = distexcess(
                     Qs,
                     self.gZ,
-                    self.lFill,
-                    self.lPits,
-                    self.lVol,
+                    self.cFill,
+                    self.cPits,
+                    self.cVol,
                     outVol,
                     self.sOut,
-                    self.lPits[:, 0],
+                    self.cPits[:, 0],
                 )
         Qs = MPI.COMM_WORLD.bcast(Qs, root=0)
         ndepo = MPI.COMM_WORLD.bcast(ndepo, root=0)
@@ -246,7 +247,6 @@ class SEDMesh(object):
             Qs[self.glBorders] = 0.0
         self.depo += ndepo
         self.gZ += ndepo
-
         if self.memclear:
             del ndepo
             gc.collect()
@@ -562,7 +562,6 @@ class SEDMesh(object):
         smthZ[ins] = -3.0e4
         zsmth = smthZ.copy()
         sinkFlx = sinkFlx / float(self.marinestep)
-
         ndep = np.zeros(self.mpoints, dtype=np.float64)
         ndepo = np.empty(self.mpoints, dtype=np.float64)
         for step in range(self.marinestep):
@@ -585,7 +584,6 @@ class SEDMesh(object):
             val[ins] = -1
             sRcv[self.locIDs, :] = val
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, sRcv, op=MPI.MAX)
-
             if MPIrank == 0:
                 sid = np.argsort(smthZ)[::-1]
                 topID = np.where(sinkFlx[sid] > 0)[0][0]
@@ -598,7 +596,6 @@ class SEDMesh(object):
             if self.flatModel:
                 ndepo[self.glBorders] = 0.0
             ndep += ndepo
-            # ndep, gZ = self._diffuseOcean(zb, ndep, stype)
             gZ = zb + ndep
             if self.flatModel:
                 ndep[self.glBorders] = 0.0
@@ -656,7 +653,7 @@ class SEDMesh(object):
 
         return fill, pits
 
-    def _nullitfyBorders(self, rcv, wght):
+    def _nullifyBorders(self, rcv, wght):
         """
         Set receivers and weights to zero for border points when running a 2D case.
         """
@@ -666,10 +663,23 @@ class SEDMesh(object):
 
         return rcv, wght
 
-    def _getDepressions(self):
+    def _getLimitedDepressions(self):
         """
-        Get continental depressions parameters.
+        Get filled-limited continental depressions parameters.
         """
+
+        # Define multiple flow directions for filled elevation
+        self.lRcv, _, self.lWght = mfdreceivers(
+            self.flowDir,
+            self.flowExp,
+            self.inIDs,
+            self.lFill[self.locIDs],
+            self.sealevel,
+        )
+        if self.flatModel:
+            self.lRcv, self.lWght = self._nullifyBorders(self.lRcv, self.lWght)
+
+        self.matrixFlow(False)
 
         sum_weight = np.sum(self.lWght, axis=1)
         tmpw = np.zeros(self.mpoints, dtype=np.float64)
@@ -685,16 +695,66 @@ class SEDMesh(object):
             self.lGrp = self.grpSink.unique
             pitNb, self.lVol = self.grpSink.sum((self.lFill - self.gZ) * self.marea)
             _, outids, _ = np.intersect1d(self.lPits[:, 0], pitNb, return_indices=True)
-            self.lOut = self.lPits[outids, 1]
+            self.lOut = self.lPits[outids[1:], 1]
+
             if self.memclear:
                 del pitNb, outids
 
         return
 
-    def _getCloseSea(self):
+    def _getFilledDepressions(self):
+        """
+        Get fully filled continental depressions parameters.
+        """
+
+        # Define multiple flow directions for filled elevation
+        self.cRcv, _, self.cWght = mfdreceivers(
+            self.flowDir,
+            self.flowExp,
+            self.inIDs,
+            self.cFill[self.locIDs],
+            self.sealevel,
+        )
+        if self.flatModel:
+            self.cRcv, self.cWght = self._nullifyBorders(self.cRcv, self.cWght)
+
+        self._matrixDir()
+
+        sum_weight = np.sum(self.cWght, axis=1)
+        tmpw = np.zeros(self.mpoints, dtype=np.float64)
+        tmpw[self.locIDs] = sum_weight
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, tmpw, op=MPI.MAX)
+        self.cnoRcv = tmpw == 0.0
+        if self.memclear:
+            del tmpw
+
+        if MPIrank == 0:
+            # Compute continental pit volumes
+            self.grpcSink = npi.group_by(self.cPits[:, 0])
+            self.cGrp = self.grpcSink.unique
+            _, self.cVol = self.grpcSink.sum((self.cFill - self.gZ) * self.marea)
+            # _, outids, _ = np.intersect1d(self.cPits[:, 0], pitNb, return_indices=True)
+            # self.cOut = self.cPits[outids, 1]
+            if self.memclear:
+                del pitNb, outids
+
+        return
+
+    def _getCloseSea(self, mingZ):
         """
         Get closed sea parameters.
         """
+
+        # Define multiple flow directions for filled elevation
+        self.sRcv, _, self.sWght = mfdreceivers(
+            self.flowDir,
+            self.flowExp,
+            self.inIDs,
+            self.sFill[self.locIDs],
+            mingZ,
+        )
+        if self.flatModel:
+            self.sRcv, self.sWght = self._nullifyBorders(self.sRcv, self.sWght)
 
         # Set all nodes below sea-level as sinks
         self.sinkID = np.where(self.sFill < self.sealevel)[0]
@@ -704,13 +764,13 @@ class SEDMesh(object):
             closeIDs = np.where(
                 (self.sFill > self.sealevel) & (self.gZ < self.sealevel)
             )[0]
-            grpSink = npi.group_by(self.sPits[closeIDs, 0])
-            self.sGrp = grpSink.unique
+            self.grpsSink = npi.group_by(self.sPits[closeIDs, 0])
+            self.sGrp = self.grpsSink.unique
             self.sIns, self.sOut, self.sVol = seaparams(
                 self.gZ, self.sealevel, self.sGrp, self.sPits
             )
             if self.memclear:
-                del closeIDs, grpSink
+                del closeIDs
 
         return
 
@@ -750,9 +810,9 @@ class SEDMesh(object):
                     sFill, self.sPits = fillpit(-4.0e3, gZ, 1.0e6)
             if land:
                 if self.flatModel:
-                    lFill, self.lPits = self._fill2D(self.sealevel, gZ, 1.0e6)
+                    cFill, self.cPits = self._fill2D(self.sealevel, gZ, 1.0e6)
                 else:
-                    lFill, self.lPits = fillpit(self.sealevel, gZ, 1.0e6)
+                    cFill, self.cPits = fillpit(self.sealevel, gZ, 1.0e6)
             if limited:
                 fill = self.sedfill
                 if self.flowDist:
@@ -764,42 +824,22 @@ class SEDMesh(object):
         else:
             if offshore:
                 sFill = np.empty(self.mpoints, dtype=np.float64)
-            if land or limited:
+            if land:
+                cFill = np.empty(self.mpoints, dtype=np.float64)
+            if limited:
                 lFill = np.empty(self.mpoints, dtype=np.float64)
 
         if offshore:
             self.sFill = MPI.COMM_WORLD.bcast(sFill, root=0)
-            self._getCloseSea()
+            self._getCloseSea(mingZ)
 
-            # Define multiple flow directions for filled elevation
-            self.sRcv, _, self.sWght = mfdreceivers(
-                self.flowDir,
-                self.flowExp,
-                self.inIDs,
-                self.sFill[self.locIDs],
-                mingZ,
-            )
-            if self.flatModel:
-                self.sRcv, self.sWght = self._nullitfyBorders(self.sRcv, self.sWght)
+        if land:
+            self.cFill = MPI.COMM_WORLD.bcast(cFill, root=0)
+            self._getFilledDepressions()
 
-        if land or limited:
+        if limited:
             self.lFill = MPI.COMM_WORLD.bcast(lFill, root=0)
-            # Define multiple flow directions for filled elevation
-            self.lRcv, _, self.lWght = mfdreceivers(
-                self.flowDir,
-                self.flowExp,
-                self.inIDs,
-                self.lFill[self.locIDs],
-                self.sealevel,
-            )
-            if self.flatModel:
-                self.lRcv, self.lWght = self._nullitfyBorders(self.lRcv, self.lWght)
-            if land:
-                self._matrixDir()
-            else:
-                self.matrixFlow(False)
-            # Get depression parameters
-            self._getDepressions()
+            self._getLimitedDepressions()
 
         return
 
@@ -892,13 +932,10 @@ class SEDMesh(object):
 
             step += 1
             if step > 20:
-                if MPIrank == 0:
-                    print("Forced Distribution to Ocean")
                 sinkFlx += Qs
                 break
 
         if MPIrank == 0 and self.verbose:
-            print("Distribution step nb:", step)
             print(
                 "Distribute Continental Sediments (%0.02f seconds)"
                 % (process_time() - t0),

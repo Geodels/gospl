@@ -1,0 +1,429 @@
+import os
+import gc
+import sys
+import warnings
+import petsc4py
+import numpy as np
+import pandas as pd
+import numpy_indexed as npi
+
+from mpi4py import MPI
+from time import process_time
+
+if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import fillpit
+    from gospl._fortran import fill_tile
+    from gospl._fortran import fill_edges
+    from gospl._fortran import fill_depressions
+    from gospl._fortran import graph_nodes
+    from gospl._fortran import combine_edges
+    from gospl._fortran import label_pits
+    from gospl._fortran import pit_nodes
+    from gospl._fortran import spill_pts
+
+petsc4py.init(sys.argv)
+MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
+MPIcomm = petsc4py.PETSc.COMM_WORLD
+MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
+
+
+class PITFill(object):
+    """
+    This class calculates **drainage area** in an implicit, iterative manner using PETSc solvers. It accounts  for multiple flow direction paths (SFD to MFD) based on user input declaration.
+
+    .. note::
+
+        The class follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ where the iterative nature of the computational algorithms used to solve the linear system creates the possibility of accelerating the solution by providing an initial guess.
+
+    For drainage computation, the class requires to compute depressionless surfaces and the *priority-flood + ϵ* variant of the algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ is used. It provides a solution to remove flat surfaces, and it produces surfaces for which each cell has a defined gradient from which flow directions can be determined.
+
+    Finally, the class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
+
+    """
+
+    def __init__(self, *args, **kwargs):
+        """
+        The initialisation of `PITFill` class consists in the declaration of PETSc vectors, matrices and each partition internals edge vertices.
+        """
+
+        # Petsc vectors
+        self.fZg = self.dm.createGlobalVector()  # fill elevation global
+        self.fZl = self.dm.createLocalVector()  # fill elevation local
+        self.lbg = self.dm.createGlobalVector()  # watershed label global
+        self.lbl = self.dm.createLocalVector()  # watershed label local
+
+        self.gBounds = np.zeros(self.lpoints, dtype=int)
+        self.gBounds[self.idBorders] = 1
+
+        edges = -np.ones((self.lpoints, 2), dtype=int)
+        edges[self.idLBounds, 0] = self.idLBounds
+        edges[self.idBorders, 0] = self.idBorders
+        edges[self.idLBounds, 1] = 0
+        edges[self.idBorders, 1] = 1
+        self.borders = edges[:, 1]
+        out = np.where(edges[:, 1] > -1)[0]
+        self.localEdges = edges[out, :]
+
+        self.outEdges = np.zeros(self.lpoints, dtype=int)
+        self.outEdges[self.shadow_lOuts] = 1
+
+        self.rankIDs = None
+
+        return
+
+    def _buildPitDataframe(self, label1, label2):
+        """
+        Find common global IDs based on local ones.
+        """
+
+        data = {
+            "p1": label1,
+            "p2": label2,
+        }
+        df = pd.DataFrame(data, columns=["p1", "p2"])
+        df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
+
+        return df
+
+    def _offsetGlobal(self, lgth):
+        """
+        Define globally unique label based on local partition distribution.
+        """
+
+        label_offset = np.zeros(MPIsize + 1, dtype=int)
+        label_offset[MPIrank + 1] = max(1, lgth)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, label_offset, op=MPI.MAX)
+
+        return np.cumsum(label_offset), np.sum(label_offset)
+
+    def _fillFromEdges(self, mgraph):
+        """
+        Fill the connected graphs of spillover points between processors.
+        """
+
+        # Get bidirectional edges connections
+        cgraph = pd.DataFrame(
+            mgraph, columns=["source", "target", "elev", "spill", "rank"]
+        )
+        cgraph = cgraph.sort_values("elev")
+        cgraph = cgraph.drop_duplicates(["source", "target"], keep="first")
+        c12 = np.concatenate((cgraph["source"].values, cgraph["target"].values))
+        cmax = np.max(np.bincount(c12.astype(int))) + 1
+
+        # Filling the bidirectional graph
+        cgraph = cgraph.values
+        elev, rank, nodes, spillID = fill_edges(
+            int(max(cgraph[:, 1]) + 2), cgraph, cmax
+        )
+        ggraph = -np.ones((len(elev), 5))
+        ggraph[:, 0] = elev
+        ggraph[:, 1] = nodes
+        ggraph[:, 2] = rank
+        ggraph[:, 3] = spillID
+        if self.memclear:
+            del elev, nodes, rank
+            del spillID, c12
+
+        return ggraph
+
+    def _getPitParams(self, lFill, hl, nbpits):
+        """
+        Record depression parameters.
+        """
+
+        # Get pit parameters (volume and maximum filled elevation)
+        ids = np.where(self.inIDs == 1)[0]
+        grp = npi.group_by(self.pitIDs[ids])
+        uids = grp.unique
+        _, vol = grp.sum((lFill[ids] - hl[ids]) * self.larea[ids])
+        _, height = grp.max(lFill[ids] - hl[ids])
+        totv = np.zeros(nbpits, dtype=np.float64)
+        toth = np.zeros(nbpits, dtype=np.float64)
+        for k in range(len(uids)):
+            if uids[k] > -1:
+                totv[uids[k]] = vol[k]
+                toth[uids[k]] = height[k]
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, totv, op=MPI.SUM)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, toth, op=MPI.MAX)
+
+        self.pitParams = np.empty((len(totv[1:]), 2), dtype=np.float64)
+        self.pitParams[:, 0] = totv[1:]
+        self.pitParams[:, 1] = toth[1:]
+
+        return
+
+    def serialFilling(self):
+        """
+        Perform serial depression filling.
+        """
+
+        if self.rankIDs is None:
+            self.rankIDs = np.empty(self.mpoints, dtype=int)
+            self.rankIDs[self.locIDs] = MPIrank
+            self.rankIDs[self.outIDs] = -1
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.rankIDs, op=MPI.MAX)
+
+        hl = self.hLocal.getArray().copy()
+        gZ = np.empty(self.mpoints, dtype=np.float64)
+        gZ[self.locIDs] = hl
+        gZ[self.outIDs] = -1.0e8
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
+        if self.flatModel:
+            mingZ = gZ.min()
+
+        # Perform pit filling on process rank 0
+        if MPIrank == 0:
+            if self.flatModel:
+                if mingZ > self.sealevel - 1:
+                    hFill, pits = self._fill2D(mingZ, gZ, self.waterfill)
+                else:
+                    hFill, pits = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
+            else:
+                hFill, pits = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
+
+        else:
+            hFill = np.empty(self.mpoints, dtype=np.float64)
+            pits = np.empty((self.mpoints, 2), dtype=np.float64)
+        hFill = MPI.COMM_WORLD.bcast(hFill, root=0)
+        pits = MPI.COMM_WORLD.bcast(pits, root=0)
+
+        self.pitIDs = pits[self.locIDs, 0]
+
+        # Find spillover points
+        upits, ids = np.unique(pits[:, 0], return_index=True)
+        self.pitInfo = np.zeros((len(upits), 3), dtype=int)
+        gpts = pits[ids, 1]
+        pitrank = self.rankIDs[gpts]
+        ids = np.in1d(self.locIDs, gpts).nonzero()
+        loc = np.arange(self.lpoints, dtype=int)[ids]
+        ids = np.where(self.inIDs[loc] == 1)[0]
+        loc = loc[ids]
+        gpts = -np.ones(len(upits), dtype=int)
+        gpts[self.pitIDs[loc]] = loc
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gpts, op=MPI.MAX)
+
+        # Define pit information
+        lFill = hFill[self.locIDs]
+        self.fZl.setArray(lFill)
+        self.dm.localToGlobal(self.fZl, self.fZg)
+        self.dm.globalToLocal(self.fZg, self.fZl)
+
+        self.pitInfo[:, 0] = upits
+        self.pitInfo[:, 1] = gpts
+        self.pitInfo[:, 2] = pitrank
+        id = np.where(upits > -1)[0]
+        self.pitInfo = self.pitInfo[id, :]
+
+        # Get pit parameters (volume and maximum filled elevation)
+        self._getPitParams(lFill, hl, len(upits))
+
+        if self.memclear:
+            del hl, gZ, ids, gpts, loc, upits, pits, lFill
+            gc.collect()
+
+        return
+
+    def parallelFilling(self):
+        """
+        Perform parallel depression filling.
+        """
+
+        t0 = process_time()
+        hl = self.hLocal.getArray().copy()
+
+        # Local pit filling
+        lFill, label, gnb = fill_tile(self.localEdges, hl, self.inIDs)
+        # Graph associates label pairs with the minimum spillover elevation
+        graph = graph_nodes(gnb)
+
+        # Define globally unique watershed index
+        offset, _ = self._offsetGlobal(np.amax(graph[:, :2]))
+        label += offset[MPIrank]
+        graph[:, 0] += offset[MPIrank]
+        ids = np.where(graph[:, 1] > 0)[0]
+        graph[ids, 1] += offset[MPIrank]
+
+        # Transfer watershed values along local borders
+        self.lbl.setArray(label.astype(int))
+        self.dm.localToGlobal(self.lbl, self.lbg)
+        self.dm.globalToLocal(self.lbg, self.lbl)
+        label = self.lbl.getArray()
+
+        # Transfer filled values along the local borders
+        self.fZl.setArray(lFill)
+        self.dm.localToGlobal(self.fZl, self.fZg)
+        self.dm.globalToLocal(self.fZg, self.fZl)
+        lFill = self.fZl.getArray()
+
+        # Combine tiles edges
+        cgraph, graphnb = combine_edges(
+            lFill, label, self.localEdges[:, 0], self.outEdges
+        )
+        cgraph = np.concatenate((graph, cgraph[:graphnb]))
+
+        # Add processor number to the graph
+        lgrph = len(cgraph)
+        offset, sum = self._offsetGlobal(lgrph)
+        graph = -np.ones((sum, 5), dtype=float)
+        graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
+        graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
+
+        # Build global spillover graph on master
+        if MPIrank == 0:
+            mgraph = -np.ones((sum, 5), dtype=float)
+        else:
+            mgraph = None
+        MPI.COMM_WORLD.Reduce(graph, mgraph, op=MPI.MAX, root=0)
+
+        if MPIrank == 0:
+            ggraph = self._fillFromEdges(mgraph)
+        else:
+            ggraph = None
+
+        # Send filled graph dataset to each processors
+        graph = MPI.COMM_WORLD.bcast(ggraph, root=0)
+
+        # Drain pit on local boundaries and towards mesh edges
+        keep = graph[:, 2].astype(int) == MPIrank
+        proc = -np.ones(len(graph))
+        proc[keep] = graph[keep, 1]
+        keep = proc > -1
+        proc[keep] = self.gBounds[proc[keep].astype(int)]
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, proc, op=MPI.MAX)
+        ids = np.where(proc == 1)[0]
+        ids2 = np.where(graph[ids, 0] == graph[graph[ids, 3].astype(int), 0])[0]
+        graph[ids[ids2], 3] = 0.0
+        graph[graph[:, 0] < -1.0e8, 0] = -1.0e8
+        graph[graph[:, 0] > 1.0e7, 0] = -1.0e8
+
+        # Define global solution by combining depressions/flat together
+        lFill = fill_depressions(hl, lFill, label.astype(int), graph[:, 0])
+
+        self.fZl.setArray(lFill)
+        self.dm.localToGlobal(self.fZl, self.fZg)
+        self.dm.globalToLocal(self.fZg, self.fZl)
+
+        if self.memclear:
+            del hl, label, gnb, graph, lFill
+            del label_offset, offset, proc, keep
+            del cgraph, outs, mgraph, ggraph
+            gc.collect()
+
+        if MPIrank == 0 and self.verbose:
+            print("Compute pit filling (%0.02f seconds)" % (process_time() - t0))
+
+        return
+
+    def pitInformation(self):
+        """
+        Get pit information.
+        """
+
+        t0 = process_time()
+
+        # Get fill information
+        hl = self.hLocal.getArray().copy()
+        lFill = self.fZl.getArray().copy()
+        fillIDs = np.where(lFill > hl)[0]
+
+        # Combine pits locally to get a unique ID per depression
+        t1 = process_time()
+        pitIDs, pitnbs = label_pits(hl, lFill)
+        pitArray = pit_nodes(pitnbs)
+        df = self._buildPitDataframe(pitArray[:, 0], pitArray[:, 1])
+        for k in range(len(df)):
+            id2 = df["p2"].iloc[k]
+            id1 = df["p1"].iloc[k]
+            pitIDs[pitIDs == id2] = id1
+
+        # Define globally unique watershed index
+        offset, _ = self._offsetGlobal(np.amax(pitIDs))
+        pitIDs[fillIDs] += offset[MPIrank]
+
+        # Transfer depression IDs along local borders
+        self.lbl.setArray(pitIDs)
+        self.dm.localToGlobal(self.lbl, self.lbg)
+        self.dm.globalToLocal(self.lbg, self.lbl)
+        label = self.lbl.getArray()
+
+        ids = np.where(label < pitIDs)[0]
+        df = self._buildPitDataframe(label[ids], pitIDs[ids])
+        ids = np.where(label > pitIDs)[0]
+        df2 = self._buildPitDataframe(pitIDs[ids], label[ids])
+        df = df.append(df2, ignore_index=True)
+        df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
+        df = df[(df["p1"] >= 0) & (df["p2"] >= 0)]
+
+        # Send depression IDs globally
+        offset, _ = self._offsetGlobal(len(df))
+        combIds = -np.ones((np.amax(offset), 2), dtype=int)
+        if len(df) > 0:
+            combIds[offset[MPIrank] : offset[MPIrank + 1], :] = df.values
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, combIds, op=MPI.MAX)
+        df = self._buildPitDataframe(combIds[:, 0], combIds[:, 1])
+        df = df[(df["p1"] >= 0) & (df["p2"] >= 0)]
+        for k in range(len(df)):
+            id1 = df["p1"].iloc[k]
+            if k == 0:
+                id2 = df["p2"].iloc[0]
+            else:
+                if df["p2"].iloc[k] == df["p2"].iloc[k - 1]:
+                    id2 = df["p1"].iloc[k - 1]
+                else:
+                    id2 = df["p2"].iloc[k]
+            label[label == id2] = id1
+
+        # Transfer depression IDs along local borders
+        self.lbl.setArray(label)
+        self.dm.localToGlobal(self.lbl, self.lbg)
+        self.dm.globalToLocal(self.lbg, self.lbl)
+
+        # At this point all pits have a unique IDs across processors
+        self.pitIDs = self.lbl.getArray().astype(int)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define unique depression IDs (%0.02f seconds)" % (process_time() - t1)
+            )
+
+        # Get spill over points
+        t1 = process_time()
+        pitnbs = np.zeros(1, dtype=int)
+        pitnbs[0] = np.max(self.pitIDs)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, pitnbs, op=MPI.MAX)
+        spillIDs = spill_pts(
+            pitnbs[0], fillIDs, self.pitIDs[fillIDs], lFill, self.borders, self.inIDs
+        )
+        rank = -np.ones(pitnbs[0], dtype=int)
+        id = np.where(spillIDs > -1)[0]
+        rank[id] = MPIrank
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, rank, op=MPI.MAX)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillIDs, op=MPI.MAX)
+
+        # Get depression informations:
+        pitids = np.arange(pitnbs[0]) + 1
+        self.pitInfo = np.zeros((pitnbs[0], 3), dtype=int)
+        self.pitInfo[:, 0] = pitids
+        self.pitInfo[:, 1] = spillIDs
+        self.pitInfo[:, 2] = rank
+        id = np.where(rank > -1)[0]
+        self.pitInfo = self.pitInfo[id, :]
+
+        # Get pit parameters
+        self._getPitParams(lFill, hl, pitnbs[0] + 1)
+        self.pitParams = self.pitParams[id, :]
+
+        if MPIrank == 0 and self.verbose:
+            print("Spill points (%0.02f seconds)" % (process_time() - t1))
+
+        if self.memclear:
+            del hl, label, df, df2, data, lFill
+            del label_offset, offset, pitIDs
+            del fillIDs, combIds, pitArray
+            gc.collect()
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define depression parameters (%0.02f seconds)" % (process_time() - t0)
+            )
+
+        return

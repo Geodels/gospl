@@ -212,6 +212,86 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphic
         end subroutine stratabuildcarb
 
+        subroutine label_pits(elev,fill,labels,pitnbs,nb)
+            use meshparams
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(in),depend(nb) :: fill
+            integer dimension(nb),intent(out),depend(nb) :: labels
+            integer intent(out) :: pitnbs
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine label_pits
+
+        subroutine fill_tile(edge,elev,inids,fillz,labels,graphnb,m,nb)
+            use meshparams
+            integer dimension(m,2),intent(in) :: edge
+            double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb),intent(in),depend(nb) :: inids
+            double precision dimension(nb),intent(out),depend(nb) :: fillz
+            integer dimension(nb),intent(out),depend(nb) :: labels
+            integer intent(out) :: graphnb
+            integer, optional,check(shape(edge,0)==m),depend(edge) :: m=shape(edge,0)
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine fill_tile
+
+        subroutine pit_nodes(pitnb,pitarray)
+            use meshparams
+            integer intent(in) :: pitnb
+            integer dimension(pitnb,2),intent(out),depend(pitnb) :: pitarray
+        end subroutine pit_nodes
+
+        subroutine graph_nodes(graphnb,newwgraph)
+            use meshparams
+            integer intent(in) :: graphnb
+            double precision dimension(graphnb,4),intent(out),depend(graphnb) :: newwgraph
+        end subroutine graph_nodes
+
+        subroutine spill_pts(nb,pitids,pitval,elev,borders,inids,spill,n,m)
+            use meshparams
+            integer intent(in) :: nb
+            integer dimension(n),intent(in) :: pitids
+            integer dimension(n),intent(in),depend(n) :: pitval
+            double precision dimension(m),intent(in) :: elev
+            integer dimension(m),intent(in),depend(m) :: borders
+            integer dimension(m),intent(in),depend(m) :: inids
+            integer dimension(nb),intent(out),depend(nb) :: spill
+            integer, optional,check(len(pitids)>=n),depend(pitids) :: n=len(pitids)
+            integer, optional,check(len(elev)>=m),depend(elev) :: m=len(elev)
+        end subroutine spill_pts
+
+        subroutine fill_edges(nb,cgraph,maxnghbs,nelev,spillrank,spillnodes,spillid,m)
+            use meshparams
+            integer intent(in) :: nb
+            double precision dimension(m,5),intent(in) :: cgraph
+            integer intent(in) :: maxnghbs
+            integer dimension(nb),intent(out),depend(nb) :: spillrank
+            integer dimension(nb),intent(out),depend(nb) :: spillnodes
+            integer dimension(nb),intent(out),depend(nb) :: spillid
+            double precision dimension(nb),intent(out),depend(nb) :: nelev
+            integer, optional,check(shape(cgraph,0)==m),depend(cgraph) :: m=shape(cgraph,0)
+        end subroutine fill_edges
+
+        subroutine fill_depressions(dem,fillp,wsh,ggraph,elev,m,nb)
+            double precision dimension(m),intent(in) :: dem
+            double precision dimension(m),intent(in),depend(m) :: fillp
+            integer dimension(m),intent(in),depend(m) :: wsh
+            double precision dimension(nb),intent(in) :: ggraph
+            double precision dimension(m),intent(out),depend(m) :: elev
+            integer, optional,check(len(dem)>=m),depend(dem) :: m=len(dem)
+            integer, optional,check(len(ggraph)>=nb),depend(ggraph) :: nb=len(ggraph)
+        end subroutine fill_depressions
+
+        subroutine combine_edges(elev,labels,ins,outs,newgraph,graphnb,m,n)
+            use meshparams
+            double precision dimension(m),intent(in) :: elev
+            integer dimension(m),intent(in),depend(m) :: labels
+            integer dimension(n),intent(in) :: ins
+            integer dimension(m),intent(in),depend(m) :: outs
+            double precision dimension(n*8,4),intent(out),depend(m,n) :: newgraph
+            integer intent(out) :: graphnb
+            integer, optional,check(len(elev)>=m),depend(elev) :: m=len(elev)
+            integer, optional,check(len(ins)>=n),depend(ins) :: n=len(ins)
+        end subroutine combine_edges
+
         subroutine fillpit(sl,elev,hmax,fillz,pits,nb)
             use meshparams
             double precision intent(in) :: sl
@@ -221,15 +301,6 @@ python module _fortran
             integer dimension(nb,2),intent(out) :: pits
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine fillpit
-
-        subroutine filllabel(sl,elev,fillz,labels,nb)
-            use meshparams
-            double precision intent(in) :: sl
-            double precision dimension(nb),intent(in) :: elev
-            double precision dimension(nb),intent(out) :: fillz
-            integer dimension(nb),intent(out) :: labels
-            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine filllabel
 
         subroutine ngbglob(nb,ngbid)
             use meshparams

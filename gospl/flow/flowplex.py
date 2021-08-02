@@ -279,6 +279,8 @@ class FAMesh(object):
         gZ[self.locIDs] = hl
         gZ[self.outIDs] = -1.0e8
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
+        if self.flatModel:
+            mingZ = gZ.min()
 
         # Perform pit filling on process rank 0
         if MPIrank == 0:
@@ -286,7 +288,13 @@ class FAMesh(object):
             # - hFill: filled elevation values
             # - pits: 2D array containing each pit ID and
             #         corresponding overspilling point ID
-            hFill, _ = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
+            if self.flatModel:
+                if mingZ > self.sealevel - 1:
+                    hFill, _ = self._fill2D(mingZ, gZ, self.waterfill)
+                else:
+                    hFill, _ = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
+            else:
+                hFill, _ = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
 
         else:
             hFill = np.empty(self.mpoints, dtype=np.float64)

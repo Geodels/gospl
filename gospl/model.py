@@ -5,6 +5,7 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from .flow import FAMesh as _FAMesh
+    from .flow import PITFill as _PITFill
     from .sed import SEDMesh as _SEDMesh
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
@@ -29,6 +30,10 @@ else:
         def __init__(self):
             pass
 
+    class _PITFill(object):
+        def __init__(self):
+            pass
+
     class _SEDMesh(object):
         def __init__(self):
             pass
@@ -41,7 +46,7 @@ else:
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
-class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh, _STRAMesh):
+class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _PITFill, _SEDMesh, _STRAMesh):
     """
     Instantiates model object and performs surface processes evolution.
 
@@ -86,6 +91,9 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _SEDMesh, _STRAMesh):
 
         # River flow initialisation
         _FAMesh.__init__(self, *args, **kwargs)
+
+        # Pit filling initialisation
+        _PITFill.__init__(self, *args, **kwargs)
 
         # Sediment initialisation
         _SEDMesh.__init__(self, *args, **kwargs)
