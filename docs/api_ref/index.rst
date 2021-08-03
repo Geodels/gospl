@@ -136,12 +136,16 @@ Main classes
                     Class Input & Class Output
                 </div>
                 <div class="card-body">
-                  <p class="card-text"> Input/output methods declaration. </p>
+                  <p class="card-text"> <code>Input/output</code> methods declaration. </p>
 
 
 .. container:: custom-button
 
-    See :ref:`input <in_ref>` & :ref:`output<out_ref>` functions
+    :ref:`Input <in_ref> functions`
+
+.. container:: custom-button
+
+    :ref:`Output <out_ref> functions`
 
 .. raw:: html
 
