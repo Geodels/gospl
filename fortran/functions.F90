@@ -1267,6 +1267,53 @@ subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
 
 end subroutine fillpit
 
+subroutine edge_tile(lvl,border,elev,ledge,nb)
+!*****************************************************************************
+! Define edges of tile based on provided level, elevation and borders.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision,intent(in) :: lvl
+  integer,intent(in) :: border(nb, 2)
+  double precision,intent(in) :: elev(nb)
+  integer,intent(out) :: ledge(nb)
+
+  integer :: c, p, nc
+  double precision :: maxe
+  ledge = -1
+
+  ! Local edges
+
+  do c = 1, nb
+    if(elev(c) < lvl)then
+      maxe = lvl - 1
+      lp: do p = 1, FVnNb(c)
+        nc = FVnID(c,p)+1
+        if(nc > 0)then
+          maxe = max(elev(nc),maxe)
+          if(maxe >= lvl)then
+            exit lp
+          endif
+        endif
+      enddo lp
+      if(maxe >= lvl .and. border(c,2) > -1)then
+        ledge(c) = border(c,2)+1
+      elseif(maxe >= lvl)then
+        ledge(c) = 0
+      else
+        ledge(c) = -2
+      endif
+    elseif(border(c, 2) > -1)then
+      ledge(c) = border(c,2)+1
+    endif
+  enddo
+
+  return
+
+end subroutine edge_tile
+
 subroutine fill_tile(edge, elev, inids, fillz, labels, graphnb, m, nb)
 !*****************************************************************************
 ! Perform pit filling using a priority queue approach following Barnes (2015).
@@ -1349,14 +1396,14 @@ subroutine fill_tile(edge, elev, inids, fillz, labels, graphnb, m, nb)
         endif
       endif
     enddo
-
   enddo
 
   ! Push border nodes
   do i = 1, m
-    if(edge(i,2) == 1)then
+    ! if(edge(i,2) == 1)then
+    if(edge(i,2) == 0 .or. edge(i,2) == 2 )then
       c = edge(i,1) +  1
-      call graph%wpush(labels(c), 0, fillz(c), c)
+      call graph%wpush(labels(c), 0, elev(c), c)
     endif
   enddo
 
@@ -1472,7 +1519,7 @@ subroutine fill_edges(nb, cgraph, maxnghbs, nelev, spillrank, spillnodes, spilli
 
 end subroutine fill_edges
 
-subroutine fill_depressions(dem, fillp, wsh, ggraph, elev, m, nb)
+subroutine fill_depressions(lvl, dem, fillp, wsh, ggraph, elev, m, nb)
 !*****************************************************************************
 ! Find the fill elevation for each depressions per processors, returning the
 ! global mesh solution.
@@ -1482,6 +1529,7 @@ subroutine fill_depressions(dem, fillp, wsh, ggraph, elev, m, nb)
 
   integer :: m, nb
   integer, intent(in) :: wsh(m)
+  double precision, intent(in) :: lvl
   double precision, intent(in) :: dem(m)
   double precision, intent(in) :: fillp(m)
   double precision, intent(in) :: ggraph(nb)
@@ -1490,14 +1538,16 @@ subroutine fill_depressions(dem, fillp, wsh, ggraph, elev, m, nb)
 
   integer :: k, n
 
+  elev = dem
+
   do k = 1, m
-    n = wsh(k)+1
-    if(dem(k) < fillp(k) .and. fillp(k) > ggraph(n))then
-      elev(k) = fillp(k)
-    elseif(dem(k) <= ggraph(n))then
-      elev(k) = ggraph(n)
-    else
-      elev(k) = dem(k)
+    if(dem(k)>lvl)then
+      n = wsh(k)+1
+      if(dem(k) < fillp(k) .and. fillp(k) > ggraph(n))then
+        elev(k) = fillp(k)
+      elseif(dem(k) <= ggraph(n))then
+        elev(k) = ggraph(n)
+      endif
     endif
   enddo
 

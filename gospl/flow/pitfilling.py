@@ -12,6 +12,7 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fillpit
+    from gospl._fortran import edge_tile
     from gospl._fortran import fill_tile
     from gospl._fortran import fill_edges
     from gospl._fortran import fill_depressions
@@ -52,15 +53,12 @@ class PITFill(object):
         self.lbg = self.dm.createGlobalVector()  # watershed label global
         self.lbl = self.dm.createLocalVector()  # watershed label local
 
-        self.gBounds = np.zeros(self.lpoints, dtype=int)
-        self.gBounds[self.idBorders] = 1
-
         edges = -np.ones((self.lpoints, 2), dtype=int)
         edges[self.idLBounds, 0] = self.idLBounds
         edges[self.idBorders, 0] = self.idBorders
         edges[self.idLBounds, 1] = 0
         edges[self.idBorders, 1] = 1
-        self.borders = edges[:, 1]
+        self.borders = edges
         out = np.where(edges[:, 1] > -1)[0]
         self.localEdges = edges[out, :]
 
@@ -91,7 +89,7 @@ class PITFill(object):
         """
 
         label_offset = np.zeros(MPIsize + 1, dtype=int)
-        label_offset[MPIrank + 1] = max(1, lgth)
+        label_offset[MPIrank + 1] = lgth
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, label_offset, op=MPI.MAX)
 
         return np.cumsum(label_offset), np.sum(label_offset)
@@ -152,7 +150,7 @@ class PITFill(object):
 
         return
 
-    def serialFilling(self):
+    def serialFilling(self, level):
         """
         Perform serial depression filling.
         """
@@ -174,12 +172,12 @@ class PITFill(object):
         # Perform pit filling on process rank 0
         if MPIrank == 0:
             if self.flatModel:
-                if mingZ > self.sealevel - 1:
-                    hFill, pits = self._fill2D(mingZ, gZ, self.waterfill)
+                if mingZ > level:
+                    hFill, pits = self._fill2D(mingZ, gZ, 1.0e6)
                 else:
-                    hFill, pits = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
+                    hFill, pits = fillpit(level, gZ, 1.0e6)
             else:
-                hFill, pits = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
+                hFill, pits = fillpit(level, gZ, 1.0e6)
 
         else:
             hFill = np.empty(self.mpoints, dtype=np.float64)
@@ -223,7 +221,7 @@ class PITFill(object):
 
         return
 
-    def parallelFilling(self):
+    def parallelFilling(self, level):
         """
         Perform parallel depression filling.
         """
@@ -231,17 +229,37 @@ class PITFill(object):
         t0 = process_time()
         hl = self.hLocal.getArray().copy()
 
+        # Get local meshes edges and communication nodes
+        ledges = edge_tile(level, self.borders, hl)
+        out = np.where(ledges >= 0)[0]
+        localEdges = np.empty((len(out), 2), dtype=int)
+        localEdges[:, 0] = np.arange(self.lpoints)[out].astype(int)
+        localEdges[:, 1] = ledges[out]
+        out = np.where(ledges == -2)[0]
+        inIDs = self.inIDs.copy()
+        inIDs[out] = 0
+        outEdges = self.outEdges.copy()
+        outEdges[out] = 0
+        out = np.where((ledges == 0) & (ledges == 2))[0]
+        gBounds = np.zeros(self.lpoints, dtype=int)
+        gBounds[out] = 1
+
         # Local pit filling
-        lFill, label, gnb = fill_tile(self.localEdges, hl, self.inIDs)
+        lFill, label, gnb = fill_tile(localEdges, hl, inIDs)
+
         # Graph associates label pairs with the minimum spillover elevation
-        graph = graph_nodes(gnb)
+        lgth = 0
+        if gnb > 0:
+            graph = graph_nodes(gnb)
+            lgth = np.amax(graph[:, :2])
 
         # Define globally unique watershed index
-        offset, _ = self._offsetGlobal(np.amax(graph[:, :2]))
+        offset, _ = self._offsetGlobal(lgth)
         label += offset[MPIrank]
-        graph[:, 0] += offset[MPIrank]
-        ids = np.where(graph[:, 1] > 0)[0]
-        graph[ids, 1] += offset[MPIrank]
+        if lgth > 0:
+            graph[:, 0] += offset[MPIrank]
+            ids = np.where(graph[:, 1] > 0)[0]
+            graph[ids, 1] += offset[MPIrank]
 
         # Transfer watershed values along local borders
         self.lbl.setArray(label.astype(int))
@@ -256,17 +274,25 @@ class PITFill(object):
         lFill = self.fZl.getArray()
 
         # Combine tiles edges
-        cgraph, graphnb = combine_edges(
-            lFill, label, self.localEdges[:, 0], self.outEdges
-        )
-        cgraph = np.concatenate((graph, cgraph[:graphnb]))
+        cgraph, graphnb = combine_edges(lFill, label, localEdges[:, 0], outEdges)
+
+        lgrph = 0
+        if graphnb > 0 and lgth > 0:
+            cgraph = np.concatenate((graph, cgraph[:graphnb]))
+            lgrph = len(cgraph)
+        elif graphnb > 0 and lgth == 0:
+            cgraph = cgraph[:graphnb]
+            lgrph = len(cgraph)
+        elif graphnb == 0 and lgth > 0:
+            cgraph = graph
+            lgrph = len(cgraph)
 
         # Add processor number to the graph
-        lgrph = len(cgraph)
         offset, sum = self._offsetGlobal(lgrph)
         graph = -np.ones((sum, 5), dtype=float)
-        graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
-        graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
+        if lgrph > 0:
+            graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
+            graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
 
         # Build global spillover graph on master
         if MPIrank == 0:
@@ -274,7 +300,6 @@ class PITFill(object):
         else:
             mgraph = None
         MPI.COMM_WORLD.Reduce(graph, mgraph, op=MPI.MAX, root=0)
-
         if MPIrank == 0:
             ggraph = self._fillFromEdges(mgraph)
         else:
@@ -288,7 +313,7 @@ class PITFill(object):
         proc = -np.ones(len(graph))
         proc[keep] = graph[keep, 1]
         keep = proc > -1
-        proc[keep] = self.gBounds[proc[keep].astype(int)]
+        proc[keep] = gBounds[proc[keep].astype(int)]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, proc, op=MPI.MAX)
         ids = np.where(proc == 1)[0]
         ids2 = np.where(graph[ids, 0] == graph[graph[ids, 3].astype(int), 0])[0]
@@ -297,7 +322,7 @@ class PITFill(object):
         graph[graph[:, 0] > 1.0e7, 0] = -1.0e8
 
         # Define global solution by combining depressions/flat together
-        lFill = fill_depressions(hl, lFill, label.astype(int), graph[:, 0])
+        lFill = fill_depressions(level, hl, lFill, label.astype(int), graph[:, 0])
 
         self.fZl.setArray(lFill)
         self.dm.localToGlobal(self.fZl, self.fZg)
@@ -321,7 +346,7 @@ class PITFill(object):
 
         t0 = process_time()
 
-        # Get fill information
+        # Get filled information
         hl = self.hLocal.getArray().copy()
         lFill = self.fZl.getArray().copy()
         fillIDs = np.where(lFill > hl)[0]
@@ -390,12 +415,19 @@ class PITFill(object):
         pitnbs = np.zeros(1, dtype=int)
         pitnbs[0] = np.max(self.pitIDs)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, pitnbs, op=MPI.MAX)
-        spillIDs = spill_pts(
-            pitnbs[0], fillIDs, self.pitIDs[fillIDs], lFill, self.borders, self.inIDs
-        )
         rank = -np.ones(pitnbs[0], dtype=int)
-        id = np.where(spillIDs > -1)[0]
-        rank[id] = MPIrank
+        spillIDs = -np.ones(pitnbs[0], dtype=np.int32)
+        if len(fillIDs) > 0:
+            spillIDs = spill_pts(
+                pitnbs[0],
+                fillIDs,
+                self.pitIDs[fillIDs],
+                lFill,
+                self.borders[:, 1],
+                self.inIDs,
+            )
+            id = np.where(spillIDs > -1)[0]
+            rank[id] = MPIrank
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, rank, op=MPI.MAX)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillIDs, op=MPI.MAX)
 

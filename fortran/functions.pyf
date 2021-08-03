@@ -221,6 +221,15 @@ python module _fortran
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine label_pits
 
+        subroutine edge_tile(lvl,border,elev,ledge,nb)
+            use meshparams
+            double precision,intent(in) :: lvl
+            integer dimension(nb,2),intent(in) :: border
+            double precision dimension(nb),intent(in),depend(nb) :: elev
+            integer dimension(nb),intent(out),depend(nb) :: ledge
+            integer, optional,check(shape(border,0)==nb),depend(border) :: nb=shape(border,0)
+        end subroutine edge_tile
+
         subroutine fill_tile(edge,elev,inids,fillz,labels,graphnb,m,nb)
             use meshparams
             integer dimension(m,2),intent(in) :: edge
@@ -270,7 +279,8 @@ python module _fortran
             integer, optional,check(shape(cgraph,0)==m),depend(cgraph) :: m=shape(cgraph,0)
         end subroutine fill_edges
 
-        subroutine fill_depressions(dem,fillp,wsh,ggraph,elev,m,nb)
+        subroutine fill_depressions(lvl,dem,fillp,wsh,ggraph,elev,m,nb)
+            double precision,intent(in) :: lvl
             double precision dimension(m),intent(in) :: dem
             double precision dimension(m),intent(in),depend(m) :: fillp
             integer dimension(m),intent(in),depend(m) :: wsh
