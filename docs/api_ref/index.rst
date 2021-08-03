@@ -63,6 +63,23 @@ Main classes
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
+                    Class Pit
+                </div>
+                <div class="card-body">
+                  <p class="card-text"> Performs parallel <code>depression filling</code> of the surface. </p>
+
+.. container:: custom-button
+
+    :ref:`See functions and source code <pit_ref>`
+
+.. raw:: html
+
+                </div>
+                </div>
+            </div>
+            <div class="col-12 d-flex install-block">
+                <div class="card install-card shadow w-100">
+                <div class="card-header">
                     Class Flow
                 </div>
                 <div class="card-body">
@@ -140,6 +157,7 @@ Main classes
 
     model_ref
     mesh_ref
+    pit_ref
     flow_ref
     sed_ref
     stra_ref
