@@ -141,11 +141,7 @@ Main classes
 
 .. container:: custom-button
 
-    :ref:`Input <in_ref> functions`
-
-.. container:: custom-button
-
-    :ref:`Output <out_ref> functions`
+    See :ref:`input <in_ref>` & :ref:`output<out_ref>` functions
 
 .. raw:: html
 
