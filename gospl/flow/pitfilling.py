@@ -30,15 +30,23 @@ MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 
 class PITFill(object):
     """
-    This class calculates **drainage area** in an implicit, iterative manner using PETSc solvers. It accounts  for multiple flow direction paths (SFD to MFD) based on user input declaration.
+    Depression filling is an important preconditioning step to many landscape evolution models.
+
+    This class implements a linearly-scaling parallel priority-flood depression-filling algorithm based on `Barnes (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_ algorithm.
 
     .. note::
 
-        The class follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ where the iterative nature of the computational algorithms used to solve the linear system creates the possibility of accelerating the solution by providing an initial guess.
+        Unlike previous algorithms, `Barnes (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_ approach guarantees a fixed number of memory access and communication events per processors. As mentionned in his paper based on comparison testing, it runs generally faster while using fewer resources than previous methods.
 
-    For drainage computation, the class requires to compute depressionless surfaces and the *priority-flood + ϵ* variant of the algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ is used. It provides a solution to remove flat surfaces, and it produces surfaces for which each cell has a defined gradient from which flow directions can be determined.
+    The approach proposed here is more general than the one in the initial paper. First, it handles both regular and irregular meshes, allowing for complex distributed meshes to be  used as long as a clear definition of inter-mesh connectivities is available. Secondly, to prevent iteration over unnecessary vertices (such as marine regions), it is possible to define a minimal elevation (i.e. sea-level position) above which the algorithm is performed.
 
-    Finally, the class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
+    For inter-mesh connections and message passing, the approach relies on PETSc DMPlex functions.
+
+    The main functions return the following parameters:
+
+    - the elevation of the filled surface,
+    - the information for each depression (e.g., a unique global ID, its spillover local points and related processor),
+    - the description of each depression (total volume and maximum filled depth).
 
     """
 
@@ -71,7 +79,12 @@ class PITFill(object):
 
     def _buildPitDataframe(self, label1, label2):
         """
-        Find common global IDs based on local ones.
+        Definition of a Pandas data frame used to find a unique pit ID between processors.
+
+        :arg label1: depression ID in a given processors
+        :arg label2: same depression ID in a neighbouring mesh
+
+        :return: df (sorted dataframe of pit ID between processors)
         """
 
         data = {
@@ -85,7 +98,11 @@ class PITFill(object):
 
     def _offsetGlobal(self, lgth):
         """
-        Define globally unique label based on local partition distribution.
+        Compute the offset between processors to ensure a unique number for considered indices.
+
+        :arg lgth: local length of the data to distribute
+
+        :return: cumulative sum and sum of the labels to add to each processor
         """
 
         label_offset = np.zeros(MPIsize + 1, dtype=int)
@@ -96,7 +113,11 @@ class PITFill(object):
 
     def _fillFromEdges(self, mgraph):
         """
-        Fill the connected graphs of spillover points between processors.
+        Combine local meshes by joining their edges based on local spillover graphs.
+
+        :arg mgraph: numpy array containing local mesh edges information
+
+        :arg ggraph: numpy array containing filled elevation values based on other processors values
         """
 
         # Get bidirectional edges connections
@@ -126,7 +147,14 @@ class PITFill(object):
 
     def _getPitParams(self, lFill, hl, nbpits):
         """
-        Record depression parameters.
+        Define depression global parameters:
+
+        - volume of each depression
+        - maximum filled depth
+
+        :arg lFill: numpy array of filled elevation
+        :arg hl: numpy array of unfilled surface elevation
+        :arg nbpits: number of depression in the global mesh
         """
 
         # Get pit parameters (volume and maximum filled elevation)
@@ -152,7 +180,9 @@ class PITFill(object):
 
     def serialFilling(self, level):
         """
-        Perform serial depression filling.
+        This function performs the depression-filling in serial using the *priority-flood* algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_.
+
+        :arg level: minimal elevation above which the algorithm is performed.
         """
 
         if self.rankIDs is None:
@@ -223,7 +253,9 @@ class PITFill(object):
 
     def parallelFilling(self, level):
         """
-        Perform parallel depression filling.
+        This functions implements the linearly-scaling parallel priority-flood depression-filling algorithm from `Barnes (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_ but adapted to unstructured meshes.
+
+        :arg level: minimal elevation above which the algorithm is performed.
         """
 
         t0 = process_time()
@@ -341,7 +373,12 @@ class PITFill(object):
 
     def pitInformation(self):
         """
-        Get pit information.
+        This functions extracts depression informations available to all processors. It stores the following things:
+
+        - the information for each depression (e.g., a unique global ID, its spillover local points and related processor),
+        - the description of each depression (total volume and maximum filled depth).
+
+        :arg level: minimal elevation above which the algorithm is performed.
         """
 
         t0 = process_time()
