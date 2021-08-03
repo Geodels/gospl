@@ -28,9 +28,7 @@ class FAMesh(object):
 
         The class follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ where the iterative nature of the computational algorithms used to solve the linear system creates the possibility of accelerating the solution by providing an initial guess.
 
-    For drainage computation, the class requires to compute depressionless surfaces and the *priority-flood + ϵ* variant of the algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ is used. It provides a solution to remove flat surfaces, and it produces surfaces for which each cell has a defined gradient from which flow directions can be determined.
-
-    Finally, the class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
+    For drainage computation, the class uses a depression-less surface and computes river incision expressed using a **stream power formulation** function of river discharge and slope.
 
     """
 
