@@ -307,7 +307,7 @@ class SEAMesh(object):
         .. math::
           \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d(h) \nabla h \right)
 
-        .. note::
+        .. important::
 
             PETSc **KSP** component provides Krylov subspace iterative method and several preconditioner. Here, we use Newton's method to solve the nonlinear equation using generalized minimal residual solver (`gmres`) with the Additive Schwarz method preconditioning (`asm`).
 
@@ -316,7 +316,7 @@ class SEAMesh(object):
         - _RHSvector
         - _Jacobian
 
-        .. todo::
+        .. note::
 
             SNES and time stepping approach might provide a better convergence rate than the one implemented here.
 
