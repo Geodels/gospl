@@ -5,7 +5,7 @@
 Class SEAMesh
 ==============
 
-.. autoclass:: sed.sedplex.SEAMesh
+.. autoclass:: sed.seaplex.SEAMesh
 
    .. rubric:: Initialise
 
@@ -36,18 +36,18 @@ Class SEAMesh
 Public functions
 ---------------------
 
-.. automethod:: sed.sedplex.SEAMesh.seaChange
+.. automethod:: sed.seaplex.SEAMesh.seaChange
 
 
 Private functions
 ---------------------
 
-.. automethod:: sed.sedplex.SEAMesh._diffuseOcean
-.. automethod:: sed.sedplex.SEAMesh._distanceCoasts
-.. automethod:: sed.sedplex.SEAMesh._distOcean
-.. automethod:: sed.sedplex.SEAMesh._getSeaVol
-.. automethod:: sed.sedplex.SEAMesh._globalCoastsTree
-.. automethod:: sed.sedplex.SEAMesh._Jacobian
-.. automethod:: sed.sedplex.SEAMesh._matOcean
-.. automethod:: sed.sedplex.SEAMesh._nlCoefficents
-.. automethod:: sed.sedplex.SEAMesh._RHSvector
+.. automethod:: sed.seaplex.SEAMesh._diffuseOcean
+.. automethod:: sed.seaplex.SEAMesh._distanceCoasts
+.. automethod:: sed.seaplex.SEAMesh._distOcean
+.. automethod:: sed.seaplex.SEAMesh._getSeaVol
+.. automethod:: sed.seaplex.SEAMesh._globalCoastsTree
+.. automethod:: sed.seaplex.SEAMesh._Jacobian
+.. automethod:: sed.seaplex.SEAMesh._matOcean
+.. automethod:: sed.seaplex.SEAMesh._nlCoefficents
+.. automethod:: sed.seaplex.SEAMesh._RHSvector
