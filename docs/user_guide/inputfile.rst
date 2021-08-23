@@ -164,23 +164,17 @@ f. :yaml:`strat` is the stratigraphic timestep interval used to update the strat
 .. code:: ipython
 
   spl:
-      wfill: 100.
-      sfill: 10.
       K: 3.e-8
       d: 0.42
 
 This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
-a. :yaml:`wfill` this can be seen as a minimum topographic elevation that a river will not be able to flow over in a given time step (except if sufficient water is filling the sink). This parameter has a default value of 100 m. It is used to by-pass small depressions.
-
-b. :yaml:`sfill` similar to previous parameter but for sediment. This parameter has a default value of 50 m.
-
-c. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics. It is used in the SPL law: :math:`E = K (\bar{P}A)^m S^n`
+a. :yaml:`K` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics. It is used in the SPL law: :math:`E = K (\bar{P}A)^m S^n`
 
 .. warning::
   It is worth noting that the coefficient *m* and *n* are fixed in this version of *gospl* and take the value of *0.5* & *1* respectively.
 
-d. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following `Murphy et al. (2016) <https://doi.org/10.1038/nature17449>`_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`d` (:math:`d` in the equation) is a positive exponent that has been estimated from field-based relationships to 0.42. Its default value is set to 0.
+b. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following `Murphy et al. (2016) <https://doi.org/10.1038/nature17449>`_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. :yaml:`d` (:math:`d` in the equation) is a positive exponent that has been estimated from field-based relationships to 0.42. Its default value is set to 0.
 
 
 .. raw:: html
@@ -220,8 +214,6 @@ d. Studies have shown that the physical strength of bedrock which varies with th
   diffusion:
       hillslopeKa: 0.02
       hillslopeKm: 0.2
-      dstep: 5
-      mstep: 5
       sedK: 100.
       sedKf: 200.
       sedKw: 300.
@@ -231,11 +223,9 @@ Hillslope processes in *gospl* is defined using a classical *diffusion law* in w
 
 a. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
 b. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
-c. :yaml:`dstep` is the number of diffusion steps used to diffuse freshly deposited marine sediments,
-d. :yaml:`mstep` is the number of steps used to distribute sediments delivered by rivers in open ocean,
-e. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
-f. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
-g. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
+c. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
+d. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
+e. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
 
 
 

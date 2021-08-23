@@ -105,7 +105,7 @@ Main classes
 
 .. container:: custom-button
 
-    :ref:`See functions and source code <sed_ref>`
+    See source code for in :ref:`land <sed_ref>` & :ref:`marine <sea_ref>` functions
 
 .. raw:: html
 
@@ -160,6 +160,7 @@ Main classes
     pit_ref
     flow_ref
     sed_ref
+    sea_ref
     stra_ref
     in_ref
     out_ref

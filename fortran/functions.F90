@@ -2,14 +2,14 @@
 ! #include "petsc/finclude/petscmat.h"
 ! #include "petscversion.h"
 
-#undef  CHKERRQ
-#define CHKERRQ(n) if ((n) .ne. 0) return;
+! #undef  CHKERRQ
+! #define CHKERRQ(n) if ((n) .ne. 0) return;
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                 INTERNAL MODULE                  !!
 !!           Fortran Module: meshparams             !!
 !!                                                  !!
-!!  - Define global variables for mesh parameters   !!
+!!  - Define mesh variables                         !!
 !!  - Set the main functions for priority queues    !!
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -18,14 +18,8 @@ module meshparams
 
   implicit none
 
-  integer :: nGlobal
-  integer :: nLocal
-
   integer, dimension(:), allocatable :: FVnNb
-  integer, dimension(:,:), allocatable :: gnID
   integer, dimension(:,:), allocatable :: FVnID
-
-  double precision, dimension(:), allocatable :: gFVarea
   double precision, dimension(:), allocatable :: FVarea
   double precision, dimension(:,:), allocatable :: FVeLgt
   double precision, dimension(:,:), allocatable :: FVvDist
@@ -34,6 +28,11 @@ module meshparams
   type node
     integer :: id
     double precision :: Z
+  end type
+
+  ! Simple queue node definition: index
+  type snode
+    integer :: id
   end type
 
   ! Pit queue node definition: index pit1 and pit2
@@ -59,6 +58,16 @@ module meshparams
     procedure :: push
   end type
   type (queue) :: plainqueue
+
+  ! Definition of simple plain queue (no priority)
+  type squeue
+    type(snode), allocatable :: buf(:)
+    integer :: n = 0
+  contains
+    procedure :: spop
+    procedure :: spush
+  end type
+  type (squeue) :: simplequeue
 
   ! Definition of pit plain queue (no priority)
   type ptqueue
@@ -221,6 +230,31 @@ module meshparams
       end if
       this%buf(this%n) = x
     end subroutine ppush
+
+    ! Pops first values in a simple plain queue
+    function spop(this) result (res)
+      class(squeue) :: this
+      type(snode)   :: res
+      res = this%buf(1)
+      this%buf(1) = this%buf(this%n)
+      this%n = this%n - 1
+    end function spop
+    ! Pushes new values in a simple plain queue
+    subroutine spush(this, id)
+      class(squeue), intent(inout) :: this
+      integer  :: id
+      type(snode)  :: x
+      type(snode), allocatable  :: tmp(:)
+      x%id = id
+      this%n = this%n +1
+      if (.not.allocated(this%buf)) allocate(this%buf(1))
+      if (size(this%buf)<this%n) then
+        allocate(tmp(2*size(this%buf)))
+        tmp(1:this%n-1) = this%buf
+        call move_alloc(tmp, this%buf)
+      end if
+      this%buf(this%n) = x
+    end subroutine spush
 
     ! Pops first values in a plain queue
     function pop(this) result (res)
@@ -427,82 +461,50 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
-subroutine seaparams(elev, sl, grp, pit, ins, out, vol, nb, nbg)
+subroutine setjacobiancoeff(nb, h, Kd, Kp, dcoeff)
 !*****************************************************************************
-! Find closed sea parameters.
+! Define Jacobian coefficients based on a finite volume spatial
+! discretisation as proposed in Tucker et al. (2001).
 
-  use meshparams
-  implicit none
+    use meshparams
+    implicit none
 
-  integer :: nb
-  integer :: nbg
+    integer :: nb
 
-  double precision,intent(in) :: elev(nb)
-  double precision,intent(in) :: sl
-  integer,intent(in) :: grp(nbg)
-  integer,intent(in) :: pit(nb,2)
-  integer,intent(out) :: ins(nb)
-  integer,intent(out) :: out(nbg)
-  double precision,intent(out) :: vol(nbg)
+    double precision, intent(in) :: h(nb)
+    double precision, intent(in) :: Kd(nb)
+    double precision, intent(in) :: Kp(nb)
+    double precision, intent(out) :: dcoeff(nb,9)
 
-  integer :: k, g
-  double precision :: minh
+    integer :: k, p, n
+    double precision :: s1, c, ck, cpk, cn, cpn, v
 
-  ins = -1
-  out = -1
-  vol = 0.
-
-  do g = 1, nbg
-    minh = sl
+    dcoeff = 0.
     do k = 1, nb
-      if(pit(k,1)==grp(g) .and. elev(k)<sl)then
-        vol(g) = vol(g)+(sl-elev(k))*gFVarea(k)
-        ins(k) = grp(g)
-        if(minh>elev(k))then
-          out(g) = k-1
-          minh = elev(k)
-        endif
+      s1 = 0.
+      if(FVarea(k)>0)then
+        ck = Kd(k)
+        cpk = Kp(k)
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            n = FVnID(k,p)+1
+            cn = Kd(n)
+            cpn = Kp(n)
+            c = 0.5*(ck+cn+cpk*(h(k)-h(n)))/FVarea(k) !
+            v = c*FVvDist(k,p)/FVeLgt(k,p)
+            s1 = s1 + v
+            c = 0.5*(ck+cn+cpn*(h(n)-h(k)))/FVarea(k) !
+            v = c*FVvDist(k,p)/FVeLgt(k,p)
+            dcoeff(k,p+1) = -v
+          endif
+        enddo
+        dcoeff(k,1) = 1.0 + s1
       endif
     enddo
-  enddo
 
-  return
+    return
 
-end subroutine seaparams
-
-subroutine distributeland(nrcv, sid, flux, rcv, wght, flx, nb)
-!*****************************************************************************
-! Distribute land sediment downstream.
-
-  implicit none
-
-  integer :: nb
-  integer :: nrcv
-  integer,intent(in) :: sid(nb)
-  double precision,intent(in) :: flux(nb)
-  integer,intent(in) :: rcv(nb,nrcv)
-  double precision,intent(in) :: wght(nb,nrcv)
-  double precision,intent(out) :: flx(nb)
-
-  integer :: k, i, p, n
-
-  flx = 0.
-
-  do k = 1, nb
-    i = sid(k)+1
-    if(flux(i)>0.)then
-      do p = 1, nrcv
-        if(wght(i,p)>0.)then
-          n = rcv(i,p)+1
-          flx(n) = flx(n)+wght(i,p)*flux(i)
-        endif
-      enddo
-    endif
-  enddo
-
-  return
-
-end subroutine distributeland
+end subroutine setjacobiancoeff
 
 subroutine distocean(nrcv, sid, flux, rcv, wght, area, depth, dep, nb, nbi)
 !*****************************************************************************
@@ -556,215 +558,34 @@ subroutine distocean(nrcv, sid, flux, rcv, wght, area, depth, dep, nb, nbi)
 
 end subroutine distocean
 
-subroutine distexcess(flux, elev, felev, pit, vol, ovol, sout, lins, flx, depo, nb, nbg, nbs)
+subroutine scale_volume(ids, vscale, scale, nb, n)
 !*****************************************************************************
-! Distribute land sediment in closed depressions.
+! Scale depression volume based on deposited one
 
+  use meshparams
   implicit none
 
   integer :: nb
-  integer :: nbg
-  integer :: nbs
+  integer :: n
 
-  double precision,intent(in) :: elev(nb)
-  double precision,intent(in) :: felev(nb)
-  double precision,intent(in) :: flux(nb)
-  integer,intent(in) :: pit(nb,2)
-  double precision,intent(in) :: vol(nbg)
-  double precision,intent(in) :: ovol(nbs)
-  integer,intent(in) :: sout(nbs)
-  integer,intent(in) :: lins(nb)
+  integer, intent(in) :: ids(nb)
+  double precision, intent(in) :: vscale(n)
+  double precision, intent(out) :: scale(nb)
 
-  double precision,intent(out) :: flx(nb)
-  double precision,intent(out) :: depo(nb)
+  integer :: pitid, k
+  scale = 0.
 
-  integer :: k, g, i, p
-  double precision :: scale, nvol(nbg)
-
-  flx = flux
-  depo = 0.
-  nvol = vol
-
-  do g = 1, nbs
-
-    if(ovol(g)>0.)then
-
-      p = sout(g)+1
-      i = lins(p)+1
-
-      if(pit(p,1)>-1)then
-
-        if(nvol(i)>=ovol(g))then
-          scale = ovol(g)/nvol(i)
-          nvol(i) = nvol(i)-ovol(g)
-          flx(p) = 0.
-          do k = 1, nb
-            if(lins(k) == i-1)then
-              depo(k) = depo(k)+(felev(k)-elev(k))*scale
-            endif
-          enddo
-        else
-          flx(pit(p,2)+1) = flx(pit(p,2)+1)+ovol(g)-nvol(i)
-          flx(p) = 0.
-          nvol(i) = 0.
-          do k = 1, nb
-            if(lins(k) == i-1)then
-              depo(k) = depo(k)+felev(k)-elev(k)
-            endif
-          enddo
-        endif
-      endif
+  do k = 1, nb
+    pitid = ids(k)
+    if(pitid>-1)then
+      scale(k) = vscale(pitid+1)
     endif
   enddo
 
   return
 
-end subroutine distexcess
+end subroutine scale_volume
 
-subroutine distsea(flux, elev, sl, grp, pit, vol, sout, flx, depo, ovol, nb, nbg)
-!*****************************************************************************
-! Distribute sediment in closed ocean.
-
-  implicit none
-
-  integer :: nb
-  integer :: nbg
-
-  double precision,intent(in) :: sl
-  double precision,intent(in) :: elev(nb)
-  double precision,intent(in) :: flux(nb)
-  integer,intent(in) :: grp(nbg)
-  integer,intent(in) :: pit(nb,2)
-  integer,intent(in) :: sout(nbg)
-  double precision,intent(in) :: vol(nbg)
-
-  double precision,intent(out) :: flx(nb)
-  double precision,intent(out) :: depo(nb)
-  double precision,intent(out) :: ovol(nbg)
-
-  integer :: k, g, i, nloc
-  integer :: ingrp(nb)
-  double precision :: totflx, scale, nvol(nbg)
-
-  flx = flux
-  depo = 0.
-  ovol = 0.
-  nvol = vol
-
-  do g = 1, nbg
-
-    totflx = 0.
-
-    if(grp(g)>-1)then
-
-      nloc = 0
-      ingrp = 0
-      do k = 1, nb
-        if(pit(k,1)==grp(g) .and. sl>elev(k))then
-          totflx = totflx+flux(k)
-          nloc = nloc+1
-          ingrp(nloc) = k
-        endif
-      enddo
-
-      if(totflx>0.)then
-        if(totflx>vol(g))then
-          ovol(g) = totflx-vol(g)
-          flx(sout(g)+1) = totflx-vol(g)
-          do k = 1, nloc
-            i = ingrp(k)
-            flx(i) = 0.
-            depo(i) = sl-elev(i)
-          enddo
-          nvol(g) = 0.
-        else
-          scale = totflx/vol(g)
-          nvol(g) = nvol(g) - totflx
-          do k = 1, nloc
-            i = ingrp(k)
-            flx(i) = 0.
-            depo(i) = (sl-elev(i))*scale
-          enddo
-        endif
-      endif
-    endif
-  enddo
-
-  return
-
-end subroutine distsea
-
-subroutine distland(flux, elev, felev, grp, pit, vol, flx, depo, nb, nbg)
-!*****************************************************************************
-! Distribute land sediment in closed depressions.
-
-  implicit none
-
-  integer :: nb
-  integer :: nbg
-
-  double precision,intent(in) :: elev(nb)
-  double precision,intent(in) :: felev(nb)
-  double precision,intent(in) :: flux(nb)
-  integer,intent(in) :: pit(nb,2)
-  integer,intent(in) :: grp(nbg)
-  double precision,intent(in) :: vol(nbg)
-
-  double precision,intent(out) :: flx(nb)
-  double precision,intent(out) :: depo(nb)
-
-  integer :: k, g, i, out, nloc
-  integer :: ingrp(nb)
-  double precision :: totflx, scale, nvol(nbg)
-
-  flx = flux
-  depo = 0.
-  nvol = vol
-
-  do g = 1, nbg
-
-    totflx = 0.
-    out = -1
-
-    if(grp(g)>-1)then
-
-      nloc = 0
-      ingrp = 0
-      do k = 1, nb
-        if(pit(k,1)==grp(g))then
-          totflx = totflx+flux(k)
-          if(out==-1) out = pit(k,2)+1
-          nloc = nloc+1
-          ingrp(nloc) = k
-        endif
-      enddo
-
-      if(totflx>0.)then
-        if(totflx>vol(g))then
-          do k = 1, nloc
-            i = ingrp(k)
-            flx(i) = 0.
-            depo(i) = felev(i)-elev(i)
-          enddo
-          flx(out) = totflx-nvol(g)
-          nvol(g) = 0.
-        else
-          scale = totflx/vol(g)
-          do k = 1, nloc
-            i = ingrp(k)
-            flx(i) = 0.
-            depo(i) = (felev(i)-elev(i))*scale
-          enddo
-          nvol(g) = nvol(g) - totflx
-        endif
-      endif
-
-    endif
-  enddo
-
-  return
-
-end subroutine distland
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -868,103 +689,11 @@ subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
 
 end subroutine mfdreceivers
 
-subroutine mfdrcvs( nRcv, exp, inIDs, elev, sl, rcv, wgt, nb)
-!*****************************************************************************
-! Compute receiver characteristics based on multiple flow direction
-! algorithm.
-
-  use meshparams
-  implicit none
-
-  interface
-    recursive subroutine quicksort(array, first, last, indices)
-      double precision, dimension(:), intent(inout) :: array
-      integer, intent(in)  :: first, last
-      integer, dimension(:), intent(inout) :: indices
-    end subroutine quicksort
-  end interface
-
-  integer :: nb
-
-  double precision,intent(in) :: exp
-  integer, intent(in) :: nRcv
-  integer, intent(in) :: inIDs(nb)
-  double precision,intent(in) :: sl
-  double precision, intent(in) :: elev(nb)
-
-  integer, intent(out) :: rcv(nb,nRcv)
-  double precision, intent(out) :: wgt(nb,nRcv)
-
-  integer :: k, n, p, kk
-  double precision :: slp(8),val,slope(8)
-  integer :: id(8)
-
-  rcv = -1
-  wgt = 0.
-
-  do k = 1, nb
-    if(inIDs(k)>0)then
-      if(elev(k)<=sl)then
-        rcv(k,1:nRcv) = k-1
-      else
-        slp = 0.
-        id = 0
-        val = 0.
-        kk = 0
-        do p = 1, FVnNb(k)
-          n = FVnID(k,p)+1
-          if(n>0 .and. FVeLgt(k,p)>0.)then
-            val = (elev(k) - elev(n))**exp/FVeLgt(k,p)
-            if(val>0.)then
-              kk = kk + 1
-              slp(kk) = val
-              id(kk) = n-1
-            endif
-          endif
-        enddo
-
-        if(kk == 0)then
-          rcv(k,1:nRcv) = k-1
-        elseif(kk <= nRcv)then
-          val = 0.
-          rcv(k,1:nRcv) = k-1
-          do p = 1, kk
-            rcv(k,p) = id(p)
-            val = val + slp(p)
-          enddo
-          do p = 1, nRcv
-            wgt(k,p) = slp(p) / val
-          enddo
-        else
-          rcv(k,1:nRcv) = k-1
-          call quicksort(slp,1,kk,id)
-          n = 0
-          val = 0.
-          slope = 0.
-          do p = kk,kk-nRcv+1,-1
-            n = n + 1
-            slope(n) = slp(p)
-            rcv(k,n) = id(p)
-            val = val + slp(p)
-          enddo
-          do p = 1, nRcv
-            wgt(k,p) = slope(p)/val
-          enddo
-        endif
-      endif
-    endif
-  enddo
-
-  return
-
-end subroutine mfdrcvs
-
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
 !!            STRATIGRAPHIC FUNCTIONS               !!
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 
 subroutine stratasimple(nb, stratnb, ids, weights, strath, stratz, phis, &
                         nstrath, nstratz, nphis)
@@ -1177,95 +906,71 @@ end subroutine stratabuildcarb
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine fillpit(sl, elev, hmax, fillz, pits, nb)
+subroutine fill_eps_edges(eps, ids, hm, elev, pitid, fillz, m, n, nb)
 !*****************************************************************************
-! Perform pit filling using a priority queue approach following Barnes (2015).
-! This function is done on a single processors.
+! Perform pit filling on the edges of each depression.
 
   use meshparams
   implicit none
 
+  integer :: m
+  integer :: n
   integer :: nb
-  double precision,intent(in) :: sl
+  double precision,intent(in) :: eps
+  integer, intent(in) :: ids(m)
+  double precision,intent(in) :: hm(n)
   double precision,intent(in) :: elev(nb)
-  double precision,intent(in) :: hmax
+  integer, intent(in) :: pitid(nb)
   double precision,intent(out) :: fillz(nb)
-  ! Pit number and overspilling point ID
-  integer,intent(out) :: pits(nb,2)
   logical :: flag(nb)
 
-  integer :: i, k, c, pitNb
+  integer :: i, k, c
 
   type (node)  :: ptID
-  double precision :: h, limitz(nb)
+  integer :: pits(nb)
+  double precision :: h, bot(nb)
 
   fillz = elev
-  limitz = elev
-  pits = -1
+  pits = pitid
 
-  ! Push marine edges nodes to priority queue
+  ! Push depression nodes to priority queue
   flag = .False.
-  do i = 1, nb
-    if(fillz(i)<sl)then
-      flag(i) = .True.
-      lp: do k = 1, 8
-        c = gnID(i,k)
-        if(c>0)then
-          if(fillz(c)>=sl)then
-            call priorityqueue%PQpush(fillz(i), i)
-            exit lp
-          endif
-        endif
-      enddo lp
-    endif
+  do c = 1, m
+    i = ids(c)+1
+    flag(i) = .True.
+    pits(i) = pitid(i)
+    bot(i) = hm(pits(i)+1)
+    call priorityqueue%PQpush(fillz(i), i)
   enddo
 
   ! Perform pit filling using priority total queue
-  pitNb = 0
   do while(priorityqueue%n>0)
     ptID = priorityqueue%PQpop()
     i = ptID%id
-    do k = 1, 8
-      c = gnID(i,k)
-      if(c>0)then
-        if(.not.flag(c))then
-          flag(c) = .True.
-          h = nearest(fillz(i), 1.0)
-          ! Not a depression
-          if(fillz(c)>h)then
-            call priorityqueue%PQpush(fillz(c), c)
-          ! Find a depression
-          else
-            ! This is a new one update information
-            if(pits(i,1)==-1)then
-              fillz(c) = h
-              limitz(c) = h
-              if(fillz(c)-elev(c)>hmax) limitz(c) = elev(c)+hmax
-              pitNb = pitNb+1
-              pits(i,1) = pitNb
-              pits(c,1) = pitNb
-              pits(i,2) = i-1
-              pits(c,2) = i-1
-            ! This is an existing one: add nodes to the depression
-            else
-              fillz(c) = h
-              limitz(c) = h
-              if(fillz(c)-elev(c)>hmax) limitz(c) = elev(c)+hmax
-              pits(c,1) = pits(i,1)
-              pits(c,2) = pits(i,2)
+    if(pits(i) > -1)then
+      do k = 1, FVnNb(i)
+        c = FVnID(i,k)+1
+        if(c>0)then
+          if(.not.flag(c) .and. elev(c) > bot(i))then
+            h = fillz(i)+eps*FVeLgt(i,k)
+            if(fillz(c)<h)then
+              if(pitid(c) == -1)then
+                flag(c) = .True.
+                fillz(c) = h
+                bot(c) = bot(i)
+                pits(c) = pits(i)
+                call priorityqueue%PQpush(fillz(c), c)
+              endif
             endif
-            call priorityqueue%PQpush(fillz(c), c)
           endif
         endif
-      endif
-    enddo
+      enddo
+    endif
   enddo
-
-  fillz = limitz
 
   return
 
-end subroutine fillpit
+end subroutine fill_eps_edges
 
 subroutine edge_tile(lvl,border,elev,ledge,nb)
 !*****************************************************************************
@@ -1400,7 +1105,6 @@ subroutine fill_tile(edge, elev, inids, fillz, labels, graphnb, m, nb)
 
   ! Push border nodes
   do i = 1, m
-    ! if(edge(i,2) == 1)then
     if(edge(i,2) == 0 .or. edge(i,2) == 2 )then
       c = edge(i,1) +  1
       call graph%wpush(labels(c), 0, elev(c), c)
@@ -1644,76 +1348,73 @@ subroutine graph_nodes(graphnb, newwgraph)
 
 end subroutine graph_nodes
 
-subroutine label_pits(elev, fill, labels, pitnbs, nb)
+subroutine label_pits(lvl, fill, label, nb)
 !*****************************************************************************
-! This function finds local depression ids based on neighbors labels.
+! This function finds local depression ids based on neighbors elevation.
 
   use meshparams
   implicit none
 
   integer :: nb
-  double precision,intent(in) :: elev(nb)
+  double precision,intent(in) :: lvl
   double precision,intent(in) :: fill(nb)
 
-  ! Pit number and labels
-  integer,intent(out) :: labels(nb)
-  integer, intent(out) :: pitnbs
+  integer, intent(out) :: label(nb)
 
-  integer :: i, k, c, nblab, lbl, p
-  integer,dimension(8) :: lbls
-  type (node)  :: ptID
+  integer :: i, k, c, p, lbl
+  logical :: noflow, flag(nb)
+  type (snode)  :: ptID
 
-  labels = -1
+  ! noflows = 0
+  label = -1
+  flag = .False.
+  lbl = 0
 
+  ! Resolve flats
   do i = 1, nb
-    if(fill(i)>elev(i))then
-      call priorityqueue%PQpush(elev(i), i)
-    endif
-  enddo
-
-  nblab = 1
-  do while(priorityqueue%n>0)
-    ptID = priorityqueue%PQpop()
-    i = ptID%id
-    lbl = -1
-    p = 0
-    lbls = -1
-    do k = 1, FVnNb(i)
-      c = FVnID(i,k)+1
-      if(c>0)then
-        if(labels(c)>0)then
-          p = p+1
-          lbls(p) = labels(c)
+    if(fill(i)>lvl .and. .not. flag(i))then
+      flag(i) = .True.
+      noflow = .True.
+      lp: do k = 1, FVnNb(i)
+        c = FVnID(i,k)+1
+        if(c>0)then
+          if(fill(i)>fill(c))then
+            noflow = .False.
+            exit lp
+          endif
         endif
+      enddo lp
+      if(noflow)then
+        lbl = lbl+1
+        label(i) = lbl
+        call simplequeue%spush(i)
+        do while(simplequeue%n>0)
+          ptID = simplequeue%spop()
+          p = ptID%id
+          do k = 1, FVnNb(p)
+            c = FVnID(p,k)+1
+            if(c>0)then
+              if(fill(c)==fill(p) .and. .not. flag(c))then
+                call simplequeue%spush(c)
+                label(c) = lbl
+                flag(c) = .True.
+              else
+                flag(c) = .True.
+              endif
+            endif
+          enddo
+        enddo
       endif
-    enddo
-
-    lbl = lbls(1)
-    if(p>1)then
-      do k = 1, p
-        if(lbls(k)>lbl)then
-          call pitqueue%ppush(lbl, lbls(k))
-        elseif(lbls(k)<lbl)then
-          call pitqueue%ppush(lbls(k),lbl)
-        endif
-        lbl = min(lbl,lbls(k))
-      enddo
-    endif
-
-    labels(i) = lbl
-    if(lbl<=0)then
-      labels(i) = nblab
-      nblab = nblab+1
+    else
+      flag(i) = .True.
     endif
   enddo
-
-  pitnbs = pitqueue%n
 
   return
 
 end subroutine label_pits
 
-subroutine spill_pts(nb, pitids, pitval, elev, borders, inids, spill, n, m)
+subroutine spill_pts(ids, hmax, elev, pitids, spill, n, m)
 !*****************************************************************************
 ! Find for each depression its spillover point id.
 
@@ -1722,83 +1423,46 @@ subroutine spill_pts(nb, pitids, pitval, elev, borders, inids, spill, n, m)
 
   integer :: n
   integer :: m
-  integer :: nb
-  integer,intent(in) :: pitids(n)
-  integer,intent(in) :: pitval(n)
-  integer,intent(in) :: borders(m)
-  integer,intent(in) :: inids(m)
+  integer,intent(in) :: ids(n)
+  double precision,intent(in) :: hmax
   double precision,intent(in) :: elev(m)
+  integer,intent(in) :: pitids(m)
 
   ! Spill point ID
-  integer, intent(out) :: spill(nb)
+  integer, intent(out) :: spill
 
-  integer :: i, k, kk, c, cc, p, val
-  double precision :: z
+  integer :: i, k, kk, c, cc, p
 
   spill = -1
 
-  do p = 1, n
-    i = pitids(p)+1
-    if(inids(i)>0)then
-      val = pitval(p)
-      z = elev(i)
-      if(spill(val) == -1)then
-        lp: do k = 1, FVnNb(i)
-          c = FVnID(i,k)+1
-          if(c>0)then
-            if(z>elev(c))then
-              if(inids(c)>0)then
-                spill(val) = c-1
-                exit lp
-              endif
-            elseif((z-elev(c))<1.e-6)then
-              do kk = 1, FVnNb(c)
-                cc = FVnID(c,kk)+1
-                if(inids(cc)>0)then
-                  if(z>elev(cc))then
-                    spill(val) = cc-1
-                    exit lp
-                  elseif(z == elev(cc) .and. borders(cc) == 1)then
-                    spill(val) = cc-1
-                    exit lp
-                  endif
+  lp: do p = 1, n
+    i = ids(p)+1
+    do k = 1, FVnNb(i)
+      c = FVnID(i,k)+1
+      if(c>0)then
+        if(hmax>elev(c))then
+          spill = i-1 !c-1
+          exit lp
+        elseif(hmax==elev(c))then
+          if(pitids(c) == -1)then
+            do kk = 1, FVnNb(c)
+              cc = FVnID(c,kk)+1
+              if(cc>0)then
+                if(hmax>elev(cc))then
+                  spill = c-1
+                  exit lp
                 endif
-              enddo
-            endif
+              endif
+            enddo
           endif
-        enddo lp
+        endif
       endif
-    endif
-  enddo
+    enddo
+  enddo lp
 
   return
 
 end subroutine spill_pts
-
-subroutine pit_nodes(pitnb, pitarray)
-!*****************************************************************************
-! This function returns local depression ids that will be merged as they
-! represent the same pit.
-
-  use meshparams
-  implicit none
-
-  integer,intent(in) :: pitnb
-  integer,intent(out) :: pitarray(pitnb,2)
-  type(pnode)  :: pitID
-  integer :: p
-
-  p = 1
-  do while(pitqueue%n >0)
-    pitID = pitqueue%ppop()
-    pitarray(p,1) = pitID%p1
-    pitarray(p,2) = pitID%p2
-    p = p+1
-  enddo
-
-  return
-
-end subroutine  pit_nodes
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -1806,26 +1470,7 @@ end subroutine  pit_nodes
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine ngbglob( nb, ngbIDs )
-!*****************************************************************************
-! Set global mesh neighbours indices.
-
-  use meshparams
-  implicit none
-
-  integer, intent(in) :: nb
-  integer, intent(in) :: ngbIDs(nb, 8)
-
-  nGlobal = nb
-  if(allocated(gnID)) deallocate(gnID)
-  allocate(gnID(nGlobal,8))
-  gnID = ngbIDs+1
-
-  return
-
-end subroutine ngbglob
-
-subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes, &
+subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
                       area, circumcenter, ngbID, edgemax, n, nb, m)
 !*****************************************************************************
 ! Compute for a specific triangulation the characteristics of each node and
@@ -1835,8 +1480,6 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
   implicit none
 
   integer :: m, n, nb
-  integer, intent(in) :: nloc
-  integer, intent(in) :: lgIDs(nb)
   integer, intent(in) :: cells_nodes(n, 3)
   integer, intent(in) :: cells_edges(n,3)
   integer, intent(in) :: edges_nodes(m, 2)
@@ -1845,58 +1488,32 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
   double precision, intent(in) :: area(nb)
   double precision, intent(in) :: circumcenter(3,n)
 
-  integer, intent(out) :: ngbID(nloc, 8)
+  integer, intent(out) :: ngbID(nb, 8)
   double precision, intent(out) :: edgemax
 
   integer :: i, n1, n2, k, l, p, eid, cid
-  integer :: e, id, lid, lid2, nbngbs, ngbIDv
+  integer :: e, id, nbngbs, ngbIDv
   integer :: nid(2), nc(3), edge(nb, 8)
   integer :: edgeNb(3), edges(3,2), cell_ids(nb, 8)
 
   double precision :: coords0(3), coordsID(3)
   double precision :: midpoint(3), dist
 
-  integer, dimension(:), allocatable :: gFVnNb
-  integer, dimension(:,:), allocatable :: gngbID
-  ! integer, dimension(:,:), allocatable :: FVnID
-  double precision, dimension(:,:), allocatable :: gFVeLgt
-  double precision, dimension(:,:), allocatable :: gFVvDist
 
   logical :: inside
 
-  ! Define fortran global parameters
-  nLocal = nloc
-
-  if(nLocal < nb)then
-    if(allocated(gFVnNb)) deallocate(gFVnNb)
-    if(allocated(gngbID)) deallocate(gngbID)
-    if(allocated(gFVeLgt)) deallocate(gFVeLgt)
-    if(allocated(gFVvDist)) deallocate(gFVvDist)
-
-    allocate(gFVnNb(nb))
-    allocate(gngbID(nb,8))
-    allocate(gFVeLgt(nb,8))
-    allocate(gFVvDist(nb,8))
-
-    gFVnNb = 0
-    gngbID = -1
-    gFVeLgt = 0.
-    gFVvDist = 0.
-  endif
-
-  if(allocated(gFVarea)) deallocate(gFVarea)
+  ! Define mesh parameters
   if(allocated(FVarea)) deallocate(FVarea)
   if(allocated(FVnID)) deallocate(FVnID)
   if(allocated(FVnNb)) deallocate(FVnNb)
   if(allocated(FVeLgt)) deallocate(FVeLgt)
   if(allocated(FVvDist)) deallocate(FVvDist)
 
-  allocate(gFVarea(nb))
-  allocate(FVarea(nLocal))
-  allocate(FVnNb(nLocal))
-  allocate(FVnID(nLocal,8))
-  allocate(FVeLgt(nLocal,8))
-  allocate(FVvDist(nLocal,8))
+  allocate(FVarea(nb))
+  allocate(FVnNb(nb))
+  allocate(FVnID(nb,8))
+  allocate(FVeLgt(nb,8))
+  allocate(FVvDist(nb,8))
 
   cell_ids = -1
   edge = -1
@@ -1906,7 +1523,7 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
   FVvDist = 0.
   edgemax = 0.
 
-  gFVarea = area
+  FVarea = area
 
   ! Find all cells surrounding a given vertice
   do i = 1, n
@@ -1942,11 +1559,7 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
     enddo lp0
     if( inside )then
       edge(n1,k)  = i-1
-      if(nLocal < nb)then
-        gFVnNb(n1) = gFVnNb(n1) + 1
-      else
-        FVnNb(n1) = FVnNb(n1) + 1
-      endif
+      FVnNb(n1) = FVnNb(n1) + 1
     endif
     inside = .False.
     lp1: do k = 1, 8
@@ -1959,52 +1572,29 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
     enddo lp1
     if( inside )then
       edge(n2,k)  = i-1
-      if(nLocal < nb)then
-        gFVnNb(n2) = gFVnNb(n2) + 1
-      else
-        FVnNb(n2) = FVnNb(n2) + 1
-      endif
+      FVnNb(n2) = FVnNb(n2) + 1
     endif
   enddo
 
   do k = 1, nb
-
     ! Get triangulation edge lengths
     coords0 = coords(k,1:3)
     l = 0
-
-    if(nLocal < nb)then
-      nbngbs = gFVnNb(k)
-    else
-      nbngbs = FVnNb(k)
-    endif
+    nbngbs = FVnNb(k)
 
     do eid = 1, nbngbs
       nid = edges_nodes(edge(k,eid)+1,1:2)
       if( nid(1) == k-1)then
         l = l + 1
-        if(nLocal < nb)then
-          gngbID(k,l) = nid(2)
-        else
-          ngbID(k,l) = nid(2)
-        endif
+        ngbID(k,l) = nid(2)
         coordsID = coords(nid(2)+1,1:3)
       else
         l = l + 1
-        if(nLocal < nb)then
-          gngbID(k,l) = nid(1)
-        else
-          ngbID(k,l) = nid(1)
-        endif
+        ngbID(k,l) = nid(1)
         coordsID = coords(nid(1)+1,1:3)
       endif
-      if(nLocal < nb)then
-        call euclid( coords0, coordsID, gFVeLgt(k,l) )
-        edgemax = max(edgemax, gFVeLgt(k,l))
-      else
-        call euclid( coords0, coordsID, FVeLgt(k,l) )
-        edgemax = max(edgemax, FVeLgt(k,l))
-      endif
+      call euclid( coords0, coordsID, FVeLgt(k,l) )
+      edgemax = max(edgemax, FVeLgt(k,l))
     enddo
 
     ! Get voronoi edge lengths
@@ -2018,11 +1608,7 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
           id = -1
           if( edges(e,1) == k-1 )then
             lp3: do i = 1, nbngbs
-              if(nLocal < nb)then
-                ngbIDv = gngbID(k,i)
-              else
-                ngbIDv = ngbID(k,i)
-              endif
+              ngbIDv = ngbID(k,i)
               if(ngbIDv == edges(e,2))then
                 id = i
                 exit lp3
@@ -2030,11 +1616,7 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
             enddo lp3
           else
             lp4: do i = 1, nbngbs
-              if(nLocal < nb)then
-                ngbIDv = gngbID(k,i)
-              else
-                ngbIDv = ngbID(k,i)
-              endif
+              ngbIDv = ngbID(k,i)
               if(ngbIDv == edges(e,1))then
                 id = i
                 exit lp4
@@ -2042,50 +1624,14 @@ subroutine definetin( nloc, coords, lgIDs, cells_nodes, cells_edges, edges_nodes
             enddo lp4
           endif
           call euclid(midpoint(1:3), circumcenter(1:3, cell_ids(k,cid)+1),  dist)
-          if(nLocal < nb)then
-            gFVvDist(k,id) = gFVvDist(k,id) + dist
-          else
-            FVvDist(k,id) = FVvDist(k,id) + dist
-          endif
+          FVvDist(k,id) = FVvDist(k,id) + dist
         endif
       enddo
     enddo lp2
-
-    ! In case of parallel simulation only allocate local arrays
-    if(nLocal < nb)then
-      ! Is the vertex in the partition
-      if(lgIDs(k)>-1)then
-        lid = lgIDs(k) + 1
-        FVnNb(lid) = gFVnNb(k)
-        FVarea(lid) = area(k)
-        p = 1
-        do i = 1, gFVnNb(k)
-          ngbIDv = gngbID(k, i)
-          lid2 = lgIDs(ngbIDv + 1) + 1
-          if(lid2 > 0)then
-            ngbID(lid, p) =  lid2 - 1
-            FVeLgt(lid, p) = gFVeLgt(k, i)
-            FVvDist(lid, p) = gFVvDist(k, i)
-            FVnID(lid, p) = ngbID(lid, p)
-            p = p+1
-          else
-            FVnNb(lid) = FVnNb(lid) - 1
-          endif
-        enddo
-      endif
-    endif
   enddo
 
 
-  if(nLocal < nb)then
-    deallocate(gFVnNb)
-    deallocate(gngbID)
-    deallocate(gFVeLgt)
-    deallocate(gFVvDist)
-  else
-    FVnID = ngbID
-    FVarea = area
-  endif
+  FVnID = ngbID
 
 end subroutine definetin
 

@@ -50,9 +50,9 @@ author = "Tristan Salles"
 # release = version
 
 # The short X.Y version
-version = "0.2.10"
+version = "0.3.0"
 # The full version, including alpha/beta/rc tags
-release = "0.2.10"
+release = "0.3.0"
 
 # -- General configuration ---------------------------------------------------
 

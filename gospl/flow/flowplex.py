@@ -1,18 +1,14 @@
 import os
 import gc
 import sys
-import vtk
-import warnings
 import petsc4py
 import numpy as np
-from scipy import spatial
+import numpy_indexed as npi
 
 from mpi4py import MPI
 from time import process_time
-from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import fillpit
     from gospl._fortran import mfdreceivers
 
 petsc4py.init(sys.argv)
@@ -45,11 +41,6 @@ class FAMesh(object):
         self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
         self.iMat = self._matrix_build_diag(np.ones(self.lpoints))
 
-        # Empty matrix construction
-        self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-        self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
-        self.zMat = self._matrix_build_diag(np.zeros(self.lpoints))
-
         # Petsc vectors
         # self.fillFAG = self.hGlobal.duplicate()
         self.fillFAL = self.hLocal.duplicate()
@@ -60,9 +51,6 @@ class FAMesh(object):
         self.Eb = self.hGlobal.duplicate()
         self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
-
-        # Clinoforms slopes for each sediment type
-        self.slps = [6.0, 5.0, 3.0, 1.0]
 
         return
 
@@ -162,158 +150,9 @@ class FAMesh(object):
 
         return vector2
 
-    def _buildFlowDirection(self, h):
+    def matrixFlow(self):
         """
-        This function builds from neighbouring slopes the flow directions. It calls a fortran subroutine that locally computes for each vertice:
-
-        - the indices of receivers (downstream) nodes depending on the desired number of flow directions (SFD to MFD).
-        - the distances to the receivers based on mesh resolution.
-        - the associated weights calculated based on the number of receivers and proportional to the slope.
-
-        :arg h: elevation numpy array
-        """
-
-        t0 = process_time()
-
-        # Define multiple flow directions for unfilled elevation
-        self.rcvID, self.distRcv, self.wghtVal = mfdreceivers(
-            self.flowDir, self.flowExp, self.inIDs, h, self.sealevel
-        )
-        # Get marine regions
-        self.seaID = np.where(h <= self.sealevel)[0]
-
-        # Set marine nodes
-        if self.flatModel:
-            self.rcvID[self.idBorders, :] = np.tile(self.idBorders, (self.flowDir, 1)).T
-            self.distRcv[self.idBorders, :] = 0.0
-            self.wghtVal[self.idBorders, :] = 0.0
-
-        # Get global nodes that have no receivers
-        sum_weight = np.sum(self.wghtVal, axis=1)
-        tmpw = np.zeros(self.mpoints, dtype=np.float64)
-        tmpw[self.locIDs] = sum_weight
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, tmpw, op=MPI.MAX)
-        self.pitPts = tmpw == 0.0
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Flow Direction declaration (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-
-        return
-
-    def _distanceCoasts(self, data, k_neighbors=1):
-        """
-        This function computes for every marine vertices the distance to the closest coastline.
-
-        .. important::
-
-            The calculation takes advantage of the `vtkContourFilter` function from VTK library
-            which is performed on the **global** VTK mesh. Once the coastlines have been extracted,
-            the distances are obtained by querying a kd-tree (initialised with the coastal nodes) for
-            marine vertices contained within each partition.
-
-        :arg data: global elevation numpy array
-        :arg k_neighbors: number of nodes to use when querying the kd-tree
-        """
-
-        t0 = process_time()
-
-        self.coastDist = np.zeros(self.lpoints)
-        pointData = self.vtkMesh.GetPointData()
-        array = numpy_support.numpy_to_vtk(data, deep=1)
-        array.SetName("elev")
-        pointData.AddArray(array)
-        self.vtkMesh.SetFieldData(pointData)
-
-        cf = vtk.vtkContourFilter()
-        cf.SetInputData(self.vtkMesh)
-        cf.SetValue(0, self.sealevel)
-        cf.SetInputArrayToProcess(0, 0, 0, 0, "elev")
-        cf.GenerateTrianglesOff()
-        cf.Update()
-        coastXYZ = numpy_support.vtk_to_numpy(cf.GetOutput().GetPoints().GetData())
-        tree = spatial.cKDTree(coastXYZ, leafsize=10)
-        self.coastDist[self.seaID], indices = tree.query(
-            self.lcoords[self.seaID, :], k=k_neighbors
-        )
-
-        if self.memclear:
-            del array, pointData, cf, tree, indices, coastXYZ
-            gc.collect()
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Construct Distance to Coast (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-
-        return
-
-    def _flowSurface(self):
-        """
-        This function computes the depression less surface.
-
-        .. note::
-
-            In most landscape evolution models, internally draining regions (*e.g.* depressions and pits) are usually filled before the calculation of flow discharge and erosion–deposition rates. This ensures that all flows conveniently reach the coast or the boundary of the simulated domain. In models intended to simulate purely erosional features, such depressions are usually treated as transient features and often ignored.
-
-            However, `gospl` is designed to not only address erosion problems but also to simulate source-to-sink transfer and sedimentary basins formation and evolution in potentially complex tectonic settings. In such cases, depressions may be formed at different periods during runtime and may be filled or remain internally drained (*e.g.* endorheic basins) depending on the volume of sediment transported by upstream catchments.
-
-        The function is **not parallelised** and is performed on the master processor. It calls a fortran subroutine `fillpit` that uses a *priority-flood + ϵ* variant of the algorithm proposed in `Barnes et al. (2014) <https://doi.org/10.1016/j.cageo.2013.04.024>`_ for unstructured meshes.
-
-        The initialisation step consists of pushing all the marine nodes which are neighbours to a deep ocean node (*i.e.* nodes at water depth below 8000 m) onto a priority queue. The priority queue rearranges these nodes so that the ones with the lowest elevations in the queue are always processed first. The algorithm then proceeds incrementally by adding new vertices in the queue and defines filled elevations in the ascending order of their spill elevations + ϵ.
-
-        At the end of the function, the global fill-limited elevations are returned as well as the depressions charcateristics (*i.e.* a unique indice for each depressions, their volumes and the positions of the spill-over global vertices).
-
-        :return: gZ hFill (global and filled elevations numpy arrays)
-        """
-
-        # Get global elevations for pit filling...
-        t0 = process_time()
-        hl = self.hLocal.getArray().copy()
-        gZ = np.empty(self.mpoints, dtype=np.float64)
-        gZ[self.locIDs] = hl
-        gZ[self.outIDs] = -1.0e8
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
-        if self.flatModel:
-            mingZ = gZ.min()
-
-        # Perform pit filling on process rank 0
-        if MPIrank == 0:
-            # fillpit returns:
-            # - hFill: filled elevation values
-            # - pits: 2D array containing each pit ID and
-            #         corresponding overspilling point ID
-            if self.flatModel:
-                if mingZ > self.sealevel - 1:
-                    hFill, _ = self._fill2D(mingZ, gZ, self.waterfill)
-                else:
-                    hFill, _ = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
-            else:
-                hFill, _ = fillpit(self.sealevel - 1.0, gZ, self.waterfill)
-
-        else:
-            hFill = np.empty(self.mpoints, dtype=np.float64)
-        hFill = MPI.COMM_WORLD.bcast(hFill, root=0)
-        self.hFill = hFill[self.locIDs]
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Get pit filling information (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-
-        if self.memclear:
-            del hl
-            gc.collect()
-
-        return gZ, hFill
-
-    def matrixFlow(self, flow=True):
-        """
-        This function defines the flow direction matrices for filled-limited elevations.
+        This function defines the flow direction matrices.
 
         .. note::
 
@@ -331,12 +170,8 @@ class FAMesh(object):
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
-        if flow:
-            wght = self.wghtVal
-            rcv = self.rcvID
-        else:
-            wght = self.lWght
-            rcv = self.lRcv
+        wght = self.wghtVal
+        rcv = self.rcvID
 
         for k in range(0, self.flowDir):
 
@@ -367,81 +202,123 @@ class FAMesh(object):
 
         return
 
-    def _distributeFlowExcess(self):
+    def _buildFlowDirection(self, h):
         """
-        In cases where rivers flow in depressions, they might fill the sink completely and overspill or a portion of it forming a lake. This function computes the lake elevation and the excess of water (if any) able to flow dowstream.
+        This function builds from neighbouring slopes the flow directions. It calls a fortran subroutine that locally computes for each vertice:
+
+        - the indices of receivers (downstream) nodes depending on the desired number of flow directions (SFD to MFD).
+        - the distances to the receivers based on mesh resolution.
+        - the associated weights calculated based on the number of receivers and proportional to the slope.
+
+        :arg h: elevation numpy array
+        """
+
+        t0 = process_time()
+
+        # Define multiple flow directions for unfilled elevation
+        self.rcvID, self.distRcv, self.wghtVal = mfdreceivers(
+            self.flowDir, self.flowExp, self.inIDs, h, self.sealevel
+        )
+
+        # Get open marine regions
+        self.seaID = np.where(self.lFill <= self.sealevel)[0]
+
+        # Set borders nodes
+        if self.flatModel:
+            self.rcvID[self.idBorders, :] = np.tile(self.idBorders, (self.flowDir, 1)).T
+            self.distRcv[self.idBorders, :] = 0.0
+            self.wghtVal[self.idBorders, :] = 0.0
+
+        # Get local nodes with no receivers as boolean array
+        sum_weight = np.sum(self.wghtVal, axis=1)
+        lsink = sum_weight == 0.0
+
+        # We don't consider open sea nodes and borders as sinks
+        lsink[self.idBorders] = False
+        lsink[self.seaID] = False
+        lsink = lsink.astype(int) * self.inIDs
+        self.lsink = lsink == 1
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Flow Direction declaration (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        self.matrixFlow()
+
+        return
+
+    def _distributeDownstream(self, pitVol, FA, hl):
+        """
+        In cases where rivers flow in depressions, they might fill the sink completely and overspill or remain within the depression, forming a lake. This function computes the excess of water (if any) able to flow dowstream.
 
         .. important::
 
             The excess water is then added to the downstream flow accumulation (`FA`) and used to estimate rivers' erosion.
 
+        :arg pitVol: volume of depressions
+        :arg FA: excess flow accumulation array
+
+        :return: pitVol, excess (updated volume in each depression and boolean set to True is excess flow remains to be distributed)
         """
+        excess = False
 
-        t0 = process_time()
-        self.hierarchicalSink(True, True, False, None)
-        lFA = self.FAL.getArray().copy()
-        nFA = np.empty(self.mpoints, dtype=np.float64)
-        nFA[self.locIDs] = lFA
-        nFA[self.outIDs] = 0.0
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nFA, op=MPI.MAX)
-        FA = np.zeros(self.mpoints, dtype=np.float64)
-        FA[self.pitPts] = nFA[self.pitPts]
-        FA[self.sinkID] = 0.0
-        if self.flatModel:
-            FA[self.glBorders] = 0.0
-        self.depo = np.zeros(self.mpoints, dtype=np.float64)
-        inFA = np.where(FA > 0)[0]
+        # Remove points belonging to other processors
+        FA = np.multiply(FA, self.inIDs)
 
-        if len(inFA) == 0:
-            if self.memclear:
-                del lFA, FA, nFA, inFA
-                gc.collect()
-            return
+        # Get volume incoming in each depression
+        grp = npi.group_by(self.pitIDs[self.lsink])
+        uID = grp.unique
+        _, vol = grp.sum(FA[self.lsink])
+        inV = np.zeros(len(self.pitParams), dtype=np.float64)
+        inV[uID] = vol
 
-        step = 0
-        self.flowDist = True
-        while (FA > 0).any():
+        # Combine incoming volume globally
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)
 
-            # Check if FA are in closed sea
-            insea = np.zeros(1, dtype=np.int64)
-            if MPIrank == 0:
-                if (self.sIns[inFA] > -1).any():
-                    insea[0] = 1
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, insea, op=MPI.MAX)
+        # Get excess volume to distribute downstream
+        eV = inV - pitVol
+        if (eV > 0.0).any():
+            eIDs = (eV > 0.0) & (pitVol > 0.0)
+            pitVol[eIDs] = 0.0
+            spillIDs = self.pitInfo[eIDs, 0]
+            localSpill = np.where(self.pitInfo[eIDs, 1] == MPIrank)[0]
+            localPts = spillIDs[localSpill]
+            nFA = np.zeros(self.lpoints, dtype=np.float64)
+            nFA[localPts] = eV[eIDs][localSpill]
+            ids = np.in1d(self.pitIDs, np.where(eV > 0.0)[0])
+            self.waterFilled[ids] = self.epsFill[ids]
 
-            if insea[0] > 0:
-                # Distribute water in closed sea
-                FA = self.distributeSea(FA)
-                # Remove flux that flow into open sea
-                FA[self.sinkID] = 0.0
-                # In case of 2D model remove flow on mesh borders
-                if self.flatModel:
-                    FA[self.glBorders] = 0.0
-
-            # At this point excess water are all in continental regions
-            if (FA > 0).any():
-                FA = self.distributeContinent(FA, None)
-                if self.flatModel:
-                    FA[self.glBorders] = 0.0
-            step += 1
-            if step > 20:
-                break
-
-        # Store lake water volume for each node
-        self.fillFAL.setArray(self.depo[self.locIDs] * self.marea[self.locIDs])
-        self.flowDist = False
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Distribute Excess Flow Downstream (%0.02f seconds)"
-                % (process_time() - t0),
-                flush=True,
+        # Update unfilled depressions volumes and assign water level in depressions
+        if (eV < 0.0).any():
+            eIDs = np.where(eV < 0.0)[0]
+            pitVol[eIDs] += eV[eIDs]
+            nid = np.absolute(self.filled_vol[eIDs] - pitVol[eIDs][:, None]).argmin(
+                axis=1
             )
+            fill_lvl = self.filled_lvl[eIDs, nid]
+            for k in range(len(eIDs)):
+                ids = (self.waterFilled <= fill_lvl[k]) & (self.pitIDs == eIDs[k])
+                self.waterFilled[ids] = fill_lvl[k]
 
-        if self.memclear:
-            del FA, nFA, inFA, lFA
-            gc.collect()
+        # In case there is still remaining water flux to distribute downstream
+        if (eV > 1.0e-6).any():
+            excess = True
+            self._buildFlowDirection(self.waterFilled)
+            self.tmpL.setArray(nFA / self.dt)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            nFA = self.tmpL.getArray().copy() * self.dt
+            ids = hl < self.waterFilled
+            nFA[ids] = 0.0
+            self.tmpL.setArray(nFA / self.dt)
+            self.FAL.axpy(1.0, self.tmpL)
+        else:
+            nFA = None
 
-        return
+        return excess, pitVol, nFA
 
     def flowAccumulation(self):
         """
@@ -455,52 +332,65 @@ class FAMesh(object):
 
         It calls the following *private functions*:
 
-        1. _flowSurface
-        2. _buildFlowDirection
-        3. _distanceCoasts
-        4. _solve_KSP
-        5. _distributeFlowExcess
+        1. _buildFlowDirection
+        2. _solve_KSP
+        3. _distributeDownstream
 
         """
 
-        # self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-
-        # Filled-limited surface used to move river flow downstream
-        gZ, hFill = self._flowSurface()
-
-        # Build flow direction
-        self._buildFlowDirection(hFill[self.locIDs])
-
-        # Define coastal distance for marine points
-        if self.vtkMesh is not None:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                self._distanceCoasts(gZ)
-
-        if self.memclear:
-            del hFill, gZ
-            gc.collect()
-
-        # Build transport direction matrices
         t0 = process_time()
-        self.matrixFlow(True)
 
-        # Solve flow accumulation for filled-limited elevation
-        if self.tNow == self.rStart:
-            self._solve_KSP(False, self.fMat, self.bG, self.FAG)
-        else:
-            self._solve_KSP(True, self.fMat, self.bG, self.FAG)
+        # Compute depressions information
+        self.fillElevation(sed=False)
+        pitVol = self.pitParams[:, 0].copy()
+
+        # Build flow direction and downstream matrix
+        hl = self.hLocal.getArray().copy()
+        self._buildFlowDirection(hl)
+        self.wghtVali = self.wghtVal.copy()
+        self.rcvIDi = self.rcvID.copy()
+        self.distRcvi = self.distRcv.copy()
+        self.fMati = self.fMat.copy()
+        self.lsinki = self.lsink.copy()
+
+        # Solve flow accumulation
+        self._solve_KSP(True, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
+
+        if len(self.pitParams) == 0:
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Compute Flow Accumulation (%0.02f seconds)"
+                    % (process_time() - t0),
+                    flush=True,
+                )
+
+            return
+
+        # Volume of water flowing downstream
+        self.waterFilled = hl.copy()
+        if (pitVol > 0.0).any():
+            FA = self.FAL.getArray().copy() * self.dt
+            excess = True
+            while excess:
+                excess, pitVol, FA = self._distributeDownstream(pitVol, FA, hl)
+            # Get overall water flowing donwstream accounting for filled depressions
+            FA = self.FAL.getArray().copy()
+            ids = hl < self.waterFilled
+            FA[ids] = 0.0
+            self.FAL.setArray(FA)
+            self.dm.localToGlobal(self.FAL, self.FAG)
+            self.dm.globalToLocal(self.FAG, self.FAL)
+            FA[ids] = self.FAG.max()[1] * 0.1
+            self.fillFAL.setArray(FA)
+        else:
+            self.FAL.copy(result=self.fillFAL)
 
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Flow Accumulation (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
-
-        # Distribute excess flow
-        self._distributeFlowExcess()
 
         return
 
@@ -526,7 +416,10 @@ class FAMesh(object):
 
         """
 
-        # Upstream-averaged mean annual precipitation rate and the drainage area
+        hOldArray = self.hLocal.getArray().copy()
+        hOldArray[self.seaID] = self.sealevel
+
+        # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
 
         # Incorporate the effect of local mean annual precipitation rate on erodibility
@@ -535,41 +428,38 @@ class FAMesh(object):
         Kbr[self.seaID] = 0.0
 
         # Initialise identity matrices...
-        EbedMat = self.iMat.copy()
-        wght = self.wghtVal.copy()
+        self.eMat = self.iMat.copy()
+        wght = self.wghtVali.copy()
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        nodes = indptr[:-1]
+        wght[self.seaID, :] = 0.0
 
         # Define erosion coefficients
         for k in range(0, self.flowDir):
 
-            indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-            nodes = indptr[:-1]
             # Define erosion limiter to prevent formation of flat
-            dh = self.hOldArray - self.hOldArray[self.rcvID[:, k]]
-            # Set places which have been filled (e.g. depression/lakes) as no slope regions
-            # dh[self.hFill > self.hOldArray] = 0.0
-            # dh[dh < 0.0] = 0.0
-            limiter = np.divide(dh, dh + 1.0e-3, out=np.zeros_like(dh), where=dh != 0)
+            dh = hOldArray - hOldArray[self.rcvIDi[:, k]]
+            limiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh), where=dh != 0)
 
             # Bedrock erosion processes SPL computation (maximum bedrock incision)
             data = np.divide(
                 Kbr * limiter,
-                self.distRcv[:, k],
+                self.distRcvi[:, k],
                 out=np.zeros_like(PA),
-                where=self.distRcv[:, k] != 0,
+                where=self.distRcvi[:, k] != 0,
             )
             tmpMat = self._matrix_build()
-            wght[self.seaID, k] = 0.0
             data = np.multiply(data, -wght[:, k])
-            data[self.rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+            data[self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                self.rcvID[:, k].astype(petsc4py.PETSc.IntType),
+                self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType),
                 data,
             )
             tmpMat.assemblyEnd()
-            EbedMat += tmpMat
-            EbedMat -= self._matrix_build_diag(data)
+            self.eMat += tmpMat
+            self.eMat -= self._matrix_build_diag(data)
             tmpMat.destroy()
 
         if self.memclear:
@@ -577,8 +467,7 @@ class FAMesh(object):
             gc.collect()
 
         # Solve bedrock erosion thickness
-        self._solve_KSP(True, EbedMat, self.hOld, self.stepED)
-        EbedMat.destroy()
+        self._solve_KSP(True, self.eMat, self.hOld, self.stepED)
         self.tmp.waxpy(-1.0, self.hOld, self.stepED)
 
         # Define erosion rate (positive for incision)
@@ -590,14 +479,8 @@ class FAMesh(object):
         E = self.EbLocal.getArray().copy()
 
         E[self.seaID] = 0.0
-        ids = np.where(
-            (self.hOldArray > self.sealevel + 1.0e-2)
-            & (self.hOldArray - E * self.dt < self.sealevel + 1.0e-2)
-        )[0]
-        E[ids] = (self.hOldArray[ids] - self.sealevel - 1.0e-2) / self.dt
         if self.flatModel:
             E[self.idBorders] = 0.0
-        # E[self.hFill > self.hOldArray] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)
 
@@ -624,12 +507,10 @@ class FAMesh(object):
 
         t0 = process_time()
 
-        # Local & global vectors/arrays
+        # Computes the erosion rates based on flow accumulation
         self.Eb.set(0.0)
         self.hGlobal.copy(result=self.hOld)
         self.dm.globalToLocal(self.hOld, self.hOldLocal)
-        self.hOldArray = self.hOldLocal.getArray().copy()
-
         self._getErosionRate()
 
         # Get eroded thicknesses
@@ -637,7 +518,6 @@ class FAMesh(object):
         self.tmp.setArray(-Eb * self.dt)
         self.cumED.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 

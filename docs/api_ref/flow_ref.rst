@@ -26,11 +26,10 @@ Class FAMesh
    .. autosummary::
 
       ~FAMesh._buildFlowDirection
-      ~FAMesh._depressionlessSurface
       ~FAMesh._distanceCoasts
-      ~FAMesh._distributeFlowExcess
-      ~FAMesh._flowSurface
+      ~FAMesh._distributeDownstream
       ~FAMesh._getErosionRate
+      ~FAMesh._globalCoastsTree
       ~FAMesh._matrix_build
       ~FAMesh._matrix_build_diag
       ~FAMesh._solve_KSP
@@ -47,11 +46,10 @@ Private functions
 ---------------------
 
 .. automethod:: flow.flowplex.FAMesh._buildFlowDirection
-.. automethod:: flow.flowplex.FAMesh._depressionlessSurface
 .. automethod:: flow.flowplex.FAMesh._distanceCoasts
-.. automethod:: flow.flowplex.FAMesh._distributeFlowExcess
-.. automethod:: flow.flowplex.FAMesh._flowSurface
+.. automethod:: flow.flowplex.FAMesh._distributeDownstream
 .. automethod:: flow.flowplex.FAMesh._getErosionRate
+.. automethod:: flow.flowplex.FAMesh._globalCoastsTree
 .. automethod:: flow.flowplex.FAMesh._matrix_build
 .. automethod:: flow.flowplex.FAMesh._matrix_build_diag
 .. automethod:: flow.flowplex.FAMesh._solve_KSP

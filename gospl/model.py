@@ -7,6 +7,7 @@ if "READTHEDOCS" not in os.environ:
     from .flow import FAMesh as _FAMesh
     from .flow import PITFill as _PITFill
     from .sed import SEDMesh as _SEDMesh
+    from .sed import SEAMesh as _SEAMesh
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
@@ -38,6 +39,10 @@ else:
         def __init__(self):
             pass
 
+    class _SEAMesh(object):
+        def __init__(self):
+            pass
+
     class _STRAMesh(object):
         def __init__(self):
             pass
@@ -46,7 +51,9 @@ else:
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
-class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _PITFill, _SEDMesh, _STRAMesh):
+class Model(
+    _ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _PITFill, _SEDMesh, _SEAMesh, _STRAMesh
+):
     """
     Instantiates model object and performs surface processes evolution.
 
@@ -98,6 +105,9 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _PITFill, _SEDMesh, _STRA
         # Sediment initialisation
         _SEDMesh.__init__(self, *args, **kwargs)
 
+        # Sediment initialisation
+        _SEAMesh.__init__(self, *args, **kwargs)
+
         # Check if simulations just restarted
         if self.rStep > 0:
             _WriteMesh.readData(self)
@@ -145,10 +155,10 @@ class Model(_ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _PITFill, _SEDMesh, _STRA
             if not self.fast:
                 # Perform River Incision
                 _FAMesh.riverIncision(self)
-                # Find Continental Sediment Fluxes
-                _SEDMesh.getSedFlux(self)
-                # Downstream sediment deposition
+                # Downstream sediment deposition inland
                 _SEDMesh.sedChange(self)
+                # Downstream sediment deposition in sea
+                _SEAMesh.seaChange(self)
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 

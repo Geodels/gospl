@@ -317,14 +317,6 @@ class ReadYaml(object):
                 )
                 raise ValueError("Surface Process Model: Kb coefficient not found.")
             try:
-                self.waterfill = splDict["wfill"]
-            except KeyError:
-                self.waterfill = 100.0
-            try:
-                self.sedfill = splDict["sfill"]
-            except KeyError:
-                self.sedfill = 50.0
-            try:
                 self.coeffd = splDict["d"]
             except KeyError:
                 self.coeffd = 0.0
@@ -339,8 +331,6 @@ class ReadYaml(object):
 
         except KeyError:
             self.K = 1.0e-12
-            self.waterfill = 100.0
-            self.sedfill = 50.0
             # self.wght = 0.0
             self.coeffd = 0.0
 
@@ -377,31 +367,21 @@ class ReadYaml(object):
             try:
                 self.sedimentK = hillDict["sedK"]
             except KeyError:
-                self.sedimentK = 10000.0
+                self.sedimentK = 1.0
             try:
                 self.sedimentKf = hillDict["sedKf"]
             except KeyError:
-                self.sedimentKf = 20000.0
+                self.sedimentKf = 2.0
             try:
                 self.sedimentKw = hillDict["sedKw"]
             except KeyError:
-                self.sedimentKw = 30000.0
-            try:
-                self.marinestep = hillDict["mstep"]
-            except KeyError:
-                self.marinestep = 3
-            try:
-                self.diffstep = hillDict["dstep"]
-            except KeyError:
-                self.diffstep = 5
+                self.sedimentKw = 3.0
         except KeyError:
             self.Cda = 0.0
             self.Cdm = 0.0
-            self.sedimentK = 10000.0
-            self.sedimentKf = 20000.0
-            self.sedimentKw = 30000.0
-            self.marinestep = 3
-            self.diffstep = 5
+            self.sedimentK = 1.0
+            self.sedimentKf = 2.0
+            self.sedimentKw = 3.0
 
         return
 

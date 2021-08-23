@@ -288,7 +288,6 @@ class WriteMesh(object):
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
         - flow accumulation `flowAcc` before pit filling.
-        - flow accumulation `fillAcc` for depressionless surface.
         - river sediment load `sedLoad`.
         - fine sediment load `sedLoadf` when dual lithologies are accounted for.
         - carbonate sediment load `sedLoadc` when carbonate module is turned on.
@@ -351,17 +350,17 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.FAL.getArray().copy()
-            data[data <= 0.0] = 1.0
+            # data[data <= 0.0] = 1.0
             f["flowAcc"][:, 0] = data
             f.create_dataset(
-                "fillAcc",
+                "fillFA",
                 shape=(self.lpoints, 1),
                 dtype="float32",
                 compression="gzip",
             )
             data = self.fillFAL.getArray().copy()
-            data[data <= 0.0] = 1.0
-            f["fillAcc"][:, 0] = data
+            # data[data <= 0.0] = 1.0
+            f["fillFA"][:, 0] = data
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
@@ -369,7 +368,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.vSedLocal.getArray().copy()
-            data[data <= 0.0] = 1.0
+            # data[data <= 0.0] = 1.0
             f["sedLoad"][:, 0] = data
             if self.stratNb > 0:
                 if self.stratF is not None:
@@ -488,7 +487,7 @@ class WriteMesh(object):
         self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
         self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
-        self.fillFAL.setArray(np.array(hf["/fillAcc"])[:, 0])
+        self.fillFAL.setArray(np.array(hf["/fillFA"])[:, 0])
         self.dm.localToGlobal(self.FAL, self.FAG)
         if self.stratNb > 0:
             if self.stratF is not None:
@@ -748,12 +747,12 @@ class WriteMesh(object):
             )
             f.write("         </Attribute>\n")
 
-            f.write('         <Attribute Type="Scalar" Center="Node" Name="lake">\n')
+            f.write('         <Attribute Type="Scalar" Center="Node" Name="fillFA">\n')
             f.write(
                 '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
             )
             f.write(
-                'Dimensions="%d 1">%s:/fillAcc</DataItem>\n' % (self.nodes[p], pfile)
+                'Dimensions="%d 1">%s:/fillFA</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
 

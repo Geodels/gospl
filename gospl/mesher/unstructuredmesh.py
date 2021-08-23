@@ -17,7 +17,6 @@ from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import definetin
-    from gospl._fortran import ngbglob
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -113,11 +112,9 @@ class UnstMesh(object):
 
         # Create mesh structure with meshplex
         t0 = process_time()
-        Tmesh = meshplex.MeshTri(self.mCoords, self.mCells)
-        self.marea = np.abs(Tmesh.control_volumes)
-        self.marea[np.isnan(self.marea)] = 1.0
-        self.larea = self.marea[self.locIDs]
-        self.garea = self.marea[self.glbIDs]
+        Tmesh = meshplex.MeshTri(self.lcoords, self.lcells)
+        self.larea = np.abs(Tmesh.control_volumes)
+        self.larea[np.isnan(self.larea)] = 1.0
 
         # Voronoi and simplices declaration
         Tmesh.create_edges()
@@ -137,13 +134,11 @@ class UnstMesh(object):
 
         # Finite volume discretisation
         self.FVmesh_ngbID, self.edgeMax = definetin(
-            self.lpoints,
-            self.mCoords,
-            self.lgIDs,
+            self.lcoords,
             cells_nodes,
             cells_edges,
             edges_nodes,
-            self.marea,
+            self.larea,
             cc.T,
         )
 
@@ -189,7 +184,7 @@ class UnstMesh(object):
         gZ = loadData["z"]
         self.hLocal.setArray(gZ[self.locIDs])
         self.hGlobal.setArray(gZ[self.glbIDs])
-        # self.dm.localToGlobal(self.hLocal, self.hGlobal)
+
         self.vSed.set(0.0)
         self.vSedLocal.set(0.0)
         if self.stratNb > 0:
@@ -331,13 +326,6 @@ class UnstMesh(object):
         self.mCells = loadData["c"].astype(int)
         self.vtkMesh = None
         self.flatModel = False
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore")
-            self._generateVTKmesh(self.mCoords, self.mCells)
-
-        # Store global neighbouring on process rank 0
-        if MPIrank == 0:
-            ngbglob(self.mpoints, loadData["n"])
         if MPIrank == 0 and self.verbose:
             print(
                 "Reading mesh information (%0.02f seconds)" % (process_time() - t0),
@@ -345,6 +333,7 @@ class UnstMesh(object):
             )
 
         # Create DMPlex
+        t0 = process_time()
         self._meshfrom_cell_list(2, loadData["c"], self.mCoords)
         del loadData
         gc.collect()
@@ -387,7 +376,6 @@ class UnstMesh(object):
 
         # Define local vertex & cells
         t0 = process_time()
-
         self.gcoords = self.dm.getCoordinates().array.reshape(-1, 3)
         self.lcoords = self.dm.getCoordinatesLocal().array.reshape(-1, 3)
         self.gpoints = self.gcoords.shape[0]
@@ -405,6 +393,17 @@ class UnstMesh(object):
         if MPIrank == 0 and self.verbose:
             print(
                 "Defining local DMPlex (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        # Build local VTK mesh
+        t0 = process_time()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
+            self._generateVTKmesh(self.lcoords, self.lcells)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Generate VTK mesh (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
@@ -512,8 +511,9 @@ class UnstMesh(object):
 
         self.sealevel = self.seafunction(self.tNow)
         self.areaGlobal = self.hGlobal.duplicate()
-        self.areaGlobal.setArray(self.garea)
-        self.minArea = self.areaGlobal.min()
+        self.areaLocal = self.hLocal.duplicate()
+        self.areaLocal.setArray(self.larea)
+        self.dm.localToGlobal(self.areaLocal, self.areaGlobal)
 
         # Forcing event number
         self.bG = self.hGlobal.duplicate()
@@ -710,27 +710,16 @@ class UnstMesh(object):
 
             if pd.isnull(self.raindata["rUni"][nb]):
                 loadData = np.load(self.raindata.iloc[nb, 2])
-                rainArea = loadData[self.raindata.iloc[nb, 3]]
+                rainVal = loadData[self.raindata.iloc[nb, 3]]
                 del loadData
             else:
-                rainArea = np.full(self.mpoints, self.raindata.iloc[nb, 1])
+                rainVal = np.full(self.mpoints, self.raindata.iloc[nb, 1])
 
-            self.rainArea = rainArea * self.marea
+            self.rainMesh = rainVal
 
-        self.rainVal = self.rainArea[self.locIDs] / self.marea[self.locIDs]
-        tmpZ = self.hLocal.getArray()
-        rainArea = self.rainArea[self.locIDs]
-        rainArea[tmpZ < self.sealevel] = 0.0
-        self.bL.setArray(rainArea)
-
-        tmpZ = self.hGlobal.getArray()
-        rainArea = self.rainArea[self.glbIDs]
-        rainArea[tmpZ < self.sealevel] = 0.0
-        self.bG.setArray(rainArea)
-
-        if self.memclear:
-            del rainArea, tmpZ
-            gc.collect()
+        self.rainVal = self.rainMesh[self.locIDs]
+        self.bL.setArray(self.rainVal * self.larea)
+        self.dm.localToGlobal(self.bL, self.bG)
 
         return
 
