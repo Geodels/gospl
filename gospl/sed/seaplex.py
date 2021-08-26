@@ -296,26 +296,28 @@ class SEAMesh(object):
         ts.setIJacobian(self._evalJacobian, self.mat)
 
         ts.setTime(0.0)
-        ts.setTimeStep(1.0)  # self.dt / 100.0)
+        ts.setTimeStep(self.dt / 10.0)  # self.dt / 100.0)
         ts.setMaxTime(self.dt)
         ts.setMaxSteps(50)
         ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
         # Allow an unlimited number of failures (step will be rejected and retried)
         ts.setMaxSNESFailures(-1)
+        ts.setTolerances(rtol=1.0e-8)
 
         # SNES nonlinear solver definition
         snes = ts.getSNES()
         # Newton linear search
         snes.setType("newtonls")
-        # Stop nonlinear solve after 50 iterations (TS will retry with shorter step)
-        snes.setTolerances(max_it=10)
+        # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
+        snes.setTolerances(rtol=1.0e-8, max_it=10)
 
         # KSP linear solver definition
         ksp = snes.getKSP()
-        ksp.setType("gmres")
+        ksp.setType("fgmres")
         # Preconditioner for linear solution
         pc = ksp.getPC()
         pc.setType("asm")
+        pc.setASMOverlap(3)
         ksp.setTolerances(rtol=1.0e-8)
         ksp.setFromOptions()
         snes.setFromOptions()
