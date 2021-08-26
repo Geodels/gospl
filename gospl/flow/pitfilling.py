@@ -1,7 +1,6 @@
 import os
 import gc
 import sys
-import warnings
 import petsc4py
 import numpy as np
 import pandas as pd
