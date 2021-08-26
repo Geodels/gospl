@@ -18,7 +18,7 @@ This page gives an overview of all :mod:`gospl` objects, functions and methods.
   :target: https://lgtm.com/projects/g/Geodels/gospl/context:python
   :alt: Language grade: Python
 
-Main classes
+Model class
 --------------
 
 .. raw:: html
@@ -36,6 +36,10 @@ Main classes
 .. container:: custom-button
 
     :ref:`See functions and source code <model_ref>`
+
+
+Mesh class
+--------------
 
 .. raw:: html
 
@@ -55,6 +59,9 @@ Main classes
 
     :ref:`See functions and source code <mesh_ref>`
 
+Depression filling class
+--------------------------
+
 .. raw:: html
 
                 </div>
@@ -71,6 +78,9 @@ Main classes
 .. container:: custom-button
 
     :ref:`See functions and source code <pit_ref>`
+
+Flow & erosion class
+--------------------------
 
 .. raw:: html
 
@@ -89,6 +99,9 @@ Main classes
 
     :ref:`See functions and source code <flow_ref>`
 
+Sediment deposition classes
+-----------------------------
+
 .. raw:: html
 
                 </div>
@@ -105,7 +118,12 @@ Main classes
 
 .. container:: custom-button
 
-    :ref:`Land functions <sed_ref>` - :ref:`marine functions<sea_ref>` 
+    :ref:`Land functions <sed_ref>` - :ref:`marine functions<sea_ref>`
+
+
+Stratigraphy class
+--------------------------
+
 
 .. raw:: html
 
@@ -124,6 +142,9 @@ Main classes
 .. container:: custom-button
 
     :ref:`See functions and source code <stra_ref>`
+
+Inputs & outputs classes
+--------------------------
 
 .. raw:: html
 
