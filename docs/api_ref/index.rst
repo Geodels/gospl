@@ -37,15 +37,21 @@ Model class
 
     :ref:`See functions and source code <model_ref>`
 
+.. raw:: html
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
 Mesh class
 --------------
 
 .. raw:: html
 
-                </div>
-                </div>
-            </div>
+    <div class="container">
+        <div class="row">
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
@@ -59,14 +65,21 @@ Mesh class
 
     :ref:`See functions and source code <mesh_ref>`
 
+.. raw:: html
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
 Depression filling class
 --------------------------
 
 .. raw:: html
 
-                </div>
-                </div>
-            </div>
+    <div class="container">
+        <div class="row">
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
@@ -79,14 +92,21 @@ Depression filling class
 
     :ref:`See functions and source code <pit_ref>`
 
+.. raw:: html
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
 Flow & erosion class
 --------------------------
 
 .. raw:: html
 
-                </div>
-                </div>
-            </div>
+    <div class="container">
+        <div class="row">
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
@@ -99,14 +119,21 @@ Flow & erosion class
 
     :ref:`See functions and source code <flow_ref>`
 
+.. raw:: html
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
 Sediment deposition classes
 -----------------------------
 
 .. raw:: html
 
-                </div>
-                </div>
-            </div>
+    <div class="container">
+        <div class="row">
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
@@ -120,6 +147,14 @@ Sediment deposition classes
 
     :ref:`Land functions <sed_ref>` - :ref:`marine functions<sea_ref>`
 
+.. raw:: html
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
 
 Stratigraphy class
 --------------------------
@@ -127,9 +162,8 @@ Stratigraphy class
 
 .. raw:: html
 
-                </div>
-                </div>
-            </div>
+    <div class="container">
+        <div class="row">
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
@@ -143,14 +177,21 @@ Stratigraphy class
 
     :ref:`See functions and source code <stra_ref>`
 
+.. raw:: html
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
 Inputs & outputs classes
 --------------------------
 
 .. raw:: html
 
-                </div>
-                </div>
-            </div>
+    <div class="container">
+        <div class="row">
             <div class="col-12 d-flex install-block">
                 <div class="card install-card shadow w-100">
                 <div class="card-header">
