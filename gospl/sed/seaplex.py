@@ -14,7 +14,8 @@ from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import sethillslopecoeff
-    from gospl._fortran import setjacobiancoeff
+    from gospl._fortran import jacobiancoeff
+    from gospl._fortran import fctcoeff
     from gospl._fortran import mfdreceivers
     from gospl._fortran import distocean
 
@@ -40,8 +41,6 @@ class SEAMesh(object):
         The initialisation of `SEAMesh` class consists in the declaration of several PETSc vectors.
         """
 
-        self.nleps = 1.0e-4
-        self.max_iter = 500
         self.coastDist = None
 
         self.zMat = self._matrix_build_diag(np.zeros(self.lpoints))
@@ -52,9 +51,12 @@ class SEAMesh(object):
         self.dhl = self.hLocal.duplicate()
         self.dh = self.hGlobal.duplicate()
         self.h0 = self.hGlobal.duplicate()
+        self.hl0 = self.hLocal.duplicate()
         self.h = self.hGlobal.duplicate()
         self.hl = self.hLocal.duplicate()
         self.zb = self.hGlobal.duplicate()
+        self.mat = self.dm.createMatrix()
+        self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
 
         return
 
@@ -194,111 +196,52 @@ class SEAMesh(object):
 
         return
 
-    def _nlCoefficents(self):
-        r"""
-        Nonlinear diffusion coefficients based on each iteration freshly deposited thicknesses. In addition diffusion coefficient derivatives with respect to the independent variable `h` in the function below is computed and used in the Jacobian calculation.
-
-        .. math::
-          C_d = \kappa_{Ds} (h-z_b)^2
-
-        in which :math:`\kappa_{Ds}` is the diffusion coefficient for river sediment transport (set with `sedK` in the YAML input file) and :math:`z_b` the basement elevation at the start of the iteration.
+    def _evalFunction(self, ts, t, x, xdot, f):
+        """
+        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES method and is based on a Newton/GMRES method. . Here we define the function for the nonlinear solve.
 
         """
 
-        self.dh.waxpy(-1.0, self.hGlobal, self.h)
-        self.dm.globalToLocal(self.dh, self.dhl)
-        dh = self.dhl.getArray().copy()
+        self.dm.globalToLocal(x, self.hl)
+        with self.hl as hl, self.hLocal as zb, xdot as hdot:
+            dh = hl - zb
+            dh[dh < 0] = 0.0
+            Cd = np.multiply(self.Cd, dh ** 2)
+            nlvec = fctcoeff(hl, Cd)
+            # Set borders nodes
+            if self.flatModel:
+                nlvec[self.idBorders] = 0.0
+            f.setArray(hdot + nlvec[self.lIDs])
 
-        # Non linear coefficients
-        self.C = np.multiply(self.Cd, dh ** 2)
-
-        # Derivative from h
-        self.Cp = 2.0 * dh * self.Cd.copy()
-
-        return
-
-    def _RHSvector(self):
+    def _evalJacobian(self, ts, t, x, xdot, a, J, P):
         """
-        The nonlinear system at each time step is solved iteratively using a Newton/GMRES method. In the solution process, the right-hand side vector has to be evaluated.
-
-        """
-
-        self._nlCoefficents()
-        rhsCoeffs = sethillslopecoeff(self.lpoints, self.C)
-        if self.flatModel:
-            rhsCoeffs[self.idBorders, 1:] = 0.0
-            rhsCoeffs[self.idBorders, 0] = 1.0
-
-        rhs = self._matrix_build_diag(rhsCoeffs[:, 0])
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-
-        for k in range(0, self.maxnb):
-            tmpMat = self._matrix_build()
-            indices = self.FVmesh_ngbID[:, k].copy()
-            data = rhsCoeffs[:, k + 1]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-            rhs += tmpMat
-            tmpMat.destroy()
-
-        # Compute RHS vector
-        rhs.mult(self.h, self.tmp1)
-        self.tmp.waxpy(-1.0, self.tmp1, self.h0)
-        rhs.destroy()
-
-        return
-
-    def _Jacobian(self):
-        """
-        The nonlinear system at each time step is solved iteratively using a Newton/GMRES method. In the solution process, the Jacobian matrix–vector products have to be evaluated.
+        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES method and is based on a Newton/GMRES method. Here we define the Jacobian for the nonlinear solve.
 
         """
 
-        h = self.hl.getArray().copy()
-        jCoeffs = setjacobiancoeff(self.lpoints, h, self.C, self.Cp)
-        if self.flatModel:
-            jCoeffs[self.idBorders, 1:] = 0.0
-            jCoeffs[self.idBorders, 0] = 1.0
+        self.dm.globalToLocal(x, self.hl)
 
-        J = self._matrix_build_diag(jCoeffs[:, 0])
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        with self.hl as hl, self.hLocal as zb:
+            dh = hl - zb
+            dh[dh < 0] = 0.0
+            Cd = np.multiply(self.Cd, dh ** 2)
+            # Coefficient derivatives
+            Cp = 2.0 * np.multiply(self.Cd, dh)
+            nlC = jacobiancoeff(hl, Cd, Cp)
+            if self.flatModel:
+                nlC[self.idBorders, :] = 0.0
 
-        for k in range(0, self.maxnb):
-            tmpMat = self._matrix_build()
-            indices = self.FVmesh_ngbID[:, k].copy()
-            data = jCoeffs[:, k + 1]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-            J += tmpMat
-            tmpMat.destroy()
+            P.zeroEntries()
+            for row in range(self.lpoints):
+                P.setValuesLocal(row, row, a + nlC[row, 0])
+                cols = self.FVmesh_ngbID[row, :]
+                P.setValuesLocal(row, cols, nlC[row, 1:])
+            P.assemble()
 
-        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
-        ksp.setInitialGuessNonzero(True)
-        ksp.setOperators(J, J)
-        ksp.setType("gmres")
-        pc = ksp.getPC()
-        pc.setType("asm")
-        ksp.setTolerances(rtol=self.rtol)
-        ksp.solve(self.tmp, self.dh)
+            if J != P:
+                J.assemble()
 
-        ksp.destroy()
-        J.destroy()
-
-        return
+        return petsc4py.PETSc.Mat.Structure.SAME_NONZERO_PATTERN
 
     def _diffuseOcean(self, dh, stype):
         r"""
@@ -307,20 +250,16 @@ class SEAMesh(object):
         .. math::
           \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d(h) \nabla h \right)
 
-        .. important::
-
-            PETSc **KSP** component provides Krylov subspace iterative method and several preconditioner. Here, we use Newton's method to solve the nonlinear equation using generalized minimal residual solver (`gmres`) with the Additive Schwarz method preconditioning (`asm`).
-
         It calls the following *private functions*:
 
-        - _RHSvector
-        - _Jacobian
+        - _evalFunction
+        - _evalJacobian
 
         .. note::
 
-            SNES and time stepping approach might provide a better convergence rate than the one implemented here.
+            PETSc SNES and time stepping TS approaches are used to solve the nonlinear equation above over the considered time step.
 
-        The nondiffusion equation is ran for the coarser sediment first and for the finest ones afterwards. This mimicks the standard behaviour observed in stratigraphic architectures where the fine fraction are generally transported over longer distances.
+        The nonlinear diffusion equation is ran for the coarser sediment first and for the finest ones afterwards. This mimicks the standard behaviour observed in stratigraphic architectures where the fine fraction are generally transported over longer distances.
 
         :arg dh: numpy array of incoming marine depositional thicknesses
         :arg stype: sediment type (integer)
@@ -339,7 +278,7 @@ class SEAMesh(object):
                 sedK = self.sedimentKw
 
         # Matrix coefficients
-        self.Cd = np.full(self.lpoints, sedK, dtype=np.float64) * self.dt
+        self.Cd = np.full(self.lpoints, sedK, dtype=np.float64)
 
         self.dhl.setArray(dh)
         self.dm.localToGlobal(self.dhl, self.dh)
@@ -347,36 +286,66 @@ class SEAMesh(object):
         self.h0.waxpy(1.0, self.dh, self.hGlobal)
         self.h0.copy(result=self.h)
         self.dm.globalToLocal(self.h, self.hl)
+        self.hl0.copy(result=self.hl)
 
-        # Non linear diffusion
-        residual = 1.0
-        step = 0
-        while residual > self.nleps and step < self.max_iter:
-            self._RHSvector()
-            self._Jacobian()
-            self.h.axpy(1.0, self.dh)
-            h = self.h.getArray().copy()
-            zb = self.hGlobal.getArray().copy()
-            h[zb > h] = zb[zb > h]
-            self.h.setArray(h)
-            self.dm.globalToLocal(self.h, self.hl)
-            residual = np.abs(self.dh.max()[1])
-            step += 1
+        # Time stepping definition
+        ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
+        # ARKIMEX: implicit nonlinearl time stepping
+        ts.setType("arkimex")
+        ts.setIFunction(self._evalFunction, self.tmp1)
+        ts.setIJacobian(self._evalJacobian, self.mat)
+
+        ts.setTime(0.0)
+        ts.setTimeStep(1.0)  # self.dt / 100.0)
+        ts.setMaxTime(self.dt)
+        ts.setMaxSteps(50)
+        ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
+        # Allow an unlimited number of failures (step will be rejected and retried)
+        ts.setMaxSNESFailures(-1)
+
+        # SNES nonlinear solver definition
+        snes = ts.getSNES()
+        # Newton linear search
+        snes.setType("newtonls")
+        # Stop nonlinear solve after 50 iterations (TS will retry with shorter step)
+        snes.setTolerances(max_it=10)
+
+        # KSP linear solver definition
+        ksp = snes.getKSP()
+        ksp.setType("gmres")
+        # Preconditioner for linear solution
+        pc = ksp.getPC()
+        pc.setType("asm")
+        ksp.setTolerances(rtol=1.0e-8)
+        ksp.setFromOptions()
+        snes.setFromOptions()
+        ts.setFromOptions()
+
+        # Solve nonlinear equation
+        ts.solve(self.h)
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Non-linear convergence steps %d with residual %0.05f"
-                % (step, residual),
+                "Nonlinear diffusion solution (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
             print(
-                "Diffuse Marine Sediments (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
+                "steps %d (%d rejected, %d SNES fails), nonlinear its %d, linear its %d"
+                % (
+                    ts.getStepNumber(),
+                    ts.getStepRejections(),
+                    ts.getSNESFailures(),
+                    ts.getSNESIterations(),
+                    ts.getKSPIterations(),
+                )
             )
+        ts.destroy()
 
+        # Get diffused sediment thicknesses
         self.dh.waxpy(-1.0, self.hGlobal, self.h)
         self.dm.globalToLocal(self.dh, self.dhl)
         ndepo = self.dhl.getArray().copy()
+
         if self.flatModel:
             ndepo[self.idBorders] = 0.0
         ndepo[ndepo < 0.0] = 0.0

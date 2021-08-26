@@ -2,7 +2,7 @@ python module _fortran
 
     interface
 
-        subroutine setmaxnb(nb,maxnb) 
+        subroutine setmaxnb(nb,maxnb)
             integer :: nb
             integer intent(out) :: maxnb
         end subroutine setmaxnb
@@ -13,13 +13,20 @@ python module _fortran
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine sethillslopecoeff
 
-        subroutine setjacobiancoeff(nb,h,kd,kp,dcoeff)
-            integer :: nb
-            double precision dimension(nb),intent(in),depend(nb) :: h
+        subroutine jacobiancoeff(h,kd,kp,dcoeff,nb)
+            double precision dimension(nb),intent(in) :: h
             double precision dimension(nb),intent(in),depend(nb) :: kd
             double precision dimension(nb),intent(in),depend(nb) :: kp
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
-        end subroutine setjacobiancoeff
+            integer, optional,check(len(h)>=nb),depend(h) :: nb=len(h)
+        end subroutine jacobiancoeff
+
+        subroutine fctcoeff(h,kd,dcoeff,nb)
+            double precision dimension(nb),intent(in) :: h
+            double precision dimension(nb),intent(in),depend(nb) :: kd
+            double precision dimension(nb),intent(out),depend(nb) :: dcoeff
+            integer, optional,check(len(h)>=nb),depend(h) :: nb=len(h)
+        end subroutine fctcoeff
 
         subroutine scale_volume(ids,vscale,scale,nb,n)
             integer dimension(nb),intent(in) :: ids

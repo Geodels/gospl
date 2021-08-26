@@ -269,19 +269,24 @@ class PITFill(object):
         spillPos = -np.ones((len(self.pitInfo), 3), dtype=np.float64) * 1.0e12
         ids = []
         for k in range(len(self.pitInfo)):
-            if self.pitInfo[k, 1] == MPIrank:
-                hmax[k] = self.lFill[self.pitInfo[k, 0]]
-                spillPos[k, :] = self.lcoords[self.pitInfo[k, 0], :]
-            ids.append(np.where(self.pitIDs == k)[0])
+            if self.pitInfo[k, 1] > -1:
+                if self.pitInfo[k, 1] == MPIrank:
+                    hmax[k] = self.lFill[self.pitInfo[k, 0]]
+                    spillPos[k, :] = self.lcoords[self.pitInfo[k, 0], :]
+                ids.append(np.where(self.pitIDs == k)[0])
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, hmax, op=MPI.MAX)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillPos, op=MPI.MAX)
 
         # Get the filling + epsilon elevation from distance to spillover points
+        p = 0
         for k in range(len(self.pitInfo)):
-            if len(ids[k]) > 0:
-                dist2 = np.sum((self.lcoords[ids[k], :] - spillPos[k, :]) ** 2, axis=1)
-                self.epsFill[ids[k]] = hmax[k] + self.eps * np.sqrt(dist2)
-
+            if self.pitInfo[k, 1] > -1:
+                if len(ids[p]) > 0:
+                    dist2 = np.sum(
+                        (self.lcoords[ids[p], :] - spillPos[k, :]) ** 2, axis=1
+                    )
+                    self.epsFill[ids[p]] = hmax[k] + self.eps * np.sqrt(dist2)
+                p += 1
         # Filling with slope on the edges of the depressions
         ids = np.where(self.pitIDs > -1)[0]
         if len(ids) > 0:
@@ -541,9 +546,9 @@ class PITFill(object):
         self._getPitParams(h, pitnbs)
 
         # Remove depressions with minimal volumes
-        if sed:
+        if sed:  # True:  # sed:
             update = False
-            minh = 1.0e-4  # 1 cm
+            minh = 1.0e-2  # 1 cm
             minvol = np.zeros(1, dtype=np.float64)
             areas = self.larea.copy()
             areas[self.inIDs < 1] = 0.0

@@ -241,7 +241,7 @@ class FAMesh(object):
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Flow Direction declaration (%0.02f seconds)" % (process_time() - t0),
+                "Direction declaration (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 
@@ -303,7 +303,7 @@ class FAMesh(object):
                 self.waterFilled[ids] = fill_lvl[k]
 
         # In case there is still remaining water flux to distribute downstream
-        if (eV > 1.0e-6).any():
+        if (eV > 1.0e-3).any():
             excess = True
             self._buildFlowDirection(self.waterFilled)
             self.tmpL.setArray(nFA / self.dt)

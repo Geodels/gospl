@@ -196,7 +196,7 @@ class SEDMesh(object):
         self.pitVol[self.pitVol < 0] = 0.0
 
         # In case there is still remaining water flux to distribute downstream
-        if (eV > 1.0e-6).any():
+        if (eV > 1.0e-3).any():
             excess = True
             self._buildFlowDirection(self.sedFilled)
             self.tmpL.setArray(nvSed)

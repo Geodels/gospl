@@ -245,6 +245,15 @@ class ReadYaml(object):
         except KeyError:
             self.rStep = 0
 
+        if self.tout > self.tEnd:
+            self.tout = self.tEnd
+            print(
+                "Output time interval was changed to {} years to match the end time".format(
+                    self.dt
+                ),
+                flush=True,
+            )
+
         if self.tout < self.dt:
             self.tout = self.dt
             print(
@@ -763,7 +772,7 @@ class ReadYaml(object):
                     ],
                     ignore_index=True,
                 )
-            self.raindata = raindata[raindata["start"] >= self.tStart]
+            self.raindata = raindata.copy()  # [raindata["start"] >= self.tStart]
             self.raindata.reset_index(drop=True, inplace=True)
             self.rainNb = len(self.raindata)
 

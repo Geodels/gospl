@@ -461,23 +461,61 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
-subroutine setjacobiancoeff(nb, h, Kd, Kp, dcoeff)
+subroutine fctcoeff(h, Kd, dcoeff, nb)
 !*****************************************************************************
-! Define Jacobian coefficients based on a finite volume spatial
+! Define the nonlinear diffusion coefficients based on a finite volume spatial
 ! discretisation as proposed in Tucker et al. (2001).
 
     use meshparams
     implicit none
 
     integer :: nb
+    double precision, intent(in) :: h(nb)
+    double precision, intent(in) :: Kd(nb)
+    double precision, intent(out) :: dcoeff(nb)
 
+    integer :: k, p, n
+    double precision :: s1, c, ck, cn, v
+
+    dcoeff = 0.
+    do k = 1, nb
+      s1 = 0.
+      if(FVarea(k)>0)then
+        ck = Kd(k)
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            n = FVnID(k,p)+1
+            cn = Kd(n)
+            c = 0.5*(ck+cn)/FVarea(k)
+            v = c*FVvDist(k,p)/FVeLgt(k,p)
+            dcoeff(k) = dcoeff(k) - v*h(n)
+            s1 = s1 + v
+          endif
+        enddo
+        dcoeff(k) = dcoeff(k) + s1*h(k)
+      endif
+    enddo
+
+    return
+
+end subroutine fctcoeff
+
+subroutine jacobiancoeff(h, Kd, Kp, dcoeff, nb)
+!*****************************************************************************
+! Define the nonlinear jacobian coefficients based on a finite volume spatial
+! discretisation as proposed in Tucker et al. (2001).
+
+    use meshparams
+    implicit none
+
+    integer :: nb
     double precision, intent(in) :: h(nb)
     double precision, intent(in) :: Kd(nb)
     double precision, intent(in) :: Kp(nb)
     double precision, intent(out) :: dcoeff(nb,9)
 
     integer :: k, p, n
-    double precision :: s1, c, ck, cpk, cn, cpn, v
+    double precision :: s1, c, ck, cn, cpk, cpn, v
 
     dcoeff = 0.
     do k = 1, nb
@@ -490,21 +528,20 @@ subroutine setjacobiancoeff(nb, h, Kd, Kp, dcoeff)
             n = FVnID(k,p)+1
             cn = Kd(n)
             cpn = Kp(n)
-            c = 0.5*(ck+cn+cpk*(h(k)-h(n)))/FVarea(k) !
+            c = 0.5*(ck+cn+cpk*(h(k)-h(n)))/FVarea(k)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
-            s1 = s1 + v
-            c = 0.5*(ck+cn+cpn*(h(n)-h(k)))/FVarea(k) !
+            dcoeff(k,1) = dcoeff(k,1) + v
+            c = 0.5*(ck+cn+cpn*(h(n)-h(k)))/FVarea(k)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
             dcoeff(k,p+1) = -v
           endif
         enddo
-        dcoeff(k,1) = 1.0 + s1
       endif
     enddo
 
     return
 
-end subroutine setjacobiancoeff
+end subroutine jacobiancoeff
 
 subroutine distocean(nrcv, sid, flux, rcv, wght, area, depth, dep, nb, nbi)
 !*****************************************************************************
