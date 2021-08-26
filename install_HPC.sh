@@ -19,6 +19,6 @@ pip install mpi4py==3.0.0 --user
 pip install petsc4py==3.11.0 --user
 pip install scikit-fuzzy==0.4.2 --user
 
-mv requirements_hpc.txt requirements.txt
+mv hpcrequirements.txt requirements.txt
 
 python3 setup.py install --user
