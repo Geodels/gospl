@@ -100,12 +100,12 @@ Main classes
                     Class Sediment
                 </div>
                 <div class="card-body">
-                  <p class="card-text"> Functions related to <code>sediment transport</code> and <code>deposition</code>. </p>
+                  <p class="card-text"> Functions related to <code>sediment transport</code> and <code>deposition</code> for both land & sea. </p>
 
 
 .. container:: custom-button
 
-    See source code for in :ref:`land <sed_ref>` & :ref:`marine <sea_ref>` functions
+    :ref:`Land functions <sed_ref>` - :ref:`marine functions<sea_ref>` 
 
 .. raw:: html
 
