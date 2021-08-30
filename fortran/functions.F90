@@ -23,6 +23,7 @@ module meshparams
   double precision, dimension(:), allocatable :: FVarea
   double precision, dimension(:,:), allocatable :: FVeLgt
   double precision, dimension(:,:), allocatable :: FVvDist
+  double precision, dimension(:, :), allocatable :: lcoords
 
   ! Queue node definition: index and elevation
   type node
@@ -943,9 +944,9 @@ end subroutine stratabuildcarb
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine fill_eps_edges(eps, ids, hm, elev, pitid, fillz, m, n, nb)
+subroutine fill_eps(eps, ids, hm, spillc, elev, pitid, fillz, m, n, nb)
 !*****************************************************************************
-! Perform pit filling on the edges of each depression.
+! Perform pit filling on each depression.
 
   use meshparams
   implicit none
@@ -956,6 +957,7 @@ subroutine fill_eps_edges(eps, ids, hm, elev, pitid, fillz, m, n, nb)
   double precision,intent(in) :: eps
   integer, intent(in) :: ids(m)
   double precision,intent(in) :: hm(n)
+  double precision,intent(in) :: spillc(n,3)
   double precision,intent(in) :: elev(nb)
   integer, intent(in) :: pitid(nb)
   double precision,intent(out) :: fillz(nb)
@@ -965,7 +967,7 @@ subroutine fill_eps_edges(eps, ids, hm, elev, pitid, fillz, m, n, nb)
 
   type (node)  :: ptID
   integer :: pits(nb)
-  double precision :: h, bot(nb)
+  double precision :: h, bot(nb), dist
 
   fillz = elev
   pits = pitid
@@ -978,6 +980,10 @@ subroutine fill_eps_edges(eps, ids, hm, elev, pitid, fillz, m, n, nb)
     pits(i) = pitid(i)
     bot(i) = hm(pits(i)+1)
     call priorityqueue%PQpush(fillz(i), i)
+    dist = (lcoords(i,1) - spillc(pits(i)+1,1))**2.
+    dist = dist + (lcoords(i,2) - spillc(pits(i)+1,2))**2.
+    dist = dist + (lcoords(i,3) - spillc(pits(i)+1,3))**2.
+    fillz(i) = bot(i) + eps * dist**0.5
   enddo
 
   ! Perform pit filling using priority total queue
@@ -1007,7 +1013,109 @@ subroutine fill_eps_edges(eps, ids, hm, elev, pitid, fillz, m, n, nb)
 
   return
 
-end subroutine fill_eps_edges
+end subroutine fill_eps
+
+subroutine removepits(h,fill,pit,vol,nh,npit,m,n)
+!*****************************************************************************
+! Remove small depression.
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer :: n
+  double precision,intent(in) :: h(m)
+  double precision,intent(in) :: fill(m)
+  double precision,intent(in) :: vol(n)
+  integer,intent(in) :: pit(m)
+  double precision,intent(out) :: nh(m)
+  integer,intent(out) :: npit(m)
+
+
+  integer :: i, p
+
+  nh = h
+  npit = pit
+
+  do i = 1, m
+    p = pit(i)
+    if(p>-1)then
+      if(vol(p+1) <= 0.)then
+        nh(i) = fill(i)
+        npit(i) = -1
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine removepits
+
+subroutine getpitvol(hlvl,elev,pit,id,vol,m,n)
+!*****************************************************************************
+! Compute the volume of the depressions at different elevations.
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer :: n
+  double precision,intent(in) :: hlvl(n,4)
+  double precision,intent(in) :: elev(m)
+  integer,intent(in) :: pit(m)
+  integer,intent(in) :: id(m)
+  double precision,intent(out) :: vol(n,4)
+
+
+  integer :: i, p, k
+
+  vol = 0.
+
+  do i = 1, m
+    p = pit(i)
+    if(p>-1 .and. id(i)>0)then
+      do k = 1, 4
+        if(hlvl(p+1,k)>elev(i))then
+          vol(p+1,k) = vol(p+1,k)+(hlvl(p+1,k)-elev(i))*FVarea(i)
+        endif
+      enddo
+    endif
+  enddo
+
+  return
+
+end subroutine getpitvol
+
+subroutine pits_cons(pitids, pitnb, npitids, m, n)
+!*****************************************************************************
+! Define consecutive indices for each pits.
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer :: n
+  integer,intent(in) :: pitids(m)
+  integer,intent(in) :: pitnb(n)
+  integer,intent(out) :: npitids(m)
+
+  integer :: i, k
+
+  npitids = pitids
+  do i = 1, m
+    if(pitids(i)>-1)then
+      lp: do k = 1, n
+        if(pitids(i)==pitnb(k))then
+          npitids(i) = k
+          exit lp
+        endif
+      enddo lp
+    endif
+  enddo
+
+  return
+
+end subroutine pits_cons
 
 subroutine edge_tile(lvl,border,elev,ledge,nb)
 !*****************************************************************************
@@ -1435,7 +1543,7 @@ subroutine label_pits(lvl, fill, label, nb)
                 call simplequeue%spush(c)
                 label(c) = lbl
                 flag(c) = .True.
-              else
+              elseif(fill(c)>fill(p))then
                 flag(c) = .True.
               endif
             endif
@@ -1451,51 +1559,75 @@ subroutine label_pits(lvl, fill, label, nb)
 
 end subroutine label_pits
 
-subroutine spill_pts(ids, hmax, elev, pitids, spill, n, m)
+subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, m)
 !*****************************************************************************
 ! Find for each depression its spillover point id.
 
   use meshparams
   implicit none
 
-  integer :: n
   integer :: m
-  integer,intent(in) :: ids(n)
-  double precision,intent(in) :: hmax
+  integer,intent(in) :: mpirk
+  integer,intent(in) :: pitsnb
   double precision,intent(in) :: elev(m)
   integer,intent(in) :: pitids(m)
+  integer,intent(in) :: border(m)
 
   ! Spill point ID
-  integer, intent(out) :: spill
+  integer, intent(out) :: spill(pitsnb)
+  integer, intent(out) :: rank(pitsnb)
+  integer,intent(out) :: npitids(m)
 
-  integer :: i, k, kk, c, cc, p
+  integer :: i, k, kk, c, cc, pid, ccc, kkk
+
+  double precision :: hmax
 
   spill = -1
+  rank = -1
+  npitids = pitids
 
-  lp: do p = 1, n
-    i = ids(p)+1
-    do k = 1, FVnNb(i)
-      c = FVnID(i,k)+1
-      if(c>0)then
-        if(hmax>elev(c))then
-          spill = i-1 !c-1
-          exit lp
-        elseif(hmax==elev(c))then
-          if(pitids(c) == -1)then
-            do kk = 1, FVnNb(c)
-              cc = FVnID(c,kk)+1
-              if(cc>0)then
-                if(hmax>elev(cc))then
-                  spill = c-1
-                  exit lp
-                endif
+  do i = 1, m
+    if(pitids(i)>-1)then
+      pid = pitids(i)
+      if(spill(pid+1) == -1)then
+        hmax = elev(i)
+        lp: do k = 1, FVnNb(i)
+          c = FVnID(i,k)+1
+          if(c>0)then
+            if(hmax>elev(c))then
+              spill(pid+1) = i-1
+              rank(pid+1) = mpirk
+              exit lp
+            elseif(hmax==elev(c))then
+              if(border(c)>0)then
+                spill(pid+1) = c-1
+                rank(pid+1) = mpirk
+                exit lp
               endif
-            enddo
+              if(pitids(c) == -1)then
+                do kk = 1, FVnNb(c)
+                  cc = FVnID(c,kk)+1
+                  if(cc>0)then
+                    if(border(cc)>0)then
+                      spill(pid+1) = cc-1
+                      rank(pid+1) = mpirk
+                      exit lp
+                    endif
+                    if(hmax>elev(cc))then
+                      spill(pid+1) = c-1
+                      rank(pid+1) = mpirk
+                      npitids(c) = pid
+                      exit lp
+                    endif
+                  endif
+                enddo
+              endif
+            endif
           endif
-        endif
+        enddo lp
       endif
-    enddo
-  enddo lp
+    endif
+  enddo
 
   return
 
@@ -1545,12 +1677,14 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   if(allocated(FVnNb)) deallocate(FVnNb)
   if(allocated(FVeLgt)) deallocate(FVeLgt)
   if(allocated(FVvDist)) deallocate(FVvDist)
+  if(allocated(lcoords)) deallocate(lcoords)
 
   allocate(FVarea(nb))
   allocate(FVnNb(nb))
   allocate(FVnID(nb,8))
   allocate(FVeLgt(nb,8))
   allocate(FVvDist(nb,8))
+  allocate(lcoords(nb,3))
 
   cell_ids = -1
   edge = -1
@@ -1560,6 +1694,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   FVvDist = 0.
   edgemax = 0.
 
+  lcoords = coords
   FVarea = area
 
   ! Find all cells surrounding a given vertice

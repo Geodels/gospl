@@ -151,13 +151,15 @@ python module _fortran
             double precision dimension(graphnb,4),intent(out),depend(graphnb) :: newwgraph
         end subroutine graph_nodes
 
-        subroutine spill_pts(ids,hmax,elev,pitids,spill,n,m)
-            integer dimension(n),intent(in) :: ids
-            double precision,intent(in) :: hmax
+        subroutine spill_pts(mpirk,pitsnb,elev,pitids,border,spill,rank,npitids,m)
+            integer intent(in) :: mpirk
+            integer intent(in) :: pitsnb
             double precision dimension(m),intent(in) :: elev
             integer dimension(m),intent(in),depend(m) :: pitids
-            integer,intent(out) :: spill
-            integer, optional,check(len(ids)>=n),depend(ids) :: n=len(ids)
+            integer dimension(m),intent(in),depend(m) :: border
+            integer dimension(pitsnb),intent(out),depend(pitsnb) :: spill
+            integer dimension(pitsnb),intent(out),depend(pitsnb) :: rank
+            integer dimension(m),intent(out),depend(m) :: npitids
             integer, optional,check(len(elev)>=m),depend(elev) :: m=len(elev)
         end subroutine spill_pts
 
@@ -194,17 +196,48 @@ python module _fortran
             integer, optional,check(len(ins)>=n),depend(ins) :: n=len(ins)
         end subroutine combine_edges
 
-        subroutine fill_eps_edges(eps,ids,hm,elev,pitid,fillz,m,n,nb)
+        subroutine fill_eps(eps,ids,hm,spillc,elev,pitid,fillz,m,n,nb)
             double precision,intent(in) :: eps
             integer dimension(m),intent(in) :: ids
             double precision dimension(n),intent(in):: hm
+            double precision dimension(n,3),intent(in),depend(n) :: spillc
             double precision dimension(nb),intent(in) :: elev
             integer dimension(nb),intent(in),depend(nb) :: pitid
             double precision dimension(nb),intent(out),depend(nb) :: fillz
             integer, optional,check(len(ids)>=m),depend(ids) :: m=len(ids)
             integer, optional,check(len(hm)>=n),depend(hm) :: n=len(hm)
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine fill_eps_edges
+        end subroutine fill_eps
+
+        subroutine removepits(h,fill,pit,vol,nh,npit,m,n)
+            double precision dimension(m),intent(in) :: h
+            double precision dimension(m),intent(in),depend(m) :: fill
+            integer dimension(m),intent(in),depend(m) :: pit
+            double precision dimension(n),intent(in) :: vol
+            double precision dimension(m),intent(out),depend(m) :: nh
+            integer dimension(m),intent(out),depend(m) :: npit
+            integer, optional,check(len(h)>=m),depend(h) :: m=len(h)
+            integer, optional,check(len(vol)>=n),depend(vol) :: n=len(vol)
+        end subroutine removepits
+
+        subroutine getpitvol(hlvl,elev,pit,id,vol,m,n)
+            double precision dimension(n,4),intent(in) :: hlvl
+            double precision dimension(m),intent(in) :: elev
+            integer dimension(m),intent(in),depend(m) :: pit
+            integer dimension(m),intent(in),depend(m) :: id
+            double precision dimension(n,4),intent(out),depend(n) :: vol
+            integer dimension(m),intent(out),depend(m) :: npit
+            integer, optional,check(shape(hlvl,0)==n),depend(hlvl) :: n=shape(hlvl,0)
+            integer, optional,check(len(elev)>=m),depend(elev) :: m=len(elev)
+        end subroutine getpitvol
+
+        subroutine pits_cons(pitids,pitnb,npitids,m,n)
+            integer dimension(m),intent(in) :: pitids
+            integer dimension(n),intent(in) :: pitnb
+            integer dimension(m),intent(out),depend(m) :: npitids
+            integer, optional,check(len(pitids)>=m),depend(pitids) :: m=len(pitids)
+            integer, optional,check(len(pitnb)>=n),depend(pitnb) :: n=len(pitnb)
+        end subroutine pits_cons
 
         subroutine definetin(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
             double precision dimension(nb,3),intent(in) :: coords

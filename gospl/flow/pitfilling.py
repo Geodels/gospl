@@ -13,7 +13,10 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import edge_tile
     from gospl._fortran import fill_tile
     from gospl._fortran import fill_edges
-    from gospl._fortran import fill_eps_edges
+    from gospl._fortran import fill_eps
+    from gospl._fortran import removepits
+    from gospl._fortran import getpitvol
+    from gospl._fortran import pits_cons
     from gospl._fortran import fill_depressions
     from gospl._fortran import graph_nodes
     from gospl._fortran import combine_edges
@@ -203,9 +206,9 @@ class PITFill(object):
         self.dm.globalToLocal(self.lbg, self.lbl)
         label = self.lbl.getArray().copy()
 
-        ids = np.where(label < pitIDs)[0]
+        ids = label < pitIDs
         df = self._buildPitDataframe(label[ids], pitIDs[ids])
-        ids = np.where(label > pitIDs)[0]
+        ids = label > pitIDs
         df2 = self._buildPitDataframe(pitIDs[ids], label[ids])
         df = df.append(df2, ignore_index=True)
         df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
@@ -241,7 +244,7 @@ class PITFill(object):
         pitnbs = np.zeros(1, dtype=int)
         pitnbs[0] = np.max(self.pitIDs) + 1
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, pitnbs, op=MPI.MAX)
-        fillIDs = np.where(self.pitIDs >= 0)[0]
+        fillIDs = self.pitIDs >= 0
         valpit = -np.ones(pitnbs[0], dtype=int)
         unique, idx_groups = npi.group_by(
             self.pitIDs[fillIDs], np.arange(len(self.pitIDs[fillIDs]))
@@ -249,10 +252,7 @@ class PITFill(object):
         valpit[unique] = 1
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, valpit, op=MPI.MAX)
         pitNb = np.where(valpit > 0)[0]
-        for k in range(len(pitNb)):
-            ids = np.where(self.pitIDs == pitNb[k])[0]
-            if len(ids) > 0:
-                self.pitIDs[ids] = k + 1
+        self.pitIDs = pits_cons(self.pitIDs, pitNb)
 
         return pitNb
 
@@ -266,31 +266,18 @@ class PITFill(object):
         # Elevation and position of spillover points
         hmax = -np.ones(len(self.pitInfo), dtype=np.float64) * 1.0e8
         spillPos = -np.ones((len(self.pitInfo), 3), dtype=np.float64) * 1.0e12
-        ids = []
-        for k in range(len(self.pitInfo)):
-            if self.pitInfo[k, 1] > -1:
-                if self.pitInfo[k, 1] == MPIrank:
-                    hmax[k] = self.lFill[self.pitInfo[k, 0]]
-                    spillPos[k, :] = self.lcoords[self.pitInfo[k, 0], :]
-                ids.append(np.where(self.pitIDs == k)[0])
+        id = self.pitInfo[:, 1] == MPIrank
+        if len(id) > 0:
+            hmax[id] = self.lFill[self.pitInfo[id, 0]]
+            spillPos[id, :] = self.lcoords[self.pitInfo[id, 0], :]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, hmax, op=MPI.MAX)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillPos, op=MPI.MAX)
 
         # Get the filling + epsilon elevation from distance to spillover points
-        p = 0
-        for k in range(len(self.pitInfo)):
-            if self.pitInfo[k, 1] > -1:
-                if len(ids[p]) > 0:
-                    dist2 = np.sum(
-                        (self.lcoords[ids[p], :] - spillPos[k, :]) ** 2, axis=1
-                    )
-                    self.epsFill[ids[p]] = hmax[k] + self.eps * np.sqrt(dist2)
-                p += 1
-        # Filling with slope on the edges of the depressions
         ids = np.where(self.pitIDs > -1)[0]
         if len(ids) > 0:
-            self.epsFill = fill_eps_edges(
-                self.eps, ids, hmax, self.epsFill, self.pitIDs
+            self.epsFill = fill_eps(
+                self.eps, ids, hmax, spillPos, self.epsFill, self.pitIDs
             )
 
         # Update the filled + eps elevations
@@ -313,7 +300,7 @@ class PITFill(object):
         """
 
         # Get pit parameters (volume and maximum filled elevation)
-        ids = np.where(self.inIDs == 1)[0]
+        ids = self.inIDs == 1
         grp = npi.group_by(self.pitIDs[ids])
         uids = grp.unique
         _, vol = grp.sum((self.epsFill[ids] - hl[ids]) * self.larea[ids])
@@ -495,24 +482,16 @@ class PITFill(object):
             pitIDs = label_pits(level, self.lFill)
         else:
             pitIDs = label_pits(self.sealevel, self.lFill)
-
         pitIDs[self.idBorders] = -1
         pitNb = self._transferIDs(pitIDs)
 
-        # Get spill over points
         pitnbs = len(pitNb) + 1
-        rank = -np.ones(pitnbs, dtype=int)
-        spillIDs = -np.ones(pitnbs, dtype=np.int32)
-        for pit in range(pitnbs):
-            ids = np.where(self.pitIDs == pit)[0]
-            if len(ids) > 0:
-                hmax = np.amax(self.lFill[ids])
-                spillIDs[pit] = spill_pts(ids, hmax, self.lFill, self.pitIDs)
-                self.pitIDs[spillIDs[pit]] = pit
-            if spillIDs[pit] > -1:
-                rank[pit] = MPIrank
+        spillIDs, rank, self.pitIDs = spill_pts(
+            MPIrank, pitnbs, self.lFill, self.pitIDs, self.borders[:, 1]
+        )
+
+        ids = np.where(self.pitIDs == 1)[0]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, rank, op=MPI.MAX)
-        self.locSpill = spillIDs.copy()
         spillIDs[rank != MPIrank] = -1
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillIDs, op=MPI.MAX)
 
@@ -545,23 +524,25 @@ class PITFill(object):
         self._getPitParams(h, pitnbs)
 
         # Remove depressions with minimal volumes
-        if sed:  # True:  # sed:
-            update = False
-            minh = 1.0e-2  # 1 cm
-            minvol = np.zeros(1, dtype=np.float64)
-            areas = self.larea.copy()
-            areas[self.inIDs < 1] = 0.0
-            for k in range(pitnbs):
-                id = self.pitIDs == k
-                minvol[0] = np.sum(areas[id] * minh)
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, minvol, op=MPI.SUM)
-                if self.pitParams[k, 0] < minvol[0]:
-                    update = True
-                    self.pitParams[k, 0] = 0.0
-                    self.pitInfo[k, :] = -1
-                    hl[id] = self.epsFill[id]
-                    self.pitIDs[id] = -1
-            if update:
+        if True:  # sed:
+            minh = 1.0e-6
+
+            ids = self.inIDs == 1
+            grp = npi.group_by(self.pitIDs[ids])
+            uids = grp.unique
+            _, vol = grp.sum(minh * self.larea[ids])
+            minv = np.zeros(pitnbs, dtype=np.float64)
+            ids = uids > -1
+            minv[uids[ids]] = vol[ids]
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, minv, op=MPI.SUM)
+
+            ids = minv > self.pitParams[:, 0]
+            if ids.any():
+                self.pitParams[ids, 0] = 0.0
+                self.pitInfo[ids, :] = -1
+                hl, self.pitIDs = removepits(
+                    hl, self.epsFill, self.pitIDs, self.pitParams[:, 0]
+                )
                 self.hLocal.setArray(hl)
                 self.dm.localToGlobal(self.hLocal, self.hGlobal)
                 self.dm.globalToLocal(self.hGlobal, self.hLocal)
@@ -605,25 +586,20 @@ class PITFill(object):
 
         # Define specific filling levels for unfilled water depressions
         if not sed:
-            ids = np.where(self.inIDs == 1)[0]
-            self.filled_lvl = np.zeros((len(self.pitInfo), 5), dtype=np.float64)
+
+            ids = self.pitParams[:, 0] > 0.0
+            dh = np.zeros((len(self.pitInfo), 6), dtype=np.float64)
+            dh[ids, 0] = self.pitParams[ids, 1] - self.pitParams[ids, 2]
+            dh[ids, 1:] = np.expand_dims(self.pitParams[ids, 2] / 5.0, axis=1)
+            self.filled_lvl = np.cumsum(dh, axis=1)[:, 1:]
+
             self.filled_vol = np.zeros((len(self.pitInfo), 5), dtype=np.float64)
-            areas = self.larea.copy()
-            areas[self.inIDs < 1] = 0.0
-            for k in range(len(self.pitInfo)):
-                hh = np.zeros(5, dtype=np.float64)
-                vol = np.zeros(5, dtype=np.float64)
-                if self.pitParams[k, 0] > 0.0:
-                    hmin = self.pitParams[k, 1] - self.pitParams[k, 2]
-                    dh = self.pitParams[k, 2] / 5.0
-                    for p in range(1, 6):
-                        h = hmin + p * dh
-                        ids = (hl < h) & (self.pitIDs == k)
-                        hh[p - 1] = h
-                        vol[p - 1] = np.sum(areas[ids] * (h - hl[ids]))
-                    MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, vol, op=MPI.SUM)
-                self.filled_lvl[k, :] = hh
-                self.filled_vol[k, :] = vol
+            hl[hl < self.sealevel] = self.sealevel
+            self.filled_vol[:, :-1] = getpitvol(
+                self.filled_lvl[:, :-1], hl, self.pitIDs, self.inIDs
+            )
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.filled_vol, op=MPI.SUM)
+            self.filled_vol[:, -1] = self.pitParams[:, 0]
 
         if MPIrank == 0 and self.verbose:
             print(

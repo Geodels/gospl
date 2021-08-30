@@ -44,19 +44,17 @@ class SEAMesh(object):
         self.coastDist = None
 
         self.zMat = self._matrix_build_diag(np.zeros(self.lpoints))
+        self.mat = self.dm.createMatrix()
+        self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
 
         # Clinoforms slopes for each sediment type
-        self.slps = [6.0, 5.0, 3.0, 1.0]
+        self.slps = [20.0, 15.0, 8.0, 1.0]
 
-        self.dhl = self.hLocal.duplicate()
+        self.flx = self.hLocal.duplicate()
         self.dh = self.hGlobal.duplicate()
-        self.h0 = self.hGlobal.duplicate()
-        self.hl0 = self.hLocal.duplicate()
         self.h = self.hGlobal.duplicate()
         self.hl = self.hLocal.duplicate()
         self.zb = self.hGlobal.duplicate()
-        self.mat = self.dm.createMatrix()
-        self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
 
         return
 
@@ -203,15 +201,15 @@ class SEAMesh(object):
         """
 
         self.dm.globalToLocal(x, self.hl)
-        with self.hl as hl, self.hLocal as zb, xdot as hdot:
+        with self.hl as hl, self.hLocal as zb, xdot as hdot, self.flx as flx:
             dh = hl - zb
             dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, dh ** 2)
+            Cd = np.multiply(self.Cd, dh ** self.cexp)
             nlvec = fctcoeff(hl, Cd)
             # Set borders nodes
             if self.flatModel:
                 nlvec[self.idBorders] = 0.0
-            f.setArray(hdot + nlvec[self.lIDs])
+            f.setArray(hdot + nlvec[self.lIDs] - flx[self.lIDs])
 
     def _evalJacobian(self, ts, t, x, xdot, a, J, P):
         """
@@ -224,9 +222,11 @@ class SEAMesh(object):
         with self.hl as hl, self.hLocal as zb:
             dh = hl - zb
             dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, dh ** 2)
+            Cd = np.multiply(self.Cd, dh ** self.cexp)
+
             # Coefficient derivatives
-            Cp = 2.0 * np.multiply(self.Cd, dh)
+            Cp = self.cexp * np.multiply(self.Cd, dh ** (self.cexp - 1.0))
+
             nlC = jacobiancoeff(hl, Cd, Cp)
             if self.flatModel:
                 nlC[self.idBorders, :] = 0.0
@@ -279,14 +279,9 @@ class SEAMesh(object):
 
         # Matrix coefficients
         self.Cd = np.full(self.lpoints, sedK, dtype=np.float64)
-
-        self.dhl.setArray(dh)
-        self.dm.localToGlobal(self.dhl, self.dh)
-        self.dm.globalToLocal(self.dh, self.dhl)
-        self.h0.waxpy(1.0, self.dh, self.hGlobal)
-        self.h0.copy(result=self.h)
-        self.dm.globalToLocal(self.h, self.hl)
-        self.hl0.copy(result=self.hl)
+        self.flx.setArray(dh / self.dt)
+        self.hGlobal.copy(result=self.h)
+        self.hLocal.copy(result=self.hl)
 
         # Time stepping definition
         ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
@@ -298,7 +293,7 @@ class SEAMesh(object):
         ts.setTime(0.0)
         ts.setTimeStep(self.dt / 10.0)  # self.dt / 100.0)
         ts.setMaxTime(self.dt)
-        ts.setMaxSteps(50)
+        ts.setMaxSteps(100)
         ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
         # Allow an unlimited number of failures (step will be rejected and retried)
         ts.setMaxSNESFailures(-1)
@@ -345,8 +340,8 @@ class SEAMesh(object):
 
         # Get diffused sediment thicknesses
         self.dh.waxpy(-1.0, self.hGlobal, self.h)
-        self.dm.globalToLocal(self.dh, self.dhl)
-        ndepo = self.dhl.getArray().copy()
+        self.dm.globalToLocal(self.dh, self.tmpL)
+        ndepo = self.tmpL.getArray().copy()
 
         if self.flatModel:
             ndepo[self.idBorders] = 0.0
@@ -410,7 +405,6 @@ class SEAMesh(object):
         clinoH = self.sealevel - 1.0e-4 - self.coastDist * self.slps[stype] * 1.0e-5
 
         # Get the maximum marine deposition heights and volume
-        # self.marVol = depo * self.larea
         self.marVol = (clinoH - hl) * self.larea
         self.marVol[self.marVol < 0.0] = 0.0
 

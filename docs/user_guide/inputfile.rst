@@ -212,6 +212,8 @@ b. Studies have shown that the physical strength of bedrock which varies with th
 .. code:: ipython
 
   diffusion:
+      mdep: True
+      nlc: 2.
       hillslopeKa: 0.02
       hillslopeKm: 0.2
       sedK: 100.
@@ -221,11 +223,13 @@ b. Studies have shown that the physical strength of bedrock which varies with th
 
 Hillslope processes in *gospl* is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
 
-a. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
-b. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
-c. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
-d. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
-e. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
+a. :yaml:`mdep` boolean set to *True* to account for marine deposition,
+b. :yaml:`nlc` nonlinear marine diffusion exponent for the freshly river deposited thicknesses,
+c. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
+d. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
+e. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
+f. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
+g. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
 
 
 

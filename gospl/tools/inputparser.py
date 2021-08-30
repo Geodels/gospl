@@ -373,6 +373,11 @@ class ReadYaml(object):
                 raise ValueError(
                     "Hillslope: Cd coefficient for marine environment not found."
                 )
+
+            try:
+                self.marineDep = hillDict["mdep"]
+            except KeyError:
+                self.marineDep = True
             try:
                 self.sedimentK = hillDict["sedK"]
             except KeyError:
@@ -385,9 +390,15 @@ class ReadYaml(object):
                 self.sedimentKw = hillDict["sedKw"]
             except KeyError:
                 self.sedimentKw = 3.0
+            try:
+                self.cexp = hillDict["nlc"]
+            except KeyError:
+                self.cexp = 2.0
         except KeyError:
             self.Cda = 0.0
             self.Cdm = 0.0
+            self.cexp = 2.0
+            self.marineDep = True
             self.sedimentK = 1.0
             self.sedimentKf = 2.0
             self.sedimentKw = 3.0

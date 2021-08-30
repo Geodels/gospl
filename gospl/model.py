@@ -158,7 +158,8 @@ class Model(
                 # Downstream sediment deposition inland
                 _SEDMesh.sedChange(self)
                 # Downstream sediment deposition in sea
-                _SEAMesh.seaChange(self)
+                if self.marineDep:
+                    _SEAMesh.seaChange(self)
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 
