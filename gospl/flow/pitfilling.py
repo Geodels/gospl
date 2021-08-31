@@ -524,9 +524,8 @@ class PITFill(object):
         self._getPitParams(h, pitnbs)
 
         # Remove depressions with minimal volumes
-        if True:  # sed:
-            minh = 1.0e-6
-
+        if True:
+            minh = 1.0e-2
             ids = self.inIDs == 1
             grp = npi.group_by(self.pitIDs[ids])
             uids = grp.unique
@@ -535,7 +534,6 @@ class PITFill(object):
             ids = uids > -1
             minv[uids[ids]] = vol[ids]
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, minv, op=MPI.SUM)
-
             ids = minv > self.pitParams[:, 0]
             if ids.any():
                 self.pitParams[ids, 0] = 0.0
@@ -586,7 +584,6 @@ class PITFill(object):
 
         # Define specific filling levels for unfilled water depressions
         if not sed:
-
             ids = self.pitParams[:, 0] > 0.0
             dh = np.zeros((len(self.pitInfo), 6), dtype=np.float64)
             dh[ids, 0] = self.pitParams[ids, 1] - self.pitParams[ids, 2]
@@ -606,19 +603,6 @@ class PITFill(object):
                 "Handling depressions over the surface (%0.02f seconds)"
                 % (process_time() - tfill)
             )
-            # for k in range(len(self.pitInfo)):
-            #     if MPIrank == 0:
-            #         if self.pitInfo[k, 1] >= -1 and self.pitParams[k, 0] > 0.0:
-            #             print(
-            #                 "Pit Nb",
-            #                 k,
-            #                 " spill id",
-            #                 self.pitInfo[k, 0],
-            #                 " vol",
-            #                 self.pitParams[k, 0],
-            #                 "h",
-            #                 round(self.pitParams[k, 1], 3),
-            #             )
 
         if self.memclear:
             del hl, minh

@@ -375,13 +375,9 @@ class ReadYaml(object):
                 )
 
             try:
-                self.marineDep = hillDict["mdep"]
+                self.sedimentK = hillDict["nlK"]
             except KeyError:
-                self.marineDep = True
-            try:
-                self.sedimentK = hillDict["sedK"]
-            except KeyError:
-                self.sedimentK = 1.0
+                self.sedimentK = 0.1
             try:
                 self.sedimentKf = hillDict["sedKf"]
             except KeyError:
@@ -390,18 +386,53 @@ class ReadYaml(object):
                 self.sedimentKw = hillDict["sedKw"]
             except KeyError:
                 self.sedimentKw = 3.0
+
+        except KeyError:
+            self.Cda = 0.0
+            self.Cdm = 0.0
+            self.sedimentK = 0.1
+            self.sedimentKf = 2.0
+            self.sedimentKw = 3.0
+
+        self._extraHillslope()
+
+        return
+
+    def _extraHillslope(self):
+        """
+        Read extra hillslope parameters.
+        """
+
+        try:
+            hillDict = self.input["diffusion"]
+
             try:
                 self.cexp = hillDict["nlc"]
             except KeyError:
                 self.cexp = 2.0
+            try:
+                self.marineNl = hillDict["nldep"]
+            except KeyError:
+                self.marineNl = True
+            try:
+                self.smthK = hillDict["smthS"]
+            except KeyError:
+                self.smthK = 1.0e3
+            try:
+                self.smthD = hillDict["smthD"]
+            except KeyError:
+                self.smthD = 1.0e3
+            try:
+                self.offset = hillDict["offset"]
+            except KeyError:
+                self.offset = 400.0
+
         except KeyError:
-            self.Cda = 0.0
-            self.Cdm = 0.0
             self.cexp = 2.0
-            self.marineDep = True
-            self.sedimentK = 1.0
-            self.sedimentKf = 2.0
-            self.sedimentKw = 3.0
+            self.marineNl = False
+            self.smthK = 1.0e3
+            self.smthD = 1.0e3
+            self.offset = 400.0
 
         return
 

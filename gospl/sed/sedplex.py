@@ -359,7 +359,7 @@ class SEDMesh(object):
 
         return
 
-    def _hillSlope(self):
+    def _hillSlope(self, smooth=0):
         r"""
         This function computes hillslope using a linear diffusion law commonly referred to as **soil creep**:
 
@@ -371,16 +371,23 @@ class SEDMesh(object):
         .. note::
             The hillslope processes in `gospl` are considered to be happening at the same rate for coarse and fine sediment sizes.
 
+        :arg smooth: integer specifying if the diffusion equation is used for smoothing (1) or for marine deposits (2).
         """
 
-        if self.Cda == 0.0 and self.Cdm == 0.0:
-            return
+        if not smooth:
+            if self.Cda == 0.0 and self.Cdm == 0.0:
+                return
 
         t0 = process_time()
 
         # Diffusion matrix construction
-        Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
-        Cd[self.seaID] = self.Cdm
+        if smooth == 1:
+            Cd = np.full(self.lpoints, self.smthK, dtype=np.float64)
+        elif smooth == 2:
+            Cd = np.full(self.lpoints, self.smthD, dtype=np.float64)
+        else:
+            Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
+            Cd[self.seaID] = self.Cdm
 
         diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
         if self.flatModel:
@@ -407,26 +414,37 @@ class SEDMesh(object):
             tmpMat.destroy()
 
         # Get elevation values for considered time step
-        self.hGlobal.copy(result=self.hOld)
-        self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
-        diffMat.destroy()
+        if smooth == 1:
+            self._solve_KSP(True, diffMat, self.hGlobal, self.tmp)
+            diffMat.destroy()
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            return self.tmpL.getArray().copy()
+        elif smooth == 2:
+            self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
+            diffMat.destroy()
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            return self.tmpL.getArray().copy()
+        else:
+            self.hGlobal.copy(result=self.hOld)
+            self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
+            diffMat.destroy()
 
-        # Update cumulative erosion/deposition and elevation
-        self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
-        self.cumED.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            # Update cumulative erosion/deposition and elevation
+            self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
+            self.cumED.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        if self.memclear:
-            del ids, indices, indptr, diffCoeffs, Cd, tmp
-            gc.collect()
+            if self.memclear:
+                del ids, indices, indptr, diffCoeffs, Cd
+                gc.collect()
 
-        if self.stratNb > 0:
-            self.erodeStrat()
-            if self.stratW is not None:
-                self.deposeStrat(3)
-            else:
-                self.deposeStrat(0)
+            if self.stratNb > 0:
+                self.erodeStrat()
+                if self.stratW is not None:
+                    self.deposeStrat(3)
+                else:
+                    self.deposeStrat(0)
 
         if MPIrank == 0 and self.verbose:
             print(

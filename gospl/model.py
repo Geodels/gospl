@@ -141,6 +141,9 @@ class Model(
         self.newForcing = True
         self.steppaleo = 0
 
+        # _SEAMesh.seaChange(self)
+        # _WriteMesh.visModel(self)
+        # return
         while self.tNow <= self.tEnd:
             tstep = process_time()
 
@@ -158,8 +161,7 @@ class Model(
                 # Downstream sediment deposition inland
                 _SEDMesh.sedChange(self)
                 # Downstream sediment deposition in sea
-                if self.marineDep:
-                    _SEAMesh.seaChange(self)
+                _SEAMesh.seaChange(self)
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 

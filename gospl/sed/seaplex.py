@@ -48,9 +48,8 @@ class SEAMesh(object):
         self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
 
         # Clinoforms slopes for each sediment type
-        self.slps = [20.0, 15.0, 8.0, 1.0]
+        self.slps = [12.0, 8.0, 6.0, 1.0]
 
-        self.flx = self.hLocal.duplicate()
         self.dh = self.hGlobal.duplicate()
         self.h = self.hGlobal.duplicate()
         self.hl = self.hLocal.duplicate()
@@ -153,7 +152,9 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions for filled + eps elevations
-        rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
+        # rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
+        rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.oceanFill, -1.0e5)
+        # rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.smthH, -1.0e5)
 
         # Set borders nodes
         if self.flatModel:
@@ -201,7 +202,7 @@ class SEAMesh(object):
         """
 
         self.dm.globalToLocal(x, self.hl)
-        with self.hl as hl, self.hLocal as zb, xdot as hdot, self.flx as flx:
+        with self.hl as hl, self.hLocal as zb, xdot as hdot:
             dh = hl - zb
             dh[dh < 0] = 0.0
             Cd = np.multiply(self.Cd, dh ** self.cexp)
@@ -209,7 +210,7 @@ class SEAMesh(object):
             # Set borders nodes
             if self.flatModel:
                 nlvec[self.idBorders] = 0.0
-            f.setArray(hdot + nlvec[self.lIDs] - flx[self.lIDs])
+            f.setArray(hdot + nlvec[self.lIDs])
 
     def _evalJacobian(self, ts, t, x, xdot, a, J, P):
         """
@@ -279,9 +280,9 @@ class SEAMesh(object):
 
         # Matrix coefficients
         self.Cd = np.full(self.lpoints, sedK, dtype=np.float64)
-        self.flx.setArray(dh / self.dt)
-        self.hGlobal.copy(result=self.h)
-        self.hLocal.copy(result=self.hl)
+        self.hl.setArray(dh)
+        self.hl.axpy(1.0, self.hLocal)
+        self.dm.localToGlobal(self.hl, self.h)
 
         # Time stepping definition
         ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
@@ -291,20 +292,20 @@ class SEAMesh(object):
         ts.setIJacobian(self._evalJacobian, self.mat)
 
         ts.setTime(0.0)
-        ts.setTimeStep(self.dt / 10.0)  # self.dt / 100.0)
+        ts.setTimeStep(self.dt / 1000.0)
         ts.setMaxTime(self.dt)
-        ts.setMaxSteps(100)
+        ts.setMaxSteps(50)
         ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
         # Allow an unlimited number of failures (step will be rejected and retried)
         ts.setMaxSNESFailures(-1)
-        ts.setTolerances(rtol=1.0e-8)
+        ts.setTolerances(rtol=1.0e-2)
 
         # SNES nonlinear solver definition
         snes = ts.getSNES()
         # Newton linear search
         snes.setType("newtonls")
         # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
-        snes.setTolerances(rtol=1.0e-8, max_it=10)
+        snes.setTolerances(rtol=1.0e-2, max_it=100)
 
         # KSP linear solver definition
         ksp = snes.getKSP()
@@ -313,7 +314,7 @@ class SEAMesh(object):
         pc = ksp.getPC()
         pc.setType("asm")
         pc.setASMOverlap(3)
-        ksp.setTolerances(rtol=1.0e-8)
+        ksp.setTolerances(rtol=1.0e-2, max_it=100)
         ksp.setFromOptions()
         snes.setFromOptions()
         ts.setFromOptions()
@@ -403,6 +404,9 @@ class SEAMesh(object):
 
         # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
         clinoH = self.sealevel - 1.0e-4 - self.coastDist * self.slps[stype] * 1.0e-5
+        # Update the marine maximal depositional thicknesses
+        clinoH = np.minimum(clinoH, self.smthH + self.offset)
+        clinoH[hl > self.sealevel] = hl[hl > self.sealevel]
 
         # Get the maximum marine deposition heights and volume
         self.marVol = (clinoH - hl) * self.larea
@@ -423,7 +427,20 @@ class SEAMesh(object):
 
         # Distribute sediment downstream in the marine environment
         marDep = self._distOcean()
-        marDep = self._diffuseOcean(marDep, stype)
+        self.tmpL.setArray(hl)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        smthH1 = self._hillSlope(smooth=2)
+        self.tmpL.setArray(marDep + hl)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        smthH2 = self._hillSlope(smooth=2)
+        marDep = smthH2 - smthH1
+        marDep[marDep < 0.0] = 0.0
+        marDep[hl > self.sealevel] = 0.0
+        ids = marDep > clinoH - hl
+        marDep[ids] = clinoH[ids] - hl[ids]
+        marDep[marDep < 0.0] = 0.0
+        if self.marineNl:
+            marDep = self._diffuseOcean(marDep, stype)
 
         # Update cumulative erosion and deposition as well as elevation
         self.tmpL.setArray(marDep)
@@ -451,6 +468,9 @@ class SEAMesh(object):
         """
 
         t0 = process_time()
+
+        # Get the smooth regional elevation
+        self.smthH = self._hillSlope(smooth=1)
 
         # Downstream direction matrix for ocean distribution
         self._matOcean()

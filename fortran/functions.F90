@@ -1578,7 +1578,7 @@ subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, 
   integer, intent(out) :: rank(pitsnb)
   integer,intent(out) :: npitids(m)
 
-  integer :: i, k, kk, c, cc, pid, ccc, kkk
+  integer :: i, k, kk, c, cc, pid
 
   double precision :: hmax
 
