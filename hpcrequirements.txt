@@ -9,6 +9,6 @@ pandas==1.0.3
 ruamel.yaml==0.16.5
 meshio==3.3.1
 meshplex==0.11.6
-pre-commit==2.2.0
+pre-commit>=2.2.0
 vtk==9.0.1
 scikit-fuzzy==0.4.2

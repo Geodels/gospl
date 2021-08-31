@@ -153,8 +153,7 @@ class SEAMesh(object):
 
         # Define multiple flow directions for filled + eps elevations
         # rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
-        rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.oceanFill, -1.0e5)
-        # rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.smthH, -1.0e5)
+        rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.smthH, -1.0e5)
 
         # Set borders nodes
         if self.flatModel:
