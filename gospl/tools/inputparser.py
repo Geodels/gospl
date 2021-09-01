@@ -426,6 +426,10 @@ class ReadYaml(object):
                 self.offset = hillDict["offset"]
             except KeyError:
                 self.offset = 400.0
+            try:
+                self.clinSlp = hillDict["clinSlp"]
+            except KeyError:
+                self.clinSlp = 0.0
 
         except KeyError:
             self.cexp = 2.0
@@ -433,6 +437,7 @@ class ReadYaml(object):
             self.smthK = 1.0e3
             self.smthD = 1.0e3
             self.offset = 400.0
+            self.clinSlp = 0.0
 
         return
 

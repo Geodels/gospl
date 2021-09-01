@@ -1578,7 +1578,7 @@ subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, 
   integer, intent(out) :: rank(pitsnb)
   integer,intent(out) :: npitids(m)
 
-  integer :: i, k, kk, c, cc, pid
+  integer :: i, k, c, pid
 
   double precision :: hmax
 
@@ -1603,24 +1603,10 @@ subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, 
                 spill(pid+1) = c-1
                 rank(pid+1) = mpirk
                 exit lp
-              endif
-              if(pitids(c) == -1)then
-                do kk = 1, FVnNb(c)
-                  cc = FVnID(c,kk)+1
-                  if(cc>0)then
-                    if(border(cc)>0)then
-                      spill(pid+1) = cc-1
-                      rank(pid+1) = mpirk
-                      exit lp
-                    endif
-                    if(hmax>elev(cc))then
-                      spill(pid+1) = c-1
-                      rank(pid+1) = mpirk
-                      npitids(c) = pid
-                      exit lp
-                    endif
-                  endif
-                enddo
+              elseif(pitids(c) == -1)then
+                spill(pid+1) = c-1
+                rank(pid+1) = mpirk
+                exit lp
               endif
             endif
           endif

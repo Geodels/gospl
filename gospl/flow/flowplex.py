@@ -237,6 +237,7 @@ class FAMesh(object):
         lsink[self.idBorders] = False
         lsink[self.seaID] = False
         lsink = lsink.astype(int) * self.inIDs
+
         self.lsink = lsink == 1
 
         if MPIrank == 0 and self.verbose:
@@ -272,7 +273,8 @@ class FAMesh(object):
         uID = grp.unique
         _, vol = grp.sum(FA[self.lsink])
         inV = np.zeros(len(self.pitParams), dtype=np.float64)
-        inV[uID] = vol
+        ids = uID > -1
+        inV[uID[ids]] = vol[ids]
 
         # Combine incoming volume globally
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)
@@ -364,7 +366,6 @@ class FAMesh(object):
                     % (process_time() - t0),
                     flush=True,
                 )
-
             return
 
         # Volume of water flowing downstream

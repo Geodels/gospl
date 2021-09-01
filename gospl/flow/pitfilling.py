@@ -484,13 +484,11 @@ class PITFill(object):
             pitIDs = label_pits(self.sealevel, self.lFill)
         pitIDs[self.idBorders] = -1
         pitNb = self._transferIDs(pitIDs)
-
         pitnbs = len(pitNb) + 1
         spillIDs, rank, self.pitIDs = spill_pts(
             MPIrank, pitnbs, self.lFill, self.pitIDs, self.borders[:, 1]
         )
 
-        ids = np.where(self.pitIDs == 1)[0]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, rank, op=MPI.MAX)
         spillIDs[rank != MPIrank] = -1
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillIDs, op=MPI.MAX)
@@ -516,7 +514,6 @@ class PITFill(object):
             self.lFill[id] = hl[id]
 
         # Get pit parameters
-        # Will need to change pitIDs and lFill first
         h = hl.copy()
         if not sed:
             # Only compute the water volume for incoming water fluxes above sea level
@@ -579,7 +576,6 @@ class PITFill(object):
         level = max(minh, self.sealevel - 6000.0)
 
         self._performFilling(hl, level, sed)
-
         self._pitInformation(hl, level, sed)
 
         # Define specific filling levels for unfilled water depressions

@@ -397,15 +397,16 @@ class UnstMesh(object):
             )
 
         # Build local VTK mesh
-        t0 = process_time()
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore")
-            self._generateVTKmesh(self.lcoords, self.lcells)
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Generate VTK mesh (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
+        if self.clinSlp > 0.0:
+            t0 = process_time()
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                self._generateVTKmesh(self.lcoords, self.lcells)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Generate VTK mesh (%0.02f seconds)" % (process_time() - t0),
+                    flush=True,
+                )
 
         # From mesh values to local and global ones...
         t0 = process_time()

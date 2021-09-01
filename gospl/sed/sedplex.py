@@ -172,7 +172,8 @@ class SEDMesh(object):
         uID = grp.unique
         _, vol = grp.sum(vSed[self.lsink])
         inV = np.zeros(len(self.pitParams), dtype=np.float64)
-        inV[uID] = vol
+        ids = uID > -1
+        inV[uID[ids]] = vol[ids]
 
         # Combine incoming volume globally
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)

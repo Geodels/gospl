@@ -48,7 +48,7 @@ class SEAMesh(object):
         self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
 
         # Clinoforms slopes for each sediment type
-        self.slps = [12.0, 8.0, 6.0, 1.0]
+        # self.slps = [12.0, 8.0, 6.0, 1.0]
 
         self.dh = self.hGlobal.duplicate()
         self.h = self.hGlobal.duplicate()
@@ -402,7 +402,10 @@ class SEAMesh(object):
         """
 
         # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
-        clinoH = self.sealevel - 1.0e-4 - self.coastDist * self.slps[stype] * 1.0e-5
+        if self.clinSlp > 0.0:
+            clinoH = self.sealevel - 1.0e-2 - self.coastDist * self.clinSlp
+        else:
+            clinoH = np.full(self.lpoints, self.sealevel - 1.0e-2, dtype=np.float64)
         # Update the marine maximal depositional thicknesses
         clinoH = np.minimum(clinoH, self.smthH + self.offset)
         clinoH[hl > self.sealevel] = hl[hl > self.sealevel]
@@ -477,9 +480,11 @@ class SEAMesh(object):
         # Define coastal distance for marine points
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
         hl = self.hLocal.getArray().copy()
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore")
-            self._distanceCoasts(hl)
+
+        if self.clinSlp > 0.0:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                self._distanceCoasts(hl)
 
         # Set all nodes below sea-level as sinks
         self.sinkIDs = self.epsFill < self.sealevel
