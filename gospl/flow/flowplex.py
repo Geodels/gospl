@@ -34,7 +34,7 @@ class FAMesh(object):
         """
 
         # KSP solver parameters
-        self.rtol = 1.0e-8
+        self.rtol = 1.0e-6
 
         # Identity matrix construction
         self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
@@ -145,7 +145,8 @@ class FAMesh(object):
                 flush=True,
             )
             print("with reason: %s", KSPReasons[r], flush=True)
-            raise RuntimeError("LinearSolver failed to converge!")
+            vector2.set(0.0)
+            # raise RuntimeError("LinearSolver failed to converge!")
         ksp.destroy()
 
         return vector2
@@ -172,7 +173,6 @@ class FAMesh(object):
 
         wght = self.wghtVal
         rcv = self.rcvID
-
         for k in range(0, self.flowDir):
 
             # Flow direction matrix for a specific direction
@@ -282,7 +282,7 @@ class FAMesh(object):
         # Get excess volume to distribute downstream
         eV = inV - pitVol
         if (eV > 0.0).any():
-            eIDs = (eV > 0.0) & (pitVol > 0.0)
+            eIDs = eV > 0.0
             pitVol[eIDs] = 0.0
             spillIDs = self.pitInfo[eIDs, 0]
             localSpill = np.where(self.pitInfo[eIDs, 1] == MPIrank)[0]
@@ -306,17 +306,20 @@ class FAMesh(object):
 
         # In case there is still remaining water flux to distribute downstream
         if (eV > 1.0e-3).any():
-            excess = True
             self._buildFlowDirection(self.waterFilled)
             self.tmpL.setArray(nFA / self.dt)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
-            self.dm.globalToLocal(self.tmp1, self.tmpL)
-            nFA = self.tmpL.getArray().copy() * self.dt
-            ids = hl < self.waterFilled
-            nFA[ids] = 0.0
-            self.tmpL.setArray(nFA / self.dt)
-            self.FAL.axpy(1.0, self.tmpL)
+            if self.tmp.sum() > self.maxarea[0]:
+                excess = True
+                self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+                self.dm.globalToLocal(self.tmp1, self.tmpL)
+                nFA = self.tmpL.getArray().copy() * self.dt
+                FA = nFA.copy()
+                FA[hl < self.waterFilled] = 0.0
+                self.tmpL.setArray(FA / self.dt)
+                self.FAL.axpy(1.0, self.tmpL)
+            else:
+                nFA = None
         else:
             nFA = None
 
@@ -356,7 +359,7 @@ class FAMesh(object):
         self.lsinki = self.lsink.copy()
 
         # Solve flow accumulation
-        self._solve_KSP(True, self.fMat, self.bG, self.FAG)
+        self._solve_KSP(False, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
 
         if len(self.pitParams) == 0:

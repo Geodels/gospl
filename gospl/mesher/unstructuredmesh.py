@@ -115,6 +115,9 @@ class UnstMesh(object):
         Tmesh = meshplex.MeshTri(self.lcoords, self.lcells)
         self.larea = np.abs(Tmesh.control_volumes)
         self.larea[np.isnan(self.larea)] = 1.0
+        self.maxarea = np.zeros(1, dtype=np.float64)
+        self.maxarea[0] = self.larea.max()
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MIN)
 
         # Voronoi and simplices declaration
         Tmesh.create_edges()

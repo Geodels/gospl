@@ -181,7 +181,7 @@ class SEDMesh(object):
         # Get excess volume to distribute downstream
         eV = inV - self.pitVol
         if (eV > 0.0).any():
-            eIDs = (eV > 0.0) & (self.pitVol > 0.0)
+            eIDs = eV > 0.0  # & (self.pitVol > 0.0)
             self.pitVol[eIDs] = 0.0
             spillIDs = self.pitInfo[eIDs, 0]
             localSpill = np.where(self.pitInfo[eIDs, 1] == MPIrank)[0]
@@ -198,12 +198,13 @@ class SEDMesh(object):
 
         # In case there is still remaining water flux to distribute downstream
         if (eV > 1.0e-3).any():
-            excess = True
             self._buildFlowDirection(self.sedFilled)
             self.tmpL.setArray(nvSed)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self._solve_KSP(False, self.fMat, self.tmp, self.tmp1)
-            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            if self.tmp.sum() > 0.5 * self.maxarea[0]:
+                excess = True
+                self._solve_KSP(False, self.fMat, self.tmp, self.tmp1)
+                self.dm.globalToLocal(self.tmp1, self.tmpL)
 
         return excess
 
@@ -226,9 +227,9 @@ class SEDMesh(object):
             excess = self._moveDownstream(vSed)
             if excess:
                 vSed = self.tmpL.getArray().copy()
-                ids = hl < self.sedFilled
-                vSed[ids] = 0.0
-                self.tmpL.setArray(vSed / self.dt)
+                nvSed = vSed.copy()
+                nvSed[hl < self.sedFilled] = 0.0
+                self.tmpL.setArray(nvSed / self.dt)
                 vSed[self.idBorders] = 0.0
                 if stype == 0:
                     self.vSedLocal.axpy(1.0, self.tmpL)

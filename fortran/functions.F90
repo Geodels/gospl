@@ -944,7 +944,172 @@ end subroutine stratabuildcarb
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine fill_eps(eps, ids, hm, spillc, elev, pitid, fillz, m, n, nb)
+subroutine fill_eps(spill, pitids, pitvals, m, n)
+!*****************************************************************************
+! Perform pit filling on each depression.
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer :: n
+  integer, intent(in) :: spill(m)
+  integer, intent(in) :: pitids(n)
+
+  double precision,intent(out) :: pitvals(n)
+
+  integer :: i, k, c
+  type (node)  :: ptID
+  logical :: flag(n)
+
+  pitvals = -1.
+
+  ! Push depression spill over nodes to priority queue
+  flag = .False.
+  do c = 1, m
+    i = spill(c)+1
+    flag(i) = .True.
+    pitvals(i) = 1.
+    call priorityqueue%PQpush(pitvals(i), i)
+  enddo
+
+  ! Perform pit filling using priority total queue
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    do k = 1, FVnNb(i)
+      c = FVnID(i,k)+1
+      if(c>0)then
+        if(.not.flag(c) .and. pitids(c) > -1)then
+          flag(c) = .True.
+          pitvals(c) = pitvals(i)+1.
+          call priorityqueue%PQpush(pitvals(c), c)
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine fill_eps
+
+subroutine fill_proc(pitids, pitvals, npitvals, n)
+!*****************************************************************************
+! Perform pit filling on depression crossing different processors.
+
+  use meshparams
+  implicit none
+
+  integer :: n
+  integer, intent(in) :: pitids(n)
+  double precision,intent(in) :: pitvals(n)
+
+  double precision,intent(out) :: npitvals(n)
+
+  integer :: i, k, c
+  type (node)  :: ptID
+  logical :: flag(n)
+
+  npitvals = -1.
+
+  ! Push depression spill over nodes to priority queue
+  flag = .False.
+  do c = 1, n
+    if(pitids(c) > -1 .and. pitvals(c)>0.)then
+      flag(c) = .True.
+      npitvals(c) = pitvals(c)
+      call priorityqueue%PQpush(npitvals(c), c)
+    endif
+  enddo
+
+  ! Perform pit filling using priority total queue
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    do k = 1, FVnNb(i)
+      c = FVnID(i,k)+1
+      if(c>0)then
+        if(.not.flag(c) .and. pitids(c) > -1)then
+          flag(c) = .True.
+          npitvals(c) = npitvals(i)+1.
+          call priorityqueue%PQpush(npitvals(c), c)
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine fill_proc
+
+subroutine fill_side(eps, ids, hm, elev, pitid, spill, fillz, m, n, nb)
+!*****************************************************************************
+! Perform pit filling on each depression.
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer :: n
+  integer :: nb
+  double precision,intent(in) :: eps
+  integer, intent(in) :: ids(m)
+  double precision,intent(in) :: hm(n)
+  double precision,intent(in) :: elev(nb)
+  integer, intent(in) :: pitid(nb)
+  integer, intent(in) :: spill(nb)
+  double precision,intent(out) :: fillz(nb)
+  logical :: flag(nb)
+
+  integer :: i, k, c
+
+  type (node)  :: ptID
+  integer :: pits(nb)
+  double precision :: h, bot(nb)
+
+  fillz = elev
+  pits = pitid
+
+  ! Push depression nodes to priority queue
+  flag = .False.
+  do c = 1, m
+    i = ids(c)+1
+    flag(i) = .True.
+    pits(i) = pitid(i)
+    bot(i) = hm(pits(i)+1)
+    call priorityqueue%PQpush(fillz(i), i)
+  enddo
+
+  ! Perform pit filling using priority total queue
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    if(pits(i) > -1)then
+      do k = 1, FVnNb(i)
+        c = FVnID(i,k)+1
+        if(c>0)then
+          if(.not.flag(c) .and. elev(c) > bot(i))then
+            h = fillz(i)+eps !*FVeLgt(i,k)
+            if(fillz(c)<h)then
+              if(pitid(c) == -1 .and. spill(c)==0)then
+                flag(c) = .True.
+                fillz(c) = h
+                bot(c) = bot(i)
+                pits(c) = pits(i)
+                call priorityqueue%PQpush(fillz(c), c)
+              endif
+            endif
+          endif
+        endif
+      enddo
+    endif
+  enddo
+
+  return
+
+end subroutine fill_side
+
+subroutine fill_eps2(eps, ids, hm, spillc, elev, pitid, fillz, m, n, nb)
 !*****************************************************************************
 ! Perform pit filling on each depression.
 
@@ -995,7 +1160,7 @@ subroutine fill_eps(eps, ids, hm, spillc, elev, pitid, fillz, m, n, nb)
         c = FVnID(i,k)+1
         if(c>0)then
           if(.not.flag(c) .and. elev(c) > bot(i))then
-            h = fillz(i)+eps*FVeLgt(i,k)
+            h = fillz(i)+eps !*FVeLgt(i,k)
             if(fillz(c)<h)then
               if(pitid(c) == -1)then
                 flag(c) = .True.
@@ -1013,7 +1178,7 @@ subroutine fill_eps(eps, ids, hm, spillc, elev, pitid, fillz, m, n, nb)
 
   return
 
-end subroutine fill_eps
+end subroutine fill_eps2
 
 subroutine removepits(h,fill,pit,vol,nh,npit,m,n)
 !*****************************************************************************
@@ -1532,13 +1697,17 @@ subroutine label_pits(lvl, fill, label, nb)
       if(noflow)then
         lbl = lbl+1
         label(i) = lbl
+        ! if(i==173137+1)write(*,*)'in innn',label(i)
         call simplequeue%spush(i)
         do while(simplequeue%n>0)
+
           ptID = simplequeue%spop()
           p = ptID%id
+          ! if(p==173137+1)write(*,*)'pppp',lbl,label(p)
           do k = 1, FVnNb(p)
             c = FVnID(p,k)+1
             if(c>0)then
+              ! if(c==173137+1)write(*,*)'cccc',i,p,c,fill(c),fill(p),lbl
               if(fill(c)==fill(p) .and. .not. flag(c))then
                 call simplequeue%spush(c)
                 label(c) = lbl
@@ -1559,7 +1728,7 @@ subroutine label_pits(lvl, fill, label, nb)
 
 end subroutine label_pits
 
-subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, m)
+subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, lspill, rank, m)
 !*****************************************************************************
 ! Find for each depression its spillover point id.
 
@@ -1576,7 +1745,7 @@ subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, 
   ! Spill point ID
   integer, intent(out) :: spill(pitsnb)
   integer, intent(out) :: rank(pitsnb)
-  integer,intent(out) :: npitids(m)
+  integer,intent(out) :: lspill(m)
 
   integer :: i, k, c, pid
 
@@ -1584,7 +1753,7 @@ subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, 
 
   spill = -1
   rank = -1
-  npitids = pitids
+  lspill = -1
 
   do i = 1, m
     if(pitids(i)>-1)then
@@ -1597,15 +1766,18 @@ subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, rank, npitids, 
             if(hmax>elev(c))then
               spill(pid+1) = i-1
               rank(pid+1) = mpirk
+              lspill(i) = 1
               exit lp
             elseif(hmax==elev(c))then
               if(border(c)>0)then
                 spill(pid+1) = c-1
                 rank(pid+1) = mpirk
+                lspill(c) = 1
                 exit lp
               elseif(pitids(c) == -1)then
                 spill(pid+1) = c-1
                 rank(pid+1) = mpirk
+                lspill(c) = 1
                 exit lp
               endif
             endif
