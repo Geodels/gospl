@@ -291,6 +291,16 @@ python module _fortran
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
         end subroutine definegtin
 
+        subroutine gfill(sl,elev,ngbid,hmax,fillz,nb)
+            use meshparams
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb,12),intent(in),depend(nb) :: ngbid
+            double precision intent(in) :: hmax
+            double precision dimension(nb),intent(out) :: fillz
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine gfill
+
     end interface
 
 end python module _fortran

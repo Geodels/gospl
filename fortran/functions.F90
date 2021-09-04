@@ -1965,6 +1965,12 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
 
 end subroutine definetin
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!            PREPROCESSING FUNCTIONS               !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 subroutine definegtin( nb, cells_nodes, edges_nodes, ngbNb, ngbID, n, m)
 !*****************************************************************************
 ! Compute for the global mesh, the characteristics of each node and
@@ -2056,7 +2062,79 @@ subroutine definegtin( nb, cells_nodes, edges_nodes, ngbNb, ngbID, n, m)
         ngbID(k,l) = nid(1)
       endif
     enddo
-
   enddo
 
 end subroutine definegtin
+
+subroutine gfill(sl, elev, ngbid, hmax, fillz, nb)
+!*****************************************************************************
+! Perform pit filling using a priority queue approach following Barnes (2015).
+! This function is done on a single processors.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision,intent(in) :: sl
+  double precision,intent(in) :: elev(nb)
+  integer, intent(in) :: ngbid(nb, 12)
+  double precision,intent(in) :: hmax
+  double precision,intent(out) :: fillz(nb)
+
+  logical :: flag(nb)
+
+  integer :: i, k, c
+
+  type (node)  :: ptID
+  double precision :: h, limitz(nb)
+
+  fillz = elev
+  limitz = elev
+
+  ! Push marine edges nodes to priority queue
+  flag = .False.
+  do i = 1, nb
+    if(fillz(i)<sl)then
+      flag(i) = .True.
+      lp: do k = 1, 12
+        c = ngbid(i,k)+1
+        if(c>0)then
+          if(fillz(c)>=sl)then
+            call priorityqueue%PQpush(fillz(i), i)
+            exit lp
+          endif
+        endif
+      enddo lp
+    endif
+  enddo
+
+  ! Perform pit filling using priority total queue
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    do k = 1, 12
+      c = ngbid(i,k)+1
+      if(c>0)then
+        if(.not.flag(c))then
+          flag(c) = .True.
+          h = nearest(fillz(i), 1.0)
+          ! Not a depression
+          if(fillz(c)>h)then
+            call priorityqueue%PQpush(fillz(c), c)
+          ! Find a depression
+          else
+            fillz(c) = h
+            limitz(c) = h
+            if(fillz(c)-elev(c)>hmax) limitz(c) = elev(c)+hmax
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
+        endif
+      endif
+    enddo
+  enddo
+
+  fillz = limitz
+
+  return
+
+end subroutine gfill
