@@ -150,7 +150,7 @@ class SEDMesh(object):
 
         return
 
-    def _moveDownstream(self, vSed):
+    def _moveDownstream(self, vSed, step):
         """
         In cases where river sediment fluxes drain into depressions, they might fill the sink completely and overspill or be deposited in it. This function computes the excess of sediment (if any) able to flow dowstream.
 
@@ -159,6 +159,7 @@ class SEDMesh(object):
             The excess sediment volume is then added to the downstream sediment flux (`vSed`).
 
         :arg vSed: excess sediment volume array
+        :arg step: downstream distribution step
 
         :return: excess (boolean set to True is excess sediment fluxes remain to be distributed)
         """
@@ -181,7 +182,7 @@ class SEDMesh(object):
         # Get excess volume to distribute downstream
         eV = inV - self.pitVol
         if (eV > 0.0).any():
-            eIDs = eV > 0.0  # & (self.pitVol > 0.0)
+            eIDs = eV > 0.0
             self.pitVol[eIDs] = 0.0
             spillIDs = self.pitInfo[eIDs, 0]
             localSpill = np.where(self.pitInfo[eIDs, 1] == MPIrank)[0]
@@ -189,7 +190,7 @@ class SEDMesh(object):
             nvSed = np.zeros(self.lpoints, dtype=np.float64)
             nvSed[localPts] = eV[eIDs][localSpill]
             ids = np.in1d(self.pitIDs, np.where(eV > 0.0)[0])
-            self.sedFilled[ids] = self.epsFill[ids]
+            self.sedFilled[ids] = self.lFill[ids]
 
         # Update unfilled depressions volumes
         eIDs = eV < 0
@@ -198,7 +199,10 @@ class SEDMesh(object):
 
         # In case there is still remaining water flux to distribute downstream
         if (eV > 1.0e-3).any():
-            self._buildFlowDirection(self.sedFilled)
+            if step == 100:
+                self._buildFlowDirection(self.lFill)
+            else:
+                self._buildFlowDirection(self.sedFilled)
             self.tmpL.setArray(nvSed)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             if self.tmp.sum() > 0.5 * self.maxarea[0]:
@@ -222,9 +226,11 @@ class SEDMesh(object):
         # Get the volumetric sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
         vSed = self.QsL.getArray().copy() * self.dt
 
+        step = 0
         excess = True
         while excess:
-            excess = self._moveDownstream(vSed)
+            t1 = process_time()
+            excess = self._moveDownstream(vSed, step)
             if excess:
                 vSed = self.tmpL.getArray().copy()
                 nvSed = vSed.copy()
@@ -239,6 +245,13 @@ class SEDMesh(object):
                     self.vSedwLocal.axpy(1.0, self.tmpL)
                 if stype == 2:
                     self.vSedcLocal.axpy(1.0, self.tmpL)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Downstream sediment flux computation step %d (%0.02f seconds)"
+                    % (step, process_time() - t1),
+                    flush=True,
+                )
+            step += 1
         if stype == 0:
             self.dm.localToGlobal(self.vSedLocal, self.vSed)
         if stype == 1:
@@ -277,7 +290,7 @@ class SEDMesh(object):
         scale = scale_volume(self.pitIDs, scaleV)
 
         # Update cumulative erosion and deposition as well as elevation
-        self.tmpL.setArray((self.epsFill - hl) * scale)
+        self.tmpL.setArray((self.lFill - hl) * scale)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.cumED.axpy(1.0, self.tmp)
         self.hGlobal.axpy(1.0, self.tmp)

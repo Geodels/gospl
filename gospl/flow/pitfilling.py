@@ -503,6 +503,8 @@ class PITFill(object):
             id = self.lFill <= self.sealevel
             self.oceanFill = self.lFill.copy()
             self.lFill[id] = hl[id]
+            self.flatOcean = self.flatDirs.copy()
+            self.flatDirs[id] = -1
 
         # Get pit parameters
         h = hl.copy()

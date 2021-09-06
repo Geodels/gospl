@@ -34,7 +34,7 @@ class FAMesh(object):
         """
 
         # KSP solver parameters
-        self.rtol = 1.0e-6
+        self.rtol = 1.0e-10
 
         # Identity matrix construction
         self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
@@ -213,12 +213,17 @@ class FAMesh(object):
         :arg h: elevation numpy array
         """
 
-        t0 = process_time()
-
         # Define multiple flow directions for unfilled elevation
         self.rcvID, self.distRcv, self.wghtVal = mfdreceivers(
             self.flowDir, self.flowExp, self.inIDs, h, self.sealevel
         )
+
+        ids = (h == self.lFill) & (self.pitIDs > -1) & (self.flatDirs > -1)
+        ids = ids.nonzero()[0]
+        self.rcvID[ids, :] = np.tile(ids, (self.flowDir, 1)).T
+        self.rcvID[ids, 0] = self.flatDirs[ids]
+        self.wghtVal[ids, :] = 0.0
+        self.wghtVal[ids, 0] = 1.0
 
         # Get open marine regions
         self.seaID = np.where(self.lFill <= self.sealevel)[0]
@@ -240,17 +245,11 @@ class FAMesh(object):
 
         self.lsink = lsink == 1
 
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Direction declaration (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-
         self.matrixFlow()
 
         return
 
-    def _distributeDownstream(self, pitVol, FA, hl):
+    def _distributeDownstream(self, pitVol, FA, hl, step):
         """
         In cases where rivers flow in depressions, they might fill the sink completely and overspill or remain within the depression, forming a lake. This function computes the excess of water (if any) able to flow dowstream.
 
@@ -260,9 +259,12 @@ class FAMesh(object):
 
         :arg pitVol: volume of depressions
         :arg FA: excess flow accumulation array
+        :arg hl: current elevation array
+        :arg step: downstream distribution step
 
         :return: pitVol, excess (updated volume in each depression and boolean set to True is excess flow remains to be distributed)
         """
+
         excess = False
 
         # Remove points belonging to other processors
@@ -290,7 +292,7 @@ class FAMesh(object):
             nFA = np.zeros(self.lpoints, dtype=np.float64)
             nFA[localPts] = eV[eIDs][localSpill]
             ids = np.in1d(self.pitIDs, np.where(eV > 0.0)[0])
-            self.waterFilled[ids] = self.epsFill[ids]
+            self.waterFilled[ids] = self.lFill[ids]
 
         # Update unfilled depressions volumes and assign water level in depressions
         if (eV < 0.0).any():
@@ -306,7 +308,10 @@ class FAMesh(object):
 
         # In case there is still remaining water flux to distribute downstream
         if (eV > 1.0e-3).any():
-            self._buildFlowDirection(self.waterFilled)
+            if step == 100:
+                self._buildFlowDirection(self.lFill)
+            else:
+                self._buildFlowDirection(self.waterFilled)
             self.tmpL.setArray(nFA / self.dt)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             if self.tmp.sum() > self.maxarea[0]:
@@ -351,6 +356,7 @@ class FAMesh(object):
 
         # Build flow direction and downstream matrix
         hl = self.hLocal.getArray().copy()
+
         self._buildFlowDirection(hl)
         self.wghtVali = self.wghtVal.copy()
         self.rcvIDi = self.rcvID.copy()
@@ -376,11 +382,21 @@ class FAMesh(object):
         if (pitVol > 0.0).any():
             FA = self.FAL.getArray().copy() * self.dt
             excess = True
+            step = 0
             while excess:
-                excess, pitVol, FA = self._distributeDownstream(pitVol, FA, hl)
+                t1 = process_time()
+                excess, pitVol, FA = self._distributeDownstream(pitVol, FA, hl, step)
+                if MPIrank == 0 and self.verbose:
+                    print(
+                        "Downstream flow computation step %d (%0.02f seconds)"
+                        % (step, process_time() - t1),
+                        flush=True,
+                    )
+                step += 1
+
             # Get overall water flowing donwstream accounting for filled depressions
             FA = self.FAL.getArray().copy()
-            ids = hl < self.waterFilled
+            ids = (hl <= self.waterFilled) & (self.pitIDs > -1)
             FA[ids] = 0.0
             self.FAL.setArray(FA)
             self.dm.localToGlobal(self.FAL, self.FAG)

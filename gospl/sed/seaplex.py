@@ -487,7 +487,7 @@ class SEAMesh(object):
                 self._distanceCoasts(hl)
 
         # Set all nodes below sea-level as sinks
-        self.sinkIDs = self.epsFill < self.sealevel
+        self.sinkIDs = self.lFill < self.sealevel
 
         # Get sediment volume to distribute
         if self.stratNb > 0:
