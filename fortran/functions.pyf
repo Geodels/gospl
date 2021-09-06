@@ -196,57 +196,30 @@ python module _fortran
             integer, optional,check(len(ins)>=n),depend(ins) :: n=len(ins)
         end subroutine combine_edges
 
-        subroutine fill_eps(spill,pitids,pitvals,m,n)
+        subroutine fill_dir(spill,pitids,h,ptdir,m,n)
             integer dimension(m),intent(in) :: spill
             integer dimension(n),intent(in) :: pitids
-            double precision dimension(n),intent(out),depend(n) :: pitvals
+            double precision dimension(n),intent(in) :: h
+            integer dimension(n),intent(out),depend(n) :: ptdir
             integer, optional,check(len(spill)>=m),depend(spill) :: m=len(spill)
             integer, optional,check(len(pitids)>=n),depend(pitids) :: n=len(pitids)
-        end subroutine fill_eps
+        end subroutine fill_dir
 
-        subroutine fill_proc(pitids,pitvals,npitvals,n)
+        subroutine fill_rcvs(pitids,h,ptdir,rcvs,n)
             integer dimension(n),intent(in) :: pitids
-            double precision dimension(n),intent(in),depend(n) :: pitvals
-            double precision dimension(n),intent(out),depend(n) :: npitvals
+            double precision dimension(n),intent(in) :: h
+            integer dimension(n),intent(in),depend(n) :: ptdir
+            integer dimension(n),intent(out),depend(n) :: rcvs
             integer, optional,check(len(pitids)>=n),depend(pitids) :: n=len(pitids)
-        end subroutine fill_proc
+        end subroutine fill_rcvs
 
-        subroutine fill_side(eps,ids,hm,elev,pitid,spill,fillz,m,n,nb)
-            double precision,intent(in) :: eps
-            integer dimension(m),intent(in) :: ids
-            double precision dimension(n),intent(in):: hm
-            double precision dimension(nb),intent(in) :: elev
-            integer dimension(nb),intent(in),depend(nb) :: pitid
-            integer dimension(nb),intent(in),depend(nb) :: spill
-            double precision dimension(nb),intent(out),depend(nb) :: fillz
-            integer, optional,check(len(ids)>=m),depend(ids) :: m=len(ids)
-            integer, optional,check(len(hm)>=n),depend(hm) :: n=len(hm)
-            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine fill_side
-
-        subroutine fill_eps2(eps,ids,hm,spillc,elev,pitid,fillz,m,n,nb)
-            double precision,intent(in) :: eps
-            integer dimension(m),intent(in) :: ids
-            double precision dimension(n),intent(in):: hm
-            double precision dimension(n,3),intent(in),depend(n) :: spillc
-            double precision dimension(nb),intent(in) :: elev
-            integer dimension(nb),intent(in),depend(nb) :: pitid
-            double precision dimension(nb),intent(out),depend(nb) :: fillz
-            integer, optional,check(len(ids)>=m),depend(ids) :: m=len(ids)
-            integer, optional,check(len(hm)>=n),depend(hm) :: n=len(hm)
-            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine fill_eps2
-
-        subroutine removepits(h,fill,pit,vol,nh,npit,m,n)
-            double precision dimension(m),intent(in) :: h
-            double precision dimension(m),intent(in),depend(m) :: fill
-            integer dimension(m),intent(in),depend(m) :: pit
-            double precision dimension(n),intent(in) :: vol
-            double precision dimension(m),intent(out),depend(m) :: nh
-            integer dimension(m),intent(out),depend(m) :: npit
-            integer, optional,check(len(h)>=m),depend(h) :: m=len(h)
-            integer, optional,check(len(vol)>=n),depend(vol) :: n=len(vol)
-        end subroutine removepits
+        subroutine nghb_dir(pitids,h,ptdir,nptdir,n)
+            integer dimension(n),intent(in) :: pitids
+            double precision dimension(n),intent(in) :: h
+            integer dimension(n),intent(in),depend(n) :: ptdir
+            integer dimension(n),intent(out),depend(n) :: nptdir
+            integer, optional,check(len(pitids)>=n),depend(pitids) :: n=len(pitids)
+        end subroutine nghb_dir
 
         subroutine getpitvol(hlvl,elev,pit,id,vol,m,n)
             double precision dimension(n,4),intent(in) :: hlvl

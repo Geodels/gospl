@@ -13,10 +13,9 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import edge_tile
     from gospl._fortran import fill_tile
     from gospl._fortran import fill_edges
-    from gospl._fortran import fill_eps
-    from gospl._fortran import fill_proc
-    from gospl._fortran import fill_side
-    from gospl._fortran import removepits
+    from gospl._fortran import fill_dir
+    from gospl._fortran import nghb_dir
+    from gospl._fortran import fill_rcvs
     from gospl._fortran import getpitvol
     from gospl._fortran import pits_cons
     from gospl._fortran import fill_depressions
@@ -207,7 +206,6 @@ class PITFill(object):
         self.dm.localToGlobal(self.lbl, self.lbg)
         self.dm.globalToLocal(self.lbg, self.lbl)
         label = self.lbl.getArray().copy()
-        # print("label", label[173137], label[173138])
 
         ids = label < pitIDs
         df = self._buildPitDataframe(label[ids], pitIDs[ids])
@@ -260,62 +258,40 @@ class PITFill(object):
 
         return pitNb
 
-    def _slopeFlats(self):
+    def _dirFlats(self):
         """
-        This function adds a minimal slope on all depressions to ensure downstream distribution if they are overfilled.
+        This function finds shortest route to spillover points on filled depressions to ensure downstream distribution if they are overfilled.
         """
 
-        # Fill local depressions
-        self.epsFill = self.lFill.copy()
-
+        # Find local receivers to direct flow to spillover nodes
         ids = self.pitIDs > -1
         if ids.any():
-            vals = fill_eps(self.lspillIDs, self.pitIDs)
+            pdir = fill_dir(self.lspillIDs, self.pitIDs, self.lFill)
         else:
-            vals = np.zeros(self.lpoints, dtype=np.float64)
+            pdir = -np.ones(self.lpoints, dtype=np.int32)
 
         # Transfer filled values along the local borders
-        keep = np.zeros(1)
+        keep = -np.ones(1)
         stp = 0
-        while keep[0] < 1:
-            self.tmpL.setArray(vals)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            vals = self.tmpL.getArray().copy()
-            vals = fill_proc(self.pitIDs, vals)
+        while keep[0] < 0:
+            self.tmp.setArray(pdir[self.lIDs])
+            self.dm.globalToLocal(self.tmp, self.tmpL, 3)
+            pdir = self.tmpL.getArray().copy().astype(int)
+            pdir = nghb_dir(self.pitIDs, self.lFill, pdir)
+
+            # Check if there are pit nodes without directions
             if ids.any():
-                keep[0] = vals[ids].min()
+                keep[0] = pdir[ids].min()
             else:
                 keep[0] = 1.0
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, keep, op=MPI.MIN)
             stp += 1
-            if stp > 5:
+            if stp > 100:
                 break
-        vals[vals < 0.0] = 0.0
-        eps = 1.0e-8
-        self.epsFill += vals * eps
 
-        # Elevation of spillover points
-        spill = np.zeros(self.lpoints, dtype=np.int32)
-        spill[self.lspillIDs] = 1
-        hmax = -np.ones(len(self.pitInfo), dtype=np.float64) * 1.0e8
-        id = self.pitInfo[:, 1] == MPIrank
-        if len(id) > 0:
-            hmax[id] = self.lFill[self.pitInfo[id, 0]]
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, hmax, op=MPI.MAX)
-
-        # Get the filling + epsilon elevation on the edges of the depressions
-        ids = np.where(self.pitIDs > -1)[0]
-        if len(ids) > 0:
-            self.epsFill = fill_side(eps, ids, hmax, self.epsFill, self.pitIDs, spill)
-        if len(id) > 0:
-            self.epsFill[self.pitInfo[id, 0]] = self.lFill[self.pitInfo[id, 0]]
-
-        # Update the filled + eps elevations
-        self.sZl.setArray(self.epsFill)
-        self.dm.localToGlobal(self.sZl, self.sZg)
-        self.dm.globalToLocal(self.sZg, self.sZl)
-        self.epsFill = self.sZl.getArray().copy()
+        # Define receiver nodes on each depression
+        self.flatDirs = fill_rcvs(self.pitIDs, self.lFill, pdir)
+        self.flatDirs[self.lspillIDs] = -1
 
         return
 
@@ -334,7 +310,7 @@ class PITFill(object):
         ids = self.inIDs == 1
         grp = npi.group_by(self.pitIDs[ids])
         uids = grp.unique
-        _, vol = grp.sum((self.epsFill[ids] - hl[ids]) * self.larea[ids])
+        _, vol = grp.sum((self.lFill[ids] - hl[ids]) * self.larea[ids])
         _, hh = grp.max(self.lFill[ids])
         _, dh = grp.max(self.lFill[ids] - hl[ids])
         totv = np.zeros(nbpits, dtype=np.float64)
@@ -493,21 +469,6 @@ class PITFill(object):
 
         t0 = process_time()
 
-        # Check if there are any pits?
-        # nb = -np.ones(1, dtype=int)
-        # nb[0] = len(np.where(self.lFill > hl)[0])
-        # MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nb, op=MPI.MAX)
-        # if nb[0] == 0:
-        #     self.pitParams = -np.zeros((1, 3), dtype=np.float64)
-        #     self.pitInfo = -np.ones((1, 2), dtype=int)
-        #     self.epsFill = self.lFill.copy()
-        #     self.oceanFill = self.lFill.copy()
-        #     self.pitIDs = -np.ones(self.lpoints, dtype=int)
-        #     self.sZl.setArray(self.lFill)
-        #     self.dm.localToGlobal(self.fZl, self.fZg)
-        #     self.dm.globalToLocal(self.fZg, self.fZl)
-        #     return
-
         # Combine pits locally to get a unique local ID per depression
         if sed:
             pitIDs = label_pits(level, self.lFill)
@@ -536,17 +497,11 @@ class PITFill(object):
         self.pitIDs = self.lbl.getArray().astype(int)
         self.pitIDs[self.idBorders] = -1
 
-        # Add minimal slopes to flats
-        # self._slopeFlats()
-        self.epsFill = self.lFill.copy()
-        self.sZl.setArray(self.epsFill)
-        self.dm.localToGlobal(self.sZl, self.sZg)
-        self.dm.globalToLocal(self.sZg, self.sZl)
-        self.epsFill = self.sZl.getArray().copy()
+        # Get directions on flats
+        self._dirFlats()
         if sed:
             id = self.lFill <= self.sealevel
-            self.oceanFill = self.epsFill.copy()
-            self.epsFill[id] = hl[id]
+            self.oceanFill = self.lFill.copy()
             self.lFill[id] = hl[id]
 
         # Get pit parameters
@@ -555,28 +510,6 @@ class PITFill(object):
             # Only compute the water volume for incoming water fluxes above sea level
             h[h < self.sealevel] = self.sealevel
         self._getPitParams(h, pitnbs)
-
-        # Remove depressions with minimal volumes
-        # if True:
-        #     minh = 1.0e-2
-        #     ids = self.inIDs == 1
-        #     grp = npi.group_by(self.pitIDs[ids])
-        #     uids = grp.unique
-        #     _, vol = grp.sum(minh * self.larea[ids])
-        #     minv = np.zeros(pitnbs, dtype=np.float64)
-        #     ids = uids > -1
-        #     minv[uids[ids]] = vol[ids]
-        #     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, minv, op=MPI.SUM)
-        #     ids = minv > self.pitParams[:, 0]
-        #     if ids.any():
-        #         self.pitParams[ids, 0] = 0.0
-        #         self.pitInfo[ids, :] = -1
-        #         hl, self.pitIDs = removepits(
-        #             hl, self.epsFill, self.pitIDs, self.pitParams[:, 0]
-        #         )
-        #         self.hLocal.setArray(hl)
-        #         self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        #         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         if self.memclear:
             del label, df, df2, data
