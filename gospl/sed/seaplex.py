@@ -152,8 +152,13 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions for filled + eps elevations
-        # rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
-        rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.smthH, -1.0e5)
+        rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
+        ids = (self.pitIDs > -1) & (self.flatOcean > -1)
+        ids = ids.nonzero()[0]
+        rcv[ids, :] = np.tile(ids, (8, 1)).T
+        rcv[ids, 0] = self.flatOcean[ids]
+        wght[ids, :] = 0.0
+        wght[ids, 0] = 1.0
 
         # Set borders nodes
         if self.flatModel:
@@ -360,7 +365,6 @@ class SEAMesh(object):
         self.tmpL.setArray(self.sinkVol)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         vdep = np.zeros(self.lpoints, dtype=np.float64)
-
         step = 0
         while self.tmp.sum() > 1.0e-6:
 
@@ -403,12 +407,12 @@ class SEAMesh(object):
 
         # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
         if self.clinSlp > 0.0:
-            clinoH = self.sealevel - 1.0e-2 - self.coastDist * self.clinSlp
+            clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp
         else:
-            clinoH = np.full(self.lpoints, self.sealevel - 1.0e-2, dtype=np.float64)
+            clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)
         # Update the marine maximal depositional thicknesses
         clinoH = np.minimum(clinoH, self.smthH + self.offset)
-        clinoH[hl > self.sealevel] = hl[hl > self.sealevel]
+        clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
 
         # Get the maximum marine deposition heights and volume
         self.marVol = (clinoH - hl) * self.larea

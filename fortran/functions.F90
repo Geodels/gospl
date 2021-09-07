@@ -1177,7 +1177,6 @@ subroutine edge_tile(lvl,border,elev,ledge,nb)
   ledge = -1
 
   ! Local edges
-
   do c = 1, nb
     if(elev(c) < lvl)then
       maxe = lvl - 1

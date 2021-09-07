@@ -438,18 +438,12 @@ class PITFill(object):
 
         # Define filling in land and enclosed seas only
         if not sed:
-            label = lFill < self.sealevel
-            lFill[label] = hl[label]
+            id = lFill < self.sealevel
+            lFill[id] = hl[id]
         self.fZl.setArray(lFill)
         self.dm.localToGlobal(self.fZl, self.fZg)
         self.dm.globalToLocal(self.fZg, self.fZl)
         self.lFill = self.fZl.getArray().copy()
-
-        if self.memclear:
-            del label, gnb, graph, lFill
-            del label_offset, offset, proc, keep
-            del cgraph, outs, mgraph, ggraph
-            gc.collect()
 
         if MPIrank == 0 and self.verbose:
             print("Remove depressions (%0.02f seconds)" % (process_time() - t0))
@@ -513,12 +507,6 @@ class PITFill(object):
             h[h < self.sealevel] = self.sealevel
         self._getPitParams(h, pitnbs)
 
-        if self.memclear:
-            del label, df, df2, data
-            del label_offset, offset, pitIDs
-            del fillIDs, combIds, pitArray
-            gc.collect()
-
         if MPIrank == 0 and self.verbose:
             print(
                 "Define depressions parameters (%0.02f seconds)" % (process_time() - t0)
@@ -545,8 +533,11 @@ class PITFill(object):
         if not self.flatModel:
             minh += 1.0e-3
         level = max(minh, self.sealevel - 6000.0)
-
-        self._performFilling(hl, level, sed)
+        if sed:
+            self._performFilling(hl - level, 0.0, sed)
+            self.lFill += level
+        else:
+            self._performFilling(hl, level, sed)
         self._pitInformation(hl, level, sed)
 
         # Define specific filling levels for unfilled water depressions
