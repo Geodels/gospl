@@ -202,7 +202,7 @@ class FAMesh(object):
 
         return
 
-    def _buildFlowDirection(self, h):
+    def _buildFlowDirection(self, h, down=True):
         """
         This function builds from neighbouring slopes the flow directions. It calls a fortran subroutine that locally computes for each vertice:
 
@@ -218,12 +218,19 @@ class FAMesh(object):
             self.flowDir, self.flowExp, self.inIDs, h, self.sealevel
         )
 
-        ids = (h == self.lFill) & (self.pitIDs > -1) & (self.flatDirs > -1)
-        ids = ids.nonzero()[0]
-        self.rcvID[ids, :] = np.tile(ids, (self.flowDir, 1)).T
-        self.rcvID[ids, 0] = self.flatDirs[ids]
-        self.wghtVal[ids, :] = 0.0
-        self.wghtVal[ids, 0] = 1.0
+        if down:
+            sum_weight = np.sum(self.wghtVal, axis=1)
+            ids = (
+                (h == self.lFill)
+                & (self.pitIDs > -1)
+                & (self.flatDirs > -1)
+                & (sum_weight == 0.0)
+            )
+            ids = ids.nonzero()[0]
+            self.rcvID[ids, :] = np.tile(ids, (self.flowDir, 1)).T
+            self.rcvID[ids, 0] = self.flatDirs[ids]
+            self.wghtVal[ids, :] = 0.0
+            self.wghtVal[ids, 0] = 1.0
 
         # Get open marine regions
         self.seaID = np.where(self.lFill <= self.sealevel)[0]
@@ -357,7 +364,7 @@ class FAMesh(object):
         # Build flow direction and downstream matrix
         hl = self.hLocal.getArray().copy()
 
-        self._buildFlowDirection(hl)
+        self._buildFlowDirection(hl, False)
         self.wghtVali = self.wghtVal.copy()
         self.rcvIDi = self.rcvID.copy()
         self.distRcvi = self.distRcv.copy()
@@ -365,7 +372,7 @@ class FAMesh(object):
         self.lsinki = self.lsink.copy()
 
         # Solve flow accumulation
-        self._solve_KSP(False, self.fMat, self.bG, self.FAG)
+        self._solve_KSP(True, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
 
         if len(self.pitParams) == 0:

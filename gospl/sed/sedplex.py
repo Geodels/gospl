@@ -207,7 +207,7 @@ class SEDMesh(object):
             self.dm.localToGlobal(self.tmpL, self.tmp)
             if self.tmp.sum() > 0.5 * self.maxarea[0]:
                 excess = True
-                self._solve_KSP(False, self.fMat, self.tmp, self.tmp1)
+                self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
 
         return excess

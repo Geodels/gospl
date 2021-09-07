@@ -342,7 +342,7 @@ class PITFill(object):
         t0 = process_time()
 
         # Get local meshes edges and communication nodes
-        ledges = edge_tile(level, self.borders, hl)
+        ledges = edge_tile(0.0, self.borders, hl)
         out = np.where(ledges >= 0)[0]
         localEdges = np.empty((len(out), 2), dtype=int)
         localEdges[:, 0] = np.arange(self.lpoints)[out].astype(int)
@@ -434,11 +434,11 @@ class PITFill(object):
         graph[graph[:, 0] > 1.0e7, 0] = -1.0e8
 
         # Define global solution by combining depressions/flat together
-        lFill = fill_depressions(level, hl, lFill, label.astype(int), graph[:, 0])
+        lFill = fill_depressions(0.0, hl, lFill, label.astype(int), graph[:, 0])
 
         # Define filling in land and enclosed seas only
         if not sed:
-            id = lFill < self.sealevel
+            id = lFill < self.sealevel - level
             lFill[id] = hl[id]
         self.fZl.setArray(lFill)
         self.dm.localToGlobal(self.fZl, self.fZg)
@@ -463,7 +463,7 @@ class PITFill(object):
 
         t0 = process_time()
 
-        # Combine pits locally to get a unique local ID per depression
+        # Combine pits locally to get an unique local ID per depression
         if sed:
             pitIDs = label_pits(level, self.lFill)
         else:
@@ -493,18 +493,21 @@ class PITFill(object):
 
         # Get directions on flats
         self._dirFlats()
+        id = self.lFill <= self.sealevel
+
+        h = hl.copy()
         if sed:
-            id = self.lFill <= self.sealevel
             self.oceanFill = self.lFill.copy()
             self.lFill[id] = hl[id]
             self.flatOcean = self.flatDirs.copy()
             self.flatDirs[id] = -1
-
-        # Get pit parameters
-        h = hl.copy()
-        if not sed:
+        else:
+            self.lFill[id] = hl[id]
+            self.flatDirs[id] = -1
             # Only compute the water volume for incoming water fluxes above sea level
             h[h < self.sealevel] = self.sealevel
+
+        # Get pit parameters
         self._getPitParams(h, pitnbs)
 
         if MPIrank == 0 and self.verbose:
@@ -533,11 +536,9 @@ class PITFill(object):
         if not self.flatModel:
             minh += 1.0e-3
         level = max(minh, self.sealevel - 6000.0)
-        if sed:
-            self._performFilling(hl - level, 0.0, sed)
-            self.lFill += level
-        else:
-            self._performFilling(hl, level, sed)
+
+        self._performFilling(hl - level, level, sed)
+        self.lFill += level
         self._pitInformation(hl, level, sed)
 
         # Define specific filling levels for unfilled water depressions
