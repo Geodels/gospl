@@ -1059,7 +1059,7 @@ subroutine nghb_dir(pitids, h, ptdir, nptdir, n)
   type (node)  :: ptID
   logical :: flag(n)
 
-  nptdir = -1.
+  nptdir = -1
 
   ! Push existing directions to priority queue
   flag = .False.
