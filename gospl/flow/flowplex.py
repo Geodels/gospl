@@ -375,15 +375,6 @@ class FAMesh(object):
         self._solve_KSP(True, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
 
-        if len(self.pitParams) == 0:
-            if MPIrank == 0 and self.verbose:
-                print(
-                    "Compute Flow Accumulation (%0.02f seconds)"
-                    % (process_time() - t0),
-                    flush=True,
-                )
-            return
-
         # Volume of water flowing downstream
         self.waterFilled = hl.copy()
         if (pitVol > 0.0).any():

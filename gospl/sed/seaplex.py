@@ -152,15 +152,15 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions for filled + eps elevations
-        rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.smthH, -1.0e5)
-        # rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
-        # sum_wght = np.sum(wght, axis=1)
-        # ids = (self.pitIDs > -1) & (self.flatOcean > -1) & (sum_wght == 0.0)
-        # ids = ids.nonzero()[0]
-        # rcv[ids, :] = np.tile(ids, (8, 1)).T
-        # rcv[ids, 0] = self.flatOcean[ids]
-        # wght[ids, :] = 0.0
-        # wght[ids, 0] = 1.0
+        # rcv, _, wght = mfdreceivers(8, 1.0, self.inIDs, self.smthH, -1.0e5)
+        rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
+        sum_wght = np.sum(wght, axis=1)
+        ids = (self.pitIDs > -1) & (self.flatOcean > -1) & (sum_wght == 0.0)
+        ids = ids.nonzero()[0]
+        rcv[ids, :] = np.tile(ids, (8, 1)).T
+        rcv[ids, 0] = self.flatOcean[ids]
+        wght[ids, :] = 0.0
+        wght[ids, 0] = 1.0
 
         # Set borders nodes
         if self.flatModel:

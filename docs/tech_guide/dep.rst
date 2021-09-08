@@ -13,7 +13,7 @@ In most landscape evolution models, internally-draining regions (*e.g.*, depress
 
   However, :mod:`gospl` is designed to not only address erosion problems but also to simulate source-to-sink transfer and sedimentary basins formation and evolution in potentially complex tectonic settings. In such cases, depressions may be formed at different periods during runtime and may be filled or remain internally drained (*e.g.*, endorheic basins) depending on the volume of sediment transported by upstream catchments.
 
-Depression filling approaches have received some attention in recent years with the development of new and more efficient algorithms such as the work from `Barnes et al. (2014) <https://arxiv.org/abs/1511.04463>`_. These methods based on **priority-flood**  offer a time complexity of the order of :math:`\mathrm{O(Nlog(N))}`.
+Depression filling approaches have received some attention in recent years with the development of new and more efficient algorithms such as the work from `Barnes et al. (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_. These methods based on **priority-flood**  offer a time complexity of the order of :math:`\mathrm{O(Nlog(N))}`.
 
 Priority-flood algorithms consist in finding the minimum elevation a cell needs to be raised to (*e.g.*, spill elevation of a cell) to prevent downstream ascending path to occur. They rely on priority queue data structure used to efficiently find the lowest spill elevation in a grid.
 
@@ -24,15 +24,13 @@ Priority-flood algorithms consist in finding the minimum elevation a cell needs 
   The Priority-Flood begins by adding all of the edge cells to the priority queue. Queued cells are represented by a black circle. Each edge cell is the mouth of its own watershed, represented with different colours here. The queue's lowest cell c is dequeued and its neighbours added to the queue; the neighbours inherit c's watershed label. Depressions are filled in. When two different watersheds meet, the maximum elevation of the two meeting cells is noted: here there are five distinct elevation levels and the two watersheds meet at an elevation of 5. If this noted elevation is the lowest of any meeting of the two watersheds, it is retained as the watersheds' spillover elevation (adapted from Barnes et al. (2014)).
 
 
-In :mod:`gospl`, the priority-flood + :math:`\mathrm{\epsilon}` variant of the algorithm proposed in `Barnes et al. (2014) <https://arxiv.org/abs/1511.04463>`_ is implemented. It provides a solution to remove automatically flat surfaces and it produces surfaces for which each cell has a defined gradient from which flow directions can be determined.
+In :mod:`gospl`, the priority-flood algorithm proposed in `Barnes et al. (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_ is implemented. It provides a solution to remove automatically flat surfaces.
 
-.. warning::
+The approach proposed in :mod:`gospl` is more general than the one in the initial paper. First, it handles both regular and irregular meshes, allowing for complex distributed meshes to be used as long as a clear definition of inter-mesh connectivities is available. Secondly, to prevent iteration over unnecessary vertices (such as marine regions), it is possible to define a minimal elevation (i.e. sea-level position) above which the algorithm is performed. Finally, it creates directions over flat regions allowing for downstream flows in cases where the entire volume of a depression is filled.
 
-  This part of the algorithm is not parallelised and is performed on the master processor once at every time step.
+.. important::
 
-Initially every nodes below a 1000 m depth are pushed to the priority queue. To track nodes that have already been processed by the algorithm a Boolean array is used in which edge nodes (that are by definition at the correct elevation) are marked as solved. The next step consists in removing (*i.e.* popping) from the priority queue the first element (*i.e.* the lowest node). This node is guarantee to have a non-ascending drainage path to the ocean. All non-processed neighbours (based on the Boolean array) from the popped node are then added to the priority queue. In the case where a neighbour is at a lower elevation than the considered node  its elevation is raised to the elevation of the node plus :math:`\mathrm{\epsilon}` before being pushed to the queue. Once the neighbour node has been added to the queue, it is marked as resolved in the Boolean array. In this basic implementation of the priority-flood algorithm, the process continues until the priority queue is empty.
-
-The priority-flood algorithm has been written in ``Fortran`` and returns the **flooded elevation** and for each depression its **volume**, its **spill over node**  and a **basin unique identifier** assigned to each of the nodes belonging to the depression.
+  The priority-flood algorithm returns the **flooded elevation** and for each depression its **volume**, its **spill over node**  and a **basin unique identifier** assigned to each of the nodes belonging to the depression.
 
 Depression filling
 ---------------------------------

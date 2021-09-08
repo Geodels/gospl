@@ -379,11 +379,11 @@ class ReadYaml(object):
             except KeyError:
                 self.sedimentK = 0.1
             try:
-                self.sedimentKf = hillDict["sedKf"]
+                self.sedimentKf = hillDict["nlKf"]
             except KeyError:
                 self.sedimentKf = 2.0
             try:
-                self.sedimentKw = hillDict["sedKw"]
+                self.sedimentKw = hillDict["nlKw"]
             except KeyError:
                 self.sedimentKw = 3.0
 
@@ -391,8 +391,8 @@ class ReadYaml(object):
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 0.1
-            self.sedimentKf = 2.0
-            self.sedimentKw = 3.0
+            self.sedimentKf = 0.3
+            self.sedimentKw = 0.5
 
         self._extraHillslope()
 
@@ -429,7 +429,7 @@ class ReadYaml(object):
             try:
                 self.clinSlp = hillDict["clinSlp"]
             except KeyError:
-                self.clinSlp = 0.0
+                self.clinSlp = 1.0e-6
 
         except KeyError:
             self.cexp = 2.0
@@ -437,7 +437,9 @@ class ReadYaml(object):
             self.smthK = 1.0e3
             self.smthD = 1.0e3
             self.offset = 400.0
-            self.clinSlp = 0.0
+            self.clinSlp = 1.0e-7
+
+        self.clinSlp = max(1.0e-7, self.clinSlp)
 
         return
 

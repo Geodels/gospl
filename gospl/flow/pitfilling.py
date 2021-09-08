@@ -40,7 +40,7 @@ class PITFill(object):
 
         Unlike previous algorithms, `Barnes (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_ approach guarantees a fixed number of memory access and communication events per processors. As mentionned in his paper based on comparison testing, it runs generally faster while using fewer resources than previous methods.
 
-    The approach proposed here is more general than the one in the initial paper. First, it handles both regular and irregular meshes, allowing for complex distributed meshes to be used as long as a clear definition of inter-mesh connectivities is available. Secondly, to prevent iteration over unnecessary vertices (such as marine regions), it is possible to define a minimal elevation (i.e. sea-level position) above which the algorithm is performed. Finally, it creates elevations with an epsilon slope allowing for downstream flows in case the entire volume of a depression is filled.
+    The approach proposed here is more general than the one in the initial paper. First, it handles both regular and irregular meshes, allowing for complex distributed meshes to be used as long as a clear definition of inter-mesh connectivities is available. Secondly, to prevent iteration over unnecessary vertices (such as marine regions), it is possible to define a minimal elevation (i.e. sea-level position) above which the algorithm is performed. Finally, it creates directions over flat regions allowing for downstream flows in cases where the entire volume of a depression is filled.
 
     For inter-mesh connections and message passing, the approach relies on PETSc DMPlex functions.
 
@@ -58,32 +58,15 @@ class PITFill(object):
         """
 
         # Petsc vectors
-        self.fZg = self.dm.createGlobalVector()
-        self.fZl = self.dm.createLocalVector()
-        self.sZg = self.dm.createGlobalVector()
-        self.sZl = self.dm.createLocalVector()
-        self.lbg = self.dm.createGlobalVector()
-        self.lbl = self.dm.createLocalVector()
-
         edges = -np.ones((self.lpoints, 2), dtype=int)
         edges[self.idLBounds, 0] = self.idLBounds
         edges[self.idBorders, 0] = self.idBorders
         edges[self.idLBounds, 1] = 0
         edges[self.idBorders, 1] = 1
         self.borders = edges
-        out = np.where(edges[:, 1] > -1)[0]
-        self.localEdges = edges[out, :]
 
         self.outEdges = np.zeros(self.lpoints, dtype=int)
         self.outEdges[self.shadow_lOuts] = 1
-
-        self.rankIDs = None
-
-        # Minimal slope to ensure downstream flow
-        hmax = np.zeros(1, dtype=np.float64)
-        hmax[0] = self.edgeMax
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, hmax, op=MPI.MAX)
-        self.eps = min(1.0e-12, np.round(1.0e-7 / hmax[0], 15))
 
         return
 
@@ -193,7 +176,7 @@ class PITFill(object):
 
         :arg pitIDs: local depression index.
 
-        :return: filled elevation.
+        :return: number of depressions.
         """
 
         # Define globally unique watershed index
@@ -202,10 +185,10 @@ class PITFill(object):
         pitIDs[fillIDs] += offset[MPIrank]
 
         # Transfer depression IDs along local borders
-        self.lbl.setArray(pitIDs)
-        self.dm.localToGlobal(self.lbl, self.lbg)
-        self.dm.globalToLocal(self.lbg, self.lbl)
-        label = self.lbl.getArray().copy()
+        self.tmpL.setArray(pitIDs)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        label = self.tmpL.getArray().copy().astype(int)
 
         ids = label < pitIDs
         df = self._buildPitDataframe(label[ids], pitIDs[ids])
@@ -234,12 +217,12 @@ class PITFill(object):
             label[label == df["p2"].iloc[k]] = df["p1"].iloc[k]
 
         # Transfer depression IDs along local borders
-        self.lbl.setArray(label)
-        self.dm.localToGlobal(self.lbl, self.lbg)
-        self.dm.globalToLocal(self.lbg, self.lbl)
+        self.tmpL.setArray(label)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
 
         # At this point all pits have a unique IDs across processors
-        self.pitIDs = self.lbl.getArray().astype(int)
+        self.pitIDs = self.tmpL.getArray().astype(int)
 
         # Lets make consecutive indices
         pitnbs = np.zeros(1, dtype=int)
@@ -260,7 +243,7 @@ class PITFill(object):
 
     def _dirFlats(self):
         """
-        This function finds shortest route to spillover points on filled depressions to ensure downstream distribution if they are overfilled.
+        This function finds routes to spillover points on filled depressions to ensure downstream distribution if they are overfilled.
         """
 
         # Find local receivers to direct flow to spillover nodes
@@ -337,6 +320,7 @@ class PITFill(object):
 
         :arg hl: local elevation.
         :arg level: minimal elevation above which the algorithm is performed.
+        :arg sed: boolean specifying if the pits are filled with water or sediments.
         """
 
         t0 = process_time()
@@ -374,16 +358,16 @@ class PITFill(object):
             graph[ids, 1] += offset[MPIrank]
 
         # Transfer watershed values along local borders
-        self.lbl.setArray(label.astype(int))
-        self.dm.localToGlobal(self.lbl, self.lbg)
-        self.dm.globalToLocal(self.lbg, self.lbl)
-        label = self.lbl.getArray()
+        self.tmpL.setArray(label)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        label = self.tmpL.getArray().copy().astype(int)
 
         # Transfer filled values along the local borders
-        self.fZl.setArray(lFill)
-        self.dm.localToGlobal(self.fZl, self.fZg)
-        self.dm.globalToLocal(self.fZg, self.fZl)
-        lFill = self.fZl.getArray()
+        self.tmpL.setArray(lFill)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        lFill = self.tmpL.getArray()
 
         # Combine tiles edges
         cgraph, graphnb = combine_edges(lFill, label, localEdges[:, 0], outEdges)
@@ -440,10 +424,10 @@ class PITFill(object):
         if not sed:
             id = lFill < self.sealevel - level
             lFill[id] = hl[id]
-        self.fZl.setArray(lFill)
-        self.dm.localToGlobal(self.fZl, self.fZg)
-        self.dm.globalToLocal(self.fZg, self.fZl)
-        self.lFill = self.fZl.getArray().copy()
+        self.tmpL.setArray(lFill)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        self.lFill = self.tmpL.getArray().copy()
 
         if MPIrank == 0 and self.verbose:
             print("Remove depressions (%0.02f seconds)" % (process_time() - t0))
@@ -485,10 +469,10 @@ class PITFill(object):
         self.pitInfo[:, 1] = rank
 
         # Transfer depression IDs along local borders
-        self.lbl.setArray(self.pitIDs)
-        self.dm.localToGlobal(self.lbl, self.lbg)
-        self.dm.globalToLocal(self.lbg, self.lbl)
-        self.pitIDs = self.lbl.getArray().astype(int)
+        self.tmpL.setArray(self.pitIDs)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        self.pitIDs = self.tmpL.getArray().copy().astype(int)
         self.pitIDs[self.idBorders] = -1
 
         # Get directions on flats

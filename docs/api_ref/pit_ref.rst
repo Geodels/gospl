@@ -17,29 +17,37 @@ Class PITFill
 
    .. autosummary::
 
-      ~PITFill.parallelFilling
-      ~PITFill.pitInformation
+      ~PITFill.fillElevation
 
    .. rubric:: Private Methods
 
    .. autosummary::
 
       ~PITFill._buildPitDataframe
+      ~PITFill._dirFlats
       ~PITFill._fillFromEdges
       ~PITFill._getPitParams
       ~PITFill._offsetGlobal
+      ~PITFill._performFilling
+      ~PITFill._pitInformation
+      ~PITFill._sortingPits
+      ~PITFill._transferIDs
 
 Public functions
 ---------------------
 
-.. automethod:: flow.pitfilling.PITFill.parallelFilling
-.. automethod:: flow.pitfilling.PITFill.pitInformation
+.. automethod:: flow.pitfilling.PITFill.fillElevation
 
 
 Private functions
 ---------------------
 
 .. automethod:: flow.pitfilling.PITFill._buildPitDataframe
+.. automethod:: flow.pitfilling.PITFill._dirFlats
 .. automethod:: flow.pitfilling.PITFill._fillFromEdges
 .. automethod:: flow.pitfilling.PITFill._getPitParams
 .. automethod:: flow.pitfilling.PITFill._offsetGlobal
+.. automethod:: flow.pitfilling.PITFill._performFilling
+.. automethod:: flow.pitfilling.PITFill._pitInformation
+.. automethod:: flow.pitfilling.PITFill._sortingPits
+.. automethod:: flow.pitfilling.PITFill._transferIDs

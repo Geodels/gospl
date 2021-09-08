@@ -212,26 +212,36 @@ b. Studies have shown that the physical strength of bedrock which varies with th
 .. code:: ipython
 
   diffusion:
-      mdep: True
-      nlc: 2.
       hillslopeKa: 0.02
       hillslopeKm: 0.2
-      sedK: 100.
-      sedKf: 200.
-      sedKw: 300.
+      clinSlp: 5.e-5
+      smthS: 2.e5
+      smthD: 1.e5
+      offset: 500.
+      nldep: False
+      nlc: 2.
+      nlK: 0.5
+      nlKf: 0.75
+      nlKw: 1.
 
 
 Hillslope processes in *gospl* is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
 
-a. :yaml:`mdep` boolean set to *True* to account for marine deposition,
-b. :yaml:`nlc` nonlinear marine diffusion exponent for the freshly river deposited thicknesses,
-c. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
-d. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
-e. :yaml:`sedK` is the diffusion coefficient for sediment deposited by rivers entering the marine environment.
-f. :yaml:`sedKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology option is turned on.
-g. :yaml:`sedKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology option is turned on.
+a. :yaml:`hillslopeKa` is the diffusion coefficient for the aerial domain,
+b. :yaml:`hillslopeKm` is the diffusion coefficient for the marine domain,
+c. :yaml:`clinSlp` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore,
+d. :yaml:`smthS` is the initial surface smoothing used to define the downstream transport of the marine sediments coming from rivers,
+e. :yaml:`smthD` is the smoothing of the surface added to the freshly deposited sediments thicknesses used to define the downstream transport of the marine sediments coming from rivers
+f. :yaml:`offset` is the offset in meters used to evaluate from the smoothed surface the maximum marine deposition thicknesses as sediments move on the continal slope and deep offshore basins.
 
+.. warning::
+  The following parameters are used to specify non-linear diffusion of rivers' sediments entering the ocean. This option is quite slow when not used on multi-processors and you might want to first look at the results of the simulation without this option turned on.
 
+g. :yaml:`nldep` boolean set to *True* to account for non linear marine deposition,
+h. :yaml:`nlc` nonlinear marine diffusion exponent for the freshly river deposited thicknesses (only accounted for if :yaml:`nldep` is True),
+i. :yaml:`nlK` is the non linear diffusion coefficient for sediment deposited by rivers entering the marine environment (only accounted for if :yaml:`nldep` is True),
+j. :yaml:`nlKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology and :yaml:`nlc` options are turned on,
+k. :yaml:`nlKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology and :yaml:`nlc` options are turned on.
 
 .. raw:: html
 
