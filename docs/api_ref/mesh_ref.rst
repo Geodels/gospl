@@ -30,7 +30,7 @@ Class UnstMesh
       ~UnstMesh._buildMesh
       ~UnstMesh._generateVTKmesh
       ~UnstMesh._get_boundary
-      ~UnstMesh._meshAdvectorSphere
+      ~UnstMesh._meshAdvector
       ~UnstMesh._meshUpliftSubsidence
       ~UnstMesh._meshfrom_cell_list
       ~UnstMesh._meshStructure
@@ -57,7 +57,7 @@ Private functions
 .. automethod:: mesher.unstructuredmesh.UnstMesh._buildMesh
 .. automethod:: mesher.unstructuredmesh.UnstMesh._generateVTKmesh
 .. automethod:: mesher.unstructuredmesh.UnstMesh._get_boundary
-.. automethod:: mesher.unstructuredmesh.UnstMesh._meshAdvectorSphere
+.. automethod:: mesher.unstructuredmesh.UnstMesh._meshAdvector
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshUpliftSubsidence
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshfrom_cell_list
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshStructure

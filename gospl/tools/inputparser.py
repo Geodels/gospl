@@ -94,11 +94,6 @@ class ReadYaml(object):
             )
             raise KeyError("Key domain is required in the input file!")
 
-        # try:
-        #     self.radius = domainDict["radius"]
-        # except KeyError:
-        #     self.radius = 6378137.0
-
         try:
             self.flowDir = domainDict["flowdir"]
         except KeyError:
@@ -142,6 +137,9 @@ class ReadYaml(object):
             self.interp = domainDict["interp"]
         except KeyError:
             self.interp = 1
+
+        if self.interp > 1:
+            self.interp = 3
 
         self._extraDomain()
 
@@ -245,11 +243,11 @@ class ReadYaml(object):
         except KeyError:
             self.rStep = 0
 
-        if self.tout > self.tEnd:
-            self.tout = self.tEnd
+        if self.tStart + self.tout > self.tEnd:
+            self.tout = self.tEnd - self.tStart
             print(
                 "Output time interval was changed to {} years to match the end time".format(
-                    self.dt
+                    self.tout
                 ),
                 flush=True,
             )
@@ -329,18 +327,8 @@ class ReadYaml(object):
                 self.coeffd = splDict["d"]
             except KeyError:
                 self.coeffd = 0.0
-            # try:
-            #     # `wght` is the percentage of upstream sediment flux
-            #     # that will be deposited on each cell...
-            #     self.wght = splDict["wght"]
-            #     if self.wght >= 1.0:
-            #         self.wght = 0.999
-            # except KeyError:
-            #     self.wght = 0.0
-
         except KeyError:
             self.K = 1.0e-12
-            # self.wght = 0.0
             self.coeffd = 0.0
 
         return
@@ -413,7 +401,7 @@ class ReadYaml(object):
             try:
                 self.marineNl = hillDict["nldep"]
             except KeyError:
-                self.marineNl = True
+                self.marineNl = False
             try:
                 self.smthK = hillDict["smthS"]
             except KeyError:

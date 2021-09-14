@@ -417,11 +417,6 @@ class UnstMesh(object):
         distances, self.locIDs = tree.query(self.lcoords, k=1)
         distances, self.glbIDs = tree.query(self.gcoords, k=1)
 
-        # From local to global values...
-        self.lgIDs = -np.ones(self.mpoints, dtype=int)
-        self.lgIDs[self.locIDs] = np.arange(self.lpoints)
-        self.outIDs = np.where(self.lgIDs < 0)[0]
-
         # Local/Global mapping
         self.lgmap_row = self.dm.getLGMap()
         l2g = self.lgmap_row.indices.copy()
@@ -435,7 +430,10 @@ class UnstMesh(object):
         vIS = self.dm.getVertexNumbering()
         self.inIDs = np.zeros(self.lpoints, dtype=int)
         self.inIDs[vIS.indices >= 0] = 1
-        self.lIDs = np.where(self.inIDs == 1)[0]
+        # glIDs are the indices part of a local partition which are not ghosts
+        self.glIDs = np.where(self.inIDs == 1)[0]
+        # ghostIDs are the shadow nodes indices on each partition
+        self.ghostIDs = np.where(self.inIDs == 0)[0]
 
         # Local mesh boundary points in 2D model
         localBound = self._get_boundary()
@@ -446,14 +444,6 @@ class UnstMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nib, op=MPI.MAX)
         if nib[0] > 0:
             self.flatModel = True
-            self.glBorders = np.zeros(self.mpoints, dtype=int)
-            idLocal = self.glBorders.copy()
-            localBound = np.zeros(self.lpoints, dtype=int)
-            localBound[self.idBorders] = 1
-            idLocal[self.locIDs] = localBound
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, idLocal, op=MPI.MAX)
-            self.glBorders = np.where(idLocal == 1)[0]
-            del localBound
         del idLocal
         vIS.destroy()
 
@@ -474,41 +464,12 @@ class UnstMesh(object):
         # Create mesh structure with meshplex
         self._meshStructure()
 
-        # Find global shadow nodes indices
-        self.shadow_lOuts = np.where(self.inIDs == 0)[0]
-        distances, indices = tree.query(self.lcoords[self.shadow_lOuts, :], k=1)
-        tmp = -np.ones(self.mpoints, dtype=int)
-        tmp[indices] = 1.0
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, tmp, op=MPI.MAX)
-        self.shadowAlls = np.unique(np.where(tmp > 0)[0])
-
         # Get local mesh borders not included in the shadow regions for parallel pit filling
-        masknodes = ~np.isin(self.lcells, self.shadow_lOuts)
+        masknodes = ~np.isin(self.lcells, self.ghostIDs)
         tmp2 = np.sum(masknodes.astype(int), axis=1)
         out = np.where(np.logical_and(tmp2 > 0, tmp2 < 3))[0]
         ptscells = self.lcells[out, :].flatten()
-        self.idLBounds = np.setdiff1d(ptscells, self.shadow_lOuts)
-
-        # Find local shadow nodes global indices
-        tree = spatial.cKDTree(self.mCoords[self.shadowAlls, :], leafsize=10)
-        distances, indices = tree.query(self.lcoords, k=1)
-        if MPIsize > 1:
-            self.gshadowIDs = np.unique(self.shadowAlls[indices])
-            tmp.fill(0.0)
-            tmp[self.gshadowIDs] = 1.0
-            ltmp = tmp[self.locIDs]
-            self.lshadowIDs = np.unique(np.where(ltmp > 0)[0])
-            distances, indices = tree.query(self.lcoords[self.shadow_lOuts], k=1)
-            self.shadow_gOuts = np.unique(self.shadowAlls[indices])
-
-            # Get shadow zones sorted indices
-            self.shadowgNb = len(self.shadowAlls)
-            self.gshadinIDs = np.where(np.in1d(self.shadowAlls, self.gshadowIDs))[0]
-            self.gshadoutIDs = np.where(np.in1d(self.shadowAlls, self.shadow_gOuts))[0]
-            tmp = np.concatenate((self.shadow_lOuts, np.arange(self.lpoints)))
-            cbin = np.bincount(tmp)
-            self.lshadinIDs = np.where(cbin == 1)[0]
-            del ltmp, cbin
+        self.idLBounds = np.setdiff1d(ptscells, self.ghostIDs)
 
         # Define cumulative erosion deposition arrays
         self._readErosionDeposition()
@@ -527,7 +488,7 @@ class UnstMesh(object):
         self.tecNb = -1
         self.flexNb = -1
 
-        del tree, distances, indices, tmp, tmp2
+        del tree, distances, tmp2  # , indices, tmp
         del l2g, offproc, gZ, out, ptscells
         gc.collect()
 
@@ -735,7 +696,7 @@ class UnstMesh(object):
 
         This function calls the following 2 private functions:
 
-        - _meshAdvectorSphere
+        - _meshAdvector
         - _meshUpliftSubsidence
 
         """
@@ -764,7 +725,7 @@ class UnstMesh(object):
             if self.tecdata.iloc[nb, 1] != "empty":
                 mdata = np.load(self.tecdata.iloc[nb, 1])
                 self.hdisp = mdata["xyz"][self.locIDs, :]
-                self._meshAdvectorSphere(mdata["xyz"], timer)
+                self._meshAdvector(mdata["xyz"], timer)
 
             if self.tecdata.iloc[nb, 2] != "empty":
                 mdata = np.load(self.tecdata.iloc[nb, 2])
@@ -804,9 +765,9 @@ class UnstMesh(object):
 
         return
 
-    def _meshAdvectorSphere(self, tectonic, timer):
+    def _meshAdvector(self, tectonic, timer):
         """
-        Advects the spherical mesh horizontally and interpolates mesh information.
+        Advects the mesh horizontally and interpolates mesh information.
 
         The advection proceeds in each partition seprately in the following way:
 
@@ -824,65 +785,15 @@ class UnstMesh(object):
         # Move local coordinates
         XYZ = self.lcoords + tectonic[self.locIDs, :] * timer
 
-        # Update local elevation
-        tmp = self.hLocal.getArray().copy()
-        elev = tmp[self.lgIDs]
-        if MPIsize > 1:
-            temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs] = elev[self.gshadowIDs]
-            temp[self.gshadoutIDs] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            elev[self.shadowAlls] = temp
-            loc_elev = elev[self.locIDs]
-        else:
-            loc_elev = elev[self.locIDs]
-
-        # Update local erosion/deposition
-        tmp = self.cumEDLocal.getArray().copy()
-        erodep = tmp[self.lgIDs]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs] = erodep[self.gshadowIDs]
-            temp[self.gshadoutIDs] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            erodep[self.shadowAlls] = temp
-            loc_erodep = erodep[self.locIDs]
-        else:
-            loc_erodep = erodep[self.locIDs]
-
-        # Update local stratal dataset after displacements
-        if self.stratNb > 0 and self.stratStep > 0:
-            if self.carbOn:
-                (
-                    loc_stratH,
-                    loc_stratZ,
-                    loc_stratF,
-                    loc_stratW,
-                    loc_stratC,
-                    loc_phiS,
-                    loc_phiF,
-                    loc_phiW,
-                    loc_phiC,
-                ) = self.updateDispStrata()
-            else:
-                (
-                    loc_stratH,
-                    loc_stratZ,
-                    loc_stratF,
-                    loc_stratW,
-                    loc_phiS,
-                    loc_phiF,
-                    loc_phiW,
-                ) = self.updateDispStrata()
+        # Get local elevation and erosion/deposition information
+        loc_elev = self.hLocal.getArray().copy()
+        loc_erodep = self.cumEDLocal.getArray().copy()
 
         # Build and query local kd-tree
         tree = spatial.cKDTree(XYZ, leafsize=10)
-        distances, indices = tree.query(self.lcoords, k=3)
+        distances, indices = tree.query(self.gcoords, k=3)
 
         # Inverse weighting distance...
-        if self.interp == 1:
-            nelev = loc_elev[indices[:, 0]]
-
         weights = np.divide(
             1.0, distances, out=np.zeros_like(distances), where=distances != 0
         )
@@ -890,82 +801,28 @@ class UnstMesh(object):
         temp = np.sum(weights, axis=1)
 
         # Update elevation
-        if self.interp > 1:
+        if self.interp == 1:
+            nelev = loc_elev[indices[:, 0]]
+        else:
             tmp = np.sum(weights * loc_elev[indices], axis=1)
             nelev = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
 
         # Update erosion deposition
         tmp = np.sum(weights * loc_erodep[indices], axis=1)
         nerodep = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
+        if len(onIDs) > 0:
+            if self.interp > 1:
+                nelev[onIDs] = loc_elev[indices[onIDs, 0]]
+            nerodep[onIDs] = loc_erodep[indices[onIDs, 0]]
+
+        self.hGlobal.setArray(nelev)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        self.cumED.setArray(nerodep)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
 
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:
-            if self.carbOn:
-                self.stratalRecord(
-                    indices,
-                    weights,
-                    loc_stratH,
-                    loc_stratZ,
-                    loc_stratF,
-                    loc_stratW,
-                    loc_stratC,
-                    loc_phiS,
-                    loc_phiF,
-                    loc_phiW,
-                    loc_phiC,
-                )
-            else:
-                self.stratalRecord(
-                    indices,
-                    weights,
-                    loc_stratH,
-                    loc_stratZ,
-                    loc_stratF,
-                    loc_stratW,
-                    None,
-                    loc_phiS,
-                    loc_phiF,
-                    loc_phiW,
-                    None,
-                )
-
-        if len(onIDs) > 0:
-            nerodep[onIDs] = loc_erodep[indices[onIDs, 0]]
-            if self.interp > 1:
-                nelev[onIDs] = loc_elev[indices[onIDs, 0]]
-            if self.stratNb > 0 and self.stratStep > 0:
-                self.stratZ[onIDs, : self.stratStep] = loc_stratZ[indices[onIDs, 0], :]
-                self.stratH[onIDs, : self.stratStep] = loc_stratH[indices[onIDs, 0], :]
-                self.phiS[onIDs, : self.stratStep] = loc_phiS[indices[onIDs, 0], :]
-                if self.stratF is not None:
-                    self.stratF[onIDs, : self.stratStep] = loc_stratF[
-                        indices[onIDs, 0], :
-                    ]
-                    self.phiF[onIDs, : self.stratStep] = loc_phiW[indices[onIDs, 0], :]
-                if self.stratW is not None:
-                    self.stratW[onIDs, : self.stratStep] = loc_stratW[
-                        indices[onIDs, 0], :
-                    ]
-                    self.phiW[onIDs, : self.stratStep] = loc_phiF[indices[onIDs, 0], :]
-                if self.carbOn:
-                    self.stratC[onIDs, : self.stratStep] = loc_stratC[
-                        indices[onIDs, 0], :
-                    ]
-                    self.phiC[onIDs, : self.stratStep] = loc_phiC[indices[onIDs, 0], :]
-
-        self.hLocal.setArray(nelev)
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
-
-        self.cumEDLocal.setArray(nerodep)
-        self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-
-        # Update local stratal dataset
-        if self.stratNb > 0 and self.stratStep > 0:
-            self.localStrat()
-            del loc_stratH, loc_stratZ, loc_stratF, loc_stratW
-            del loc_phiS, loc_phiF, loc_phiW
-            if self.carbOn:
-                del loc_stratC, loc_phiC
+            self.stratalRecord(indices, weights, onIDs)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -973,12 +830,6 @@ class UnstMesh(object):
                 % (process_time() - t1),
                 flush=True,
             )
-
-        del XYZ, elev, nelev, erodep, nerodep
-        del loc_elev, loc_erodep, onIDs
-        del weights, tmp, temp
-        del tree, distances, indices
-        gc.collect()
 
         return
 

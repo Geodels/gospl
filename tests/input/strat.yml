@@ -17,19 +17,19 @@ time:
     strat: 500000.
 
 spl:
-    wfill: 100.
-    sfill: 10.
     K: 3.e-9
     d: 0.
 
 diffusion:
     hillslopeKa: 0.01
     hillslopeKm: 0.1
-    sedK: 1000.
-    dstep: 5
-    mstep: 5
-    sedKf: 2000.
-    sedKw: 3000.
+    clinSlp: 5.e-5
+    smthS: 5.e5
+    smthD: 2.e5
+    offset: 500.
+    nldep: False
+    nlK: 0.25
+    nlc: 2.
 
 sea:
     position: 0.

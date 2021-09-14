@@ -20,10 +20,8 @@ Class StraMesh
       ~STRAMesh.erodeStrat
       ~STRAMesh.elevStrat
       ~STRAMesh.getCompaction
-      ~STRAMesh.localStrat
       ~STRAMesh.readStratLayers
       ~STRAMesh.stratalRecord
-      ~STRAMesh.updateDispStrata
 
    .. rubric:: Private Methods
 
@@ -38,10 +36,8 @@ Public functions
 .. automethod:: sed.stratplex.STRAMesh.erodeStrat
 .. automethod:: sed.stratplex.STRAMesh.elevStrat
 .. automethod:: sed.stratplex.STRAMesh.getCompaction
-.. automethod:: sed.stratplex.STRAMesh.localStrat
 .. automethod:: sed.stratplex.STRAMesh.readStratLayers
 .. automethod:: sed.stratplex.STRAMesh.stratalRecord
-.. automethod:: sed.stratplex.STRAMesh.updateDispStrata
 
 
 Private functions

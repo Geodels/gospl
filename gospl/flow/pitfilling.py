@@ -66,7 +66,7 @@ class PITFill(object):
         self.borders = edges
 
         self.outEdges = np.zeros(self.lpoints, dtype=int)
-        self.outEdges[self.shadow_lOuts] = 1
+        self.outEdges[self.ghostIDs] = 1
 
         return
 
@@ -257,7 +257,7 @@ class PITFill(object):
         keep = -np.ones(1)
         stp = 0
         while keep[0] < 0:
-            self.tmp.setArray(pdir[self.lIDs])
+            self.tmp.setArray(pdir[self.glIDs])
             self.dm.globalToLocal(self.tmp, self.tmpL, 3)
             pdir = self.tmpL.getArray().copy().astype(int)
             pdir = nghb_dir(self.pitIDs, self.lFill, pdir)

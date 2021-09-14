@@ -165,7 +165,7 @@ def unstMesh(esph, infile, hfn0=100.0, hfn1=30.0, hfn2=15, tmp="tmp/"):
 
 def gosplElev(coords, cells, elev, gmesh, visvtk=False):
 
-    Gmesh = meshplex.mesh_tri.MeshTri(coords, cells)
+    Gmesh = meshplex.MeshTri(coords, cells)
     s = Gmesh.idx_hierarchy.shape
     a = np.sort(Gmesh.idx_hierarchy.reshape(s[0], -1).T)
 

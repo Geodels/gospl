@@ -733,21 +733,23 @@ end subroutine mfdreceivers
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine stratasimple(nb, stratnb, ids, weights, strath, stratz, phis, &
-                        nstrath, nstratz, nphis)
+subroutine strataonesed(n, stratnb, ids, weights, strath, stratz, phis, &
+                        nstrath, nstratz, nphis, nb)
 !*****************************************************************************
 ! Record stratigraphic layers through time.
 
   implicit none
 
-  integer, intent(in) :: nb
+  integer :: nb
+  integer, intent(in) :: n
   integer, intent(in) :: stratnb
 
   integer, intent(in) :: ids(nb,3)
   double precision,intent(in) :: weights(nb,3)
-  double precision, intent(in) :: stratz(nb,stratnb)
-  double precision, intent(in) :: strath(nb,stratnb)
-  double precision, intent(in) :: phis(nb,stratnb)
+
+  double precision, intent(in) :: stratz(n,stratnb)
+  double precision, intent(in) :: strath(n,stratnb)
+  double precision, intent(in) :: phis(n,stratnb)
 
   double precision, intent(out) :: nstratz(nb,stratnb)
   double precision, intent(out) :: nstrath(nb,stratnb)
@@ -775,28 +777,30 @@ subroutine stratasimple(nb, stratnb, ids, weights, strath, stratz, phis, &
 
   return
 
-end subroutine stratasimple
+end subroutine strataonesed
 
-subroutine stratabuild(nb, stratnb, ids, weights, strath, stratz, stratf, &
+subroutine stratathreesed(n, stratnb, ids, weights, strath, stratz, stratf, &
                        stratw, phis, phif, phiw, nstrath, nstratz, nstratf, &
-                       nstratw, nphis, nphif, nphiw)
+                       nstratw, nphis, nphif, nphiw, nb)
 !*****************************************************************************
 ! Record stratigraphic layers through time with multiple lithologies.
 
   implicit none
 
-  integer, intent(in) :: nb
+  integer :: nb
+  integer, intent(in) :: n
   integer, intent(in) :: stratnb
 
   integer, intent(in) :: ids(nb,3)
   double precision,intent(in) :: weights(nb,3)
-  double precision, intent(in) :: stratz(nb,stratnb)
-  double precision, intent(in) :: strath(nb,stratnb)
-  double precision, intent(in) :: stratf(nb,stratnb)
-  double precision, intent(in) :: stratw(nb,stratnb)
-  double precision, intent(in) :: phis(nb,stratnb)
-  double precision, intent(in) :: phif(nb,stratnb)
-  double precision, intent(in) :: phiw(nb,stratnb)
+
+  double precision, intent(in) :: stratz(n,stratnb)
+  double precision, intent(in) :: strath(n,stratnb)
+  double precision, intent(in) :: stratf(n,stratnb)
+  double precision, intent(in) :: stratw(n,stratnb)
+  double precision, intent(in) :: phis(n,stratnb)
+  double precision, intent(in) :: phif(n,stratnb)
+  double precision, intent(in) :: phiw(n,stratnb)
 
   double precision, intent(out) :: nstratz(nb,stratnb)
   double precision, intent(out) :: nstrath(nb,stratnb)
@@ -848,31 +852,33 @@ subroutine stratabuild(nb, stratnb, ids, weights, strath, stratz, stratf, &
 
   return
 
-end subroutine stratabuild
+end subroutine stratathreesed
 
-subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
+subroutine stratafullsed(n, stratnb, ids, weights, strath, stratz, stratf, &
                            stratw, stratc, phis, phif, phiw, phic, nstrath, &
                            nstratz, nstratf, nstratw, nstratc, nphis, nphif, &
-                           nphiw, nphic)
+                           nphiw, nphic, nb)
 !*****************************************************************************
 ! Record stratigraphic layers through time with carbonate module turned on.
 
   implicit none
 
-  integer, intent(in) :: nb
+  integer :: nb
+  integer, intent(in) :: n
   integer, intent(in) :: stratnb
 
   integer, intent(in) :: ids(nb,3)
   double precision,intent(in) :: weights(nb,3)
-  double precision, intent(in) :: stratz(nb,stratnb)
-  double precision, intent(in) :: strath(nb,stratnb)
-  double precision, intent(in) :: stratf(nb,stratnb)
-  double precision, intent(in) :: stratw(nb,stratnb)
-  double precision, intent(in) :: stratc(nb,stratnb)
-  double precision, intent(in) :: phis(nb,stratnb)
-  double precision, intent(in) :: phif(nb,stratnb)
-  double precision, intent(in) :: phiw(nb,stratnb)
-  double precision, intent(in) :: phic(nb,stratnb)
+
+  double precision, intent(in) :: stratz(n,stratnb)
+  double precision, intent(in) :: strath(n,stratnb)
+  double precision, intent(in) :: stratf(n,stratnb)
+  double precision, intent(in) :: stratw(n,stratnb)
+  double precision, intent(in) :: stratc(n,stratnb)
+  double precision, intent(in) :: phis(n,stratnb)
+  double precision, intent(in) :: phif(n,stratnb)
+  double precision, intent(in) :: phiw(n,stratnb)
+  double precision, intent(in) :: phic(n,stratnb)
 
   double precision, intent(out) :: nstratz(nb,stratnb)
   double precision, intent(out) :: nstrath(nb,stratnb)
@@ -916,11 +922,9 @@ subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
       nstratf(k,kk) = tmp3/sum_weight
       nstratc(k,kk) = tmp4/sum_weight
       nstratw(k,kk) = tmp8/sum_weight
-
       if(nstratf(k,kk)<0.) nstratf(k,kk) = 0.0
       if(nstratc(k,kk)<0.) nstratc(k,kk) = 0.0
       if(nstratw(k,kk)<0.) nstratw(k,kk) = 0.0
-
       tot = nstratw(k,kk)+nstratf(k,kk)+nstratc(k,kk)
       if(tot>1.)then
         nstratf(k,kk) = nstratf(k,kk)/tot
@@ -936,7 +940,7 @@ subroutine stratabuildcarb(nb, stratnb, ids, weights, strath, stratz, stratf, &
 
   return
 
-end subroutine stratabuildcarb
+end subroutine stratafullsed
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!

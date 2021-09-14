@@ -115,7 +115,7 @@ def getInitialMesh(topofile, meshfile, spacefile, outfile, dst_path, hfn):
 
 def gosplElev(coords, cells, elev, gmesh, visvtk=False):
 
-    Gmesh = meshplex.mesh_tri.MeshTri(coords, cells)
+    Gmesh = meshplex.MeshTri(coords, cells)
     s = Gmesh.idx_hierarchy.shape
     a = np.sort(Gmesh.idx_hierarchy.reshape(s[0], -1).T)
 

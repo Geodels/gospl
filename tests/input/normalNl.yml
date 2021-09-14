@@ -1,18 +1,20 @@
-name: Testing model forward
+name: Testing model with nonlinear diffusion
 
 domain:
     npdata: '/live/lib/gospl/tests/data/elev/elev20Ma'
     flowdir: 3
     fast: False
     backward: False
+    interp: 3
     overlap: 10
 
 time:
     start: -20000000.
     end: -15000000.
     tout: 1000000.
-    dt: 1000000.
+    dt: 500000.
     tec: 1000000.
+    strat: 500000.
 
 spl:
     K: 3.e-9
@@ -25,12 +27,12 @@ diffusion:
     smthS: 5.e5
     smthD: 2.e5
     offset: 500.
-    nldep: False
-    nlK: 0.25
+    nldep: True
+    nlK: 0.1
     nlc: 2.
 
 sea:
-    position: 0.
+    curve: '/live/lib/gospl/tests/data/sealevel.csv'
 
 tectonic:
   - start: -20000000.
@@ -55,10 +57,10 @@ climate:
   - start: -15000000.
     map: ['/live/lib/gospl/tests/data/rain/rain15Ma','r']
 
-forcepaleo:
-    dir: 'output/backward'
-    steps: [5]
+paleomap:
+  - time: -15000000.
+    npdata: '/live/lib/gospl/tests/data/elev/elev15Ma'
 
 output:
-    dir: 'output/forward'
+    dir: 'output/normalNl'
     makedir: False

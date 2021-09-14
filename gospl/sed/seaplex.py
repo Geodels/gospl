@@ -216,7 +216,7 @@ class SEAMesh(object):
             # Set borders nodes
             if self.flatModel:
                 nlvec[self.idBorders] = 0.0
-            f.setArray(hdot + nlvec[self.lIDs])
+            f.setArray(hdot + nlvec[self.glIDs])
 
     def _evalJacobian(self, ts, t, x, xdot, a, J, P):
         """

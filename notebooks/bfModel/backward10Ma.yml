@@ -1,4 +1,4 @@
-name: Global model from 5 Ma to present backward
+name: Global model from 5 Ma to 15 Ma backward so it will be set as ranging from -10 Ma to present
 
 domain:
     npdata: 'input8/elev5Ma'
@@ -16,15 +16,19 @@ time:
     tec: 1000000.
 
 spl:
-    hfill: 100.
     K: 3.e-8
-    Ff: 0.2
     d: 0.42
 
 diffusion:
     hillslopeKa: 0.02
     hillslopeKm: 0.2
-    sedK: 1000.
+    clinSlp: 5.e-5
+    smthS: 5.e2
+    smthD: 2.e2
+    offset: 500.
+    nldep: False
+    nlK: 0.25 
+    nlc: 2.
 
 sea:
     position: 0.

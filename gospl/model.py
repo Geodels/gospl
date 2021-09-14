@@ -141,9 +141,6 @@ class Model(
         self.newForcing = True
         self.steppaleo = 0
 
-        # _SEAMesh.seaChange(self)
-        # _WriteMesh.visModel(self)
-        # return
         while self.tNow <= self.tEnd:
             tstep = process_time()
 

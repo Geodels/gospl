@@ -81,7 +81,7 @@ class WriteMesh(object):
             self.forceonIDs = np.where(distances[:, 0] == 0)[0]
 
             outTree = spatial.cKDTree(latlonreg, leafsize=10)
-            distances, self.regIDs = outTree.query(self.lLatLon, k=3)
+            distances, self.regIDs = outTree.query(self.lLatLon[self.glIDs], k=3)
             self.regWeights = 1.0 / distances ** 2
             self.regTop = 1.0 / np.sum(self.regWeights, axis=1)
             self.regonIDs = np.where(distances[:, 0] == 0)[0]
@@ -350,7 +350,9 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.FAL.getArray().copy()
-            # data[data <= 0.0] = 1.0
+            data[data <= 0.0] = 1.0
+            if not self.fast:
+                data[self.seaID] = 1.0
             f["flowAcc"][:, 0] = data
             f.create_dataset(
                 "fillFA",
@@ -359,7 +361,9 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.fillFAL.getArray().copy()
-            # data[data <= 0.0] = 1.0
+            data[data <= 0.0] = 1.0
+            if not self.fast:
+                data[self.seaID] = 1.0
             f["fillFA"][:, 0] = data
             f.create_dataset(
                 "sedLoad",
@@ -368,7 +372,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.vSedLocal.getArray().copy()
-            # data[data <= 0.0] = 1.0
+            data[data <= 0.0] = 1.0
             f["sedLoad"][:, 0] = data
             if self.stratNb > 0:
                 if self.stratF is not None:
@@ -614,21 +618,6 @@ class WriteMesh(object):
         # Get the difference between backward and forward model on TIN
         ldiff = np.array(hf["/elev"])[:, 0] - self.hLocal.getArray()
 
-        # erosional features using a low-pass filter
-        gdiff = ldiff[self.lgIDs]
-        if MPIsize > 1:
-            temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs] = gdiff[self.gshadowIDs]
-            temp[self.gshadoutIDs] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            gdiff[self.shadowAlls] = temp
-        ldiff = gdiff[self.locIDs]
-
-        # self.uplift = ldiff
-        # self.uplift *= alpha / self.tecStep
-        # hf.close()
-        # return
-
         # Map it on a regularly spaced mesh (lon/lat)
         diffreg = (
             np.sum(self.forceWeights * ldiff[self.forceIDs], axis=1) * self.forceTop
@@ -637,13 +626,7 @@ class WriteMesh(object):
             diffreg[self.forceonIDs] = ldiff[self.forceIDs[self.forceonIDs, 0]]
 
         # Apply a low-pass filter to the regular array
-        # median = False
         kernel_size = 3
-        # if median:
-        #     filter = ndimage.median_filter(
-        #         diffreg.reshape(self.regshape), size=kernel_size, mode="wrap"
-        #     )
-        # else:
         filter = ndimage.gaussian_filter(
             diffreg.reshape(self.regshape), sigma=kernel_size, mode="wrap"
         )
@@ -654,20 +637,12 @@ class WriteMesh(object):
         if len(self.regonIDs) > 0:
             lfilter[self.regonIDs] = filter[self.regIDs[self.regonIDs, 0]]
 
-        # From local to global
-        gfilter = lfilter[self.lgIDs]
-        if MPIsize > 1:
-            temp = np.full(self.shadowgNb, -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs] = gfilter[self.gshadowIDs]
-            temp[self.gshadoutIDs] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            gfilter[self.shadowAlls] = temp
-
         # Specify new uplift value matching backward elevation removing the
         # erosional features using a low-pass filter
-        self.uplift = gfilter[self.locIDs]
+        self.tmp.setArray(lfilter)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        self.uplift = self.tmpL.getArray().copy()
         self.uplift[self.seaID] = ldiff[self.seaID]
-
         self.uplift *= alpha / self.tecStep
         hf.close()
 

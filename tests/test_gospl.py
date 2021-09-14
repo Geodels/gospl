@@ -105,6 +105,28 @@ def test_gospl_restart_run():
     normal.destroy()
 
 
+def test_gospl_normalnl_run():
+    import gospl
+    from gospl.model import Model
+    import warnings
+
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+    input = "/live/lib/gospl/tests/input/normalNl.yml"
+
+    # Initialise model
+    normal = Model(input, True, False)
+
+    # Run model
+    normal.runProcesses()
+
+    # Reinitialise model
+    normal.reInitialiseZ()
+
+    # Destroy model
+    normal.destroy()
+
+
 def test_gospl_carbonate_run():
     import gospl
     from gospl.model import Model

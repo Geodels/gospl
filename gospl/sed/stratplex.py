@@ -8,9 +8,9 @@ from mpi4py import MPI
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import stratasimple
-    from gospl._fortran import stratabuild
-    from gospl._fortran import stratabuildcarb
+    from gospl._fortran import strataonesed
+    from gospl._fortran import stratathreesed
+    from gospl._fortran import stratafullsed
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -319,17 +319,17 @@ class STRAMesh(object):
         # Update thickness of top stratigraphic layer
         self.stratH[nids, eroLayNb] = eroVal
         self.stratH[nids, 0] -= 1.0e6
-        self.stratH[self.stratH <= 0] = 0.0
-        self.phiS[self.stratH <= 0] = 0.0
+        self.stratH[self.stratH < 0] = 0.0
+        self.phiS[self.stratH < 0] = 0.0
         if self.stratF is not None:
-            self.stratF[self.stratH <= 0] = 0.0
-            self.phiF[self.stratH <= 0] = 0.0
+            self.stratF[self.stratH < 0] = 0.0
+            self.phiF[self.stratH < 0] = 0.0
         if self.stratW is not None:
-            self.stratW[self.stratH <= 0] = 0.0
-            self.phiW[self.stratH <= 0] = 0.0
+            self.stratW[self.stratH < 0] = 0.0
+            self.phiW[self.stratH < 0] = 0.0
         if self.carbOn:
-            self.stratC[self.stratH <= 0] = 0.0
-            self.phiC[self.stratH <= 0] = 0.0
+            self.stratC[self.stratH < 0] = 0.0
+            self.phiC[self.stratH < 0] = 0.0
 
         self.thCoarse /= self.dt
         if self.stratF is not None:
@@ -525,208 +525,48 @@ class STRAMesh(object):
 
         return
 
-    def updateDispStrata(self):
-        """
-        Gets the stratigraphic records relevant to each partition after mesh advection.
-
-        The functions returns local stratigraphic layer information:
-
-        - thickness of each stratigrapic layer `loc_stratH` accounting for both erosion & deposition events.
-        - proportion of fine sediment `loc_stratF` contains in each stratigraphic layer.
-        - proportion of weathered sediment `loc_stratW` contains in each stratigraphic layer.
-        - elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer `loc_stratZ`.
-        - porosity of coarse sediment `loc_phiS` in each stratigraphic layer computed at center of each layer.
-        - porosity of fine sediment `loc_phiF` in each stratigraphic layer computed at center of each layer.
-        - porosity of waethered sediment `loc_phiW` in each stratigraphic layer computed at center of each layer.
-        - proportion of carbonate sediment `loc_strataC` contains in each stratigraphic layer if the carbonate module is turned on.
-        - porosity of carbonate sediment `loc_phiC` in each stratigraphic layer computed at center of each layer when the carbonate module is turned on.
-
-        .. note::
-
-            In `gospl`, the stratigraphic layers are only defined locally. For interpolation on the edges of each partition it is important to ensure that all stratigraphic information on the adjacent nodes of the neighbouring partition are accessible. This is done by applying MPI `Allreduce` operation to the nodes parts of the overlaid ('shadow') zone.
-
-        :return: loc_stratH, loc_stratZ, loc_stratF, loc_stratW, loc_stratC, loc_phiS, loc_phiF, loc_phiW, loc_phiC
-        """
-
-        stratH = self.stratH[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratH[self.shadowAlls, :] = temp
-            loc_stratH = stratH[self.locIDs, :]
-        else:
-            loc_stratH = stratH[self.locIDs, :]
-
-        stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratZ[self.shadowAlls, :] = temp
-            loc_stratZ = stratZ[self.locIDs, :]
-        else:
-            loc_stratZ = stratZ[self.locIDs, :]
-
-        phiS = self.phiS[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = phiS[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            phiS[self.shadowAlls, :] = temp
-            loc_phiS = phiS[self.locIDs, :]
-        else:
-            loc_phiS = phiS[self.locIDs, :]
-
-        if self.stratF is not None:
-            stratF = self.stratF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratF[self.shadowAlls, :] = temp
-                loc_stratF = stratF[self.locIDs, :]
-            else:
-                loc_stratF = stratF[self.locIDs, :]
-
-            phiF = self.phiF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiF[self.shadowAlls, :] = temp
-                loc_phiF = phiF[self.locIDs, :]
-            else:
-                loc_phiF = phiF[self.locIDs, :]
-        else:
-            loc_stratF = None
-            loc_phiF = None
-
-        if self.stratW is not None:
-            stratW = self.stratW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratW[self.shadowAlls, :] = temp
-                loc_stratW = stratW[self.locIDs, :]
-            else:
-                loc_stratW = stratW[self.locIDs, :]
-
-            phiW = self.phiW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiW[self.shadowAlls, :] = temp
-                loc_phiW = phiW[self.locIDs, :]
-            else:
-                loc_phiW = phiW[self.locIDs, :]
-        else:
-            loc_stratW = None
-            loc_phiW = None
-
-        if self.carbOn:
-            stratC = self.stratC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratC[self.shadowAlls, :] = temp
-                loc_stratC = stratC[self.locIDs, :]
-            else:
-                loc_stratC = stratC[self.locIDs, :]
-
-            phiC = self.phiC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiC[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiC[self.shadowAlls, :] = temp
-                loc_phiC = phiC[self.locIDs, :]
-            else:
-                loc_phiC = phiC[self.locIDs, :]
-
-            return (
-                loc_stratH,
-                loc_stratZ,
-                loc_stratF,
-                loc_stratW,
-                loc_stratC,
-                loc_phiS,
-                loc_phiF,
-                loc_phiW,
-                loc_phiC,
-            )
-        else:
-            return (
-                loc_stratH,
-                loc_stratZ,
-                loc_stratF,
-                loc_stratW,
-                loc_phiS,
-                loc_phiF,
-                loc_phiW,
-            )
-
-    def stratalRecord(
-        self,
-        indices,
-        weights,
-        loc_stratH,
-        loc_stratZ,
-        loc_stratF,
-        loc_stratW,
-        loc_stratC,
-        loc_phiS,
-        loc_phiF,
-        loc_phiW,
-        loc_phiC,
-    ):
+    def stratalRecord(self, indices, weights, onIDs):
         """
         Once the interpolation has been performed, the following function updates the stratigraphic records based on the advected mesh.
 
         The function relies on 3 fortran subroutines (for loop performance purposes):
 
-        1. stratasimple
-        2. stratabuild
-        3. stratabuildcarb
+        1. strataonesed
+        2. stratathreesed
+        3. stratafullsed
 
         :arg indices: indices of the closest nodes used for interpolation
         :arg weights: weights based on the distances to closest nodes
-        :arg loc_stratH: thickness of each stratigrapic layer accounting for both erosion & deposition events.
-        :arg loc_stratF: proportion of fine sediment contains in each stratigraphic layer.
-        :arg loc_stratW: proportion of weathered sediment contains in each stratigraphic layer.
-        :arg loc_stratZ: elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer.
-        :arg loc_phiS: porosity of coarse sediment in each stratigraphic layer computed at center of each layer.
-        :arg loc_phiF: porosity of fine sediment in each stratigraphic layer computed at center of each layer.
-        :arg loc_phiW: porosity of weathered sediment in each stratigraphic layer computed at center of each layer.
-        :arg loc_strataC: proportion of carbonate sediment contains in each stratigraphic layer if the carbonate module is turned on.
-        :arg loc_phiC: porosity of carbonate sediment in each stratigraphic layer computed at center of each layer when the carbonate module is turned on.
+        :arg onIDs: index of nodes remaining at the same position.
 
         """
 
+        # Get local stratal dataset after displacements
+        loc_stratH = self.stratH[:, : self.stratStep]
+        loc_stratZ = self.stratZ[:, : self.stratStep]
+        loc_phiS = self.phiS[:, : self.stratStep]
+        if self.stratF is not None:
+            loc_stratF = self.stratF[:, : self.stratStep]
+            loc_phiF = self.phiF[:, : self.stratStep]
+        if self.stratW is not None:
+            loc_stratW = self.stratW[:, : self.stratStep]
+            loc_phiW = self.phiW[:, : self.stratStep]
+        if self.carbOn:
+            loc_stratC = self.stratC[:, : self.stratStep]
+            loc_phiC = self.phiC[:, : self.stratStep]
+
         if self.carbOn:
             (
-                self.stratH[:, : self.stratStep],
-                self.stratZ[:, : self.stratStep],
-                self.stratF[:, : self.stratStep],
-                self.stratW[:, : self.stratStep],
-                self.stratC[:, : self.stratStep],
-                self.phiS[:, : self.stratStep],
-                self.phiF[:, : self.stratStep],
-                self.phiW[:, : self.stratStep],
-                self.phiC[:, : self.stratStep],
-            ) = stratabuildcarb(
+                nstratH,
+                nstratZ,
+                nstratF,
+                nstratW,
+                nstratC,
+                nphiS,
+                nphiF,
+                nphiW,
+                nphiC,
+            ) = stratafullsed(
                 self.lpoints,
                 self.stratStep,
                 indices,
@@ -742,15 +582,7 @@ class STRAMesh(object):
                 loc_phiC,
             )
         elif self.stratF is not None:
-            (
-                self.stratH[:, : self.stratStep],
-                self.stratZ[:, : self.stratStep],
-                self.stratF[:, : self.stratStep],
-                self.stratW[:, : self.stratStep],
-                self.phiS[:, : self.stratStep],
-                self.phiF[:, : self.stratStep],
-                self.phiW[:, : self.stratStep],
-            ) = stratabuild(
+            nstratH, nstratZ, nstratF, nstratW, nphiS, nphiF, nphiW = stratathreesed(
                 self.lpoints,
                 self.stratStep,
                 indices,
@@ -764,11 +596,7 @@ class STRAMesh(object):
                 loc_phiW,
             )
         else:
-            (
-                self.stratH[:, : self.stratStep],
-                self.stratZ[:, : self.stratStep],
-                self.phiS[:, : self.stratStep],
-            ) = stratasimple(
+            nstratH, nstratZ, nphiS = strataonesed(
                 self.lpoints,
                 self.stratStep,
                 indices,
@@ -778,116 +606,57 @@ class STRAMesh(object):
                 loc_phiS,
             )
 
-        return
+        if len(onIDs) > 0:
+            nstratZ[onIDs, :] = loc_stratZ[indices[onIDs, 0], :]
+            nstratH[onIDs, :] = loc_stratH[indices[onIDs, 0], :]
+            nphiS[onIDs, :] = loc_phiS[indices[onIDs, 0], :]
+            if self.stratF is not None:
+                nstratF[onIDs, :] = loc_stratF[indices[onIDs, 0], :]
+                nphiF[onIDs, :] = loc_phiW[indices[onIDs, 0], :]
+            if self.stratW is not None:
+                nstratW[onIDs, :] = loc_stratW[indices[onIDs, 0], :]
+                nphiW[onIDs, :] = loc_phiF[indices[onIDs, 0], :]
+            if self.carbOn:
+                nstratC[onIDs, :] = loc_stratC[indices[onIDs, 0], :]
+                nphiC[onIDs, :] = loc_phiC[indices[onIDs, 0], :]
 
-    def localStrat(self):
-        """
-        Updates stratigraphic records after mesh advection on the edges of each partition to ensure that all stratigraphic information on the adjacent nodes of the neighbouring partition are equals on all processors sharing a common number of nodes.
-        """
+        # Updates stratigraphic records after mesh advection on the edges of each partition
+        # to ensure that all stratigraphic information on the adjacent nodes of the neighbouring
+        # partition are equals on all processors sharing a common number of nodes.
+        for k in range(self.stratStep):
+            self.tmp.setArray(nstratZ[:, k])
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            self.stratZ[:, k] = self.tmpL.getArray().copy()
 
-        stratH = self.stratH[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp = np.full((self.shadowgNb, self.stratStep), -1.0e8, dtype=np.float64)
-            temp[self.gshadinIDs, :] = stratH[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratH[self.shadowAlls, :] = temp
-            self.stratH[:, : self.stratStep] = stratH[self.locIDs, :]
-        else:
-            self.stratH[:, : self.stratStep] = stratH[self.locIDs, :]
-        stratZ = self.stratZ[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = stratZ[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            stratZ[self.shadowAlls, :] = temp
-            self.stratZ[:, : self.stratStep] = stratZ[self.locIDs, :]
-        else:
-            self.stratZ[:, : self.stratStep] = stratZ[self.locIDs, :]
-        phiS = self.phiS[self.lgIDs, : self.stratStep]
-        if MPIsize > 1:
-            temp.fill(-1.0e8)
-            temp[self.gshadinIDs, :] = phiS[self.gshadowIDs, :]
-            temp[self.gshadoutIDs, :] = -1.0e8
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-            phiS[self.shadowAlls, :] = temp
-            self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
-        else:
-            self.phiS[:, : self.stratStep] = phiS[self.locIDs, :]
-        if self.memclear:
-            del stratH, stratZ, phiS
+            self.tmp.setArray(nstratH[:, k])
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            self.stratH[:, k] = self.tmpL.getArray().copy()
+            self.tmp.setArray(nphiS[:, k])
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            self.phiS[:, k] = self.tmpL.getArray().copy()
 
-        if self.stratF is not None:
-            stratF = self.stratF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratF[self.shadowAlls, :] = temp
-                self.stratF[:, : self.stratStep] = stratF[self.locIDs, :]
-            else:
-                self.stratF[:, : self.stratStep] = stratF[self.locIDs, :]
-            phiF = self.phiF[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiF[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiF[self.shadowAlls, :] = temp
-                self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
-            else:
-                self.phiF[:, : self.stratStep] = phiF[self.locIDs, :]
-            if self.memclear:
-                del stratF, phiF
+            if self.stratF is not None:
+                self.tmp.setArray(nstratF[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratF[:, k] = self.tmpL.getArray().copy()
+                self.tmp.setArray(nphiF[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.phiF[:, k] = self.tmpL.getArray().copy()
 
-        if self.stratW is not None:
-            stratW = self.stratW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratW[self.shadowAlls, :] = temp
-                self.stratW[:, : self.stratStep] = stratW[self.locIDs, :]
-            else:
-                self.stratW[:, : self.stratStep] = stratW[self.locIDs, :]
-            phiW = self.phiW[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiW[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiW[self.shadowAlls, :] = temp
-                self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
-            else:
-                self.phiW[:, : self.stratStep] = phiW[self.locIDs, :]
-            if self.memclear:
-                del stratW, phiW
+            if self.stratW is not None:
+                self.tmp.setArray(nstratW[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratW[:, k] = self.tmpL.getArray().copy()
+                self.tmp.setArray(nphiW[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.phiW[:, k] = self.tmpL.getArray().copy()
 
-        if self.carbOn:
-            stratC = self.stratC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = stratC[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                stratC[self.shadowAlls, :] = temp
-                self.stratC[:, : self.stratStep] = stratC[self.locIDs, :]
-            else:
-                self.stratC[:, : self.stratStep] = stratC[self.locIDs, :]
-            phiC = self.phiC[self.lgIDs, : self.stratStep]
-            if MPIsize > 1:
-                temp.fill(-1.0e8)
-                temp[self.gshadinIDs, :] = phiC[self.gshadowIDs, :]
-                temp[self.gshadoutIDs, :] = -1.0e8
-                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, temp, op=MPI.MAX)
-                phiC[self.shadowAlls, :] = temp
-                self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
-            else:
-                self.phiC[:, : self.stratStep] = phiC[self.locIDs, :]
-            if self.memclear:
-                del stratC, phiC
+            if self.carbOn:
+                self.tmp.setArray(nstratC[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratC[:, k] = self.tmpL.getArray().copy()
+                self.tmp.setArray(nphiC[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.phiC[:, k] = self.tmpL.getArray().copy()
 
         return
