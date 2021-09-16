@@ -211,7 +211,8 @@ class SEAMesh(object):
         with self.hl as hl, self.hLocal as zb, xdot as hdot:
             dh = hl - zb
             dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, dh ** self.cexp)
+            Cd = np.multiply(self.Cd, (1.0 - np.exp(-self.cexp * dh)))
+            # Cd = np.multiply(self.Cd, dh ** self.cexp)
             nlvec = fctcoeff(hl, Cd)
             # Set borders nodes
             if self.flatModel:
@@ -229,10 +230,12 @@ class SEAMesh(object):
         with self.hl as hl, self.hLocal as zb:
             dh = hl - zb
             dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, dh ** self.cexp)
+            Cd = np.multiply(self.Cd, (1.0 - np.exp(-self.cexp * dh)))
+            # Cd = np.multiply(self.Cd, dh ** self.cexp)
 
             # Coefficient derivatives
-            Cp = self.cexp * np.multiply(self.Cd, dh ** (self.cexp - 1.0))
+            Cp = self.cexp * np.multiply(self.Cd, np.exp(-self.cexp * dh))
+            # Cp = self.cexp * np.multiply(self.Cd, dh ** (self.cexp - 1.0))
 
             nlC = jacobiancoeff(hl, Cd, Cp)
             if self.flatModel:
@@ -319,7 +322,7 @@ class SEAMesh(object):
         # Preconditioner for linear solution
         pc = ksp.getPC()
         pc.setType("asm")
-        pc.setASMOverlap(3)
+        # pc.setASMOverlap(3)
         ksp.setTolerances(rtol=1.0e-2, max_it=100)
         ksp.setFromOptions()
         snes.setFromOptions()
@@ -435,6 +438,12 @@ class SEAMesh(object):
 
         # Distribute sediment downstream in the marine environment
         marDep = self._distOcean()
+
+        # Apply non-linear diffusion
+        if self.marineNl:
+            marDep = self._diffuseOcean(marDep, stype)
+
+        depSed = marDep.copy()
         self.tmpL.setArray(hl)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
         smthH1 = self._hillSlope(smooth=2)
@@ -442,13 +451,11 @@ class SEAMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp1)
         smthH2 = self._hillSlope(smooth=2)
         marDep = smthH2 - smthH1
-        marDep[marDep < 0.0] = 0.0
+        marDep[marDep < 1.0e-4] = 0.0
         marDep[hl > self.sealevel] = 0.0
         ids = marDep > clinoH - hl
         marDep[ids] = clinoH[ids] - hl[ids]
         marDep[marDep < 0.0] = 0.0
-        if self.marineNl:
-            marDep = self._diffuseOcean(marDep, stype)
 
         # Update cumulative erosion and deposition as well as elevation
         self.tmpL.setArray(marDep)
@@ -460,10 +467,29 @@ class SEAMesh(object):
 
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
-            self.deposeStrat(stype)
             self.elevStrat()
+            if self.stratF is not None:
+                if stype < 3:
+                    # Add specific sediment deposited before diffusion
+                    tmp = marDep.copy()
+                    ids = (marDep > 0) & (depSed == 0)
+                    tmp[ids] = 0.0
+                    self.tmpL.setArray(tmp)
+                    self.dm.localToGlobal(self.tmpL, self.tmp)
+                    self.deposeStrat(stype)
+                    # Set diffused sediment as weathered one
+                    tmp = marDep.copy()
+                    ids = (marDep > 0) & (depSed > 0)
+                    tmp[ids] = 0.0
+                    self.tmpL.setArray(tmp)
+                    self.dm.localToGlobal(self.tmpL, self.tmp)
+                    self.deposeStrat(3)
+                else:
+                    self.deposeStrat(stype)
+            else:
+                self.deposeStrat(stype)
 
-        return
+        return hl + marDep
 
     def seaChange(self):
         """
@@ -497,15 +523,15 @@ class SEAMesh(object):
 
         # Get sediment volume to distribute
         if self.stratNb > 0:
-            self._getSeaVol(hl, stype=0)
+            nhl = self._getSeaVol(hl, stype=0)
             if self.stratF is not None:
-                self._getSeaVol(hl, stype=1)
+                nhl = self._getSeaVol(nhl, stype=1)
             if self.carbOn:
-                self._getSeaVol(hl, stype=2)
+                nhl = self._getSeaVol(nhl, stype=2)
             if self.stratW is not None:
-                self._getSeaVol(hl, stype=3)
+                nhl = self._getSeaVol(nhl, stype=3)
         else:
-            self._getSeaVol(hl, stype=0)
+            nhl = self._getSeaVol(hl, stype=0)
 
         if MPIrank == 0 and self.verbose:
             print(

@@ -27,8 +27,8 @@ diffusion:
     smthD: 2.e2
     offset: 500.
     nldep: False
-    nlK: 0.25 
-    nlc: 2.
+    nlK: 5.e4
+    nlf: 1.e-3
 
 sea:
     position: 0.

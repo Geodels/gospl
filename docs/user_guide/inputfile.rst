@@ -219,10 +219,10 @@ b. Studies have shown that the physical strength of bedrock which varies with th
       smthD: 1.e5
       offset: 500.
       nldep: False
-      nlc: 2.
-      nlK: 0.5
-      nlKf: 0.75
-      nlKw: 1.
+      nlf: 1.e-3
+      nlK: 3.e5
+      nlKf: 5.e5
+      nlKw: 7.e5
 
 
 Hillslope processes in *gospl* is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
@@ -238,10 +238,10 @@ f. :yaml:`offset` is the offset in meters used to evaluate from the smoothed sur
   The following parameters are used to specify non-linear diffusion of rivers' sediments entering the ocean. This option is quite slow when not used on multi-processors and you might want to first look at the results of the simulation without this option turned on.
 
 g. :yaml:`nldep` boolean set to *True* to account for non linear marine deposition,
-h. :yaml:`nlc` nonlinear marine diffusion exponent for the freshly river deposited thicknesses (only accounted for if :yaml:`nldep` is True),
+h. :yaml:`nlf` nonlinear marine diffusion exponential factor for the freshly river deposited thicknesses (only accounted for if :yaml:`nldep` is True),
 i. :yaml:`nlK` is the non linear diffusion coefficient for sediment deposited by rivers entering the marine environment (only accounted for if :yaml:`nldep` is True),
-j. :yaml:`nlKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology and :yaml:`nlc` options are turned on,
-k. :yaml:`nlKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology and :yaml:`nlc` options are turned on.
+j. :yaml:`nlKf` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology and :yaml:`nlf` options are turned on,
+k. :yaml:`nlKw` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology and :yaml:`nlf` options are turned on.
 
 .. raw:: html
 

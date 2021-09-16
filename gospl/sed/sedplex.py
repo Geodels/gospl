@@ -303,7 +303,7 @@ class SEDMesh(object):
             self.elevStrat()
 
         # In case there is other sediment type
-        self.pitParams[:, 0] = depo.copy()
+        self.pitParams[:, 0] = self.pitVol.copy()
 
         return
 

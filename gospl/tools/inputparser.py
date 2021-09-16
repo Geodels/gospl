@@ -395,9 +395,9 @@ class ReadYaml(object):
             hillDict = self.input["diffusion"]
 
             try:
-                self.cexp = hillDict["nlc"]
+                self.cexp = hillDict["nlf"]
             except KeyError:
-                self.cexp = 2.0
+                self.cexp = 0.01
             try:
                 self.marineNl = hillDict["nldep"]
             except KeyError:
@@ -420,7 +420,7 @@ class ReadYaml(object):
                 self.clinSlp = 1.0e-6
 
         except KeyError:
-            self.cexp = 2.0
+            self.cexp = 0.01
             self.marineNl = False
             self.smthK = 1.0e3
             self.smthD = 1.0e3

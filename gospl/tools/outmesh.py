@@ -350,7 +350,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.FAL.getArray().copy()
-            data[data <= 0.0] = 1.0
+            data[data <= 1.0e-8] = 1.0e-8
             if not self.fast:
                 data[self.seaID] = 1.0
             f["flowAcc"][:, 0] = data
@@ -361,7 +361,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.fillFAL.getArray().copy()
-            data[data <= 0.0] = 1.0
+            data[data <= 1.0e-8] = 1.0e-8
             if not self.fast:
                 data[self.seaID] = 1.0
             f["fillFA"][:, 0] = data
@@ -372,7 +372,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.vSedLocal.getArray().copy()
-            data[data <= 0.0] = 1.0
+            data[data <= 1.0e-8] = 1.0e-8
             f["sedLoad"][:, 0] = data
             if self.stratNb > 0:
                 if self.stratF is not None:
@@ -383,7 +383,7 @@ class WriteMesh(object):
                         compression="gzip",
                     )
                     data = self.vSedfLocal.getArray().copy()
-                    data[data <= 0.0] = 1.0
+                    data[data <= 1.0e-8] = 1.0e-8
                     f["sedLoadf"][:, 0] = data
                 if self.stratW is not None:
                     f.create_dataset(
@@ -393,7 +393,7 @@ class WriteMesh(object):
                         compression="gzip",
                     )
                     data = self.vSedwLocal.getArray().copy()
-                    data[data <= 0.0] = 1.0
+                    data[data <= 1.0e-8] = 1.0e-8
                     f["sedLoadw"][:, 0] = data
                 if self.carbOn:
                     f.create_dataset(
@@ -403,7 +403,7 @@ class WriteMesh(object):
                         compression="gzip",
                     )
                     data = self.vSedcLocal.getArray().copy()
-                    data[data <= 0.0] = 1.0
+                    data[data <= 1.0e-8] = 1.0e-8
                     f["sedLoadc"][:, 0] = data
             if self.uplift is not None:
                 f.create_dataset(

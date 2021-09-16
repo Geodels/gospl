@@ -28,8 +28,8 @@ diffusion:
     smthD: 2.e5
     offset: 500.
     nldep: True
-    nlK: 0.1
-    nlc: 2.
+    nlK: 5.e3
+    nlf: 1.e-3
 
 sea:
     curve: '/live/lib/gospl/tests/data/sealevel.csv'
