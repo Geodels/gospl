@@ -365,22 +365,22 @@ class ReadYaml(object):
             try:
                 self.sedimentK = hillDict["nlK"]
             except KeyError:
-                self.sedimentK = 0.1
+                self.sedimentK = 1.0e3
             try:
                 self.sedimentKf = hillDict["nlKf"]
             except KeyError:
-                self.sedimentKf = 2.0
+                self.sedimentKf = 3.0e3
             try:
                 self.sedimentKw = hillDict["nlKw"]
             except KeyError:
-                self.sedimentKw = 3.0
+                self.sedimentKw = 5.0e3
 
         except KeyError:
             self.Cda = 0.0
             self.Cdm = 0.0
-            self.sedimentK = 0.1
-            self.sedimentKf = 0.3
-            self.sedimentKw = 0.5
+            self.sedimentK = 1.0e3
+            self.sedimentKf = 3.0e3
+            self.sedimentKw = 5.0e3
 
         self._extraHillslope()
 
@@ -397,7 +397,7 @@ class ReadYaml(object):
             try:
                 self.cexp = hillDict["nlf"]
             except KeyError:
-                self.cexp = 0.01
+                self.cexp = 0.001
             try:
                 self.marineNl = hillDict["nldep"]
             except KeyError:
@@ -420,7 +420,7 @@ class ReadYaml(object):
                 self.clinSlp = 1.0e-6
 
         except KeyError:
-            self.cexp = 0.01
+            self.cexp = 0.001
             self.marineNl = False
             self.smthK = 1.0e3
             self.smthD = 1.0e3
