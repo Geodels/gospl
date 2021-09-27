@@ -277,6 +277,16 @@ python module _fortran
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine gfill
 
+        subroutine filllabel(sl,elev,ngbid,fillz,labels,nb)
+            use meshparams
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb,8),intent(in),depend(nb) :: ngbid
+            double precision dimension(nb),intent(out) :: fillz
+            integer dimension(nb),intent(out) :: labels
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine filllabel
+
     end interface
 
 end python module _fortran

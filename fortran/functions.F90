@@ -2015,3 +2015,80 @@ subroutine gfill(sl, elev, ngbid, hmax, fillz, nb)
   return
 
 end subroutine gfill
+
+subroutine filllabel(sl, elev, ngbid, fillz, labels, nb)
+!*****************************************************************************
+! Perform pit filling and watershed labeling using a variant of the priority
+! queue approach following Barnes (2015).
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision,intent(in) :: sl
+  double precision,intent(in) :: elev(nb)
+  integer, intent(in) :: ngbid(nb, 8)
+  double precision,intent(out) :: fillz(nb)
+  ! Pit number and overspilling point ID
+  integer,intent(out) :: labels(nb)
+  logical :: flag(nb)
+
+  integer :: i, k, c, label
+
+  type (node)  :: ptID
+  double precision :: h
+
+  fillz = elev
+  labels = -1
+
+  ! Push marine edges nodes to priority queue
+  flag = .False.
+  do i = 1, nb
+    if(fillz(i)<sl)then
+      flag(i) = .True.
+      labels(i) = 0
+      lp: do k = 1, 6
+        c = ngbid(i,k)+1
+        if(c>0)then
+          if(fillz(c)>=sl)then
+            call priorityqueue%PQpush(fillz(i), i)
+            exit lp
+          endif
+        endif
+      enddo lp
+    endif
+  enddo
+
+  ! Perform pit filling using priority total queue
+  label = 0
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    if(labels(i)==0)then
+      label = label + 1
+      labels(i) = label
+    endif
+    do k = 1, 6
+      c = ngbid(i,k)+1
+      if(c>0)then
+        if(.not.flag(c))then
+          flag(c) = .True.
+          h = nearest(fillz(i), 1.0)
+          ! Not a depression
+          if(fillz(c)>h)then
+            call priorityqueue%PQpush(fillz(c), c)
+          ! Find a depression
+          else
+            ! This is a new one update information
+            fillz(c) = h
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
+          labels(c) = labels(i)
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine filllabel
