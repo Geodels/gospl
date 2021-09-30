@@ -55,6 +55,7 @@ class ReadYaml(object):
         self._readHillslope()
         self._readSealevel()
         self._readTectonic()
+        self._readPlate()
         self._readRain()
         self._readCompaction()
 
@@ -138,8 +139,8 @@ class ReadYaml(object):
         except KeyError:
             self.interp = 1
 
-        if self.interp > 1:
-            self.interp = 3
+        # if self.interp > 1:
+        #     self.interp = 3
 
         self._extraDomain()
 
@@ -267,6 +268,11 @@ class ReadYaml(object):
             self.tecStep = self.tout
 
         try:
+            self.tPaleo = timeDict["tecp"]
+        except KeyError:
+            self.tPaleo = self.tout
+
+        try:
             self.strat = timeDict["strat"]
         except KeyError:
             self.strat = 0
@@ -274,8 +280,7 @@ class ReadYaml(object):
         if self.tout < self.tecStep:
             self.tecStep = self.tout
             print(
-                "Output time interval and tectonic forcing time step \
-                 have been adjusted to match each others.",
+                "Output time interval and tectonic forcing time step have been adjusted to match each others.",
                 flush=True,
             )
 
@@ -549,7 +554,7 @@ class ReadYaml(object):
                 except IOError:
                     print("Unable to open tectonic file: {}".format(zMap), flush=True)
                     raise IOError(
-                        "The tectonic file {} is not found for climatic event {}.".format(
+                        "The tectonic file {} is not found for tectonic event {}.".format(
                             zMap, k
                         )
                     )
@@ -663,6 +668,140 @@ class ReadYaml(object):
 
         except KeyError:
             self.tecdata = None
+
+        return
+
+    def _storePlate(self, k, pStart, pMap, pTec, pEnd, platedata):
+        """
+        Record plate movement conditions.
+
+        :arg k: plate event number
+        :arg pStart: plate event start time
+        :arg pMap: plate advection information file
+        :arg pTec: plate uplift/subsidence file
+        :arg pEnd: tectonic event end time
+        :arg platedata: pandas dataframe storing each plate movement event
+
+        :return: appended platedata
+        """
+
+        if pMap is not None:
+            try:
+                with open(pMap) as platefile:
+                    platefile.close()
+
+            except IOError:
+                print("Unable to open plate file: {}".format(pMap), flush=True)
+                raise IOError(
+                    "The plate file {} is not found for event {}.".format(pMap, k)
+                )
+        else:
+            print(
+                "For each plate event a plate id grid is required.",
+                flush=True,
+            )
+            raise ValueError("Plate event {} has no plate map (plate).".format(k))
+
+        if pTec is not None:
+            try:
+                with open(pTec) as platetec:
+                    platetec.close()
+
+            except IOError:
+                print(
+                    "Unable to open uplift/subsidence file in plates: {}".format(pTec),
+                    flush=True,
+                )
+                raise IOError(
+                    "The plate file {} is not found for event {}.".format(pTec, k)
+                )
+        else:
+            pTec = "empty"
+
+        tmpPlate = []
+        tmpPlate.insert(0, {"start": pStart, "pMap": pMap, "pTec": pTec})
+
+        if k == 0:
+            platedata = pd.DataFrame(tmpPlate, columns=["start", "pMap", "pTec"])
+        else:
+            platedata = pd.concat(
+                [platedata, pd.DataFrame(tmpPlate, columns=["start", "pMap", "pTec"])],
+                ignore_index=True,
+            )
+
+        return platedata
+
+    def _definePlate(self, k, plateSort, platedata):
+        """
+        Define plate rotation IDs.
+
+        :arg k: plate movement event number
+        :arg plateSort: sorted plate ids event through time
+        :arg platedata: pandas dataframe storing each plate IDs
+        :return: appended platedata
+        """
+
+        pStart = None
+        pEnd = None
+        pMap = None
+        pTec = None
+
+        try:
+            pStart = plateSort[k]["start"]
+        except Exception:
+            print("For each tectonic event a start time is required.", flush=True)
+            raise ValueError("Tectonic event {} has no parameter start".format(k))
+        try:
+            pMap = plateSort[k]["plate"] + ".npz"
+        except Exception:
+            pass
+        try:
+            pTec = plateSort[k]["upsub"] + ".npz"
+        except Exception:
+            pass
+        try:
+            pEnd = plateSort[k]["end"]
+        except Exception:
+            pass
+
+        platedata = self._storePlate(k, pStart, pMap, pTec, pEnd, platedata)
+
+        return platedata
+
+    def _readPlate(self):
+        """
+        Parse plates movement forcing conditions.
+        """
+
+        platedata = None
+        try:
+            plateDict = self.input["plates"]
+
+            plateSort = sorted(plateDict, key=itemgetter("start"))
+            for k in range(len(plateSort)):
+                platedata = self._definePlate(k, plateSort, platedata)
+
+            if platedata["start"][0] > self.tStart:
+                tmpPlate = []
+                tmpPlate.insert(
+                    0, {"start": self.tStart, "pMap": "empty", "pTec": "empty"}
+                )
+                platedata = pd.concat(
+                    [
+                        pd.DataFrame(tmpPlate, columns=["start", "pMap", "pTec"]),
+                        platedata,
+                    ],
+                    ignore_index=True,
+                )
+            self.platedata = platedata[platedata["start"] >= self.tStart]
+            if self.rStep > 0:
+                self.platedata = platedata[
+                    platedata["start"] >= self.tStart + self.rStep * self.tout
+                ]
+            self.platedata.reset_index(drop=True, inplace=True)
+
+        except KeyError:
+            self.platedata = None
 
         return
 

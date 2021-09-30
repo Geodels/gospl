@@ -11,6 +11,7 @@ if "READTHEDOCS" not in os.environ:
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
+    from .mesher import EarthPlate as _EarthPlate
     from .tools import WriteMesh as _WriteMesh
 
 else:
@@ -20,6 +21,10 @@ else:
             print("Fake print statement for readthedocs", filename)
 
     class _UnstMesh(object):
+        def __init__(self):
+            pass
+
+    class _EarthPlate(object):
         def __init__(self):
             pass
 
@@ -52,7 +57,15 @@ MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
 class Model(
-    _ReadYaml, _WriteMesh, _UnstMesh, _FAMesh, _PITFill, _SEDMesh, _SEAMesh, _STRAMesh
+    _ReadYaml,
+    _WriteMesh,
+    _UnstMesh,
+    _EarthPlate,
+    _FAMesh,
+    _PITFill,
+    _SEDMesh,
+    _SEAMesh,
+    _STRAMesh,
 ):
     """
     Instantiates model object and performs surface processes evolution.
@@ -89,6 +102,9 @@ class Model(
 
         # Stratigraphy initialisation
         _STRAMesh.__init__(self)
+
+        # Initialise earth plate
+        _EarthPlate.__init__(self)
 
         # Define unstructured mesh
         _UnstMesh.__init__(self)
@@ -162,7 +178,7 @@ class Model(
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 
-            # Update Tectonic, Sea-level & Climatic conditions
+            # Update Tectonics
             if self.backward and self.tNow < self.tEnd:
                 _UnstMesh.applyTectonics(self)
 
@@ -175,6 +191,10 @@ class Model(
 
             # Output time step
             _WriteMesh.visModel(self)
+
+            # Perform plates advection
+            _EarthPlate.advectPlates(self)
+
             if self.newForcing and self.paleodata is not None:
                 _UnstMesh.updatePaleomap(self)
 

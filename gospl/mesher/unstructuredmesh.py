@@ -679,7 +679,7 @@ class UnstMesh(object):
                 del loadData
             else:
                 rainVal = np.full(self.mpoints, self.raindata.iloc[nb, 1])
-
+            rainVal[rainVal < 0] = 0.0
             self.rainMesh = rainVal
 
         self.rainVal = self.rainMesh[self.locIDs]
