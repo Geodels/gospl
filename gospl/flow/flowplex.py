@@ -139,12 +139,16 @@ class FAMesh(object):
         r = ksp.getConvergedReason()
         if r < 0:
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
-            print(
-                "LinearSolver failed to converge after %d iterations",
-                ksp.getIterationNumber(),
-                flush=True,
-            )
-            print("with reason: %s", KSPReasons[r], flush=True)
+            v1max = vector1.max()[1]
+            v1min = vector1.min()[1]
+            if MPIrank == 0:
+                print(
+                    "LinearSolver failed to converge after %d iterations",
+                    ksp.getIterationNumber(),
+                    flush=True,
+                )
+                print("with reason: %s", KSPReasons[r], flush=True)
+                print("input vector: ", v1min, v1max, flush=True)
             vector2.set(0.0)
             # raise RuntimeError("LinearSolver failed to converge!")
         ksp.destroy()
