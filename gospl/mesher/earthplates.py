@@ -24,6 +24,39 @@ class EarthPlate(object):
         """
 
         self.plateMov = 0
+        if self.platedata is not None:
+            self.tecL = self.hLocal.duplicate()
+
+        return
+
+    def _readAdvectionData(self):
+        """
+        From a plate input file read the plate advection information, elevation and subsidence/uplift for each point of the mesh.
+        """
+
+        fplate = self.platedata.iloc[self.plateMov, 1]
+        if fplate != "empty":
+            mdata = np.load(fplate)
+            # self.plateIds = mdata["iplate"]
+            self.isCluster = mdata["clust"]
+            self.clustNgbhs = mdata["cngbh"]
+            self.distNbghs = mdata["dngbh"]
+            self.idNbghs = mdata["ingbh"]
+            del mdata
+
+        tplate = "empty"
+        tplate = self.platedata.iloc[self.plateMov, 2]
+        if tplate != "empty":
+            if self.plateMov < len(self.platedata) - 1:
+                dstep = (
+                    self.platedata.iloc[self.plateMov + 1, 0]
+                    - self.platedata.iloc[self.plateMov, 0]
+                )
+            else:
+                dstep = self.tEnd - self.platedata.iloc[self.plateMov, 0]
+            mdata = np.load(tplate)
+            self.uplift = mdata["t"][self.locIDs] / dstep
+            del mdata
 
         return
 
@@ -38,30 +71,18 @@ class EarthPlate(object):
         t0 = process_time()
         # Check if we reached a plate advection time step
         nb = self.plateMov
+
         if nb < len(self.platedata):
             if self.platedata.iloc[nb, 0] < self.tNow + self.dt:
                 nb += 1
         if nb == self.plateMov:
             return
-        if self.platedata.iloc[self.plateMov, 1] == "empty":
+
+        if (self.platedata.iloc[self.plateMov, 1] == "empty") & (
+            self.platedata.iloc[self.plateMov, 2] == "empty"
+        ):
             self.plateMov = nb
             return
-
-        # dt = self.platedata.iloc[nb, 0] - self.platedata.iloc[self.plateMov, 0]
-        # Plate advection starting time is define as an integer in Myrs
-        # and follows gPlates convention positive when moving back in time
-        # self.advecttime = -int(self.platedata.iloc[self.plateMov, 0] / 1.0e6)
-        # Plate advection time step is defined as an integer in Myrs
-        # self.advectdt = int(dt / 1.0e6)
-
-        # From a plate input file read the plate advection information for each point of the mesh.
-        fplate = self.platedata.iloc[self.plateMov, 1]
-        mdata = np.load(fplate)
-        # self.plateIds = mdata["iplate"]
-        self.isCluster = mdata["clust"]
-        self.clustNgbhs = mdata["cngbh"]
-        self.distNbghs = mdata["dngbh"]
-        self.idNbghs = mdata["ingbh"]
 
         # Send local elevation globally
         t0 = process_time()
@@ -83,17 +104,22 @@ class EarthPlate(object):
                 flush=True,
             )
 
+        # Get relevant files information
+        self._readAdvectionData()
+
         # For clustered points get heights of nearest neighbours
         t0 = process_time()
         idCluster = self.isCluster > 0
-        heightsInCluster = gZ[idCluster]
-        neighbourHeights = heightsInCluster[self.clustNgbhs]
-        erodepInCluster = gED[idCluster]
-        neighbourErodep = erodepInCluster[self.clustNgbhs]
+        tmp = gZ[idCluster]
+        tmpngb = tmp[self.clustNgbhs]
         # Set new heights to the maximum height of nearest neighbours
-        gZ[idCluster] = np.max(neighbourHeights, axis=1)
+        gZ[idCluster] = np.max(tmpngb, axis=1)
+
+        # For clustered points get erosion/deposition of nearest neighbours
+        tmp = gED[idCluster]
+        tmpngb = tmp[self.clustNgbhs]
         # Set new erosion deposition to the maximum erosion of nearest neighbours
-        gED[idCluster] = np.min(neighbourErodep, axis=1)
+        gED[idCluster] = np.min(tmpngb, axis=1)
 
         # Update elevation and erosion/deposition
         if self.interp == 1:
@@ -123,21 +149,70 @@ class EarthPlate(object):
                 % (process_time() - t0),
                 flush=True,
             )
-
-        # From a plate input file read the associated uplift/subsidence for each point of the mesh.
-        fplate = self.platedata.iloc[self.plateMov, 2]
-        if fplate != "empty":
-            mdata = np.load(fplate)
-            nelev += mdata["z"]
-
         self.plateMov = nb
-        if mdata is not None:
-            del mdata
 
         self.hGlobal.setArray(nelev[self.glbIDs])
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         self.cumED.setArray(nerodep[self.glbIDs])
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+
+        return
+
+    def forcePaleoElev(self):
+        """
+        Advect surface and stratigraphic information based on plate evolution.
+        """
+
+        if self.platedata is None:
+            return
+
+        if self.plateMov <= 0:
+            return
+
+        t0 = process_time()
+        # Check if we reached a plate advection time step
+        nb = self.plateMov
+
+        if nb < len(self.platedata):
+            if self.platedata.iloc[nb, 0] < self.tNow + self.dt:
+                nb += 1
+        if nb == self.plateMov:
+            return
+
+        if (self.platedata.iloc[self.plateMov, 1] == "empty") & (
+            self.platedata.iloc[self.plateMov, 2] == "empty"
+        ):
+            return
+
+        # Get relevant file information
+        tplate = "empty"
+        if self.plateMov > 0:
+            tplate = self.platedata.iloc[self.plateMov - 1, 2]
+
+        if tplate == "empty":
+            return
+
+        # Get the tectonic forcing required to fit with paleo-elevation model
+        mdata = np.load(tplate)
+
+        if "z" in list(mdata.keys()):
+            # Send local elevation globally
+            t0 = process_time()
+            hl = self.hLocal.getArray().copy()
+            gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+            gZ[self.locIDs] = hl
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
+            tec = mdata["z"][self.locIDs] - gZ[self.locIDs]
+            self.tecL.setArray(tec)
+            self.hGlobal.setArray(mdata["z"][self.glbIDs])
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            del mdata
+
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Force paleo-elevation (%0.02f seconds)" % (process_time() - t0),
+                    flush=True,
+                )
 
         return

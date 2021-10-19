@@ -31,7 +31,7 @@ class WriteMesh(object):
 
     def __init__(self):
         """
-        Initialise model outputs paramters.
+        Initialise model outputs parameters.
         """
 
         self.step = 0
@@ -413,6 +413,14 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["uplift"][:, 0] = self.uplift
+            if self.plateMov > 0:
+                f.create_dataset(
+                    "paleotec",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["paleotec"][:, 0] = self.tecL.getArray().copy()
             if self.hdisp is not None:
                 f.create_dataset(
                     "hdisp",
@@ -546,6 +554,14 @@ class WriteMesh(object):
                 self.phiC[:, : self.stratStep] = np.array(hf["/phiC"])
 
             hf.close()
+
+        # Set global erosion deposition values for model using plates advection
+        # if self.platedata is not None:
+        #     edl = self.cumEDLocal.getArray().copy()
+        #     gED = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
+        #     gED[self.locIDs] = edl
+        #     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
+        #     self.edold = gED.copy()
 
         return
 
@@ -797,6 +813,18 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/uplift</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+            if self.plateMov > 0:
+                f.write(
+                    '         <Attribute Type="Scalar" Center="Node" Name="paleoTec">\n'
+                )
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/paleotec</DataItem>\n'
+                    % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
             if self.rainVal is not None:

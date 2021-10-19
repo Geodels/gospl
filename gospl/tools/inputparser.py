@@ -167,6 +167,11 @@ class ReadYaml(object):
             self.dataFile = None
 
         try:
+            self.nodep = domainDict["nodep"]
+        except KeyError:
+            self.nodep = False
+
+        try:
             strataFile = domainDict["npstrata"]
             self.strataFile = strataFile + ".npz"
             with open(self.strataFile) as strataFile:
@@ -266,11 +271,6 @@ class ReadYaml(object):
             self.tecStep = timeDict["tec"]
         except KeyError:
             self.tecStep = self.tout
-
-        try:
-            self.tPaleo = timeDict["tecp"]
-        except KeyError:
-            self.tPaleo = self.tout
 
         try:
             self.strat = timeDict["strat"]
@@ -696,11 +696,11 @@ class ReadYaml(object):
                     "The plate file {} is not found for event {}.".format(pMap, k)
                 )
         else:
-            print(
-                "For each plate event a plate id grid is required.",
-                flush=True,
-            )
-            raise ValueError("Plate event {} has no plate map (plate).".format(k))
+            pMap = "empty"
+            # print(
+            #     "For each plate event a plate id grid is required.", flush=True,
+            # )
+            # raise ValueError("Plate event {} has no plate map (plate).".format(k))
 
         if pTec is not None:
             try:

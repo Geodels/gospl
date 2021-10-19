@@ -103,11 +103,11 @@ class Model(
         # Stratigraphy initialisation
         _STRAMesh.__init__(self)
 
-        # Initialise earth plate
-        _EarthPlate.__init__(self)
-
         # Define unstructured mesh
         _UnstMesh.__init__(self)
+
+        # Initialise earth plate
+        _EarthPlate.__init__(self)
 
         # Initialise output mesh
         _WriteMesh.__init__(self)
@@ -171,10 +171,11 @@ class Model(
             if not self.fast:
                 # Perform River Incision
                 _FAMesh.riverIncision(self)
-                # Downstream sediment deposition inland
-                _SEDMesh.sedChange(self)
-                # Downstream sediment deposition in sea
-                _SEAMesh.seaChange(self)
+                if not self.nodep:
+                    # Downstream sediment deposition inland
+                    _SEDMesh.sedChange(self)
+                    # Downstream sediment deposition in sea
+                    _SEAMesh.seaChange(self)
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 
@@ -188,6 +189,9 @@ class Model(
                 _STRAMesh.getCompaction(self)
                 self.stratStep += 1
                 self.saveStrat += self.strat
+
+            # Force with paleo-elevation models
+            _EarthPlate.forcePaleoElev(self)
 
             # Output time step
             _WriteMesh.visModel(self)

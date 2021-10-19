@@ -578,7 +578,6 @@ class UnstMesh(object):
 
             self.cumEDLocal.setArray(gED[self.locIDs])
             self.cumED.setArray(gED[self.glbIDs])
-            # self.dm.localToGlobal(self.cumEDLocal, self.cumED)
             del gED
             gc.collect()
 
@@ -625,6 +624,12 @@ class UnstMesh(object):
 
         t0 = process_time()
         self._updateTectonics()
+
+        if self.tecdata is None and self.uplift is not None:
+            # Define vertical displacements
+            tmp = self.hLocal.getArray().copy()
+            self.hLocal.setArray(tmp + self.uplift * self.dt)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
         if MPIrank == 0 and self.verbose:
             print(
