@@ -502,7 +502,6 @@ class SEAMesh(object):
         """
 
         t0 = process_time()
-
         # Get the smooth regional elevation
         self.smthH = self._hillSlope(smooth=1)
 

@@ -180,6 +180,21 @@ class STRAMesh(object):
 
         return
 
+    def _initialiseStrat(self):
+        """
+        This function initialise zeros thickness arrays in regions experiencing no erosion at a given iteration.
+        """
+
+        self.thCoarse = np.zeros(self.lpoints)
+        if self.stratF is not None:
+            self.thFine = np.zeros(self.lpoints)
+        if self.stratW is not None:
+            self.thClay = np.zeros(self.lpoints)
+        if self.carbOn:
+            self.thCarb = np.zeros(self.lpoints)
+
+        return
+
     def erodeStrat(self):
         """
         This function removes eroded sediment thicknesses from the stratigraphic pile. The function takes into account the porosity values of considered lithologies in each eroded stratigraphic layers.
@@ -198,6 +213,7 @@ class STRAMesh(object):
         # Nodes experiencing erosion
         nids = np.where(ero < 0)[0]
         if len(nids) == 0:
+            self._initialiseStrat()
             return
 
         # Cumulative thickness for each node
