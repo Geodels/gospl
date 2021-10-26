@@ -157,6 +157,95 @@ class EarthPlate(object):
         self.cumED.setArray(nerodep[self.glbIDs])
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
 
+        # Update stratigraphic record
+        if self.stratNb > 0 and self.stratStep > 0:
+            self._advectStrata(weights, onIDs)
+
+        return
+
+    def _updateStrataVars(self, reduceIDs, variable, sumw, onIDs, weights, nghs):
+
+        t0 = process_time()
+        # Reduce variable so that all values that needs to be read from another partition can be
+        vals = np.zeros((self.mpoints, self.stratStep), dtype=np.float64) - 1.0e8
+        vals[self.locIDs, :] = variable
+        redVals = vals[reduceIDs, :]
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, redVals, op=MPI.MAX)
+        vals[reduceIDs, :] = redVals
+        if MPIrank == 0 and self.verbose:
+            print(
+                "www (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        t0 = process_time()
+        if self.interp == 1:
+            nvar = vals[nghs, :]
+        else:
+            # Inverse weighting distance...
+            nghs = self.idNbghs[self.locIDs]
+            tmp = np.sum(weights * vals[nghs, :], axis=1)
+            nvar = np.divide(tmp, sumw, where=sumw != 0, out=np.zeros_like(tmp))
+            if len(onIDs) > 0:
+                nvar[onIDs, :] = vals[nghs[onIDs, 0], :]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "fff (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        return nvar
+
+    def _findPts2Reduce(self):
+
+        # Global neighbours for each local partition
+        lgNghbs = self.idNbghs[self.locIDs, :].flatten()
+
+        # Global IDs required locally but part of another partition
+        gids = lgNghbs[~np.in1d(lgNghbs, self.locIDs)]
+
+        # Get all points that have to be transferred
+        vals = np.zeros(self.mpoints, dtype=int)
+        vals[gids] = 1
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, vals, op=MPI.MAX)
+
+        return np.where(vals > 0)[0]
+
+    def _advectStrata(self, weights, onIDs):
+
+        # Get lobal point IDs that will need to be transferred globally
+        t0 = process_time()
+        redIDs = self._findPts2Reduce()
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Send stratigraphy information to local partition (%0.02f seconds)"
+                % (process_time() - t0),
+                flush=True,
+            )
+
+        # Transfer the variables accordingly and perform operation
+        t0 = process_time()
+        nghs = self.idNbghs[self.locIDs]
+        wgts = weights[self.locIDs, :, None]
+        sumw = np.sum(weights, axis=1)[self.locIDs, None]
+        onID = np.where(self.distNbghs[self.locIDs, 0] == 0)[0]
+
+        self.stratH[:, : self.stratStep] = self._updateStrataVars(
+            redIDs, self.stratH[:, : self.stratStep], sumw, onID, wgts, nghs
+        )
+        self.stratZ[:, : self.stratStep] = self._updateStrataVars(
+            redIDs, self.stratZ[:, : self.stratStep], sumw, onID, wgts, nghs
+        )
+        self.phiS[:, : self.stratStep] = self._updateStrataVars(
+            redIDs, self.phiS[:, : self.stratStep], sumw, onID, wgts, nghs
+        )
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define local stratigraphy variables after advection (%0.02f seconds)"
+                % (process_time() - t0),
+                flush=True,
+            )
+
         return
 
     def forcePaleoElev(self):
