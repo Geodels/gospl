@@ -379,6 +379,10 @@ class ReadYaml(object):
                 self.sedimentKw = hillDict["nlKw"]
             except KeyError:
                 self.sedimentKw = 5.0e3
+            try:
+                self.oFill = hillDict["oFill"]
+            except KeyError:
+                self.oFill = -6000.0
 
         except KeyError:
             self.Cda = 0.0
@@ -386,6 +390,7 @@ class ReadYaml(object):
             self.sedimentK = 1.0e3
             self.sedimentKf = 3.0e3
             self.sedimentKw = 5.0e3
+            self.oFill = -6000.0
 
         self._extraHillslope()
 

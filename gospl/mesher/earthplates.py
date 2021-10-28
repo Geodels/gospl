@@ -165,20 +165,13 @@ class EarthPlate(object):
 
     def _updateStrataVars(self, reduceIDs, variable, sumw, onIDs, weights, nghs):
 
-        t0 = process_time()
         # Reduce variable so that all values that needs to be read from another partition can be
         vals = np.zeros((self.mpoints, self.stratStep), dtype=np.float64) - 1.0e8
         vals[self.locIDs, :] = variable
         redVals = vals[reduceIDs, :]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, redVals, op=MPI.MAX)
         vals[reduceIDs, :] = redVals
-        if MPIrank == 0 and self.verbose:
-            print(
-                "www (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
 
-        t0 = process_time()
         if self.interp == 1:
             nvar = vals[nghs, :]
         else:
@@ -188,11 +181,6 @@ class EarthPlate(object):
             nvar = np.divide(tmp, sumw, where=sumw != 0, out=np.zeros_like(tmp))
             if len(onIDs) > 0:
                 nvar[onIDs, :] = vals[nghs[onIDs, 0], :]
-        if MPIrank == 0 and self.verbose:
-            print(
-                "fff (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
 
         return nvar
 

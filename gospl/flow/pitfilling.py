@@ -519,7 +519,7 @@ class PITFill(object):
         minh = self.hGlobal.min()[1]
         if not self.flatModel:
             minh += 1.0e-3
-        level = max(minh, self.sealevel - 6000.0)
+        level = max(minh, self.sealevel + self.oFill)
 
         self._performFilling(hl - level, level, sed)
         self.lFill += level
