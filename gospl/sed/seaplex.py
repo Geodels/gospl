@@ -55,6 +55,14 @@ class SEAMesh(object):
         self.hl = self.hLocal.duplicate()
         self.zb = self.hGlobal.duplicate()
 
+        if self.excessIn:
+            self.ePit = np.zeros(self.lpoints)
+            if self.stratNb > 0:
+                self.ePitw = np.zeros(self.lpoints)
+                self.ePitf = np.zeros(self.lpoints)
+                if self.carbOn:
+                    self.ePitc = np.zeros(self.lpoints)
+
         return
 
     def _globalCoastsTree(self, coastXYZ, k_neighbors=1):
@@ -152,7 +160,6 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions for filled + eps elevations
-        # rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.smthH, -1.0e5)
         rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
         sum_wght = np.sum(wght, axis=1)
         ids = (self.pitIDs > -1) & (self.flatOcean > -1) & (sum_wght == 0.0)
@@ -162,12 +169,21 @@ class SEAMesh(object):
         wght[ids, :] = 0.0
         wght[ids, 0] = 1.0
 
+        # Get local nodes with no receivers as boolean array
+        sum_weight = np.sum(wght, axis=1)
+        msink = sum_weight == 0.0
+
+        # We don't consider borders as sinks
+        msink[self.idBorders] = False
+        msink = msink.astype(int) * self.inIDs
+        self.msink = msink == 1
+
         # Set borders nodes
         if self.flatModel:
             rcv[self.idBorders, :] = np.tile(self.idBorders, (8, 1)).T
             wght[self.idBorders, :] = 0.0
 
-        # Define downstream matrix based on filled + eps elevations
+        # Define downstream matrix based on filled + dir elevations
         dMat = self.zMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
@@ -370,8 +386,10 @@ class SEAMesh(object):
         self.tmpL.setArray(self.sinkVol)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         vdep = np.zeros(self.lpoints, dtype=np.float64)
+        if self.excessIn:
+            excessPit = vdep.copy()
         step = 0
-        while self.tmp.sum() > 1.0e-6:
+        while self.tmp.sum() > 1.0:
 
             # Move to downstream nodes
             self.dMat.mult(self.tmp, self.tmp1)
@@ -391,12 +409,45 @@ class SEAMesh(object):
             vdep[self.idBorders] = 0.0
             self.sinkVol[noexcess] = 0.0
             self.sinkVol[self.idBorders] = 0.0
+
+            # Find where excess and sink
+            if self.excessIn:
+                excessPit[self.msink] += self.sinkVol[self.msink]
             self.tmpL.setArray(self.sinkVol)
             self.dm.localToGlobal(self.tmpL, self.tmp)
 
             step += 1
 
+        if self.excessIn:
+            vdep += excessPit
+
         return vdep / self.larea
+
+    def _updateMarineStrat(self, marDep, depSed, stype):
+
+        self.elevStrat()
+        if self.stratF is not None:
+            if stype < 3:
+                # Add specific sediment deposited before diffusion
+                tmp = marDep.copy()
+                ids = (marDep > 0) & (depSed == 0)
+                tmp[ids] = 0.0
+                self.tmpL.setArray(tmp)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                self.deposeStrat(stype)
+                # Set diffused sediment as weathered one
+                tmp = marDep.copy()
+                ids = (marDep > 0) & (depSed > 0)
+                tmp[ids] = 0.0
+                self.tmpL.setArray(tmp)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                self.deposeStrat(3)
+            else:
+                self.deposeStrat(stype)
+        else:
+            self.deposeStrat(stype)
+
+        return
 
     def _getSeaVol(self, hl, stype):
         """
@@ -436,6 +487,17 @@ class SEAMesh(object):
         self.sinkVol = self.QsL.getArray().copy() * self.dt
         self.sinkVol[np.invert(self.sinkIDs)] = 0.0
 
+        # Add excess on marine depression from previous time step
+        if self.excessIn:
+            if stype == 0:
+                self.sinkVol += self.ePit * self.larea
+            elif stype == 1:
+                self.sinkVol += self.ePitf * self.larea
+            elif stype == 2:
+                self.sinkVol += self.ePitc * self.larea
+            elif stype == 3:
+                self.sinkVol += self.ePitw * self.larea
+
         # Distribute sediment downstream in the marine environment
         marDep = self._distOcean()
 
@@ -454,6 +516,19 @@ class SEAMesh(object):
         marDep[marDep < 1.0e-4] = 0.0
         marDep[hl > self.sealevel] = 0.0
         ids = marDep > clinoH - hl
+
+        # Get excess depostion in marine depressions that will be
+        # deposited at next time step.
+        if self.excessIn:
+            if stype == 0:
+                self.ePit[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
+            if stype == 1:
+                self.ePitf[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
+            if stype == 2:
+                self.ePitc[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
+            if stype == 3:
+                self.ePitw[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
+
         marDep[ids] = clinoH[ids] - hl[ids]
         marDep[marDep < 0.0] = 0.0
 
@@ -467,27 +542,7 @@ class SEAMesh(object):
 
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
-            self.elevStrat()
-            if self.stratF is not None:
-                if stype < 3:
-                    # Add specific sediment deposited before diffusion
-                    tmp = marDep.copy()
-                    ids = (marDep > 0) & (depSed == 0)
-                    tmp[ids] = 0.0
-                    self.tmpL.setArray(tmp)
-                    self.dm.localToGlobal(self.tmpL, self.tmp)
-                    self.deposeStrat(stype)
-                    # Set diffused sediment as weathered one
-                    tmp = marDep.copy()
-                    ids = (marDep > 0) & (depSed > 0)
-                    tmp[ids] = 0.0
-                    self.tmpL.setArray(tmp)
-                    self.dm.localToGlobal(self.tmpL, self.tmp)
-                    self.deposeStrat(3)
-                else:
-                    self.deposeStrat(stype)
-            else:
-                self.deposeStrat(stype)
+            self._updateMarineStrat(marDep, depSed, stype)
 
         return hl + marDep
 

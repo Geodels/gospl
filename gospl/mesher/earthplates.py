@@ -37,7 +37,6 @@ class EarthPlate(object):
         fplate = self.platedata.iloc[self.plateMov, 1]
         if fplate != "empty":
             mdata = np.load(fplate)
-            # self.plateIds = mdata["iplate"]
             self.isCluster = mdata["clust"]
             self.clustNgbhs = mdata["cngbh"]
             self.distNbghs = mdata["dngbh"]
@@ -75,6 +74,7 @@ class EarthPlate(object):
         if nb < len(self.platedata):
             if self.platedata.iloc[nb, 0] < self.tNow + self.dt:
                 nb += 1
+
         if nb == self.plateMov:
             return
 
@@ -273,6 +273,7 @@ class EarthPlate(object):
         # Get the tectonic forcing required to fit with paleo-elevation model
         mdata = np.load(tplate)
 
+        # If we want to fit all the paleo-elevation model
         if "z" in list(mdata.keys()):
             # Send local elevation globally
             t0 = process_time()
@@ -292,4 +293,26 @@ class EarthPlate(object):
                     flush=True,
                 )
 
+        # If we want to fit the paleo-bathymetry model
+        if "zm" in list(mdata.keys()):
+            # Send local bathymetry globally
+            t0 = process_time()
+            hl = self.hLocal.getArray().copy()
+            gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+            gZ[self.locIDs] = hl
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
+            # Only assign tectonic in the marine domain
+            tec = mdata["zm"][self.locIDs] - gZ[self.locIDs]
+            tec[gZ > self.sealevel] = 0.0
+            self.tecL.setArray(tec)
+            # Only force bathymentry values from paleo-elevation dataset
+            gZ[gZ <= self.sealevel] = mdata["zm"][gZ <= self.sealevel]
+            self.hGlobal.setArray(gZ[self.glbIDs])
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            del mdata
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Force paleo-bathymetry (%0.02f seconds)" % (process_time() - t0),
+                    flush=True,
+                )
         return

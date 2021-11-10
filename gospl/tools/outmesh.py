@@ -153,6 +153,8 @@ class WriteMesh(object):
             os.makedirs(self.outputDir + "/h5")
             os.makedirs(self.outputDir + "/xmf")
 
+        shutil.copy(self.finput, self.outputDir)
+
         return
 
     def _outputStrat(self):
@@ -354,6 +356,14 @@ class WriteMesh(object):
             if not self.fast:
                 data[self.seaID] = 1.0
             f["flowAcc"][:, 0] = data
+            if not self.fast:
+                f.create_dataset(
+                    "waterFill",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["waterFill"][:, 0] = self.waterFilled
             f.create_dataset(
                 "fillFA",
                 shape=(self.lpoints, 1),
@@ -728,6 +738,18 @@ class WriteMesh(object):
                 'Dimensions="%d 1">%s:/erodep</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
+            if not self.fast:
+                f.write(
+                    '         <Attribute Type="Scalar" Center="Node" Name="waterFill">\n'
+                )
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/waterFill</DataItem>\n'
+                    % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="FA">\n')
             f.write(

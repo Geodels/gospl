@@ -31,6 +31,7 @@ class ReadYaml(object):
             self.log.begin()
 
         # Check input file exists
+        self.finput = filename
         try:
             with open(filename) as finput:
                 pass
@@ -152,6 +153,11 @@ class ReadYaml(object):
         """
 
         domainDict = self.input["domain"]
+
+        try:
+            self.excessIn = domainDict["excess"]
+        except KeyError:
+            self.excessIn = False
 
         try:
             self.overlap = domainDict["overlap"]

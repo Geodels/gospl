@@ -408,6 +408,9 @@ class FAMesh(object):
         else:
             self.FAL.copy(result=self.fillFAL)
 
+        # Get water level
+        self.waterFilled -= hl
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Flow Accumulation (%0.02f seconds)" % (process_time() - t0),
