@@ -294,25 +294,25 @@ class EarthPlate(object):
                 )
 
         # If we want to fit the paleo-bathymetry model
-        if "zm" in list(mdata.keys()):
-            # Send local bathymetry globally
-            t0 = process_time()
-            hl = self.hLocal.getArray().copy()
-            gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-            gZ[self.locIDs] = hl
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
-            # Only assign tectonic in the marine domain
-            tec = mdata["zm"][self.locIDs] - gZ[self.locIDs]
-            tec[gZ > self.sealevel] = 0.0
-            self.tecL.setArray(tec)
-            # Only force bathymentry values from paleo-elevation dataset
-            gZ[gZ <= self.sealevel] = mdata["zm"][gZ <= self.sealevel]
-            self.hGlobal.setArray(gZ[self.glbIDs])
-            self.dm.globalToLocal(self.hGlobal, self.hLocal)
-            del mdata
-            if MPIrank == 0 and self.verbose:
-                print(
-                    "Force paleo-bathymetry (%0.02f seconds)" % (process_time() - t0),
-                    flush=True,
-                )
+        # if "zm" in list(mdata.keys()):
+        #     # Send local bathymetry globally
+        #     t0 = process_time()
+        #     hl = self.hLocal.getArray().copy()
+        #     gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        #     gZ[self.locIDs] = hl
+        #     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
+        #     # Only assign tectonic in the marine domain
+        #     tec = mdata["zm"][self.locIDs] - gZ[self.locIDs]
+        #     tec[gZ > self.sealevel] = 0.0
+        #     self.tecL.setArray(tec)
+        #     # Only force bathymentry values from paleo-elevation dataset
+        #     gZ[gZ <= self.sealevel] = mdata["zm"][gZ <= self.sealevel]
+        #     self.hGlobal.setArray(gZ[self.glbIDs])
+        #     self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        #     del mdata
+        #     if MPIrank == 0 and self.verbose:
+        #         print(
+        #             "Force paleo-bathymetry (%0.02f seconds)" % (process_time() - t0),
+        #             flush=True,
+        #         )
         return
