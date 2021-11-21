@@ -4,7 +4,7 @@ scipy==1.7.2
 Cython==0.29.24
 mpi4py==3.1.2
 petsc4py==3.16.1
-h5py==2.9.0
+h5py==3.6.0
 pandas==1.0.3
 ruamel.yaml==0.16.5
 meshio==3.3.1
