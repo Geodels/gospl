@@ -1,7 +1,7 @@
 numpy==1.21.4
 numpy-indexed==0.3.5
 scipy==1.7.2
-Cython==0.29.22
+Cython==0.29.24
 mpi4py==3.0.0
 petsc4py==3.11.0
 h5py==2.9.0
