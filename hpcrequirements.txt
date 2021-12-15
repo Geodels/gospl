@@ -10,5 +10,5 @@ ruamel.yaml==0.17.17
 meshio==5.1.1
 meshplex==0.16.7
 pre-commit>=2.2.0
-vtk==9.0.1
+vtk==9.1.0
 scikit-fuzzy==0.4.2
