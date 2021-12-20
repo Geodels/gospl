@@ -38,7 +38,7 @@ except ImportError:
     pass
 
 # in development set version to none and ...
-PYPI_VERSION = "0.3.1"
+PYPI_VERSION = "0.3.2"
 
 # Place install_requires into the text file "requirements.txt"
 with open("requirements.txt") as f2:
@@ -130,6 +130,7 @@ if __name__ == "__main__":
             "Programming Language :: Python :: 3.6",
             "Programming Language :: Python :: 3.7",
             "Programming Language :: Python :: 3.8",
+            "Programming Language :: Python :: 3.9",
         ],
         cmdclass={"sdist": sdist},
     )

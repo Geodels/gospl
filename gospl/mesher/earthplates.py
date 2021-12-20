@@ -78,9 +78,7 @@ class EarthPlate(object):
         if nb == self.plateMov:
             return
 
-        if (self.platedata.iloc[self.plateMov, 1] == "empty") & (
-            self.platedata.iloc[self.plateMov, 2] == "empty"
-        ):
+        if self.platedata.iloc[self.plateMov, 1] == "empty":
             self.plateMov = nb
             return
 

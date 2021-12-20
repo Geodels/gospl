@@ -553,7 +553,7 @@ class UnstMesh(object):
             indices = labelIS.indices[pt_range] - pStart
             labelIS.destroy()
         else:
-            indices = np.zeros((0,), dtype=np.int)
+            indices = np.zeros((0,), dtype=np.int32)
 
         return indices
 

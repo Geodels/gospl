@@ -63,5 +63,5 @@ paleomap:
     npdata: '/live/lib/gospl/tests/data/elev/elev15Ma'
 
 output:
-    dir: 'output/normalNl'
+    dir: 'output/normal'
     makedir: False

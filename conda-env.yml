@@ -4,7 +4,7 @@ channels:
   - defaults
 dependencies:
   - scikit-fuzzy
-  - python=3.8
+  - python=3.9
   - petsc4py
   - pip
   - scipy
@@ -19,6 +19,6 @@ dependencies:
   - mpi4py
   - cython
   - compilers
+  - meshplex
   - pip:
-    - meshplex
     - gospl

@@ -65,7 +65,7 @@ def test_meshplex_import():
 def test_vtk_import():
     import vtk
 
-    print("\t\t You have vtk version {}".format(vtk.__version__))
+    # print("\t\t You have vtk version {}".format(vtk.__version__))
 
 
 def test_gospl_modules():

@@ -499,7 +499,14 @@ class SEAMesh(object):
                 self.sinkVol += self.ePitw * self.larea
 
         # Distribute sediment downstream in the marine environment
+        # t0 = process_time()
         marDep = self._distOcean()
+
+        # if MPIrank == 0 and self.verbose:
+        #     print(
+        #         "Distribute Ocean (%0.02f seconds)" % (process_time() - t0),
+        #         flush=True,
+        #     )
 
         # Apply non-linear diffusion
         if self.marineNl:
@@ -508,10 +515,22 @@ class SEAMesh(object):
         depSed = marDep.copy()
         self.tmpL.setArray(hl)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
+        # t0 = process_time()
         smthH1 = self._hillSlope(smooth=2)
+        # if MPIrank == 0 and self.verbose:
+        #     print(
+        #         "Diffuse Surface for Ocean (%0.02f seconds)" % (process_time() - t0),
+        #         flush=True,
+        #     )
         self.tmpL.setArray(marDep + hl)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
+        # t0 = process_time()
         smthH2 = self._hillSlope(smooth=2)
+        # if MPIrank == 0 and self.verbose:
+        #     print(
+        #         "Diffuse Sediment for Ocean (%0.02f seconds)" % (process_time() - t0),
+        #         flush=True,
+        #     )
         marDep = smthH2 - smthH1
         marDep[marDep < 1.0e-4] = 0.0
         marDep[hl > self.sealevel] = 0.0
