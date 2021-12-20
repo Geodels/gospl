@@ -34,14 +34,14 @@ RUN apt-get update -qq && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-ARG MPICH_VERSION="3.3"
-ARG MPICH_CONFIGURE_OPTIONS="--enable-fast=all,O3 --prefix=/opt/mpich"
+ARG MPICH_VERSION="3.4.3"
+ARG MPICH_CONFIGURE_OPTIONS="--enable-fast=all,O3 --prefix=/opt/mpich --with-device=ch3"
 ARG MPICH_MAKE_OPTIONS="-j4"
 WORKDIR /tmp/mpich-build
 RUN wget http://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz && \
     tar xvzf mpich-${MPICH_VERSION}.tar.gz && \
     cd mpich-${MPICH_VERSION}              && \
-    ./configure ${MPICH_CONFIGURE_OPTIONS} && \
+    FFLAGS=-fallow-argument-mismatch ./configure ${MPICH_CONFIGURE_OPTIONS} && \
     make ${MPICH_MAKE_OPTIONS}             && \
     make install                           && \
     ldconfig                               && \
@@ -77,7 +77,7 @@ RUN pip3 install -U setuptools  && \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 WORKDIR /tmp/petsc-build
-ARG PETSC_VERSION="3.13.0"
+ARG PETSC_VERSION="3.16.1"
 RUN wget http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-lite-${PETSC_VERSION}.tar.gz && \
     tar zxf petsc-lite-${PETSC_VERSION}.tar.gz && cd petsc-${PETSC_VERSION}   && \
     ./configure --with-debugging=0 --prefix=/opt/petsc                     \
@@ -108,9 +108,10 @@ ENV PATH=${PETSC_DIR}/bin:$PATH
 
 ENV PYTHONPATH $PYTHONPATH:/usr/lib
 #RUN CC=h5pcc HDF5_MPI="ON" HDF5_DIR=${PETSC_DIR} python3 -m pip install --no-cache-dir --no-binary=h5py h5py && \
-RUN python3 -m pip install --no-cache-dir h5py==2.10.0
+RUN python3 -m pip install --no-cache-dir h5py
+#==2.10.0
 
-RUN python3 -m pip install --no-cache-dir petsc4py==3.13.0
+RUN python3 -m pip install --no-cache-dir petsc4py==3.16.1
 
 # install extras in a new layer
 RUN python3 -m pip install --no-cache-dir \
@@ -133,19 +134,15 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     shapely \
     meshplex>=0.13.3 \
     ruamel.yaml>=0.16.12 \
-    stripy \
     numpy>=1.19.2 \
     scipy>=1.5.2 \
     Cython>=0.29.21 \
     h5py>=2.10.0 \
     pandas>=1.1.2  \
-    meshplex>=0.13.3 \
+    meshplex>=0.15.14 \
     scikit-fuzzy>=0.4.2 \
-    pre-commit>=2.7.1
-
-# install latest vtk from wheel
-RUN  python3 -m pip install --no-cache-dir \
-        https://www.vtk.org/files/release/9.0/vtk-9.0.0-cp37-cp37m-linux_x86_64.whl
+    pre-commit>=2.7.1 \
+    vtk
 
 # create a volume
 RUN mkdir /live && \
@@ -172,10 +169,15 @@ ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /usr/
 RUN chmod +x /usr/local/bin/tini
 ENTRYPOINT ["/usr/local/bin/tini", "--"]
 
-# expose LavaVu port
 EXPOSE 9999
 
-# note we use xvfb which to mimic the X display for lavavu
+# install JIGSAW
+RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
+cd jigsaw-python && \
+python3 setup.py build_external && \
+python3 setup.py install
+
+# note we use xvfb which to mimic the X display
 ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
 
 # launch notebook

@@ -1,4 +1,4 @@
-FROM geodels/gospl-base:latest
+FROM geodels/gospl-base:py3.9
 MAINTAINER Tristan Salles
 
 ENV PETSC_DIR=/opt/petsc
@@ -32,15 +32,6 @@ RUN python3 -m pip install --no-cache-dir \
         panel \
         jupyterlab
 
-# RUN jupyter labextension install @jupyter-voila/jupyterlab-preview
-# RUN jupyter labextension install @pyviz/jupyterlab_pyviz
-
-# install JIGSAW
-RUN git clone https://github.com/dengwirda/jigsaw-python.git  && \
-cd jigsaw-python && \
-python3 setup.py build_external && \
-python3 setup.py install
-
 RUN python3 -m pip install --no-cache-dir \
         itkwidgets \
         pyvista
@@ -53,19 +44,12 @@ RUN apt-get update -qq && \
         libgdal-dev \
         python3-gdal
 
-
-#RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager \
-#    jupyter-matplotlib jupyterlab-datawidgets itkwidgets
-
 # install gospl
-WORKDIR /live/lib
-RUN git clone https://github.com/Geodels/gospl.git   && \
-    cd gospl && \
-    export F90=gfortran  && \
-    export PETSC_DIR=/opt/petsc && \
-    export PETSC_ARCH=arch-linux-c-opt && \
-    python3 setup.py install
+RUN python3 -m pip install --no-cache-dir gospl
 
+RUN export FFLAGS=-fallow-argument-mismatch && \
+    python3 -m pip install --no-cache-dir stripy
+    
 # setup space for working in
 VOLUME /live/share
 WORKDIR /live
@@ -81,12 +65,9 @@ ENTRYPOINT ["tini", "-g", "--", "start_xvfb.sh"]
 
 EXPOSE 9999
 
-RUN pip3 install lavavu
-
 RUN pip3 install rise panel
 
-
-# note we use xvfb which to mimic the X display for lavavu
+# note we use xvfb which to mimic the X display
 ENTRYPOINT ["/usr/local/bin/xvfbrun.sh"]
 
 
