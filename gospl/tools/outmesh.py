@@ -62,33 +62,6 @@ class WriteMesh(object):
         if self.strataFile is not None:
             self.stratStep = self.initLay
 
-        # If series of paleomaps are used to force the model through time.
-        if self.forceStep >= 0:
-
-            res = 0.5
-            nx = int(360.0 / res)
-            ny = int(180.0 / res)
-            lon = np.linspace(0.0, 360.0, nx)
-            lat = np.linspace(0, 180, ny)
-
-            lon, lat = np.meshgrid(lon, lat)
-            latlonreg = np.dstack([lat.flatten(), lon.flatten()])[0]
-            self.regshape = lon.shape
-            outTree = spatial.cKDTree(self.lLatLon, leafsize=10)
-            distances, self.forceIDs = outTree.query(latlonreg, k=3)
-            self.forceWeights = 1.0 / distances ** 2
-            self.forceTop = 1.0 / np.sum(self.forceWeights, axis=1)
-            self.forceonIDs = np.where(distances[:, 0] == 0)[0]
-
-            outTree = spatial.cKDTree(latlonreg, leafsize=10)
-            distances, self.regIDs = outTree.query(self.lLatLon[self.glIDs], k=3)
-            self.regWeights = 1.0 / distances ** 2
-            self.regTop = 1.0 / np.sum(self.regWeights, axis=1)
-            self.regonIDs = np.where(distances[:, 0] == 0)[0]
-
-            del distances, outTree, lon, lat, latlonreg
-            gc.collect()
-
         # Petsc vectors
         self.upsG = self.hGlobal.duplicate()
         self.upsL = self.hLocal.duplicate()
@@ -109,18 +82,6 @@ class WriteMesh(object):
         elif self.tNow >= self.saveTime:
             self._outputMesh()
             self.saveTime += self.tout
-
-            # Forcing with backward model
-            if self.forceStep >= 0 and self.newForcing:
-                self._forcePaleo()
-                self.steppaleo += 1
-
-            if self.steppaleo == 1:
-                self.steppaleo = 0
-                self.newForcing = False
-                self.forceStep += 1
-            else:
-                self.newForcing = True
 
         return
 
@@ -423,7 +384,7 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["uplift"][:, 0] = self.uplift
-            if self.plateMov > 0:
+            if self.paleoMov > 0 and self.tNow > self.tStart:
                 f.create_dataset(
                     "paleotec",
                     shape=(self.lpoints, 1),
@@ -572,111 +533,6 @@ class WriteMesh(object):
         #     gED[self.locIDs] = edl
         #     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
         #     self.edold = gED.copy()
-
-        return
-
-    def _forcePaleo(self):
-        """
-        Forcing the model based on backward simulation results. This function computes difference between backward model elevation and current one.
-
-        .. note::
-
-            The backward elevation is often computed based on paleo-elevation maps at specific time interval. During the pre-processing phase a series of backward elevations are then created based on these paleo-elevation maps. These backward elevations are then used to force the forward model over time. This is done by computing the differences at any given time step between the obtained forward elevations and the predicted backward ones. These differences are then used to define an uplift map that matches the differences modulated by an imposed factor (`alpha`). Once the uplift map has been computed the model is then rerun from the previous time step to the current one.
-
-        """
-
-        # Store the vertical displacement in the uplift variable
-        self._upliftBF(self.alpha[self.forceStep], self.stepb[self.forceStep])
-
-        # Update model parameters to the former tectonic time step
-        self.tNow -= self.tout
-        self.step -= 1
-        n = int(self.tout / self.tecStep)
-        self.tecNb -= n
-        if self.strat > 0:
-            n = int(self.tout / self.strat)
-            self.stratStep = (self.step - 1) * n
-        self.saveTime = self.tNow + self.tout
-
-        if self.saveStrat <= self.tEnd + self.strat:
-            self.saveStrat = self.tNow + self.strat
-
-        # Getting PETSc vectors values
-        if self.step == 0:
-            loadData = np.load(self.meshFile)
-            gZ = loadData["z"]
-            self.hLocal.setArray(gZ[self.locIDs])
-            self.dm.localToGlobal(self.hLocal, self.hGlobal)
-            self.vSed.set(0.0)
-            self.vSedLocal.set(0.0)
-            if self.stratNb > 0:
-                if self.stratF is not None:
-                    self.vSedf.set(0.0)
-                    self.vSedfLocal.set(0.0)
-                if self.stratW is not None:
-                    self.vSedw.set(0.0)
-                    self.vSedwLocal.set(0.0)
-                if self.carbOn:
-                    self.vSedc.set(0.0)
-                    self.vSedcLocal.set(0.0)
-            self.cumED.set(0.0)
-            self.cumEDLocal.set(0.0)
-        else:
-            self.readData()
-
-        return
-
-    def _upliftBF(self, alpha, step):
-        """
-        Reads locally the backward model elevation at any given step and compute elevation difference between backward and forward models.
-
-        :arg alpha: fitting coefficient for backward uplift differences
-        :arg step: backward model time step to use
-        """
-
-        h5file = self.forceDir + "/h5/gospl." + str(step) + ".p" + str(MPIrank) + ".h5"
-        if os.path.exists(h5file):
-            hf = h5py.File(h5file, "r")
-        else:
-            print("Backward file: {} is missing!".format(h5file), flush=True)
-            raise ValueError("Backward file is missing...")
-
-        # Get the difference between backward and forward model on TIN
-        ldiff = np.array(hf["/elev"])[:, 0] - self.hLocal.getArray()
-
-        # Map it on a regularly spaced mesh (lon/lat)
-        diffreg = (
-            np.sum(self.forceWeights * ldiff[self.forceIDs], axis=1) * self.forceTop
-        )
-        if len(self.forceonIDs) > 0:
-            diffreg[self.forceonIDs] = ldiff[self.forceIDs[self.forceonIDs, 0]]
-
-        # Apply a low-pass filter to the regular array
-        kernel_size = 3
-        filter = ndimage.gaussian_filter(
-            diffreg.reshape(self.regshape), sigma=kernel_size, mode="wrap"
-        )
-        filter = filter.flatten()
-
-        # Map it back to the spherical mesh
-        lfilter = np.sum(self.regWeights * filter[self.regIDs], axis=1) * self.regTop
-        if len(self.regonIDs) > 0:
-            lfilter[self.regonIDs] = filter[self.regIDs[self.regonIDs, 0]]
-
-        # Specify new uplift value matching backward elevation removing the
-        # erosional features using a low-pass filter
-        self.tmp.setArray(lfilter)
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        self.uplift = self.tmpL.getArray().copy()
-        self.uplift[self.seaID] = ldiff[self.seaID]
-        self.uplift *= alpha / self.tecStep
-        hf.close()
-
-        if self.memclear:
-            del diffreg, filter, lfilter, gfilter, ldiff, hf
-            if MPIsize > 1:
-                del temp
-            gc.collect()
 
         return
 
@@ -837,7 +693,7 @@ class WriteMesh(object):
                     'Dimensions="%d 1">%s:/uplift</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
-            if self.plateMov > 0:
+            if self.paleoMov > 0 and self.tNow > self.tStart:
                 f.write(
                     '         <Attribute Type="Scalar" Center="Node" Name="paleoTec">\n'
                 )

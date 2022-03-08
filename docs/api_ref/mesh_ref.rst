@@ -19,9 +19,6 @@ Class UnstMesh
       ~UnstMesh.applyForces
       ~UnstMesh.applyTectonics
       ~UnstMesh.destroy_DMPlex
-      ~UnstMesh.initExtForce
-      ~UnstMesh.reInitialiseElev
-      ~UnstMesh.updatePaleomap
 
    .. rubric:: Private Methods
 
@@ -46,9 +43,6 @@ Public functions
 .. automethod:: mesher.unstructuredmesh.UnstMesh.applyForces
 .. automethod:: mesher.unstructuredmesh.UnstMesh.applyTectonics
 .. automethod:: mesher.unstructuredmesh.UnstMesh.destroy_DMPlex
-.. automethod:: mesher.unstructuredmesh.UnstMesh.initExtForce
-.. automethod:: mesher.unstructuredmesh.UnstMesh.reInitialiseElev
-.. automethod:: mesher.unstructuredmesh.UnstMesh.updatePaleomap
 
 
 Private functions

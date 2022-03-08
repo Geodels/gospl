@@ -129,7 +129,7 @@ class Model(
             _WriteMesh.readData(self)
 
         # Get external forces
-        _UnstMesh.initExtForce(self)
+        _UnstMesh.applyForces(self)
 
         if MPIrank == 0:
             print(
@@ -154,19 +154,25 @@ class Model(
 
         """
 
-        self.newForcing = True
-        self.steppaleo = 0
-
         while self.tNow <= self.tEnd:
             tstep = process_time()
 
+            # If paleo-elevations are provided update elevations
+            _EarthPlate.updatePaleoElev(self)
+
             if not self.fast:
-                # Compute Flow Accumulation
+                # Compute flow accumulation
                 _FAMesh.flowAccumulation(self)
 
-            # Output time step for first step
-            if self.tNow == self.tStart:
-                _WriteMesh.visModel(self)
+            # Output time step
+            _WriteMesh.visModel(self)
+            if self.tNow == self.tEnd:
+                return
+
+            # Perform plates advection
+            _EarthPlate.advectPlates(self)
+            # Get information related to uplift and paleo-elevations
+            _EarthPlate.getPaleoInfo(self)
 
             if not self.fast:
                 # Perform River Incision
@@ -179,34 +185,17 @@ class Model(
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 
-            # Update Tectonics
-            if self.backward and self.tNow < self.tEnd:
-                _UnstMesh.applyTectonics(self)
-
             # Create new stratal layer
             if self.tNow >= self.saveStrat:
-                # Stratigraphic Layer Porosity and Thicknesses under Compaction
+                # Stratigraphic layer porosity and thicknesses under compaction
                 _STRAMesh.getCompaction(self)
                 self.stratStep += 1
                 self.saveStrat += self.strat
 
-            # Force with paleo-elevation models
-            _EarthPlate.forcePaleoElev(self)
-
-            # Output time step
-            _WriteMesh.visModel(self)
-
-            # Perform plates advection
-            _EarthPlate.advectPlates(self)
-
-            if self.newForcing and self.paleodata is not None:
-                _UnstMesh.updatePaleomap(self)
-
-            # Update Tectonic, Sea-level & Climatic conditions
+            # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:
                 _UnstMesh.applyForces(self)
-                if not self.backward:
-                    _UnstMesh.applyTectonics(self)
+                _UnstMesh.applyTectonics(self)
 
             # Advance time
             self.tNow += self.dt
@@ -218,17 +207,6 @@ class Model(
                     % (process_time() - tstep),
                     flush=True,
                 )
-
-        return
-
-    def reInitialiseZ(self):
-        """
-        Reinitialise model elevation.
-
-        This function clears PETSc vectors and forcing conditions without having to reset the mesh structure.
-        """
-
-        _UnstMesh.reInitialiseElev(self)
 
         return
 

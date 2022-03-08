@@ -22,10 +22,8 @@ Class ReadYaml
       ~ReadYaml._defineTectonic
       ~ReadYaml._extraCompaction
       ~ReadYaml._extraDomain
-      ~ReadYaml._readBackwardPaleo
       ~ReadYaml._readCompaction
       ~ReadYaml._readDomain
-      ~ReadYaml._readForcePaleo
       ~ReadYaml._readHillslope
       ~ReadYaml._readOut
       ~ReadYaml._readRain
@@ -44,10 +42,8 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._defineTectonic
 .. automethod:: tools.inputparser.ReadYaml._extraCompaction
 .. automethod:: tools.inputparser.ReadYaml._extraDomain
-.. automethod:: tools.inputparser.ReadYaml._readBackwardPaleo
 .. automethod:: tools.inputparser.ReadYaml._readCompaction
 .. automethod:: tools.inputparser.ReadYaml._readDomain
-.. automethod:: tools.inputparser.ReadYaml._readForcePaleo
 .. automethod:: tools.inputparser.ReadYaml._readHillslope
 .. automethod:: tools.inputparser.ReadYaml._readOut
 .. automethod:: tools.inputparser.ReadYaml._readRain

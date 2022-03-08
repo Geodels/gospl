@@ -23,7 +23,10 @@ class EarthPlate(object):
         The initialisation of `EarthPlate` class.
         """
 
+        self.paleoZ = None
         self.plateMov = 0
+        self.paleoMov = 0
+        self.paleoTime = None
         if self.platedata is not None:
             self.tecL = self.hLocal.duplicate()
 
@@ -35,27 +38,12 @@ class EarthPlate(object):
         """
 
         fplate = self.platedata.iloc[self.plateMov, 1]
-        if fplate != "empty":
-            mdata = np.load(fplate)
-            self.isCluster = mdata["clust"]
-            self.clustNgbhs = mdata["cngbh"]
-            self.distNbghs = mdata["dngbh"]
-            self.idNbghs = mdata["ingbh"]
-            del mdata
-
-        tplate = "empty"
-        tplate = self.platedata.iloc[self.plateMov, 2]
-        if tplate != "empty":
-            if self.plateMov < len(self.platedata) - 1:
-                dstep = (
-                    self.platedata.iloc[self.plateMov + 1, 0]
-                    - self.platedata.iloc[self.plateMov, 0]
-                )
-            else:
-                dstep = self.tEnd - self.platedata.iloc[self.plateMov, 0]
-            mdata = np.load(tplate)
-            self.uplift = mdata["t"][self.locIDs] / dstep
-            del mdata
+        mdata = np.load(fplate)
+        self.isCluster = mdata["clust"]
+        self.clustNgbhs = mdata["cngbh"]
+        self.distNbghs = mdata["dngbh"]
+        self.idNbghs = mdata["ingbh"]
+        del mdata
 
         return
 
@@ -72,12 +60,12 @@ class EarthPlate(object):
         nb = self.plateMov
 
         if nb < len(self.platedata):
-            if self.platedata.iloc[nb, 0] < self.tNow + self.dt:
+            if self.platedata.iloc[nb, 0] == self.tNow:
                 nb += 1
-
         if nb == self.plateMov:
             return
 
+        # Check if  relevant file information
         if self.platedata.iloc[self.plateMov, 1] == "empty":
             self.plateMov = nb
             return
@@ -234,83 +222,90 @@ class EarthPlate(object):
 
         return
 
-    def forcePaleoElev(self):
+    def updatePaleoElev(self):
         """
-        Advect surface and stratigraphic information based on plate evolution.
+        Update surface information based on paleo-reconstruction.
+        """
+
+        if self.paleoZ is not None:
+
+            if self.paleoTime is not None:
+                if self.paleoTime > self.tNow:
+                    return
+
+            t0 = process_time()
+
+            # Send local elevation globally
+            hl = self.hLocal.getArray().copy()
+            gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+            gZ[self.locIDs] = hl
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
+
+            # Compute tectonic missmatch (will be outputed) in metres
+            tec = self.paleoZ - gZ[self.locIDs]
+            self.tecL.setArray(tec)
+
+            # Fit simulated elevations to paleoelevation ones
+            self.hLocal.setArray(self.paleoZ)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Update model based on paleo-elevations (%0.02f seconds)"
+                    % (process_time() - t0),
+                    flush=True,
+                )
+
+        return
+
+    def getPaleoInfo(self):
+        """
+        Retreive paleoelevation information from inputs (vertical movements and elevations).
         """
 
         if self.platedata is None:
             return
 
-        if self.plateMov <= 0:
-            return
-
         t0 = process_time()
+
         # Check if we reached a plate advection time step
-        nb = self.plateMov
+        nb = self.paleoMov
 
         if nb < len(self.platedata):
-            if self.platedata.iloc[nb, 0] < self.tNow + self.dt:
+            if self.platedata.iloc[nb, 0] == self.tNow:
                 nb += 1
-        if nb == self.plateMov:
-            return
-
-        if (self.platedata.iloc[self.plateMov, 1] == "empty") & (
-            self.platedata.iloc[self.plateMov, 2] == "empty"
-        ):
+        if nb == self.paleoMov:
             return
 
         # Get relevant file information
-        tplate = "empty"
-        if self.plateMov > 0:
-            tplate = self.platedata.iloc[self.plateMov - 1, 2]
-
-        if tplate == "empty":
+        if self.platedata.iloc[self.paleoMov, 2] == "empty":
+            self.paleoMov = nb
             return
 
-        # Get the tectonic forcing required to fit with paleo-elevation model
+        # Read and load the file
+        tplate = self.platedata.iloc[self.paleoMov, 2]
         mdata = np.load(tplate)
 
-        # If we want to fit all the paleo-elevation model
-        if "z" in list(mdata.keys()):
-            # Send local elevation globally
-            t0 = process_time()
-            hl = self.hLocal.getArray().copy()
-            gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-            gZ[self.locIDs] = hl
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
-            tec = mdata["z"][self.locIDs] - gZ[self.locIDs]
-            self.tecL.setArray(tec)
-            self.hGlobal.setArray(mdata["z"][self.glbIDs])
-            self.dm.globalToLocal(self.hGlobal, self.hLocal)
-            del mdata
+        # If tectonic conditions exist
+        if "t" in list(mdata.keys()):
+            self.uplift = mdata["t"][self.locIDs]
+        else:
+            self.uplift = None
 
+        # If paleo-elevations information are provided
+        if "z" in list(mdata.keys()):
+            self.paleoZ = mdata["z"][self.locIDs].copy()
+            self.paleoTime = self.platedata.iloc[nb, 0]
             if MPIrank == 0 and self.verbose:
                 print(
-                    "Force paleo-elevation (%0.02f seconds)" % (process_time() - t0),
+                    "Store paleo-elevation values (%0.02f seconds)"
+                    % (process_time() - t0),
                     flush=True,
                 )
 
-        # If we want to fit the paleo-bathymetry model
-        # if "zm" in list(mdata.keys()):
-        #     # Send local bathymetry globally
-        #     t0 = process_time()
-        #     hl = self.hLocal.getArray().copy()
-        #     gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-        #     gZ[self.locIDs] = hl
-        #     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
-        #     # Only assign tectonic in the marine domain
-        #     tec = mdata["zm"][self.locIDs] - gZ[self.locIDs]
-        #     tec[gZ > self.sealevel] = 0.0
-        #     self.tecL.setArray(tec)
-        #     # Only force bathymentry values from paleo-elevation dataset
-        #     gZ[gZ <= self.sealevel] = mdata["zm"][gZ <= self.sealevel]
-        #     self.hGlobal.setArray(gZ[self.glbIDs])
-        #     self.dm.globalToLocal(self.hGlobal, self.hLocal)
-        #     del mdata
-        #     if MPIrank == 0 and self.verbose:
-        #         print(
-        #             "Force paleo-bathymetry (%0.02f seconds)" % (process_time() - t0),
-        #             flush=True,
-        #         )
+        del mdata
+
+        # Update next paleoelevation dataset parameters
+        self.paleoMov = nb
+
         return

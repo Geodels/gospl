@@ -26,12 +26,10 @@ Class WriteMesh
    .. autosummary::
 
       ~WriteMesh._createOutputDir
-      ~WriteMesh._forcePaleo
       ~WriteMesh._outputMesh
       ~WriteMesh._outputStrat
       ~WriteMesh._save_DMPlex_XMF
       ~WriteMesh._save_XDMF
-      ~WriteMesh._upliftBF
 
 
 Public functions
@@ -45,9 +43,7 @@ Private functions
 ---------------------
 
 .. automethod:: tools.outmesh.WriteMesh._createOutputDir
-.. automethod:: tools.outmesh.WriteMesh._forcePaleo
 .. automethod:: tools.outmesh.WriteMesh._outputMesh
 .. automethod:: tools.outmesh.WriteMesh._outputStrat
 .. automethod:: tools.outmesh.WriteMesh._save_DMPlex_XMF
 .. automethod:: tools.outmesh.WriteMesh._save_XDMF
-.. automethod:: tools.outmesh.WriteMesh._upliftBF

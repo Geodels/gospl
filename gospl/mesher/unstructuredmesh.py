@@ -155,72 +155,6 @@ class UnstMesh(object):
 
         return
 
-    def reInitialiseElev(self):
-        """
-        This functions reinitialises `gospl` elevation if one wants to restart a simulation that does not necessitate to rebuild the mesh structure. It can be used when running a simulation from the Jupyter environment.
-
-        .. note:
-            The elevation is read directly from the mesh elevation file defined in the YAML input file from the key: **npdata**.
-
-        """
-
-        t0step = process_time()
-
-        # Restart time
-        self.tNow = self.tStart
-        self.step = 0
-        self.stratStep = 0
-        self.rStart = self.tStart
-        self.saveTime = self.tNow
-        if self.strat > 0:
-            self.saveStrat = self.tNow + self.strat
-        else:
-            self.saveStrat = self.tEnd + 2.0 * self.tout
-
-        # Forcing functions
-        self.rainNb = -1
-        self.tecNb = -1
-        self.flexNb = -1
-
-        # Getting PETSc vectors values
-        loadData = np.load(self.meshFile)
-        gZ = loadData["z"]
-        self.hLocal.setArray(gZ[self.locIDs])
-        self.hGlobal.setArray(gZ[self.glbIDs])
-
-        self.vSed.set(0.0)
-        self.vSedLocal.set(0.0)
-        if self.stratNb > 0:
-            if self.stratF is not None:
-                self.vSedf.set(0.0)
-                self.vSedfLocal.set(0.0)
-            if self.stratW is not None:
-                self.vSedw.set(0.0)
-                self.vSedwLocal.set(0.0)
-            if self.carbOn:
-                self.vSedc.set(0.0)
-                self.vSedcLocal.set(0.0)
-
-        self.cumED.set(0.0)
-        self.cumEDLocal.set(0.0)
-
-        # Update external forces
-        self.applyForces()
-        self.applyTectonics()
-
-        del gZ, loadData
-        gc.collect()
-
-        if MPIrank == 0:
-            print(
-                "--- Reinitialise Phase \
-                  (%0.02f seconds)\n+++"
-                % (process_time() - t0step),
-                flush=True,
-            )
-
-        return
-
     def _xyz2lonlat(self):
         """
         Converts local x,y,z representation of cartesian coordinates from the spherical triangulation to latitude, longitude in degrees.
@@ -583,17 +517,6 @@ class UnstMesh(object):
 
         return
 
-    def initExtForce(self):
-        """
-        Initialises the forcing conditions: sea level condition, rainfall maps and tectonics.
-        """
-
-        self.applyForces()
-        if self.backward:
-            self.applyTectonics()
-
-        return
-
     def applyForces(self):
         """
         Finds the different values for climatic and sea-level forcing that will be applied at any given time interval during the simulation.
@@ -639,24 +562,6 @@ class UnstMesh(object):
 
         return
 
-    def updatePaleomap(self):
-        """
-        Forces model to match provided paleomaps at specific time interval during the simulation.
-
-        This function is only used when the `paleomap` key is defined in the YAML input file. It will read the paleotopography map and assign the paleo elevation on the spherical mesh.
-        """
-
-        for k in range(self.paleoNb):
-            if self.tNow == self.paleodata.iloc[k, 0]:
-                loadData = np.load(self.paleodata.iloc[k, 1])
-                gZ = loadData["z"]
-                self.hLocal.setArray(gZ[self.locIDs])
-                self.hGlobal.setArray(gZ[self.glbIDs])
-                del loadData, gZ
-                gc.collect()
-
-        return
-
     def _updateRain(self):
         """
         Finds current rain values for the considered time interval and computes the **volume** of water available for runoff on each vertex.
@@ -677,7 +582,6 @@ class UnstMesh(object):
                 nb = 0
 
             self.rainNb = nb
-
             if pd.isnull(self.raindata["rUni"][nb]):
                 loadData = np.load(self.raindata.iloc[nb, 2])
                 rainVal = loadData[self.raindata.iloc[nb, 3]]
@@ -746,9 +650,6 @@ class UnstMesh(object):
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
             del tmp
             gc.collect()
-
-        if self.forceStep >= 0 and not self.newForcing:
-            self._meshUpliftSubsidence(None)
 
         return
 

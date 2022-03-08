@@ -41,8 +41,9 @@ class ReadYaml(object):
 
         # Open YAML file
         with open(filename, "r") as finput:
-            yaml = YAML(typ="unsafe", pure=True)
-            self.input = yaml.load(finput)
+            self.input = YAML.load(finput, Loader=YAML.Loader)
+            # yaml = YAML(typ="unsafe", pure=True)
+            # self.input = yaml.load(finput)
 
         if MPIrank == 0 and "name" in self.input.keys() and self.verbose:
             print(
@@ -60,18 +61,7 @@ class ReadYaml(object):
         self._readPlate()
         self._readRain()
         self._readCompaction()
-
-        if self.raindata is not None:
-            if self.rStep > 0:
-                self.raindata = self.raindata[
-                    self.raindata["start"] >= self.tStart + self.rStep * self.tout
-                ]
-                self.raindata.reset_index(drop=True, inplace=True)
-                self.rainNb = len(self.raindata)
-
-        self._readBackwardPaleo()
         self._readOut()
-        self._readForcePaleo()
 
         self.radius = 6378137.0
         self.gravity = 9.81
@@ -81,6 +71,22 @@ class ReadYaml(object):
             self.saveStrat = self.tNow + self.strat
         else:
             self.saveStrat = self.tEnd + self.tout
+
+        # In case of restarting simulation
+        if self.rStep > 0:
+            rNow = self.tStart + self.rStep * self.tout
+
+            if self.raindata is not None:
+                for k in range(len(self.raindata)):
+                    if self.raindata["start"][k] < rNow and k < len(self.raindata) - 1:
+                        self.raindata["start"][k] = rNow - self.tout
+                    elif (
+                        self.raindata["start"][k] < rNow and k == len(self.raindata) - 1
+                    ):
+                        self.raindata["start"][k] = rNow
+                self.raindata = self.raindata[self.raindata["start"] >= rNow]
+                self.raindata.reset_index(drop=True, inplace=True)
+                self.rainNb = len(self.raindata)
 
         return
 
@@ -132,14 +138,9 @@ class ReadYaml(object):
             self.fast = False
 
         try:
-            self.backward = domainDict["backward"]
-        except KeyError:
-            self.backward = False
-
-        try:
             self.interp = domainDict["interp"]
         except KeyError:
-            self.interp = 1
+            self.interp = 3
 
         # if self.interp > 1:
         #     self.interp = 3
@@ -672,11 +673,16 @@ class ReadYaml(object):
                     ignore_index=True,
                 )
             self.tecdata = tecdata[tecdata["start"] >= self.tStart]
+
             if self.rStep > 0:
-                self.tecdata = tecdata[
-                    tecdata["start"] >= self.tStart + self.rStep * self.tout
-                ]
-            self.tecdata.reset_index(drop=True, inplace=True)
+                rNow = self.tStart + self.rStep * self.tout
+                for k in range(len(self.tecdata)):
+                    if self.tecdata["start"][k] < rNow and k < len(self.tecdata) - 1:
+                        self.tecdata["start"][k] = rNow - self.tout
+                    elif self.tecdata["start"][k] < rNow and k == len(self.tecdata) - 1:
+                        self.tecdata["start"][k] = rNow
+                self.tecdata = self.tecdata[self.tecdata["start"] >= rNow]
+                self.tecdata.reset_index(drop=True, inplace=True)
 
         except KeyError:
             self.tecdata = None
@@ -811,6 +817,22 @@ class ReadYaml(object):
                     platedata["start"] >= self.tStart + self.rStep * self.tout
                 ]
             self.platedata.reset_index(drop=True, inplace=True)
+
+            if self.rStep > 0:
+                rNow = self.tStart + self.rStep * self.tout
+                for k in range(len(self.platedata)):
+                    if (
+                        self.platedata["start"][k] < rNow
+                        and k < len(self.platedata) - 1
+                    ):
+                        self.platedata["start"][k] = rNow - self.tout
+                    elif (
+                        self.platedata["start"][k] < rNow
+                        and k == len(self.platedata) - 1
+                    ):
+                        self.platedata["start"][k] = rNow
+                self.platedata = self.platedata[self.platedata["start"] >= rNow]
+                self.platedata.reset_index(drop=True, inplace=True)
 
         except KeyError:
             self.platedata = None
@@ -966,116 +988,6 @@ class ReadYaml(object):
 
         except KeyError:
             self.raindata = None
-
-        return
-
-    def _readBackwardPaleo(self):
-        """
-        Force model with backward paleomaps.
-        """
-        try:
-            paleoDict = self.input["paleomap"]
-            paleoSort = sorted(paleoDict, key=itemgetter("time"))
-            for k in range(len(paleoSort)):
-                pTime = None
-                pMap = None
-                try:
-                    pTime = paleoSort[k]["time"]
-                except Exception:
-                    print("For each paleomap a given time is required.", flush=True)
-                    raise ValueError("Paleomap {} has no parameter time".format(k))
-                try:
-                    pMap = paleoSort[k]["npdata"]
-                except Exception:
-                    pass
-
-                if pMap is not None:
-                    try:
-                        with open(pMap + ".npz") as meshfile:
-                            meshfile.close()
-
-                    except IOError:
-                        print(
-                            "Unable to open numpy dataset: {}.npz".format(pMap),
-                            flush=True,
-                        )
-                        raise IOError("The numpy dataset is not found...")
-
-                tmpPaleo = []
-                tmpPaleo.insert(0, {"time": pTime, "pMap": pMap + ".npz"})
-                if k == 0:
-                    paleodata = pd.DataFrame(tmpPaleo, columns=["time", "pMap"])
-                else:
-                    paleodata = pd.concat(
-                        [paleodata, pd.DataFrame(tmpPaleo, columns=["time", "pMap"])],
-                        ignore_index=True,
-                    )
-
-            self.paleodata = paleodata[paleodata["time"] >= self.tStart]
-            if self.rStep > 0:
-                self.paleodata = paleodata[
-                    paleodata["start"] >= self.tStart + self.rStep * self.tout
-                ]
-
-            self.paleodata.reset_index(drop=True, inplace=True)
-            self.paleoNb = len(self.paleodata)
-
-        except KeyError:
-            self.paleodata = None
-            self.paleoNb = 0
-
-        return
-
-    def _readForcePaleo(self):
-        """
-        Get series of paleomaps to force the model through time.
-        """
-
-        try:
-            fpaleoDict = self.input["forcepaleo"]
-
-            try:
-                self.forceDir = fpaleoDict["dir"]
-                if not os.path.exists(self.forceDir):
-                    print("Forcing paleo directory does not exist!", flush=True)
-                    raise ValueError("Forcing paleo directory does not exist!")
-                try:
-                    forceNb = fpaleoDict["steps"]
-                except KeyError:
-                    print(
-                        "New Paleomap loading frequency 'steps' is required",
-                        flush=True,
-                    )
-                outNb = np.sum(forceNb)
-                self.stepb = np.flip(np.arange(0, outNb, dtype=int))
-                self.alpha = np.zeros(len(self.stepb))
-                p = 0
-                for k in range(len(forceNb)):
-                    out_nb = forceNb[k] + 1
-                    stepf = np.arange(1, out_nb, dtype=int)
-                    self.alpha[p : p + len(stepf)] = stepf.astype(float) / (out_nb - 1)
-                    p += len(stepf)
-                self.forceStep = 0
-
-                if self.rStep > 0:
-                    steptime = np.arange(0, outNb, dtype=int) * self.tout + self.tStart
-                    id = np.where(steptime == self.tStart + self.rStep * self.tout)[0]
-                    if len(id) == 0:
-                        raise steptime(
-                            "Something went wrong with the restart time, it needs to be related to the forcing step."
-                        )
-                    self.forceStep = id[0]
-
-            except Exception:
-                print(
-                    "A directory is required to force the model with paleodata.",
-                    flush=True,
-                )
-                raise ValueError("forcepaleo key requires a directory")
-
-        except KeyError:
-            self.forceDir = None
-            self.forceStep = -1
 
         return
 

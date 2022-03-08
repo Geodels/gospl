@@ -504,8 +504,7 @@ class SEAMesh(object):
 
         # if MPIrank == 0 and self.verbose:
         #     print(
-        #         "Distribute Ocean (%0.02f seconds)" % (process_time() - t0),
-        #         flush=True,
+        #         "Distribute Ocean (%0.02f seconds)" % (process_time() - t0), flush=True,
         #     )
 
         # Apply non-linear diffusion
