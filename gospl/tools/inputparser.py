@@ -42,8 +42,6 @@ class ReadYaml(object):
         # Open YAML file
         with open(filename, "r") as finput:
             self.input = YAML.load(finput, Loader=YAML.Loader)
-            # yaml = YAML(typ="unsafe", pure=True)
-            # self.input = yaml.load(finput)
 
         if MPIrank == 0 and "name" in self.input.keys() and self.verbose:
             print(
@@ -79,11 +77,11 @@ class ReadYaml(object):
             if self.raindata is not None:
                 for k in range(len(self.raindata)):
                     if self.raindata["start"][k] < rNow and k < len(self.raindata) - 1:
-                        self.raindata["start"][k] = rNow - self.tout
+                        self.raindata.loc[k, ["start"]] = rNow - self.tout
                     elif (
                         self.raindata["start"][k] < rNow and k == len(self.raindata) - 1
                     ):
-                        self.raindata["start"][k] = rNow
+                        self.raindata.loc[k, ["start"]] = rNow
                 self.raindata = self.raindata[self.raindata["start"] >= rNow]
                 self.raindata.reset_index(drop=True, inplace=True)
                 self.rainNb = len(self.raindata)
@@ -142,8 +140,10 @@ class ReadYaml(object):
         except KeyError:
             self.interp = 3
 
-        # if self.interp > 1:
-        #     self.interp = 3
+        try:
+            self.seaDepo = domainDict["seadepo"]
+        except KeyError:
+            self.seaDepo = True
 
         self._extraDomain()
 
@@ -186,6 +186,11 @@ class ReadYaml(object):
                 strataFile.close()
         except KeyError:
             self.strataFile = None
+
+        try:
+            self.fitMarine = domainDict["fitmarine"]
+        except KeyError:
+            self.fitMarine = False
 
         return
 
@@ -678,9 +683,9 @@ class ReadYaml(object):
                 rNow = self.tStart + self.rStep * self.tout
                 for k in range(len(self.tecdata)):
                     if self.tecdata["start"][k] < rNow and k < len(self.tecdata) - 1:
-                        self.tecdata["start"][k] = rNow - self.tout
+                        self.tecdata.loc[k, ["start"]] = rNow - self.tout
                     elif self.tecdata["start"][k] < rNow and k == len(self.tecdata) - 1:
-                        self.tecdata["start"][k] = rNow
+                        self.tecdata.loc[k, ["start"]] = rNow
                 self.tecdata = self.tecdata[self.tecdata["start"] >= rNow]
                 self.tecdata.reset_index(drop=True, inplace=True)
 
@@ -715,10 +720,6 @@ class ReadYaml(object):
                 )
         else:
             pMap = "empty"
-            # print(
-            #     "For each plate event a plate id grid is required.", flush=True,
-            # )
-            # raise ValueError("Plate event {} has no plate map (plate).".format(k))
 
         if pTec is not None:
             try:
@@ -825,12 +826,12 @@ class ReadYaml(object):
                         self.platedata["start"][k] < rNow
                         and k < len(self.platedata) - 1
                     ):
-                        self.platedata["start"][k] = rNow - self.tout
+                        self.platedata.loc[k, ["start"]] = rNow - self.tout
                     elif (
                         self.platedata["start"][k] < rNow
                         and k == len(self.platedata) - 1
                     ):
-                        self.platedata["start"][k] = rNow
+                        self.platedata.loc[k, ["start"]] = rNow
                 self.platedata = self.platedata[self.platedata["start"] >= rNow]
                 self.platedata.reset_index(drop=True, inplace=True)
 

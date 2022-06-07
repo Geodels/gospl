@@ -311,7 +311,7 @@ class SEAMesh(object):
 
         # Time stepping definition
         ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
-        # ARKIMEX: implicit nonlinearl time stepping
+        # ARKIMEX: implicit nonlinear time stepping
         ts.setType("arkimex")
         ts.setIFunction(self._evalFunction, self.tmp1)
         ts.setIJacobian(self._evalJacobian, self.mat)

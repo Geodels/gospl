@@ -194,7 +194,7 @@ class PITFill(object):
         df = self._buildPitDataframe(label[ids], pitIDs[ids])
         ids = label > pitIDs
         df2 = self._buildPitDataframe(pitIDs[ids], label[ids])
-        df = df.append(df2, ignore_index=True)
+        df = pd.concat([df, df2], ignore_index=True)
         df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
         df = df[(df["p1"] >= 0) & (df["p2"] >= 0)]
 

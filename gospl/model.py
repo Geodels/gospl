@@ -131,6 +131,10 @@ class Model(
         # Get external forces
         _UnstMesh.applyForces(self)
 
+        if not self.fast:
+            # Compute flow accumulation
+            _FAMesh.flowAccumulation(self)
+
         if MPIrank == 0:
             print(
                 "--- Initialisation Phase (%0.02f seconds)"
@@ -157,13 +161,6 @@ class Model(
         while self.tNow <= self.tEnd:
             tstep = process_time()
 
-            # If paleo-elevations are provided update elevations
-            _EarthPlate.updatePaleoElev(self)
-
-            if not self.fast:
-                # Compute flow accumulation
-                _FAMesh.flowAccumulation(self)
-
             # Output time step
             _WriteMesh.visModel(self)
             if self.tNow == self.tEnd:
@@ -171,17 +168,18 @@ class Model(
 
             # Perform plates advection
             _EarthPlate.advectPlates(self)
-            # Get information related to uplift and paleo-elevations
-            _EarthPlate.getPaleoInfo(self)
 
             if not self.fast:
+                # Compute flow accumulation
+                _FAMesh.flowAccumulation(self)
                 # Perform River Incision
                 _FAMesh.riverIncision(self)
                 if not self.nodep:
                     # Downstream sediment deposition inland
                     _SEDMesh.sedChange(self)
-                    # Downstream sediment deposition in sea
-                    _SEAMesh.seaChange(self)
+                    if self.seaDepo:
+                        # Downstream sediment deposition in sea
+                        _SEAMesh.seaChange(self)
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 

@@ -65,7 +65,7 @@ class EarthPlate(object):
         if nb == self.plateMov:
             return
 
-        # Check if  relevant file information
+        # Check relevant file information
         if self.platedata.iloc[self.plateMov, 1] == "empty":
             self.plateMov = nb
             return
@@ -104,7 +104,7 @@ class EarthPlate(object):
         # For clustered points get erosion/deposition of nearest neighbours
         tmp = gED[idCluster]
         tmpngb = tmp[self.clustNgbhs]
-        # Set new erosion deposition to the maximum erosion of nearest neighbours
+        # Set new erosion deposition to the maximum values of nearest neighbours
         gED[idCluster] = np.min(tmpngb, axis=1)
 
         # Update elevation and erosion/deposition
@@ -129,6 +129,11 @@ class EarthPlate(object):
                 nelev[onIDs] = gZ[self.idNbghs[onIDs, 0]]
                 nerodep[onIDs] = gED[self.idNbghs[onIDs, 0]]
 
+        # Remove marine erosion
+        if self.fitMarine:
+            seanIDs = np.where(np.logical_and(nelev < self.sealevel, nerodep < 0))[0]
+            nerodep[seanIDs] = 0.0
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Define local elevation and erosion/deposition after advection (%0.02f seconds)"
@@ -146,6 +151,11 @@ class EarthPlate(object):
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:
             self._advectStrata(weights, onIDs)
+
+        # Get the tectonic forcing from the paleo-reconstruction data
+        self._getPaleoInfo()
+        # If paleo-elevations are provided update elevations
+        self._updatePaleoElev()
 
         return
 
@@ -222,7 +232,7 @@ class EarthPlate(object):
 
         return
 
-    def updatePaleoElev(self):
+    def _updatePaleoElev(self):
         """
         Update surface information based on paleo-reconstruction.
         """
@@ -245,6 +255,11 @@ class EarthPlate(object):
             tec = self.paleoZ - gZ[self.locIDs]
             self.tecL.setArray(tec)
 
+            # Only fit marine elevation
+            if self.fitMarine:
+                ids = np.where(gZ[self.locIDs] >= self.sealevel)[0]
+                self.paleoZ[ids] = gZ[self.locIDs][ids]
+
             # Fit simulated elevations to paleoelevation ones
             self.hLocal.setArray(self.paleoZ)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
@@ -258,7 +273,7 @@ class EarthPlate(object):
 
         return
 
-    def getPaleoInfo(self):
+    def _getPaleoInfo(self):
         """
         Retreive paleoelevation information from inputs (vertical movements and elevations).
         """
@@ -295,7 +310,10 @@ class EarthPlate(object):
         # If paleo-elevations information are provided
         if "z" in list(mdata.keys()):
             self.paleoZ = mdata["z"][self.locIDs].copy()
-            self.paleoTime = self.platedata.iloc[nb, 0]
+            if nb >= len(self.platedata):
+                self.paleoTime = self.tEnd + self.dt
+            else:
+                self.paleoTime = self.platedata.iloc[nb, 0]
             if MPIrank == 0 and self.verbose:
                 print(
                     "Store paleo-elevation values (%0.02f seconds)"
