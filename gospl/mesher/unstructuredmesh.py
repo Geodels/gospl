@@ -519,7 +519,7 @@ class UnstMesh(object):
 
     def applyForces(self):
         """
-        Finds the different values for climatic and sea-level forcing that will be applied at any given time interval during the simulation.
+        Finds the different values for climatic, tectonic and sea-level forcing that will be applied at any given time interval during the simulation.
         """
 
         t0 = process_time()
@@ -538,6 +538,9 @@ class UnstMesh(object):
                 flush=True,
             )
 
+        # Tectonic forcing
+        self._updateTectonics()
+
         return
 
     def applyTectonics(self):
@@ -546,7 +549,7 @@ class UnstMesh(object):
         """
 
         t0 = process_time()
-        self._updateTectonics()
+        # self._updateTectonics()
 
         if self.tecdata is None and self.uplift is not None:
             # Define vertical displacements

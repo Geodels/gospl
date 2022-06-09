@@ -166,7 +166,8 @@ class Model(
             if self.tNow == self.tEnd:
                 return
 
-            # Perform plates advection
+            # Perform plates advection and tectonics
+            _UnstMesh.applyTectonics(self)
             _EarthPlate.advectPlates(self)
 
             if not self.fast:
@@ -193,7 +194,6 @@ class Model(
             # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:
                 _UnstMesh.applyForces(self)
-                _UnstMesh.applyTectonics(self)
 
             # Advance time
             self.tNow += self.dt
