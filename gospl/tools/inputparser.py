@@ -41,7 +41,7 @@ class ReadYaml(object):
 
         # Open YAML file
         with open(filename, "r") as finput:
-            yaml = YAML(typ="unsafe", pure=True)
+            yaml = YAML()
             self.input = yaml.load(finput)
 
         if MPIrank == 0 and "name" in self.input.keys() and self.verbose:
