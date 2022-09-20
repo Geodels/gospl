@@ -89,7 +89,7 @@ A dependency ``XXXX`` is installed via the following command in a terminal::
 ========================= ================== =============================================================
 Dependency                Minimum Version    Notes
 ========================= ================== =============================================================
-NumPy                     1.19.2             Numerical computing tools.
+NumPy                     1.22.2             Numerical computing tools.
 SciPy                     1.5.2              Optimization, linear algebra, integration, interpolation
 Cython                    0.29.21            Superset of the Python programming language
 mpi4py                    3.1.1              Bindings for the Message Passing Interface standard
