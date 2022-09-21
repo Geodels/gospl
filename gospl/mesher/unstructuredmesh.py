@@ -495,7 +495,7 @@ class UnstMesh(object):
         """
         Reads existing cumulative erosion depostion from a previous experiment if any as defined in the YAML input file following the  `nperodep` key.
 
-        This functionality can be used when restarting from a previous simulation in which the sperical mesh has been modified either to account for horizontal advection or to refine/coarsen a specific region during a given time period.
+        This functionality can be used when restarting from a previous simulation in which the spherical mesh has been modified either to account for horizontal advection or to refine/coarsen a specific region during a given time period.
         """
 
         # Build PETSc vectors
