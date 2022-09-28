@@ -108,6 +108,33 @@ class FAMesh(object):
             [(getattr(reasons, r), r) for r in dir(reasons) if not r.startswith("_")]
         )
 
+    def _solve_KSP2(self, matrix, vector1, vector2):
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setInitialGuessNonzero(True)
+        ksp.setOperators(matrix, matrix)
+        ksp.setType("fgmres")
+        pc = ksp.getPC()
+        pc.setType("asm")
+        ksp.setTolerances(rtol=1.0e-8, divtol=1.e20)
+        ksp.solve(vector1, vector2)
+        r = ksp.getConvergedReason()
+        if r < 0:
+            KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
+            if MPIrank == 0:
+                print(
+                    "LinearSolver failed to converge after iterations",
+                    ksp.getIterationNumber(),
+                    flush=True,
+                )
+                print("with reason: ", KSPReasons[r], flush=True)
+            vector2.set(0.0)
+            ksp.destroy()
+            # raise RuntimeError("LinearSolver failed to converge!")
+        else:
+            ksp.destroy()
+
+        return vector2
+
     def _solve_KSP(self, guess, matrix, vector1, vector2):
         """
 
@@ -138,20 +165,22 @@ class FAMesh(object):
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
-            KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
-            v1max = vector1.max()[1]
-            v1min = vector1.min()[1]
-            if MPIrank == 0:
-                print(
-                    "LinearSolver failed to converge after %d iterations",
-                    ksp.getIterationNumber(),
-                    flush=True,
-                )
-                print("with reason: %s", KSPReasons[r], flush=True)
-                print("input vector: ", v1min, v1max, flush=True)
-            vector2.set(0.0)
+            # KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
+            # v1max = vector1.max()[1]
+            # v1min = vector1.min()[1]
+            # if MPIrank == 0:
+            #     print(
+            #         "LinearSolver failed to converge after iterations",
+            #         ksp.getIterationNumber(),
+            #         flush=True,
+            #     )
+            #     print("with reason: ", KSPReasons[r], flush=True)
+            #     print("input vector: ", v1min, v1max, flush=True)
+            ksp.destroy()
+            vector2 = self._solve_KSP2(matrix, vector1, vector2)
             # raise RuntimeError("LinearSolver failed to converge!")
-        ksp.destroy()
+        else:
+            ksp.destroy()
 
         return vector2
 

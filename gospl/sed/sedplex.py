@@ -197,7 +197,7 @@ class SEDMesh(object):
         self.pitVol[eIDs] -= inV[eIDs]
         self.pitVol[self.pitVol < 0] = 0.0
 
-        # In case there is still remaining water flux to distribute downstream
+        # In case there is still remaining sediment flux to distribute downstream
         if (eV > 1.0e-3).any():
             if step == 100:
                 self._buildFlowDirection(self.lFill)

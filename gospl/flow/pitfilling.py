@@ -452,6 +452,12 @@ class PITFill(object):
             pitIDs = label_pits(level, self.lFill)
         else:
             pitIDs = label_pits(self.sealevel, self.lFill)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define pit labels (%0.02f seconds)" % (process_time() - t0)
+            )
+
+        t0 = process_time()
         pitIDs[self.idBorders] = -1
         pitNb = self._transferIDs(pitIDs)
         pitnbs = len(pitNb) + 1
@@ -462,6 +468,11 @@ class PITFill(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, rank, op=MPI.MAX)
         spillIDs[rank != MPIrank] = -1
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillIDs, op=MPI.MAX)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define spill points (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Get depression informations:
         self.pitInfo = np.zeros((pitnbs, 2), dtype=int)
@@ -490,6 +501,11 @@ class PITFill(object):
             self.flatDirs[id] = -1
             # Only compute the water volume for incoming water fluxes above sea level
             h[h < self.sealevel] = self.sealevel
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define flat directions (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Get pit parameters
         self._getPitParams(h, pitnbs)
