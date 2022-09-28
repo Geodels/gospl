@@ -115,7 +115,7 @@ class FAMesh(object):
         ksp.setType("fgmres")
         pc = ksp.getPC()
         pc.setType("asm")
-        ksp.setTolerances(rtol=1.0e-8, divtol=1.e20)
+        ksp.setTolerances(rtol=1.0e-6, divtol=1.e20)
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
