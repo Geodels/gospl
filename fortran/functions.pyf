@@ -166,6 +166,13 @@ python module _fortran
             integer, optional,check(len(elev)>=m),depend(elev) :: m=len(elev)
         end subroutine spill_pts
 
+        subroutine sort_ids(df1,df2,id2,m)
+            integer dimension(m),intent(in) :: df1
+            integer dimension(m),intent(in),depend(m) :: df2
+            integer dimension(m),intent(out),depend(m) :: id2
+            integer, optional,check(len(df1)>=m),depend(df1) :: m=len(df1)
+        end subroutine sort_ids
+
         subroutine fill_edges(nb,cgraph,maxnghbs,nelev,spillrank,spillnodes,spillid,m)
             integer intent(in) :: nb
             double precision dimension(m,5),intent(in) :: cgraph

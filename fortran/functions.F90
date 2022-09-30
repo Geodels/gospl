@@ -1668,6 +1668,38 @@ subroutine spill_pts(mpirk, pitsnb, elev, pitids, border, spill, lspill, rank, m
 
 end subroutine spill_pts
 
+subroutine sort_ids(df1, df2, id2, m)
+!*****************************************************************************
+! Sort pit ids.
+
+  use meshparams
+  implicit none
+
+  integer :: m
+  integer,intent(in) :: df1(m)
+  integer,intent(in) :: df2(m)
+
+  integer, intent(out) :: id2(m)
+  integer :: k
+
+  id2 = -1
+
+  do k = 1, m
+    if(k == 1)then
+      id2(k) = df2(1)
+    else
+      if(df2(k) == df2(k-1))then
+        id2(k) = df1(k-1)
+      else
+        id2(k) = df2(k)
+      endif
+    endif
+  enddo
+
+  return
+
+end subroutine sort_ids
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
 !!          MESH DECLARATION FUNCTIONS              !!
