@@ -8,7 +8,7 @@ h5py==3.7.0
 pandas==1.5.0
 ruamel.yaml==0.17.21
 meshio==5.3.4
-meshplex==0.11.6
+meshplex==0.18.5
 pre-commit>=2.2.0
 vtk==9.0.1
 scikit-fuzzy==0.4.2
