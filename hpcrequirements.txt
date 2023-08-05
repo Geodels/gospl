@@ -1,6 +1,6 @@
 numpy==1.25.2
 numpy-indexed==0.3.7
-scipy==1.5.4
+scipy==1.11.1
 Cython==0.29.22
 mpi4py==3.0.0
 petsc4py==3.11.0
