@@ -56,6 +56,7 @@ class ReadYaml(object):
         self._readHillslope()
         self._readSealevel()
         self._readTectonic()
+        self._readErofactor()
         self._readPlate()
         self._readRain()
         self._readCompaction()
@@ -85,6 +86,18 @@ class ReadYaml(object):
                 self.raindata = self.raindata[self.raindata["start"] >= rNow]
                 self.raindata.reset_index(drop=True, inplace=True)
                 self.rainNb = len(self.raindata)
+
+            if self.sedfacdata is not None:
+                for k in range(len(self.sedfacdata)):
+                    if self.sedfacdata["start"][k] < rNow and k < len(self.sedfacdata) - 1:
+                        self.sedfacdata.loc[k, ["start"]] = rNow - self.tout
+                    elif (
+                        self.sedfacdata["start"][k] < rNow and k == len(self.sedfacdata) - 1
+                    ):
+                        self.sedfacdata.loc[k, ["start"]] = rNow
+                self.sedfacdata = self.sedfacdata[self.sedfacdata["start"] >= rNow]
+                self.sedfacdata.reset_index(drop=True, inplace=True)
+                self.sedfactNb = len(self.sedfacdata)
 
         return
 
@@ -694,6 +707,156 @@ class ReadYaml(object):
 
         return
 
+    def _defineErofactor(self, k, sStart, sMap, sUniform, sedfacdata):
+        """
+        Define sediment surface erodibility factor conditions.
+
+        :arg k: erodibility factor map number
+        :arg sStart: erodibility factor map start time
+        :arg sMap: erodibility factor map file event
+        :arg sUniform: erodibility factor uniform value event
+        :arg sedfacdata: pandas dataframe storing each erodibility factor map
+        :return: appended sedfacdata
+        """
+
+        if sMap is None and sUniform is None:
+            print(
+                "For each erodibility factor map a factor value (uniform) or a factor \
+                grid (map) is required.",
+                flush=True,
+            )
+            raise ValueError(
+                "Sediment erodibility factor {} has no value (uniform) or a \
+                map (map).".format(
+                    k
+                )
+            )
+
+        tmpErof = []
+        if sMap is None:
+            tmpErof.insert(
+                0,
+                {"start": sStart, "rUni": sUniform, "sMap": None, "sKey": None},
+            )
+        else:
+            tmpErof.insert(
+                0,
+                {
+                    "start": sStart,
+                    "sUni": None,
+                    "sMap": sMap[0] + ".npz",
+                    "sKey": sMap[1],
+                },
+            )
+
+        if k == 0:
+            sedfacdata = pd.DataFrame(tmpErof, columns=["start", "sUni", "sMap", "sKey"])
+        else:
+            sedfacdata = pd.concat(
+                [
+                    sedfacdata,
+                    pd.DataFrame(tmpErof, columns=["start", "sUni", "sMap", "sKey"]),
+                ],
+                ignore_index=True,
+            )
+
+        return sedfacdata
+    
+    def _readErofactor(self):
+        """
+        Parse erodibility factor based on surface geology.
+        """
+
+        sedfacdata = None
+        try:
+            sedDict = self.input["sedfactor"]
+            sedSort = sorted(sedDict, key=itemgetter("start"))
+            for k in range(len(sedSort)):
+                sStart = None
+                sUniform = None
+                sMap = None
+                try:
+                    sStart = sedSort[k]["start"]
+                except Exception:
+                    print(
+                        "For each sediment factor a start time is required.", flush=True
+                    )
+                    raise ValueError(
+                        "Sediment factor map {} has no parameter start".format(k)
+                    )
+                try:
+                    sUniform = sedSort[k]["uniform"]
+                except Exception:
+                    pass
+                try:
+                    sMap = sedSort[k]["map"]
+                except Exception:
+                    pass
+
+                if sMap is not None:
+                    try:
+                        with open(sMap[0] + ".npz") as sedfacfile:
+                            sedfacfile.close()
+
+                    except IOError:
+                        print(
+                            "Unable to open sediment factor file: {}.npz".format(sMap[0]),
+                            flush=True,
+                        )
+                        raise IOError(
+                            "The sediment factor file {} is not found for event {}.".format(
+                                sMap[0] + ".npz", k
+                            )
+                        )
+                    mdata = np.load(sMap[0] + ".npz")
+                    sedfacSet = mdata.files
+
+                    try:
+                        sedKey = mdata[sMap[1]]
+                        if sedKey is not None:
+                            pass
+                    except KeyError:
+                        print(
+                            "Field name {} is missing from sediment factor file {}.npz".format(
+                                sMap[1], sMap[0]
+                            ),
+                            flush=True,
+                        )
+                        print(
+                            "The following fields are available: {}".format(sedfacSet),
+                            flush=True,
+                        )
+                        print("Check your sediment factor file fields definition...", flush=True)
+                        raise KeyError(
+                            "Field name for sediment factor is not defined correctly or does not exist!"
+                        )
+
+                sedfacdata = self._defineErofactor(k, sStart, sMap, sUniform, sedfacdata)
+
+            if sedfacdata["start"][0] > self.tStart:
+                tmpSedF = []
+                tmpSedF.insert(
+                    0, {"start": self.tStart, "sUni": 1.0, "sMap": None, "sKey": None}
+                )
+                sedfacdata = pd.concat(
+                    [
+                        pd.DataFrame(
+                            tmpSedF, columns=["start", "sUni", "sMap", "sKey"]
+                        ),
+                        sedfacdata,
+                    ],
+                    ignore_index=True,
+                )
+            self.sedfacdata = sedfacdata.copy()  
+            self.sedfacdata.reset_index(drop=True, inplace=True)
+            self.sedfactNb = len(self.sedfacdata)
+
+        except KeyError:
+            self.sedfactNb = 0
+            self.sedfacdata = None
+
+        return
+    
     def _storePlate(self, k, pStart, pMap, pTec, pEnd, platedata):
         """
         Record plate movement conditions.

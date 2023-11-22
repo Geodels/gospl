@@ -50,6 +50,7 @@ class UnstMesh(object):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
+        self.sedfacVal = None
         self.memclear = False
         # Let us define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
@@ -421,6 +422,7 @@ class UnstMesh(object):
         self.rainNb = -1
         self.tecNb = -1
         self.flexNb = -1
+        self.sedfactNb = -1
 
         del tree, distances, tmp2  # , indices, tmp
         del l2g, offproc, gZ, out, ptscells
@@ -532,6 +534,10 @@ class UnstMesh(object):
         # Climate information
         self._updateRain()
 
+        # Erodibility factor information
+        if self.sedfacdata is not None:
+            self._updateEroFactor()
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Update Climatic Forces (%0.02f seconds)" % (process_time() - t0),
@@ -597,6 +603,39 @@ class UnstMesh(object):
         self.rainVal = self.rainMesh[self.locIDs]
         self.bL.setArray(self.rainVal * self.larea)
         self.dm.localToGlobal(self.bL, self.bG)
+        
+        return
+
+    def _updateEroFactor(self):
+        """
+        Finds current erodibility factor values for the considered time interval.
+
+        .. note::
+
+            It is worth noting that the erodibility factor is an indice representing different lithological classes (see Moosdorf et al., 2018).
+
+        """
+
+        nb = self.sedfactNb
+        if nb < len(self.sedfacdata) - 1:
+            if self.sedfacdata.iloc[nb + 1, 0] <= self.tNow:  # + self.dt:
+                nb += 1
+
+        if nb > self.sedfactNb or nb == -1:
+            if nb == -1:
+                nb = 0
+
+            self.sedfactNb = nb
+            if pd.isnull(self.sedfacdata["sUni"][nb]):
+                loadData = np.load(self.sedfacdata.iloc[nb, 2])
+                sedfacVal = loadData[self.sedfacdata.iloc[nb, 3]]
+                del loadData
+            else:
+                sedfacVal = np.full(self.mpoints, self.sedfacdata.iloc[nb, 1])
+            sedfacVal[sedfacVal < 0.1] = 0.1
+            self.sedFacMesh = sedfacVal
+
+        self.sedfacVal = self.sedFacMesh[self.locIDs]
 
         return
 

@@ -477,7 +477,10 @@ class FAMesh(object):
         PA = self.FAL.getArray()
 
         # Incorporate the effect of local mean annual precipitation rate on erodibility
-        Kbr = self.K * (self.rainVal ** self.coeffd)
+        if self.sedfacVal is not None:
+            Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
+        else:
+            Kbr = self.K * (self.rainVal ** self.coeffd)
         Kbr *= np.sqrt(PA) * self.dt
         Kbr[self.seaID] = 0.0
 
