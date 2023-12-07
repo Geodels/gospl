@@ -1,4 +1,4 @@
-numpy==1.19.5
+numpy==1.26.2
 numpy-indexed==0.3.7
 scipy==1.5.4
 Cython==0.29.22
