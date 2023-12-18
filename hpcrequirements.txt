@@ -3,7 +3,7 @@ numpy-indexed==0.3.7
 scipy==1.11.4
 Cython==3.0.6
 mpi4py==3.1.5
-petsc4py==3.11.0
+petsc4py==3.20.2
 h5py==2.9.0
 pandas==1.0.3
 ruamel.yaml==0.16.5
