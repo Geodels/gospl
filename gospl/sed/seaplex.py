@@ -160,7 +160,7 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions for filled + eps elevations
-        rcv, _, wght = mfdreceivers(8, 1.0e-2, self.inIDs, self.oceanFill, -1.0e5)
+        rcv, _, wght = mfdreceivers(8, 0.01, self.inIDs, self.oceanFill, -1.0e5)
         sum_wght = np.sum(wght, axis=1)
         ids = (self.pitIDs > -1) & (self.flatOcean > -1) & (sum_wght == 0.0)
         ids = ids.nonzero()[0]

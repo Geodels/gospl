@@ -122,7 +122,7 @@ class ReadYaml(object):
         try:
             self.flowExp = domainDict["flowexp"]
         except KeyError:
-            self.flowExp = 0.42
+            self.flowExp = 0.5
 
         try:
             meshFile = domainDict["npdata"]

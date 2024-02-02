@@ -635,6 +635,10 @@ subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
 ! algorithm.
+! The exponent is referred to as the flow‐partition exponent following: Quin et al., 2007
+! An adaptive approach to selecting a flow‐partition exponent for a multiple‐flow‐direction algorithm
+! The larger the value of the exponent, the more similar MFD is to SFD.
+! The smaller the value of the exponent, the more spread is the distribution across downstream nodes.
 
   use meshparams
   implicit none

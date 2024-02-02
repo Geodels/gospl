@@ -450,7 +450,7 @@ class FAMesh(object):
 
     def _getErosionRate(self):
         r"""
-        This function computes erosion rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion is not going to be underestimate by small depressions which are likely to be filled (either by sediments or water) during a single time step.
+        This function computes erosion rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion is not going to be underestimated by small depressions which are likely to be filled (either by sediments or water) during a single time step.
 
         The simplest law to simulate fluvial incision is based on the detachment-limited stream power law, in which erosion rate  depends on drainage area :math:`A`, net precipitation :math:`P` and local slope :math:`S` and takes the form:
 
