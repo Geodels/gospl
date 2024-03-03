@@ -167,7 +167,7 @@ class SEAMesh(object):
 
         # Dimensionless depositional coefficient
         PA = self.tmpL.getArray().copy()
-        fDep = np.divide(10*self.fDepm*self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+        fDep = np.divide(self.fDepm*self.larea, PA, out=np.zeros_like(PA), where=PA > 1.e-6)
         dMat = self._matrix_build_diag(fDep)
         dMat += self.fMat
 
