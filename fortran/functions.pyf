@@ -49,16 +49,41 @@ python module _fortran
             integer, optional,check(len(flux)>=nb),depend(flux) :: nb=len(flux)
         end subroutine distocean
 
-        subroutine mfdreceivers(nrcv, exp, inids,elev,sl,rcv,dist,wgt,nb)
+        subroutine donorslist(nrcv,inids,rcvs,donors,nb)
+            integer intent(in) :: nrcv
+            integer dimension(nb),intent(in) :: inids
+            integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcvs
+            integer dimension(nb,8),intent(out),depend(nb) :: donors
+            integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
+        end subroutine donorslist
+
+        subroutine donorsmax(dat,donors,valmax,nb)
+            double precision dimension(nb),intent(in) :: dat
+            integer dimension(nb,8),intent(in),depend(nb) :: donors
+            double precision dimension(nb),intent(out),depend(nb) :: valmax
+            integer, optional,check(len(dat)>=nb),depend(dat) :: nb=len(dat)
+        end subroutine donorsmax
+
+        subroutine mfdrcvrs(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
             double precision intent(in) :: exp
             double precision intent(in) :: sl
-            integer dimension(nb),intent(in) :: inids
-            double precision dimension(nb),intent(in),depend(nb) :: elev
+            double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb,8),intent(out),depend(nb) :: rcv
+            double precision dimension(nb,8),intent(out),depend(nb) :: dist
+            double precision dimension(nb,8),intent(out),depend(nb) :: wgt
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine mfdrcvrs
+
+        subroutine mfdreceivers(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
+            integer intent(in) :: nrcv
+            double precision intent(in) :: exp
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
             integer dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: rcv
-            double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: dist
-            double precision dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: wgt
-            integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
+            double precision dimension(nb,nrcv),intent(out),depend(nb) :: dist
+            double precision dimension(nb,nrcv),intent(out),depend(nb) :: wgt
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine mfdreceivers
 
         subroutine strataonesed(n,stratnb,ids,weights,strath,stratz,phis,nstrath,nstratz,nphis,nb)
@@ -96,32 +121,6 @@ python module _fortran
             double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphiw
             integer, optional,check(shape(ids,0)==nb),depend(ids) :: nb=shape(ids,0)
         end subroutine stratathreesed
-
-        subroutine stratafullsed(n,stratnb,ids,weights,strath,stratz,stratf,stratw,stratc,phis,phif,phiw,phic,nstrath,nstratz,nstratf,nstratw,nstratc,nphis,nphif,nphiw,nphic,nb)
-            integer intent(in) :: n
-            integer intent(in) :: stratnb
-            integer dimension(nb,3),intent(in) :: ids
-            double precision dimension(nb,3),intent(in),depend(nb) :: weights
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: strath
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: stratz
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: stratf
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: stratw
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: stratc
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: phis
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: phif
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: phiw
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: phic
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstrath
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratf
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratw
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratc
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphis
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphif
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphiw
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphic
-            integer, optional,check(shape(ids,0)==nb),depend(ids) :: nb=shape(ids,0)
-        end subroutine stratafullsed
 
         subroutine label_pits(lvl,fill,label,nb)
             double precision,intent(in) :: lvl

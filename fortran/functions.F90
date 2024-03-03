@@ -631,14 +631,81 @@ end subroutine scale_volume
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
+subroutine donorslist(nrcv, inIDs, rcvs, donors, nb)
+!*****************************************************************************
+! Compute the list of donors based on mesh connectivity.
+
+  use meshparams
+  implicit none
+
+  integer :: nb 
+
+  integer, intent(in) :: nrcv
+  integer, intent(in) :: inIDs(nb)
+  integer, intent(in) :: rcvs(nb,nrcv)
+  integer, intent(out) :: donors(nb,8)
+
+  integer :: k, i, p
+  integer :: nbdonors(nb)
+
+  donors = -1
+  nbdonors = 0
+
+  do k = 1, nb
+    if(inIDs(k)>0)then
+      p = 1
+    endif
+    do p = 1, nrcv
+      i = rcvs(k,p) + 1
+      if(i .ne. k .and. i > 0)then
+        nbdonors(i) = nbdonors(i) + 1
+        donors(i,nbdonors(i)) = k - 1
+      endif
+    enddo 
+  enddo
+
+  return
+
+end subroutine donorslist
+
+subroutine donorsmax(dat, donors, valmax, nb)
+!*****************************************************************************
+! Compute the donors maximum based on a specific variable.
+
+  use meshparams
+  implicit none
+
+  integer :: nb 
+
+  double precision, intent(in) :: dat(nb)
+  integer, intent(in) :: donors(nb,8)
+  double precision, intent(out) :: valmax(nb)
+
+  integer :: k, i, p
+
+  valmax = -1.e8 
+
+  do k = 1, nb
+    do p = 1, 8
+      i = donors(k,p) + 1
+      if(i > 0)then
+        valmax(k) = max(dat(i),valmax(k))
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine donorsmax
+
+subroutine mfdreceivers( nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
 ! algorithm.
 ! The exponent is referred to as the flow‐partition exponent following: Quin et al., 2007
 ! An adaptive approach to selecting a flow‐partition exponent for a multiple‐flow‐direction algorithm
 ! The larger the value of the exponent, the more similar MFD is to SFD.
-! The smaller the value of the exponent, the more spread is the distribution across downstream nodes.
+! The smaller the value of the exponent, the more spread is the distribution of water across downstream nodes.
 
   use meshparams
   implicit none
@@ -655,7 +722,6 @@ subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
 
   integer, intent(in) :: nRcv
   double precision, intent(in) :: exp
-  integer, intent(in) :: inIDs(nb)
   double precision,intent(in) :: sl
   double precision, intent(in) :: elev(nb)
 
@@ -672,57 +738,55 @@ subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
   wgt = 0.
 
   do k = 1, nb
-    if(inIDs(k)>0)then
-      if(elev(k)<=sl)then
-        rcv(k,1:nRcv) = k-1
-      else
-        slp = 0.
-        id = 0
-        val = 0.
-        kk = 0
-        do p = 1, FVnNb(k)
-          n = FVnID(k,p)+1
-          if(n>0 .and. FVeLgt(k,p)>0.)then
-            val = (elev(k) - elev(n))**exp/FVeLgt(k,p)
-            if(val>0.)then
-              kk = kk + 1
-              slp(kk) = val
-              id(kk) = n-1
-              dst(kk) = FVeLgt(k,p)
-            endif
+    if(elev(k)<=sl)then
+      rcv(k,1:nRcv) = k-1
+    else
+      slp = 0.
+      id = 0
+      val = 0.
+      kk = 0
+      do p = 1, FVnNb(k)
+        n = FVnID(k,p)+1
+        if(n>0 .and. FVeLgt(k,p)>0.)then
+          val = (elev(k) - elev(n))**exp/FVeLgt(k,p)
+          if(val>0.)then
+            kk = kk + 1
+            slp(kk) = val
+            id(kk) = n-1
+            dst(kk) = FVeLgt(k,p)
           endif
-        enddo
-
-        if(kk == 0)then
-          rcv(k,1:nRcv) = k-1
-        elseif(kk <= nRcv)then
-          val = 0.
-          rcv(k,1:nRcv) = k-1
-          do p = 1, kk
-            rcv(k,p) = id(p)
-            dist(k,p) = dst(p)
-            val = val + slp(p)
-          enddo
-          do p = 1, nRcv
-            wgt(k,p) = slp(p) / val
-          enddo
-        else
-          rcv(k,1:nRcv) = k-1
-          call quicksort(slp,1,kk,id)
-          n = 0
-          val = 0.
-          slope = 0.
-          do p = kk,kk-nRcv+1,-1
-            n = n + 1
-            slope(n) = slp(p)
-            rcv(k,n) = id(p)
-            dist(k,n) = dst(p)
-            val = val + slp(p)
-          enddo
-          do p = 1, nRcv
-            wgt(k,p) = slope(p)/val
-          enddo
         endif
+      enddo
+
+      if(kk == 0)then
+        rcv(k,1:nRcv) = k-1
+      elseif(kk <= nRcv)then
+        val = 0.
+        rcv(k,1:nRcv) = k-1
+        do p = 1, kk
+          rcv(k,p) = id(p)
+          dist(k,p) = dst(p)
+          val = val + slp(p)
+        enddo
+        do p = 1, nRcv
+          wgt(k,p) = slp(p) / val
+        enddo
+      else
+        rcv(k,1:nRcv) = k-1
+        call quicksort(slp,1,kk,id)
+        n = 0
+        val = 0.
+        slope = 0.
+        do p = kk,kk-nRcv+1,-1
+          n = n + 1
+          slope(n) = slp(p)
+          rcv(k,n) = id(p)
+          dist(k,n) = dst(p)
+          val = val + slp(p)
+        enddo
+        do p = 1, nRcv
+          wgt(k,p) = slope(p)/val
+        enddo
       endif
     endif
   enddo
@@ -730,6 +794,106 @@ subroutine mfdreceivers( nRcv, exp, inIDs, elev, sl, rcv, dist, wgt, nb)
   return
 
 end subroutine mfdreceivers
+
+subroutine mfdrcvrs( nRcv, exp, elev, sl, rcv, dist, wgt, nb)
+!*****************************************************************************
+! Compute receiver characteristics based on multiple flow direction
+! algorithm.
+! The exponent is referred to as the flow‐partition exponent following: Quin et al., 2007
+! An adaptive approach to selecting a flow‐partition exponent for a multiple‐flow‐direction algorithm
+! The larger the value of the exponent, the more similar MFD is to SFD.
+! The smaller the value of the exponent, the more spread is the distribution of water across downstream nodes.
+
+  use meshparams
+  implicit none
+
+  interface
+    recursive subroutine quicksort(array, first, last, indices)
+      double precision, dimension(:), intent(inout) :: array
+      integer, intent(in)  :: first, last
+      integer, dimension(:), intent(inout) :: indices
+    end subroutine quicksort
+  end interface
+
+  integer :: nb
+
+  integer, intent(in) :: nRcv
+  double precision, intent(in) :: exp
+  double precision,intent(in) :: sl
+  double precision, intent(in) :: elev(nb)
+
+  integer, intent(out) :: rcv(nb,8)
+  double precision, intent(out) :: dist(nb,8)
+  double precision, intent(out) :: wgt(nb,8)
+
+  integer :: k, n, p, kk, ngbs
+  double precision :: fexp,slp(8),dst(8),val,slope(8)
+  integer :: id(8)
+
+  rcv = -1
+  dist = 0.
+  wgt = 0.
+
+  do k = 1, nb
+    if(elev(k)>sl)then
+      ngbs = nRcv
+      fexp = exp
+    else
+      ngbs = 8
+      fexp = 0.01
+    endif
+    slp = 0.
+    id = 0
+    val = 0.
+    kk = 0
+    do p = 1, FVnNb(k)
+      n = FVnID(k,p)+1
+      if(n>0 .and. FVeLgt(k,p)>0.)then
+        val = (elev(k) - elev(n))**fexp/FVeLgt(k,p)
+        if(val>0.)then
+          kk = kk + 1
+          slp(kk) = val
+          id(kk) = n-1
+          dst(kk) = FVeLgt(k,p)
+        endif
+      endif
+    enddo
+
+    if(kk == 0)then
+      rcv(k,1:8) = k-1
+    elseif(kk <= ngbs)then
+      val = 0.
+      rcv(k,1:ngbs) = k-1
+      do p = 1, kk
+        rcv(k,p) = id(p)
+        dist(k,p) = dst(p)
+        val = val + slp(p)
+      enddo
+      do p = 1, ngbs
+        wgt(k,p) = slp(p) / val
+      enddo
+    else
+      rcv(k,1:ngbs) = k-1
+      call quicksort(slp,1,kk,id)
+      n = 0
+      val = 0.
+      slope = 0.
+      do p = kk,kk-ngbs+1,-1
+        n = n + 1
+        slope(n) = slp(p)
+        rcv(k,n) = id(p)
+        dist(k,n) = dst(p)
+        val = val + slp(p)
+      enddo
+      do p = 1, ngbs
+        wgt(k,p) = slope(p)/val
+      enddo
+    endif
+  enddo
+
+  return
+
+end subroutine mfdrcvrs
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!

@@ -13,11 +13,7 @@ from time import process_time
 from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import sethillslopecoeff
-    from gospl._fortran import jacobiancoeff
-    from gospl._fortran import fctcoeff
-    from gospl._fortran import mfdreceivers
-    from gospl._fortran import distocean
+    from gospl._fortran import mfdrcvrs
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -44,24 +40,11 @@ class SEAMesh(object):
         self.coastDist = None
 
         self.zMat = self._matrix_build_diag(np.zeros(self.lpoints))
-        self.mat = self.dm.createMatrix()
-        self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
-
-        # Clinoforms slopes for each sediment type
-        # self.slps = [12.0, 8.0, 6.0, 1.0]
 
         self.dh = self.hGlobal.duplicate()
-        self.h = self.hGlobal.duplicate()
-        self.hl = self.hLocal.duplicate()
-        self.zb = self.hGlobal.duplicate()
 
         if self.excessIn:
             self.ePit = np.zeros(self.lpoints)
-            if self.stratNb > 0:
-                self.ePitw = np.zeros(self.lpoints)
-                self.ePitf = np.zeros(self.lpoints)
-                if self.carbOn:
-                    self.ePitc = np.zeros(self.lpoints)
 
         return
 
@@ -147,463 +130,140 @@ class SEAMesh(object):
 
         return
 
-    def _matOcean(self):
-        """
-        This function builds from neighbouring slopes the downstream directions in the marine environment. It calls a fortran subroutine that locally computes for each vertice:
-
-        - the indices of receivers (downstream) nodes depending on the desired number of flow directions (SFD to MFD).
-        - the distances to the receivers based on mesh resolution.
-        - the associated weights calculated based on the number of receivers and proportional to the slope.
-
-        From these downstream directions, a local ocean downstream matrix is computed.
-
-        """
-
-        # Define multiple flow directions for filled + eps elevations
-        rcv, _, wght = mfdreceivers(8, 0.01, self.inIDs, self.oceanFill, -1.0e5)
-        sum_wght = np.sum(wght, axis=1)
-        ids = (self.pitIDs > -1) & (self.flatOcean > -1) & (sum_wght == 0.0)
-        ids = ids.nonzero()[0]
-        rcv[ids, :] = np.tile(ids, (8, 1)).T
-        rcv[ids, 0] = self.flatOcean[ids]
-        wght[ids, :] = 0.0
-        wght[ids, 0] = 1.0
-
-        # Get local nodes with no receivers as boolean array
-        sum_weight = np.sum(wght, axis=1)
-        msink = sum_weight == 0.0
-
-        # We don't consider borders as sinks
-        msink[self.idBorders] = False
-        msink = msink.astype(int) * self.inIDs
-        self.msink = msink == 1
-
-        # Set borders nodes
-        if self.flatModel:
-            rcv[self.idBorders, :] = np.tile(self.idBorders, (8, 1)).T
-            wght[self.idBorders, :] = 0.0
-
-        # Define downstream matrix based on filled + dir elevations
-        dMat = self.zMat.copy()
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-        nodes = indptr[:-1]
-
-        for k in range(0, 8):
-
-            # Flow direction matrix for a specific direction
-            tmpMat = self._matrix_build()
-            data = wght[:, k].copy()
-            data[rcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                rcv[:, k].astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-
-            # Add the weights from each direction
-            dMat += tmpMat
-            tmpMat.destroy()
-
-        if self.memclear:
-            del data, indptr, nodes
-            gc.collect()
-
-        # Store flow direction matrix
-        self.dMat = dMat.transpose().copy()
-
-        dMat.destroy()
-
-        return
-
-    def _evalFunction(self, ts, t, x, xdot, f):
-        """
-        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES method and is based on a Newton/GMRES method. . Here we define the function for the nonlinear solve.
-
-        """
-
-        self.dm.globalToLocal(x, self.hl)
-        with self.hl as hl, self.hLocal as zb, xdot as hdot:
-            dh = hl - zb
-            dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, (1.0 - np.exp(-self.cexp * dh)))
-            # Cd = np.multiply(self.Cd, dh ** self.cexp)
-            nlvec = fctcoeff(hl, Cd)
-            # Set borders nodes
-            if self.flatModel:
-                nlvec[self.idBorders] = 0.0
-            f.setArray(hdot + nlvec[self.glIDs])
-
-    def _evalJacobian(self, ts, t, x, xdot, a, J, P):
-        """
-        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES method and is based on a Newton/GMRES method. Here we define the Jacobian for the nonlinear solve.
-
-        """
-
-        self.dm.globalToLocal(x, self.hl)
-
-        with self.hl as hl, self.hLocal as zb:
-            dh = hl - zb
-            dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, (1.0 - np.exp(-self.cexp * dh)))
-            # Cd = np.multiply(self.Cd, dh ** self.cexp)
-
-            # Coefficient derivatives
-            Cp = self.cexp * np.multiply(self.Cd, np.exp(-self.cexp * dh))
-            # Cp = self.cexp * np.multiply(self.Cd, dh ** (self.cexp - 1.0))
-
-            nlC = jacobiancoeff(hl, Cd, Cp)
-            if self.flatModel:
-                nlC[self.idBorders, :] = 0.0
-
-            P.zeroEntries()
-            for row in range(self.lpoints):
-                P.setValuesLocal(row, row, a + nlC[row, 0])
-                cols = self.FVmesh_ngbID[row, :]
-                P.setValuesLocal(row, cols, nlC[row, 1:])
-            P.assemble()
-
-            if J != P:
-                J.assemble()
-
-        return petsc4py.PETSc.Mat.Structure.SAME_NONZERO_PATTERN
-
-    def _diffuseOcean(self, dh, stype):
-        r"""
-        For sediment reaching the marine realm, this function computes the related marine deposition diffusion. The approach is based on a nonlinear diffusion.
-
-        .. math::
-          \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d(h) \nabla h \right)
-
-        It calls the following *private functions*:
-
-        - _evalFunction
-        - _evalJacobian
-
-        .. note::
-
-            PETSc SNES and time stepping TS approaches are used to solve the nonlinear equation above over the considered time step.
-
-        The nonlinear diffusion equation is ran for the coarser sediment first and for the finest ones afterwards. This mimicks the standard behaviour observed in stratigraphic architectures where the fine fraction are generally transported over longer distances.
-
-        :arg dh: numpy array of incoming marine depositional thicknesses
-        :arg stype: sediment type (integer)
-
-        :return: ndepo (updated deposition numpy arrays)
-        """
-
-        t0 = process_time()
-
-        # Get diffusion coefficients based on sediment type
-        sedK = self.sedimentK
-        if sedK > 0.0:
-            if stype == 1:
-                sedK = self.sedimentKf
-            if stype == 3:
-                sedK = self.sedimentKw
-
-        # Matrix coefficients
-        self.Cd = np.full(self.lpoints, sedK, dtype=np.float64)
-        self.hl.setArray(dh)
-        self.hl.axpy(1.0, self.hLocal)
-        self.dm.localToGlobal(self.hl, self.h)
-
-        # Time stepping definition
-        ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
-        # ARKIMEX: implicit nonlinear time stepping
-        ts.setType("arkimex")
-        ts.setIFunction(self._evalFunction, self.tmp1)
-        ts.setIJacobian(self._evalJacobian, self.mat)
-
-        ts.setTime(0.0)
-        ts.setTimeStep(self.dt / 1000.0)
-        ts.setMaxTime(self.dt)
-        ts.setMaxSteps(50)
-        ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
-        # Allow an unlimited number of failures (step will be rejected and retried)
-        ts.setMaxSNESFailures(-1)
-        ts.setTolerances(rtol=1.0e-2)
-
-        # SNES nonlinear solver definition
-        snes = ts.getSNES()
-        # Newton linear search
-        snes.setType("newtonls")
-        # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
-        snes.setTolerances(rtol=1.0e-2, max_it=100)
-
-        # KSP linear solver definition
-        ksp = snes.getKSP()
-        ksp.setType("fgmres")
-        # Preconditioner for linear solution
-        pc = ksp.getPC()
-        pc.setType("asm")
-        # pc.setASMOverlap(3)
-        ksp.setTolerances(rtol=1.0e-2, max_it=100)
-        ksp.setFromOptions()
-        snes.setFromOptions()
-        ts.setFromOptions()
-
-        # Solve nonlinear equation
-        ts.solve(self.h)
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Nonlinear diffusion solution (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-            print(
-                "steps %d (%d rejected, %d SNES fails), nonlinear its %d, linear its %d"
-                % (
-                    ts.getStepNumber(),
-                    ts.getStepRejections(),
-                    ts.getSNESFailures(),
-                    ts.getSNESIterations(),
-                    ts.getKSPIterations(),
-                )
-            )
-        ts.destroy()
-
-        # Get diffused sediment thicknesses
-        self.dh.waxpy(-1.0, self.hGlobal, self.h)
-        self.dm.globalToLocal(self.dh, self.tmpL)
-        ndepo = self.tmpL.getArray().copy()
-
-        if self.flatModel:
-            ndepo[self.idBorders] = 0.0
-        ndepo[ndepo < 0.0] = 0.0
-
-        return ndepo
-
-    def _distOcean(self):
+    def _waterFluxes(self, sedflux):
         """
         Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute
         sediments downslope.
 
         """
+        
+        # Define multiple flow directions under water
+        self.donRcvs, self.distRcv, self.wghtVal = mfdrcvrs(
+            self.flowDir, 0.01, self.oceanFill, self.sealevel
+        )
+        
+        self.rcvID = self.donRcvs.copy()
+        self.rcvID[self.ghostIDs,:] = -1
+        self.distRcv[self.ghostIDs,:] = 0
+        self.wghtVal[self.ghostIDs,:] = 0
 
-        vol = self.marVol.copy()
-        self.tmpL.setArray(self.sinkVol)
+        # Set borders nodes
+        if self.flatModel:
+            self.rcvID[self.idBorders, :] = np.tile(self.idBorders, (8, 1)).T
+            self.distRcv[self.idBorders, :] = 0.0
+            self.wghtVal[self.idBorders, :] = 0.0
+
+        # Define the flow direction matrix
+        self.matrixFlow(8)
+        
+        FAL = self.fillFAL.getArray().copy()
+        FAL[np.invert(self.sinkIDs)] = 0.0
+        self.tmpL.setArray(FAL)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        vdep = np.zeros(self.lpoints, dtype=np.float64)
-        if self.excessIn:
-            excessPit = vdep.copy()
-        step = 0
-        while self.tmp.sum() > 1.0:
 
-            # Move to downstream nodes
-            self.dMat.mult(self.tmp, self.tmp1)
-            self.dm.globalToLocal(self.tmp1, self.tmpL)
+        # Compute fluxes
+        self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
 
-            # In case there is too much sediment coming in
-            self.sinkVol = self.tmpL.getArray().copy()
-            excess = self.sinkVol >= vol
-            self.sinkVol[excess] -= vol[excess]
-            vdep[excess] = self.marVol[excess]
-            vol[excess] = 0.0
+        # Dimensionless depositional coefficient
+        PA = self.tmpL.getArray().copy()
+        fDep = np.divide(10*self.fDepm*self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+        dMat = self._matrix_build_diag(fDep)
+        dMat += self.fMat
 
-            # In case there is some room to deposit sediments
-            noexcess = np.invert(excess)
-            vol[noexcess] -= self.sinkVol[noexcess]
-            vdep[noexcess] += self.sinkVol[noexcess]
-            vdep[self.idBorders] = 0.0
-            self.sinkVol[noexcess] = 0.0
-            self.sinkVol[self.idBorders] = 0.0
+        # Implicit sediment fluxes combining upstream flux and deposition
+        self.tmpL.setArray(sedflux)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self._solve_KSP(True, dMat, self.tmp1, self.tmp)
 
-            # Find where excess and sink
-            if self.excessIn:
-                excessPit[self.msink] += self.sinkVol[self.msink]
-            self.tmpL.setArray(self.sinkVol)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
+        # Destroy temporary arrays
+        dMat.destroy()
 
-            step += 1
+        if self.memclear:
+            del PA, fDep, FAL 
+            gc.collect()
 
-        if self.excessIn:
-            vdep += excessPit
+        # Extract local sediment deposition thickness
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        sedDep = self.tmpL.getArray()*fDep
+        if self.flatModel:
+            sedDep[self.idBorders] = 0.0
+        self.EbLocal.setArray(-sedDep/self.larea)
+        self.dm.localToGlobal(self.EbLocal, self.Eb)
 
-        return vdep / self.larea
+        # Limiting deposition rates based on upstream conditions
+        self._upstreamDeposition(8)
 
-    def _updateMarineStrat(self, marDep, depSed, stype):
+        # Get deposition thicknesses
+        Eb = self.EbLocal.getArray().copy()
+        Eb[Eb>0] = 0.0
 
-        self.elevStrat()
-        if self.stratF is not None:
-            if stype < 3:
-                # Add specific sediment deposited before diffusion
-                tmp = marDep.copy()
-                ids = (marDep > 0) & (depSed == 0)
-                tmp[ids] = 0.0
-                self.tmpL.setArray(tmp)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                self.deposeStrat(stype)
-                # Set diffused sediment as weathered one
-                tmp = marDep.copy()
-                ids = (marDep > 0) & (depSed > 0)
-                tmp[ids] = 0.0
-                self.tmpL.setArray(tmp)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                self.deposeStrat(3)
-            else:
-                self.deposeStrat(stype)
-        else:
-            self.deposeStrat(stype)
-
-        return
-
-    def _getSeaVol(self, hl, stype):
-        """
-        Pick the relevant PETSc array for the specified sediment type and distribute incoming
-        river delivered sediment volume in the marine environment.
-
-        The function relies on two private functions from the class:
-
-        - _distOcean
-        - _diffuseOcean
-
-        """
+        # Define coastal distance for marine points
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        hl = self.hLocal.getArray().copy()
+        if self.clinSlp > 0.0:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                self._distanceCoasts(hl)
 
         # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
         if self.clinSlp > 0.0:
             clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp
         else:
             clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)
-        # Update the marine maximal depositional thicknesses
-        clinoH = np.minimum(clinoH, self.smthH + self.offset)
         clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
-
-        # Get the maximum marine deposition heights and volume
-        self.marVol = (clinoH - hl) * self.larea
-        self.marVol[self.marVol < 0.0] = 0.0
-
-        # Get the volumetric marine sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
-        if stype == 0:
-            self.vSedLocal.copy(result=self.QsL)
-        elif stype == 1:
-            self.vSedfLocal.copy(result=self.QsL)
-        elif stype == 2:
-            self.vSedcLocal.copy(result=self.QsL)
-        elif stype == 3:
-            self.vSedwLocal.copy(result=self.QsL)
-
-        self.sinkVol = self.QsL.getArray().copy() * self.dt
-        self.sinkVol[np.invert(self.sinkIDs)] = 0.0
-
-        # Add excess on marine depression from previous time step
-        if self.excessIn:
-            if stype == 0:
-                self.sinkVol += self.ePit * self.larea
-            elif stype == 1:
-                self.sinkVol += self.ePitf * self.larea
-            elif stype == 2:
-                self.sinkVol += self.ePitc * self.larea
-            elif stype == 3:
-                self.sinkVol += self.ePitw * self.larea
-
-        # Distribute sediment downstream in the marine environment
-        # t0 = process_time()
-        marDep = self._distOcean()
-
-        # if MPIrank == 0 and self.verbose:
-        #     print(
-        #         "Distribute Ocean (%0.02f seconds)" % (process_time() - t0), flush=True,
-        #     )
-
-        # Apply non-linear diffusion
-        if self.marineNl:
-            marDep = self._diffuseOcean(marDep, stype)
-
-        depSed = marDep.copy()
-        self.tmpL.setArray(hl)
+        
+        # Update the marine maximal depositional thicknesses
+        updateH = hl - Eb * self.dt
+        updateH[updateH >= clinoH] = clinoH[updateH >= clinoH]
+        self.tmpL.setArray(updateH - hl)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
-        # t0 = process_time()
-        smthH1 = self._hillSlope(smooth=2)
-        # if MPIrank == 0 and self.verbose:
-        #     print(
-        #         "Diffuse Surface for Ocean (%0.02f seconds)" % (process_time() - t0),
-        #         flush=True,
-        #     )
-        self.tmpL.setArray(marDep + hl)
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
-        # t0 = process_time()
-        smthH2 = self._hillSlope(smooth=2)
-        # if MPIrank == 0 and self.verbose:
-        #     print(
-        #         "Diffuse Sediment for Ocean (%0.02f seconds)" % (process_time() - t0),
-        #         flush=True,
-        #     )
-        marDep = smthH2 - smthH1
-        marDep[marDep < 1.0e-4] = 0.0
-        marDep[hl > self.sealevel] = 0.0
-        ids = marDep > clinoH - hl
 
-        # Get excess depostion in marine depressions that will be
-        # deposited at next time step.
-        if self.excessIn:
-            if stype == 0:
-                self.ePit[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
-            if stype == 1:
-                self.ePitf[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
-            if stype == 2:
-                self.ePitc[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
-            if stype == 3:
-                self.ePitw[ids] = marDep[ids] - (clinoH[ids] - hl[ids])
-
-        marDep[ids] = clinoH[ids] - hl[ids]
-        marDep[marDep < 0.0] = 0.0
-
-        # Update cumulative erosion and deposition as well as elevation
-        self.tmpL.setArray(marDep)
+        # Smoothing marine deposition
+        smthH = self._hillSlope(smooth=1) + hl
+        smthH[smthH >= clinoH] = clinoH[smthH >= clinoH]
+        self.tmpL.setArray(smthH - hl)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        self.cumED.axpy(1.0, self.tmp)
-        self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        # Update stratigraphic layer parameters
-        if self.stratNb > 0:
-            self._updateMarineStrat(marDep, depSed, stype)
+        if self.memclear:
+            del updateH, Eb, hl, clinoH
+            gc.collect()
 
-        return hl + marDep
+        return 
 
     def seaChange(self):
         """
         This function is the main entry point to perform marine river-induced deposition. It calls the private functions:
 
-        -  _matOcean
         - _distanceCoasts
-        - _getSeaVol
+        - _waterFluxes
 
         """
 
         t0 = process_time()
-        # Get the smooth regional elevation
-        self.smthH = self._hillSlope(smooth=1)
-
-        # Downstream direction matrix for ocean distribution
-        self._matOcean()
-
-        # Define coastal distance for marine points
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-        hl = self.hLocal.getArray().copy()
-
-        if self.clinSlp > 0.0:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                self._distanceCoasts(hl)
-
+        
         # Set all nodes below sea-level as sinks
-        self.sinkIDs = self.lFill < self.sealevel
+        self.sinkIDs = self.lFill <= self.sealevel
+        
+        # Get the volumetric marine sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
+        self.vSedLocal.copy(result=self.QsL)
+        sedFlux = self.QsL.getArray().copy() 
+        sedFlux[np.invert(self.sinkIDs)] = 0.0
 
-        # Get sediment volume to distribute
-        if self.stratNb > 0:
-            nhl = self._getSeaVol(hl, stype=0)
-            if self.stratF is not None:
-                nhl = self._getSeaVol(nhl, stype=1)
-            if self.carbOn:
-                nhl = self._getSeaVol(nhl, stype=2)
-            if self.stratW is not None:
-                nhl = self._getSeaVol(nhl, stype=3)
-        else:
-            nhl = self._getSeaVol(hl, stype=0)
+        flxStp = sedFlux/self.diffNb
+        for k in range(self.diffNb):
+            # Compute marine directions and fluxes
+            self._waterFluxes(flxStp)
+
+            # Update cumulative erosion and deposition as well as elevation
+            self.cumED.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.hGlobal.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+            # Update stratigraphic layer parameters
+            if self.stratNb > 0:
+                self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
             print(

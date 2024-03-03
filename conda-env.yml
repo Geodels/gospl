@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - scikit-fuzzy
+  # - scikit-fuzzy
   - python=3.9
   - petsc4py
   - pip

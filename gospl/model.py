@@ -79,23 +79,17 @@ class Model(
     :arg filename: YAML input file
     :arg verbose: output flag for model main functions
     :arg showlog: output flag for PETSC logging file
-    :arg carbctrl: carbonate control option
 
     """
 
     def __init__(
-        self, filename, verbose=True, showlog=False, carbctrl=None, *args, **kwargs
+        self, filename, verbose=True, showlog=False, *args, **kwargs
     ):
 
         self.showlog = showlog
 
         self.modelRunTime = process_time()
         self.verbose = verbose
-
-        self.carbOn = False
-        if carbctrl is not None:
-            self.carbOn = True
-            self.carbCtrl = carbctrl
 
         # Read input dataset
         _ReadYaml.__init__(self, filename)
@@ -173,14 +167,18 @@ class Model(
             if not self.fast:
                 # Compute flow accumulation
                 _FAMesh.flowAccumulation(self)
+                
                 # Perform River Incision
-                _FAMesh.riverIncision(self)
+                _FAMesh.erodepSPL(self)
+                
                 if not self.nodep:
                     # Downstream sediment deposition inland
+                    _FAMesh.flowAccumulation(self)
                     _SEDMesh.sedChange(self)
                     if self.seaDepo:
                         # Downstream sediment deposition in sea
                         _SEAMesh.seaChange(self)
+                
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 

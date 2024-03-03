@@ -107,7 +107,7 @@ to ensure compatibility of all dependencies::
     conda config --env --add channels defaults
     conda config --env --set channel_priority strict
     conda install numpy pip scipy numpy-indexed cython compilers
-    conda install scikit-fuzzy pandas h5py meshio ruamel.yaml
+    conda install pandas h5py meshio ruamel.yaml
     conda install vtk mpi4py petsc4py
     pip install meshplex
 

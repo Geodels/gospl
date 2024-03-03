@@ -358,9 +358,24 @@ class ReadYaml(object):
                 self.coeffd = splDict["d"]
             except KeyError:
                 self.coeffd = 0.0
+            try:
+                self.fDepa = splDict["fDa"]
+            except KeyError:
+                self.fDepa = 0.0
+            try:
+                self.fDepm = splDict["fDm"]
+            except KeyError:
+                self.fDepm = 0.0
+            try:
+                self.spl_m = splDict["m"]
+            except KeyError:
+                self.spl_m = 0.5
         except KeyError:
             self.K = 1.0e-12
             self.coeffd = 0.0
+            self.fDepa = 0.0
+            self.fDepm = 30.0
+            self.spl_m = 0.5
 
         return
 
@@ -392,19 +407,6 @@ class ReadYaml(object):
                 raise ValueError(
                     "Hillslope: Cd coefficient for marine environment not found."
                 )
-
-            try:
-                self.sedimentK = hillDict["nlK"]
-            except KeyError:
-                self.sedimentK = 1.0e3
-            try:
-                self.sedimentKf = hillDict["nlKf"]
-            except KeyError:
-                self.sedimentKf = 3.0e3
-            try:
-                self.sedimentKw = hillDict["nlKw"]
-            except KeyError:
-                self.sedimentKw = 5.0e3
             try:
                 self.oFill = hillDict["oFill"]
             except KeyError:
@@ -414,9 +416,6 @@ class ReadYaml(object):
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 1.0e3
-            self.sedimentKf = 3.0e3
-            self.sedimentKw = 5.0e3
-            self.oFill = -6000.0
 
         self._extraHillslope()
 
@@ -431,37 +430,22 @@ class ReadYaml(object):
             hillDict = self.input["diffusion"]
 
             try:
-                self.cexp = hillDict["nlf"]
-            except KeyError:
-                self.cexp = 0.001
-            try:
-                self.marineNl = hillDict["nldep"]
-            except KeyError:
-                self.marineNl = False
-            try:
-                self.smthK = hillDict["smthS"]
-            except KeyError:
-                self.smthK = 1.0e3
-            try:
-                self.smthD = hillDict["smthD"]
+                self.smthD = hillDict["smthDep"]
             except KeyError:
                 self.smthD = 1.0e3
-            try:
-                self.offset = hillDict["offset"]
-            except KeyError:
-                self.offset = 400.0
             try:
                 self.clinSlp = hillDict["clinSlp"]
             except KeyError:
                 self.clinSlp = 1.0e-6
+            try:
+                self.diffNb = hillDict["diffNb"]
+            except KeyError:
+                self.diffNb = 1
 
         except KeyError:
-            self.cexp = 0.001
-            self.marineNl = False
-            self.smthK = 1.0e3
             self.smthD = 1.0e3
-            self.offset = 400.0
             self.clinSlp = 1.0e-7
+            self.diffNb = 1
 
         self.clinSlp = max(1.0e-7, self.clinSlp)
 
@@ -1166,64 +1150,14 @@ class ReadYaml(object):
                 self.phi0s = compDict["phis"]
             except KeyError:
                 self.phi0s = 0.49
-
-            try:
-                self.phi0f = compDict["phif"]
-            except KeyError:
-                self.phi0f = 0.63
-
-            try:
-                self.phi0w = compDict["phiw"]
-            except KeyError:
-                self.phi0w = 0.63
-
-            try:
-                self.phi0c = compDict["phic"]
-            except KeyError:
-                self.phi0c = 0.65
-
-        except KeyError:
-            self.phi0s = 0.49
-            self.phi0f = 0.63
-            self.phi0w = 0.63
-            self.phi0c = 0.65
-
-        self._extraCompaction()
-
-        return
-
-    def _extraCompaction(self):
-        """
-        Read compaction additional parameters.
-        """
-
-        try:
-            compDict = self.input["compaction"]
             try:
                 self.z0s = compDict["z0s"]
             except KeyError:
                 self.z0s = 3700.0
 
-            try:
-                self.z0f = compDict["z0f"]
-            except KeyError:
-                self.z0f = 1960.0
-
-            try:
-                self.z0w = compDict["z0w"]
-            except KeyError:
-                self.z0w = 1960.0
-
-            try:
-                self.z0c = compDict["z0c"]
-            except KeyError:
-                self.z0c = 2570.0
-
         except KeyError:
+            self.phi0s = 0.49
             self.z0s = 3700.0
-            self.z0f = 1960.0
-            self.z0w = 1960.0
-            self.z0c = 2570.0
 
         return
 

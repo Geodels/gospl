@@ -140,7 +140,7 @@ RUN python3 -m pip install --no-cache-dir setuptools wheel && \
     h5py>=2.10.0 \
     pandas>=1.1.2  \
     meshplex>=0.15.14 \
-    scikit-fuzzy>=0.4.2 \
+    # scikit-fuzzy>=0.4.2 \
     pre-commit>=2.7.1 \
     vtk
 

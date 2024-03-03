@@ -1,7 +1,6 @@
 include README.rst
 include LICENSE
 include requirements.txt
-include MANIFEST
 
 include fortran/*.F90
 include fortran/*.pyf

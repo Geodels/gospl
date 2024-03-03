@@ -44,16 +44,6 @@ class SEDMesh(object):
 
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
-        if self.stratNb > 0:
-            if self.stratF is not None:
-                self.vSedf = self.hGlobal.duplicate()
-                self.vSedfLocal = self.hLocal.duplicate()
-            if self.stratW is not None:
-                self.vSedw = self.hGlobal.duplicate()
-                self.vSedwLocal = self.hLocal.duplicate()
-            if self.carbOn:
-                self.vSedc = self.hGlobal.duplicate()
-                self.vSedcLocal = self.hLocal.duplicate()
 
         # Get the maximum number of neighbours on the mesh
         maxnb = np.zeros(1, dtype=np.int64)
@@ -82,40 +72,6 @@ class SEDMesh(object):
             self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
             # Update local vector
             self.dm.globalToLocal(self.vSed, self.vSedLocal)
-
-            # Fine sediment
-            if self.stratF is not None:
-                # Get erosion rate (m/yr) to volume
-                self.tmpL.setArray(self.thFine)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-                # Get the volume of sediment transported in m3 per year
-                self._solve_KSP(False, self.fMati, self.tmp, self.vSedf)
-                # Update local vector
-                self.dm.globalToLocal(self.vSedf, self.vSedfLocal)
-
-            # Weathered sediment
-            if self.stratW is not None:
-                # Get erosion rate (m/yr) to volume
-                self.tmpL.setArray(self.thClay)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-                # Get the volume of sediment transported in m3 per year
-                self._solve_KSP(False, self.fMati, self.tmp, self.vSedw)
-                # Update local vector
-                self.dm.globalToLocal(self.vSedw, self.vSedwLocal)
-
-            # Carbonate sediment
-            if self.carbOn:
-                # Get erosion rate (m/yr) to volume
-                self.tmpL.setArray(self.thCarb)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-                # Get the volume of sediment transported in m3 per year
-                self._solve_KSP(False, self.fMati, self.tmp, self.vSedc)
-                # Update local vector
-                self.dm.globalToLocal(self.vSedc, self.vSedcLocal)
-
         else:
             # Get erosion rate (m/yr) to volume
             self.Eb.copy(result=self.tmp)
@@ -130,23 +86,6 @@ class SEDMesh(object):
                 "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
-
-        return
-
-    def _getSedVol(self, stype):
-        """
-        Pick the relevant PETSc array for the specified sediment type.
-        """
-
-        if stype == 0:
-            self.vSedLocal.copy(result=self.QsL)
-        elif stype == 1:
-            self.vSedfLocal.copy(result=self.QsL)
-        elif stype == 2:
-            self.vSedcLocal.copy(result=self.QsL)
-        elif stype == 3:
-            self.vSedwLocal.copy(result=self.QsL)
-        self.dm.localToGlobal(self.QsL, self.Qs)
 
         return
 
@@ -209,10 +148,10 @@ class SEDMesh(object):
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
-
+    
         return excess
 
-    def _distributeSediment(self, hl, stype=0):
+    def _distributeSediment(self, hl):
         """
         This function finds the continental sediment volumes to distribute downstream (down to the ocean or sinks) for a given iteration.
 
@@ -221,7 +160,8 @@ class SEDMesh(object):
         t0 = process_time()
 
         # Define the volume to distribute
-        self._getSedVol(stype)
+        self.vSedLocal.copy(result=self.QsL)
+        self.dm.localToGlobal(self.QsL, self.Qs)
 
         # Get the volumetric sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
         vSed = self.QsL.getArray().copy() * self.dt
@@ -237,14 +177,7 @@ class SEDMesh(object):
                 nvSed[hl < self.sedFilled] = 0.0
                 self.tmpL.setArray(nvSed / self.dt)
                 vSed[self.idBorders] = 0.0
-                if stype == 0:
-                    self.vSedLocal.axpy(1.0, self.tmpL)
-                if stype == 1:
-                    self.vSedfLocal.axpy(1.0, self.tmpL)
-                if stype == 3:
-                    self.vSedwLocal.axpy(1.0, self.tmpL)
-                if stype == 2:
-                    self.vSedcLocal.axpy(1.0, self.tmpL)
+                self.vSedLocal.axpy(1.0, self.tmpL)
             if MPIrank == 0 and self.verbose:
                 print(
                     "Downstream sediment flux computation step %d (%0.02f seconds)"
@@ -252,15 +185,8 @@ class SEDMesh(object):
                     flush=True,
                 )
             step += 1
-        if stype == 0:
-            self.dm.localToGlobal(self.vSedLocal, self.vSed)
-        if stype == 1:
-            self.dm.localToGlobal(self.vSedfLocal, self.vSedf)
-        if stype == 3:
-            self.dm.localToGlobal(self.vSedwLocal, self.vSedw)
-        if stype == 2:
-            self.dm.localToGlobal(self.vSedcLocal, self.vSedc)
-
+        self.dm.localToGlobal(self.vSedLocal, self.vSed)
+        
         if MPIrank == 0 and self.verbose:
             print(
                 "Distribute Continental Sediments (%0.02f seconds)"
@@ -270,7 +196,7 @@ class SEDMesh(object):
 
         return
 
-    def _updateSinks(self, hl, stype=0):
+    def _updateSinks(self, hl):
         """
         This function updates depressions elevations based on incoming sediment volumes. The function runs until all inland sediments have reached either a sink which is not completely filled or the open ocean.
 
@@ -299,7 +225,7 @@ class SEDMesh(object):
 
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
-            self.deposeStrat(stype)
+            self.deposeStrat()
             self.elevStrat()
 
         # In case there is other sediment type
@@ -327,24 +253,8 @@ class SEDMesh(object):
 
         # Distribute inland sediments
         self.sedFilled = hl.copy()
-        if self.stratNb > 0:
-            self._distributeSediment(hl, stype=0)
-            self._updateSinks(hl, stype=0)
-            hl = self.hLocal.getArray().copy()
-            if self.carbOn:
-                self._distributeSediment(hl, stype=2)
-                self._updateSinks(hl, stype=2)
-                hl = self.hLocal.getArray().copy()
-            if self.stratF is not None:
-                self._distributeSediment(hl, stype=1)
-                self._updateSinks(hl, stype=1)
-                hl = self.hLocal.getArray().copy()
-            if self.stratW is not None:
-                self._distributeSediment(hl, stype=3)
-                self._updateSinks(hl, stype=3)
-        else:
-            self._distributeSediment(hl, stype=0)
-            self._updateSinks(hl, stype=0)
+        self._distributeSediment(hl)
+        self._updateSinks(hl)
 
         return
 
@@ -386,7 +296,7 @@ class SEDMesh(object):
         .. note::
             The hillslope processes in `gospl` are considered to be happening at the same rate for coarse and fine sediment sizes.
 
-        :arg smooth: integer specifying if the diffusion equation is used for smoothing (1) or for marine deposits (2).
+        :arg smooth: integer specifying if the diffusion equation is used for marine deposits (1).
         """
 
         if not smooth:
@@ -397,8 +307,6 @@ class SEDMesh(object):
 
         # Diffusion matrix construction
         if smooth == 1:
-            Cd = np.full(self.lpoints, self.smthK, dtype=np.float64)
-        elif smooth == 2:
             Cd = np.full(self.lpoints, self.smthD, dtype=np.float64)
         else:
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
@@ -430,11 +338,6 @@ class SEDMesh(object):
 
         # Get elevation values for considered time step
         if smooth == 1:
-            self._solve_KSP(True, diffMat, self.hGlobal, self.tmp)
-            diffMat.destroy()
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            return self.tmpL.getArray().copy()
-        elif smooth == 2:
             self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
             diffMat.destroy()
             self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -456,10 +359,7 @@ class SEDMesh(object):
 
             if self.stratNb > 0:
                 self.erodeStrat()
-                if self.stratW is not None:
-                    self.deposeStrat(3)
-                else:
-                    self.deposeStrat(0)
+                self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
             print(

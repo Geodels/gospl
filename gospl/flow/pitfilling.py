@@ -100,25 +100,6 @@ class PITFill(object):
         :return: df sorted pandas dataframe containing depression numbers.
         """
 
-        # p1 = []
-        # p2 = []
-        # for k in range(len(df)):
-        #     id1 = df["p1"].iloc[k]
-        #     if k == 0:
-        #         id2 = df["p2"].iloc[0]
-        #     else:
-        #         if df["p2"].iloc[k] == df["p2"].iloc[k - 1]:
-        #             id2 = df["p1"].iloc[k - 1]
-        #         else:
-        #             id2 = df["p2"].iloc[k]
-        #     p1.append(id1)
-        #     p2.append(id2)
-        # data = {
-        #     "p1": p1,
-        #     "p2": id2,
-        # }
-        # df = pd.DataFrame(data, columns=["p1", "p2"])
-
         df["p2"] = sort_ids( df["p1"].values.astype(int), df["p2"].values.astype(int) )
         df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
 
@@ -227,11 +208,12 @@ class PITFill(object):
         t0 = process_time()
 
         # Sorting label transfer between processors
-        sorting = True
-        while sorting:
-            df2 = self._sortingPits(df)
-            sorting = not df.equals(df2)
-            df = df2.copy()
+        if len(df)>1:
+            sorting = True
+            while sorting:
+                df2 = self._sortingPits(df)
+                sorting = not df.equals(df2)
+                df = df2.copy()
         for k in range(len(df)):
             label[label == df["p2"].iloc[k]] = df["p1"].iloc[k]
         if MPIrank == 0 and self.verbose:

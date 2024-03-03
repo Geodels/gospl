@@ -418,7 +418,6 @@ class UnstMesh(object):
         # Forcing event number
         self.bG = self.hGlobal.duplicate()
         self.bL = self.hLocal.duplicate()
-
         self.rainNb = -1
         self.tecNb = -1
         self.flexNb = -1
@@ -790,6 +789,7 @@ class UnstMesh(object):
 
         self.hLocal.destroy()
         self.hGlobal.destroy()
+        self.dh.destroy()
         self.FAG.destroy()
         self.FAL.destroy()
         self.fillFAL.destroy()
@@ -797,16 +797,6 @@ class UnstMesh(object):
         self.cumEDLocal.destroy()
         self.vSed.destroy()
         self.vSedLocal.destroy()
-        if self.stratNb > 0:
-            if self.stratF is not None:
-                self.vSedf.destroy()
-                self.vSedfLocal.destroy()
-            if self.stratW is not None:
-                self.vSedw.destroy()
-                self.vSedwLocal.destroy()
-            if self.carbOn:
-                self.vSedc.destroy()
-                self.vSedcLocal.destroy()
         self.areaGlobal.destroy()
         self.bG.destroy()
         self.bL.destroy()
@@ -828,19 +818,11 @@ class UnstMesh(object):
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
         self.dm.destroy()
+        self.zMat.destroy()
 
         del self.lcoords, self.lcells, self.inIDs
 
         del self.stratH, self.stratZ, self.phiS
-
-        if self.stratF is not None:
-            del self.stratF, self.phiF
-
-        if self.stratW is not None:
-            del self.stratW, self.phiW
-
-        if self.carbOn:
-            del self.stratC, self.phiC
 
         if not self.fast:
             del self.distRcv, self.wghtVal, self.rcvID

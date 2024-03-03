@@ -38,16 +38,11 @@ except ImportError:
     pass
 
 # in development set version to none and ...
-PYPI_VERSION = "0.3.2"
+PYPI_VERSION = "1.0.0"
 
 # Place install_requires into the text file "requirements.txt"
 with open("requirements.txt") as f2:
     requirements = f2.read().strip().splitlines()
-
-
-# class sdist(_sdist):
-#     def run(self):
-#         _sdist.run(self)
 
 
 packs = find_packages(include=["gospl", "gospl.*"])
@@ -127,10 +122,10 @@ if __name__ == "__main__":
             "Programming Language :: Fortran",
             "Operating System :: Unix",
             "Operating System :: MacOS",
-            "Programming Language :: Python :: 3.6",
             "Programming Language :: Python :: 3.7",
             "Programming Language :: Python :: 3.8",
             "Programming Language :: Python :: 3.9",
+            "Programming Language :: Python :: 3.10",
         ],
         cmdclass={"sdist": sdist},
     )

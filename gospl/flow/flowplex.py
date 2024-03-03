@@ -9,6 +9,8 @@ from mpi4py import MPI
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import donorslist
+    from gospl._fortran import donorsmax
     from gospl._fortran import mfdreceivers
 
 petsc4py.init(sys.argv)
@@ -42,7 +44,6 @@ class FAMesh(object):
         self.iMat = self._matrix_build_diag(np.ones(self.lpoints))
 
         # Petsc vectors
-        # self.fillFAG = self.hGlobal.duplicate()
         self.fillFAL = self.hLocal.duplicate()
         self.FAG = self.hGlobal.duplicate()
         self.FAL = self.hLocal.duplicate()
@@ -165,26 +166,14 @@ class FAMesh(object):
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
-            # KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
-            # v1max = vector1.max()[1]
-            # v1min = vector1.min()[1]
-            # if MPIrank == 0:
-            #     print(
-            #         "LinearSolver failed to converge after iterations",
-            #         ksp.getIterationNumber(),
-            #         flush=True,
-            #     )
-            #     print("with reason: ", KSPReasons[r], flush=True)
-            #     print("input vector: ", v1min, v1max, flush=True)
             ksp.destroy()
             vector2 = self._solve_KSP2(matrix, vector1, vector2)
-            # raise RuntimeError("LinearSolver failed to converge!")
         else:
             ksp.destroy()
 
         return vector2
-
-    def matrixFlow(self):
+    
+    def matrixFlow(self, flowdir):
         """
         This function defines the flow direction matrices.
 
@@ -203,10 +192,9 @@ class FAMesh(object):
         flowMat = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
-
         wght = self.wghtVal
         rcv = self.rcvID
-        for k in range(0, self.flowDir):
+        for k in range(0, flowdir):
 
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
@@ -219,11 +207,10 @@ class FAMesh(object):
                 data,
             )
             tmpMat.assemblyEnd()
-
             # Add the weights from each direction
             flowMat += tmpMat
             tmpMat.destroy()
-
+            
         if self.memclear:
             del data, indptr, nodes
             gc.collect()
@@ -245,12 +232,20 @@ class FAMesh(object):
 
         :arg h: elevation numpy array
         """
+        
+        # Get open marine regions
+        self.seaID = np.where(self.lFill <= self.sealevel)[0]
 
         # Define multiple flow directions for unfilled elevation
-        self.rcvID, self.distRcv, self.wghtVal = mfdreceivers(
-            self.flowDir, self.flowExp, self.inIDs, h, self.sealevel
+        self.donRcvs, self.distRcv, self.wghtVal = mfdreceivers(
+            self.flowDir, self.flowExp, h, self.sealevel
         )
-
+        
+        self.rcvID = self.donRcvs.copy()
+        self.rcvID[self.ghostIDs,:] = -1
+        self.distRcv[self.ghostIDs,:] = 0
+        self.wghtVal[self.ghostIDs,:] = 0
+              
         if down:
             sum_weight = np.sum(self.wghtVal, axis=1)
             ids = (
@@ -260,13 +255,11 @@ class FAMesh(object):
                 & (sum_weight == 0.0)
             )
             ids = ids.nonzero()[0]
+            # self.rcvID[ids, :] = np.tile(ids, (8, 1)).T
             self.rcvID[ids, :] = np.tile(ids, (self.flowDir, 1)).T
             self.rcvID[ids, 0] = self.flatDirs[ids]
             self.wghtVal[ids, :] = 0.0
             self.wghtVal[ids, 0] = 1.0
-
-        # Get open marine regions
-        self.seaID = np.where(self.lFill <= self.sealevel)[0]
 
         # Set borders nodes
         if self.flatModel:
@@ -285,7 +278,7 @@ class FAMesh(object):
 
         self.lsink = lsink == 1
 
-        self.matrixFlow()
+        self.matrixFlow(self.flowDir)
 
         return
 
@@ -320,7 +313,7 @@ class FAMesh(object):
 
         # Combine incoming volume globally
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)
-
+        
         # Get excess volume to distribute downstream
         eV = inV - pitVol
         if (eV > 0.0).any():
@@ -405,6 +398,10 @@ class FAMesh(object):
         self.lsinki = self.lsink.copy()
 
         # Solve flow accumulation
+        rainA = self.bL.getArray().copy()
+        rainA[self.seaID] = 0.
+        self.bL.setArray(rainA)
+        self.dm.localToGlobal(self.bL, self.bG)
         self._solve_KSP(True, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
 
@@ -448,9 +445,52 @@ class FAMesh(object):
 
         return
 
-    def _getErosionRate(self):
+    def _upstreamDeposition(self, flowdir):
+        """
+        Check if over deposition occurs in depressions and/or flat regions and enforce a maximum deposition rate based on upstream elevations computed from the implicit erosion/deposition equation.
+
+        """
+        niter = 0
+        tolerance = 1e-3 
+        equal = False
+        h = self.hLocal.getArray().copy()
+
+        # Get donors list based on elevation
+        donors = donorslist(flowdir, self.inIDs, self.donRcvs)
+        
+        while not equal and niter < 10000:
+
+            Eb = -self.EbLocal.getArray().copy()*self.dt
+            elev = (Eb + h).copy()
+            maxh = donorsmax(elev,donors)
+            maxh[maxh==-1.e8] = elev[maxh==-1.e8]
+            
+            self.tmpL.setArray(maxh)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            maxh = self.tmpL.getArray().copy()-1.e-6
+            maxh[maxh>elev] = elev[maxh>elev]
+            
+            self.tmpL.setArray(maxh-elev)
+            self.dm.localToGlobal(self.tmpL, self.dh)
+            self.dh.abs()
+            maxdh = self.dh.max()[1]
+
+            equal = maxdh < tolerance
+            self.EbLocal.setArray(-(maxh - h)/self.dt)
+            self.dm.localToGlobal(self.EbLocal, self.Eb)
+            self.dm.globalToLocal(self.Eb, self.EbLocal)
+            niter += 1
+
+        if self.memclear:
+            del donors, h, elev, maxh, Eb
+            gc.collect()
+
+        return
+
+    def _getEroDepRate(self):
         r"""
-        This function computes erosion rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion is not going to be underestimated by small depressions which are likely to be filled (either by sediments or water) during a single time step.
+        This function computes erosion deposition rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion/deposition is not going to be underestimated by small depressions which are likely to be filled (either by sediments or water) during a single time step.
 
         The simplest law to simulate fluvial incision is based on the detachment-limited stream power law, in which erosion rate  depends on drainage area :math:`A`, net precipitation :math:`P` and local slope :math:`S` and takes the form:
 
@@ -464,10 +504,11 @@ class FAMesh(object):
 
         .. important::
 
-            In `gospl`, the coefficients `m` and `n` are fixed and the only variables that the user can tune are the coefficient `d` and the erodibility :math:`\kappa`. E is in m/yr and therefore the erodibility dimension is :math:`(m yr)^{−0.5}`.
+            In `gospl`, the coefficient `n` is fixed and the only variables that the user can tune are the coefficients `m`, `d` and the erodibility :math:`\kappa`.
 
         The erosion rate is solved by an implicit time integration method, the matrix system is based on the receiver distributions and is assembled from local Compressed Sparse Row (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers* (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
+        Once the erosion rate solution has been obtained, local sediment flux depends on upstream fluxes, local eroded flux and local deposition flux. We assume that local deposition depends on the user-defined forced deposition value (:math:`fDep`), the local water flux and the cell area. Here again the sediment flux is determined implicitly and corresponding deposition flux are calculated subsequently once the local total flux is known.      
         """
 
         hOldArray = self.hLocal.getArray().copy()
@@ -481,11 +522,16 @@ class FAMesh(object):
             Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
         else:
             Kbr = self.K * (self.rainVal ** self.coeffd)
-        Kbr *= np.sqrt(PA) * self.dt
+        Kbr *= self.dt * (PA ** self.spl_m)
         Kbr[self.seaID] = 0.0
 
-        # Initialise identity matrices...
-        self.eMat = self.iMat.copy()
+        # Dimensionless depositional coefficient
+        fDep = np.divide(self.fDepa*self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+        dMat = self._matrix_build_diag(fDep)
+        dMat += self.fMat
+
+        # Initialise matrices...
+        eMat = self.iMat.copy()
         wght = self.wghtVali.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
@@ -515,62 +561,77 @@ class FAMesh(object):
                 data,
             )
             tmpMat.assemblyEnd()
-            self.eMat += tmpMat
-            self.eMat -= self._matrix_build_diag(data)
+            eMat += tmpMat
+            eMat -= self._matrix_build_diag(data)
             tmpMat.destroy()
 
         if self.memclear:
             del dh, limiter, wght, data
             gc.collect()
 
-        # Solve bedrock erosion thickness
-        self._solve_KSP(True, self.eMat, self.hOld, self.stepED)
+        # Solve SPL erosion implicitly
+        self._solve_KSP(True, eMat, self.hOld, self.stepED)
         self.tmp.waxpy(-1.0, self.hOld, self.stepED)
+
+        # Implicit sediment fluxes combining upstream flux, erosion and deposition
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        QsL = -self.tmpL.getArray()*self.larea
+        QsL = np.divide(QsL, self.dt)
+        self.tmpL.setArray(QsL)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._solve_KSP(True, dMat, self.tmp, self.tmp1)
+
+        # Destroy temporary arrays
+        dMat.destroy()
+        eMat.destroy()
+
+        # Extract local sediment deposition fluxes
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        QsD = self.tmpL.getArray()*fDep
+        self.tmpL.setArray((QsD-QsL)*self.dt/self.larea)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
 
         # Define erosion rate (positive for incision)
         E = -self.tmp.getArray().copy()
         E = np.divide(E, self.dt)
-        E[E < 0.0] = 0.0
         self.Eb.setArray(E)
         self.dm.globalToLocal(self.Eb, self.EbLocal)
         E = self.EbLocal.getArray().copy()
 
-        E[self.seaID] = 0.0
         if self.flatModel:
             E[self.idBorders] = 0.0
+        E[self.lsink] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)
 
+        # Limiting deposition rates based on upstream conditions
+        self._upstreamDeposition(self.flowDir)
+
         if self.memclear:
-            del E, PA, Kbr, ids
+            del E, PA, Kbr, QsL, QsD, fDep
             gc.collect()
 
         return
-
-    def riverIncision(self):
+    
+    def erodepSPL(self):
         """
-        River incision is based on a standard form of the **stream power law** assuming
-        **detachment-limited behaviour**.
+        Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediment in modulating erosion and deposition rate.
+        
+        It calls the private function `_getEroDepRate <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._getEroDepRate>`_ described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
 
-        It calls the private function `_getErosionRate <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._getErosionRate>`_ described above. Once erosion rates have been calculated, the function computes local eroded thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
-
-        If multiple lithologies are considered, the stratigraphic record is updated based on eroded thicknesses.
-
-        .. important::
-
-            The approach assumes that the volume of rock eroded using the stream power law accounts for both the solid and void phase.
+        If multiple lithologies are considered, the stratigraphic record is updated based on eroded/deposited thicknesses.
 
         """
 
         t0 = process_time()
 
-        # Computes the erosion rates based on flow accumulation
+        # Computes the erosion deposition rates based on flow accumulation
         self.Eb.set(0.0)
         self.hGlobal.copy(result=self.hOld)
         self.dm.globalToLocal(self.hOld, self.hOldLocal)
-        self._getErosionRate()
+        self._getEroDepRate()
 
-        # Get eroded thicknesses
+        # Get erosion / deposition thicknesses
         Eb = self.Eb.getArray().copy()
         self.tmp.setArray(-Eb * self.dt)
         self.cumED.axpy(1.0, self.tmp)
@@ -581,10 +642,11 @@ class FAMesh(object):
         # Update stratigraphic layers
         if self.stratNb > 0:
             self.erodeStrat()
+            self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Get Erosion Thicknesses (%0.02f seconds)" % (process_time() - t0),
+                "Get Erosion Deposition values (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
 

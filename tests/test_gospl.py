@@ -126,28 +126,3 @@ def test_gospl_normalnl_run():
     # Destroy model
     normal.destroy()
 
-
-def test_gospl_carbonate_run():
-    import gospl
-    from gospl.model import Model
-    from scripts import fuzzyCarb as carbfuzz
-    import warnings
-
-    warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-    input = "/live/lib/gospl/tests/input/normal.yml"
-
-    # Carbonate controller
-    carbctrl = carbfuzz.fuzzyCarb()
-
-    # Initialise model
-    normal = Model(input, True, False, carbctrl)
-
-    # Run model
-    # normal.runProcesses()
-
-    # Reinitialise model
-    normal.reInitialiseZ()
-
-    # Destroy model
-    # normal.destroy()
