@@ -217,13 +217,16 @@ class SEAMesh(object):
         updateH = hl - Eb * self.dt
         updateH[updateH >= clinoH] = clinoH[updateH >= clinoH]
         self.tmpL.setArray(updateH - hl)
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
 
         # Smoothing marine deposition
-        smthH = self._hillSlope(smooth=1) + hl
-        smthH[smthH >= clinoH] = clinoH[smthH >= clinoH]
-        self.tmpL.setArray(smthH - hl)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
+        if self.smthD > 0:
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            smthH = self._hillSlope(smooth=1) + hl
+            smthH[smthH >= clinoH] = clinoH[smthH >= clinoH]
+            self.tmpL.setArray(smthH - hl)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+        else:
+            self.dm.localToGlobal(self.tmpL, self.tmp)
 
         if self.memclear:
             del updateH, Eb, hl, clinoH

@@ -338,7 +338,10 @@ class SEDMesh(object):
 
         # Get elevation values for considered time step
         if smooth == 1:
-            self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
+            if self.tmp1.max()[1]>0:
+                self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
+            else:
+                self.tmp1.copy(result=self.tmp)
             diffMat.destroy()
             self.dm.globalToLocal(self.tmp, self.tmpL)
             return self.tmpL.getArray().copy()
