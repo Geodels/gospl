@@ -282,6 +282,15 @@ class SEDMesh(object):
             del h
             gc.collect()
 
+        # Update erosion/deposition rates
+        h = self.hLocal.getArray().copy()
+        EDrates = (h - self.oldH)/self.dt
+        self.EbLocal.setArray(EDrates)
+
+        if self.memclear:
+            del h, EDrates
+            gc.collect()
+
         return
 
     def _hillSlope(self, smooth=0):
@@ -296,7 +305,7 @@ class SEDMesh(object):
         .. note::
             The hillslope processes in `gospl` are considered to be happening at the same rate for coarse and fine sediment sizes.
 
-        :arg smooth: integer specifying if the diffusion equation is used for marine deposits (1).
+        :arg smooth: integer specifying if the diffusion equation is used for marine deposits (1) and ice flow (2).
         """
 
         if not smooth:
@@ -308,6 +317,9 @@ class SEDMesh(object):
         # Diffusion matrix construction
         if smooth == 1:
             Cd = np.full(self.lpoints, self.smthD, dtype=np.float64)
+        elif smooth == 2:
+            Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
+            Cd[~self.iceIDs] = 0.        
         else:
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
             Cd[self.seaID] = self.Cdm
@@ -337,7 +349,7 @@ class SEDMesh(object):
             tmpMat.destroy()
 
         # Get elevation values for considered time step
-        if smooth == 1:
+        if smooth > 0:
             if self.tmp1.max()[1]>0:
                 self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
             else:

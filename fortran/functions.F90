@@ -394,6 +394,101 @@ end subroutine split
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
+!!      GLACIER EROSION PROCESSES FUNCTIONS         !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+recursive subroutine iflows(id, donors, ai, width, iflow)
+!*****************************************************************************
+! iflows routine to set all donors with a given downstream ice accumulation
+! value based on the width of the glacier.
+
+  use meshparams
+
+  integer, intent(in) :: id
+  integer, intent(in), dimension(:,:) :: donors
+  double precision, intent(in) :: ai
+  double precision, intent(inout) :: width
+  double precision, dimension(:), intent(inout) :: iflow
+
+  integer :: p, n
+  double precision :: nwidth
+
+  do p = 1, 8
+    n = donors(id,p) + 1
+    if(n > 0 .and. FVeLgt(n,p)>0.)then
+      nwidth = width - FVeLgt(id,p)
+      iflow(id) = max(iflow(id), ai)
+      if(nwidth > 0) call iflows(n, donors, ai, nwidth, iflow)
+    endif
+  enddo
+
+  return
+
+end subroutine iflows
+
+subroutine iceflow(fglacier, donors, wglacier, newflow, nb)
+!*****************************************************************************
+! Compute the ice flux as a measured of catchment-size equivalent according to
+! upstream donors based on cardinal flow distances and the width of the glacier.
+  
+  use meshparams
+  implicit none
+
+  interface
+    recursive subroutine iflows(id, donors, ai, width, iflow)
+      integer, intent(in) :: id
+      integer, intent(in), dimension(:,:) :: donors
+      double precision, intent(in) :: ai
+      double precision, intent(inout) :: width
+      double precision, dimension(:), intent(inout) :: iflow
+    end subroutine iflows
+  end interface
+
+  integer :: nb
+  integer, intent(in) :: donors(nb,8)
+  double precision, intent(in) :: fglacier(nb)
+  double precision, intent(in) :: wglacier(nb)
+  double precision, intent(out) :: newflow(nb)
+
+  integer :: k, p, istrunk, id
+  double precision :: dflow
+  double precision :: width(nb)
+  
+  newflow = fglacier
+  width = wglacier
+
+  do k = 1, nb
+    if(fglacier(k)>0)then
+
+      ! Find not trunk nodes
+      istrunk = -1
+      dflow = -1.e8
+      do p = 1, 8
+        id = donors(k, p) + 1
+        if(id > 0)then
+          if(dflow < fglacier(id))then
+            istrunk = id
+            dflow = fglacier(id)
+          endif
+        endif
+      enddo
+
+      ! Recursively assign the new glacier flows based on upstream nodes 
+      do p = 1, 8
+        id = donors(k, p) + 1
+        if(id .ne. istrunk .and. id > 0) call iflows(id, donors, fglacier(k), width(k), newflow)
+      enddo
+      ! write(*,*)'fglacier',k
+    endif
+  enddo
+  
+  return
+
+end subroutine iceflow
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
 !!         HILLSLOPE PROCESSES FUNCTIONS            !!
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -652,9 +747,7 @@ subroutine donorslist(nrcv, inIDs, rcvs, donors, nb)
   nbdonors = 0
 
   do k = 1, nb
-    if(inIDs(k)>0)then
-      p = 1
-    endif
+    if(inIDs(k)>0) p = 1
     do p = 1, nrcv
       i = rcvs(k,p) + 1
       if(i .ne. k .and. i > 0)then
@@ -698,7 +791,7 @@ subroutine donorsmax(dat, donors, valmax, nb)
 
 end subroutine donorsmax
 
-subroutine mfdreceivers( nRcv, exp, elev, sl, rcv, dist, wgt, nb)
+subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
 ! algorithm.
@@ -795,7 +888,7 @@ subroutine mfdreceivers( nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 
 end subroutine mfdreceivers
 
-subroutine mfdrcvrs( nRcv, exp, elev, sl, rcv, dist, wgt, nb)
+subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
 ! algorithm.

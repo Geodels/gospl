@@ -811,7 +811,10 @@ class UnstMesh(object):
         self.EbLocal.destroy()
         self.upsG.destroy()
         self.upsL.destroy()
-
+        if self.iceOn:
+            self.iceFAG.destroy()
+            self.iceFAL.destroy()
+        
         self.iMat.destroy()
         if not self.fast:
             self.fMat.destroy()

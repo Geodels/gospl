@@ -191,6 +191,7 @@ class WriteMesh(object):
 
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
+        - erosion & deposition rate values `EDrate` for the considered time step.
         - flow accumulation `flowAcc` before pit filling.
         - river sediment load `sedLoad`.
         - fine sediment load `sedLoadf` when dual lithologies are accounted for.
@@ -248,16 +249,13 @@ class WriteMesh(object):
             )
             f["erodep"][:, 0] = self.cumEDLocal.getArray()
             f.create_dataset(
-                "flowAcc",
+                "EDrate",
                 shape=(self.lpoints, 1),
                 dtype="float32",
                 compression="gzip",
             )
-            data = self.FAL.getArray().copy()
-            data[data <= 1.0e-8] = 1.0e-8
-            # if not self.fast:
-            #     data[self.seaID] = 1.0
-            f["flowAcc"][:, 0] = data
+            data = self.EbLocal.getArray().copy()
+            f["EDrate"][:, 0] = data
             if not self.fast:
                 f.create_dataset(
                     "waterFill",
@@ -277,6 +275,20 @@ class WriteMesh(object):
             if not self.fast:
                 data[self.seaID] = 1.0
             f["fillFA"][:, 0] = data
+            
+            if self.iceOn:
+                f.create_dataset(
+                    "iceFA",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                data = self.iceFAL.getArray().copy()
+                data[data <= 1.0e-8] = 1.0e-8
+                if not self.fast:
+                    data[self.seaID] = 1.0
+                f["iceFA"][:, 0] = data
+            
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
@@ -351,7 +363,7 @@ class WriteMesh(object):
 
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
-        - flow accumulation `flowAcc` before pit filling.
+        - erosion & deposition values `EDrate` for the considered time step.
         - river sediment load `sedLoad`.
         - fine sediment load `sedLoadf` when dual lithologies are accounted for.
         - weathered sediment load `sedLoadw` when dual lithologies are accounted for.
@@ -379,7 +391,9 @@ class WriteMesh(object):
         self.dm.localToGlobal(self.cumEDLocal, self.cumED)
         self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
-        self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
+        self.EbLocal.setArray(np.array(hf["/EDrate"])[:, 0])
+        self.dm.localToGlobal(self.EbLocal, self.Eb)
+        self.FAL.setArray(np.array(hf["/fillFA"])[:, 0])
         self.fillFAL.setArray(np.array(hf["/fillFA"])[:, 0])
         self.dm.localToGlobal(self.FAL, self.FAG)
         self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
@@ -402,11 +416,11 @@ class WriteMesh(object):
                 raise ValueError("Restart file is missing...")
 
             self.stratZ.fill(0.0)
-            self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
+            self.stratZ[:, : self.stratStep-1] = np.array(hf["/stratZ"])
             self.stratH.fill(0.0)
-            self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
+            self.stratH[:, : self.stratStep-1] = np.array(hf["/stratH"])
             self.phiS.fill(0.0)
-            self.phiS[:, : self.stratStep] = np.array(hf["/phiS"])
+            self.phiS[:, : self.stratStep-1] = np.array(hf["/phiS"])
 
             hf.close()
 
@@ -483,12 +497,12 @@ class WriteMesh(object):
                 )
                 f.write("         </Attribute>\n")
 
-            f.write('         <Attribute Type="Scalar" Center="Node" Name="FA">\n')
+            f.write('         <Attribute Type="Scalar" Center="Node" Name="EDrate">\n')
             f.write(
                 '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
             )
             f.write(
-                'Dimensions="%d 1">%s:/flowAcc</DataItem>\n' % (self.nodes[p], pfile)
+                'Dimensions="%d 1">%s:/EDrate</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
 
@@ -500,6 +514,16 @@ class WriteMesh(object):
                 'Dimensions="%d 1">%s:/fillFA</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
+
+            if self.iceOn:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceFA">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceFA</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="SL">\n')
             f.write(

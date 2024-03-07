@@ -11,6 +11,7 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import donorslist
     from gospl._fortran import donorsmax
+    from gospl._fortran import iceflow
     from gospl._fortran import mfdreceivers
 
 petsc4py.init(sys.argv)
@@ -52,6 +53,11 @@ class FAMesh(object):
         self.Eb = self.hGlobal.duplicate()
         self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
+        self.EbLocal.set(0.0)
+
+        if self.iceOn:
+            self.iceFAG = self.hGlobal.duplicate()
+            self.iceFAL = self.hLocal.duplicate()
 
         return
 
@@ -282,7 +288,7 @@ class FAMesh(object):
 
         return
 
-    def _distributeDownstream(self, pitVol, FA, hl, step):
+    def _distributeDownstream(self, pitVol, FA, hl, step, ice=False):
         """
         In cases where rivers flow in depressions, they might fill the sink completely and overspill or remain within the depression, forming a lake. This function computes the excess of water (if any) able to flow dowstream.
 
@@ -355,13 +361,89 @@ class FAMesh(object):
                 FA = nFA.copy()
                 FA[hl < self.waterFilled] = 0.0
                 self.tmpL.setArray(FA / self.dt)
-                self.FAL.axpy(1.0, self.tmpL)
+                if ice:
+                    self.iceFAL.axpy(1.0, self.tmpL)
+                else:
+                    self.FAL.axpy(1.0, self.tmpL)
             else:
                 nFA = None
         else:
             nFA = None
 
         return excess, pitVol, nFA
+
+    def _iceFlow(self):
+
+
+        ti = process_time()
+        
+        # Get depressions information
+        ti1 = process_time()
+        pitVol = self.pitParams[:, 0].copy()
+        hl = self.hLocal.getArray().copy()
+
+        # Solve ice flow accumulation
+        iceA = self.bL.getArray().copy()
+        iceA[self.seaID] = 0.
+        tmp = (hl - self.elaH) / (self.iceH - self.elaH)
+        self.iceIDs = tmp > 0
+        tmp[tmp>1.] = 1. 
+        tmp[tmp<0.] = 0.
+        iceA = np.multiply(iceA, tmp)
+        self.tmpL.setArray(iceA)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._solve_KSP(True, self.fMat, self.tmp, self.iceFAG)
+        self.dm.globalToLocal(self.iceFAG, self.iceFAL)
+
+        # # Volume of ice flowing downstream
+        self.waterFilled = hl.copy()
+        if (pitVol > 0.0).any():
+            iFA = self.iceFAL.getArray().copy() * self.dt
+            _, _, iFA = self._distributeDownstream(pitVol, iFA, hl, 100, ice=True)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Downstream ice flow computation (%0.02f seconds)" % (process_time() - ti1),
+                flush=True,
+            )
+
+        # Smooth the ice flow across cells
+        ti1 = process_time()
+        self.iceFAL.copy(result=self.tmpL)
+        tmp = self.tmpL.getArray().copy()
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        smthIce = self._hillSlope(smooth=2)
+        self.tmpL.setArray(smthIce*self.scaleIce)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        smthIce[~self.iceIDs] = tmp[~self.iceIDs]
+        self.iceFAL.setArray(smthIce)
+        self.dm.localToGlobal(self.iceFAL, self.iceFAG)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti1),
+                flush=True,
+            )
+
+        # Update fluvial flow accumulation
+        PA = self.FAL.getArray().copy()
+        PA[self.iceIDs] -= smthIce[self.iceIDs]
+        PA[~self.iceIDs] += smthIce[~self.iceIDs]
+        PA[PA<0] = 0.
+        self.FAL.setArray(PA)
+        self.dm.localToGlobal(self.FAL, self.FAG)
+
+        PA = self.fillFAL.getArray().copy()
+        PA[self.iceIDs] -= smthIce[self.iceIDs]
+        PA[~self.iceIDs] += smthIce[~self.iceIDs]
+        PA[PA<0] = 0.
+        self.fillFAL.setArray(PA)
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Compute IceFlow Accumulation (%0.02f seconds)" % (process_time() - ti),
+                flush=True,
+            )
+        
+        return
 
     def flowAccumulation(self):
         """
@@ -443,6 +525,10 @@ class FAMesh(object):
                 flush=True,
             )
 
+        # Compute glacier flows
+        if self.iceOn:
+            self._iceFlow()
+
         return
 
     def _upstreamDeposition(self, flowdir):
@@ -512,6 +598,7 @@ class FAMesh(object):
         """
 
         hOldArray = self.hLocal.getArray().copy()
+        self.oldH = hOldArray.copy()
         hOldArray[self.seaID] = self.sealevel
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
@@ -525,10 +612,16 @@ class FAMesh(object):
         Kbr *= self.dt * (PA ** self.spl_m)
         Kbr[self.seaID] = 0.0
 
+        if self.iceOn:
+            GA = self.iceFAL.getArray()
+            GA[~self.iceIDs] = 0.
+            Kbi = self.Kice * GA
+
         # Dimensionless depositional coefficient
-        fDep = np.divide(self.fDepa*self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
-        dMat = self._matrix_build_diag(fDep)
-        dMat += self.fMat
+        if self.fDepa > 0:
+            fDep = np.divide(self.fDepa*self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+            dMat = self._matrix_build_diag(fDep)
+            dMat += self.fMat
 
         # Initialise matrices...
         eMat = self.iMat.copy()
@@ -536,6 +629,9 @@ class FAMesh(object):
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
         wght[self.seaID, :] = 0.0
+
+        if self.iceOn:
+            gMat = self.iMat.copy()
 
         # Define erosion coefficients
         for k in range(0, self.flowDir):
@@ -565,31 +661,60 @@ class FAMesh(object):
             eMat -= self._matrix_build_diag(data)
             tmpMat.destroy()
 
+            if self.iceOn:
+                data = np.divide(
+                    Kbi * limiter,
+                    self.distRcvi[:, k],
+                    out=np.zeros_like(PA),
+                    where=self.distRcvi[:, k] != 0,
+                )
+                tmpMat = self._matrix_build()
+                data = np.multiply(data, -wght[:, k])
+                data[self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+                tmpMat.assemblyBegin()
+                tmpMat.setValuesLocalCSR(
+                    indptr,
+                    self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType),
+                    data,
+                )
+                tmpMat.assemblyEnd()
+                gMat += tmpMat
+                gMat -= self._matrix_build_diag(data)
+                tmpMat.destroy()
+
         if self.memclear:
             del dh, limiter, wght, data
             gc.collect()
 
-        # Solve SPL erosion implicitly
+        # Solve SPL erosion implicitly for fluvial erosion
         self._solve_KSP(True, eMat, self.hOld, self.stepED)
         self.tmp.waxpy(-1.0, self.hOld, self.stepED)
-
-        # Implicit sediment fluxes combining upstream flux, erosion and deposition
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        QsL = -self.tmpL.getArray()*self.larea
-        QsL = np.divide(QsL, self.dt)
-        self.tmpL.setArray(QsL)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(True, dMat, self.tmp, self.tmp1)
-
-        # Destroy temporary arrays
-        dMat.destroy()
         eMat.destroy()
 
-        # Extract local sediment deposition fluxes
-        self.dm.globalToLocal(self.tmp1, self.tmpL)
-        QsD = self.tmpL.getArray()*fDep
-        self.tmpL.setArray((QsD-QsL)*self.dt/self.larea)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
+        # Solve SPL erosion implicitly for glacial erosion
+        if self.iceOn:
+            self._solve_KSP(True, gMat, self.hOld, self.stepED)
+            self.tmp1.waxpy(-1.0, self.hOld, self.stepED)
+            gMat.destroy()
+            self.tmp.axpy(1.,self.tmp1)
+
+        # Implicit sediment fluxes combining upstream flux, erosion and deposition
+        if self.fDepa > 0:
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            QsL = -self.tmpL.getArray()*self.larea
+            QsL = np.divide(QsL, self.dt)
+            self.tmpL.setArray(QsL)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self._solve_KSP(True, dMat, self.tmp, self.tmp1)
+
+            # Destroy temporary arrays
+            dMat.destroy()
+
+            # Extract local sediment deposition fluxes
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            QsD = self.tmpL.getArray()*fDep
+            self.tmpL.setArray((QsD-QsL)*self.dt/self.larea)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
 
         # Define erosion rate (positive for incision)
         E = -self.tmp.getArray().copy()
@@ -605,7 +730,8 @@ class FAMesh(object):
         self.dm.localToGlobal(self.EbLocal, self.Eb)
 
         # Limiting deposition rates based on upstream conditions
-        self._upstreamDeposition(self.flowDir)
+        if self.fDepa > 0:
+            self._upstreamDeposition(self.flowDir)
 
         if self.memclear:
             del E, PA, Kbr, QsL, QsD, fDep

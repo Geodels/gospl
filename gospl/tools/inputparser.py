@@ -60,6 +60,7 @@ class ReadYaml(object):
         self._readPlate()
         self._readRain()
         self._readCompaction()
+        self._readIce()
         self._readOut()
 
         self.radius = 6378137.0
@@ -1161,6 +1162,42 @@ class ReadYaml(object):
 
         return
 
+    def _readIce(self):
+        """
+        Parse ice flow variables.
+        """
+
+        try:
+            iceDict = self.input["ice"]
+            self.iceOn = True
+            try:
+                self.gaussIce = iceDict["gauss"]
+            except KeyError:
+                print("Check your ice fields definition...", flush=True)
+                raise KeyError(
+                    "Field name gauss is not defined correctly or does not exist!"
+                )
+            try:
+                self.elaH = iceDict["hela"]
+            except KeyError:
+                self.elaH = 1800.0
+            try:
+                self.iceH = iceDict["hice"]
+            except KeyError:
+                self.iceH = 2100.0
+            try:
+                self.scaleIce = iceDict["fice"]
+            except KeyError:
+                self.scaleIce = 1.0
+            try:
+                self.Kice = iceDict["Ki"]
+            except KeyError:
+                self.Kice = 0.0
+        except KeyError:
+            self.iceOn = False
+
+        return
+    
     def _readOut(self):
         """
         Parse output directory.
