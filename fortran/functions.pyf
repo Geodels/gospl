@@ -64,14 +64,6 @@ python module _fortran
             integer, optional,check(len(dat)>=nb),depend(dat) :: nb=len(dat)
         end subroutine donorsmax
 
-        subroutine iceflow(fglacier,donors,wglacier,newflow,nb)
-            double precision dimension(nb),intent(in) :: fglacier
-            integer dimension(nb,8),intent(in),depend(nb,8) :: donors
-            double precision dimension(nb),intent(in),depend(nb) :: wglacier
-            double precision dimension(nb),intent(out),depend(nb) :: newflow
-            integer, optional,check(len(fglacier)>=nb),depend(fglacier) :: nb=len(fglacier)
-        end subroutine iceflow
-
         subroutine mfdrcvrs(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
             double precision intent(in) :: exp
