@@ -696,6 +696,45 @@ subroutine donorsmax(dat, donors, valmax, nb)
 
 end subroutine donorsmax
 
+subroutine getbc(pb, elev, pts, nelev, nb)
+!*****************************************************************************
+! Compute boundary conditions
+  
+  use meshparams
+  implicit none
+
+  integer :: nb 
+  
+  integer, intent(in) :: pb 
+  integer, intent(in) :: pts(pb)
+  double precision, intent(in) :: elev(nb)
+  double precision, intent(out) :: nelev(pb)
+
+  integer :: i, k, n, p, s
+
+  nelev = 0.
+
+  do i = 1, pb
+    k = pts(i)+1
+    s = 0
+    do p = 1, FVnNb(k)
+      n = FVnID(k,p)+1
+      if(n>0 .and. FVeLgt(k,p)>0.)then
+        s = s + 1
+        nelev(i) = nelev(i) + elev(n)
+      endif
+    enddo
+    if(s == 0)then
+      nelev(i) = elev(k)
+    else
+      nelev(i) = nelev(i)/s
+    endif
+  enddo
+
+  return
+
+end subroutine getbc
+
 subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction
@@ -2225,7 +2264,7 @@ subroutine filllabel(sl, elev, ngbid, fillz, labels, nb)
   integer :: nb
   double precision,intent(in) :: sl
   double precision,intent(in) :: elev(nb)
-  integer, intent(in) :: ngbid(nb, 8)
+  integer,intent(in) :: ngbid(nb, 8)
   double precision,intent(out) :: fillz(nb)
   ! Pit number and overspilling point ID
   integer,intent(out) :: labels(nb)
@@ -2290,3 +2329,365 @@ subroutine filllabel(sl, elev, ngbid, fillz, labels, nb)
   return
 
 end subroutine filllabel
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
+!!           FLEXURE PROCESSES FUNCTIONS            !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+subroutine four1(data1,nn,isign)
+  
+  integer :: isign,nn
+  double precision :: data1(2*nn)
+  integer i,istep,j,m,mmax,n
+  double precision :: tempi,tempr
+  double precision :: theta,wi,wpi,wpr,wr,wtemp
+  
+  n=2*nn
+  j=1
+  do i=1,n,2
+    if(j>i)then
+      tempr=data1(j)
+      tempi=data1(j+1)
+      data1(j)=data1(i)
+      data1(j+1)=data1(i+1)
+      data1(i)=tempr
+      data1(i+1)=tempi
+    endif
+    m=n/2
+    do while((m>=2).and.(j>m)) 
+      j=j-m
+      m=m/2
+    enddo
+    j=j+m
+  enddo
+  
+  mmax=2
+  do while(n>mmax) 
+    istep=2*mmax
+    theta=6.28318530717959d0/(isign*mmax)
+    wpr=-2.d0*dsin(0.5d0*theta)**2
+    wpi=dsin(theta)
+    wr=1.d0
+    wi=0.d0
+    do m=1,mmax,2
+      do i=m,n,istep
+        j=i+mmax
+        tempr=sngl(wr)*data1(j)-sngl(wi)*data1(j+1)
+        tempi=sngl(wr)*data1(j+1)+sngl(wi)*data1(j)
+        data1(j)=data1(i)-tempr
+        data1(j+1)=data1(i+1)-tempi
+        data1(i)=data1(i)+tempr
+        data1(i+1)=data1(i+1)+tempi
+      enddo
+      wtemp=wr
+      wr=wr*wpr-wi*wpi+wr
+      wi=wi*wpr+wtemp*wpi+wi
+    enddo
+    mmax=istep
+  enddo
+
+end subroutine four1
+
+subroutine realft(data1,n,isign)
+
+  double precision :: wr,wi,wpi,wpr,wtemp,theta
+  double precision :: data1(2*n)
+  integer :: n,isign,i1,i2,i3,i4,i
+  double precision :: c2,h2r,h2i,wis,h1r,h1i
+  
+  theta=6.28318530717959d0/2.0d0/dfloat(n)
+  c1=0.5
+  if(isign==1)then
+    c2=-0.5
+    call four1(data1,n,+1)
+  else
+    c2=0.5
+    theta=-theta
+  endif
+  
+  wpr=-2.0d0*dsin(0.5d0*theta)**2
+  wpi=dsin(theta)
+  wr=1.0d0+wpr
+  wi=wpi
+  n2p3=2*n+3
+  
+  do i=2,n/2+1
+    i1=2*i-1
+    i2=i1+1
+    i3=n2p3-i2
+    i4=i3+1
+    wrs=sngl(wr)
+    wis=sngl(wi)
+    h1r=c1*(data1(i1)+data1(i3))
+    h1i=c1*(data1(i2)-data1(i4))
+    h2r=-c2*(data1(i2)+data1(i4))
+    h2i=c2*(data1(i1)-data1(i3))
+    data1(i1)=h1r+wrs*h2r-wis*h2i
+    data1(i2)=h1i+wrs*h2i+wis*h2r
+    data1(i3)=h1r-wrs*h2r+wis*h2i
+    data1(i4)=-h1i+wrs*h2i+wis*h2r
+    wtemp=wr
+    wr=wr*wpr-wi*wpi+wr
+    wi=wi*wpr+wtemp*wpi+wi
+  enddo
+  
+  if(isign==1)then
+    h1r=data1(1)
+    data1(1)=h1r+data1(2)
+    data1(2)=h1r-data1(2)
+  else
+    h1r=data1(1)
+    data1(1)=c1*(h1r+data1(2))
+    data1(2)=c1*(h1r-data1(2))
+    call four1(data1,n,-1)
+  endif
+
+end subroutine realft
+
+subroutine sinft(y,n)
+  integer :: n
+  double precision, intent(inout) :: y(n)
+  
+  integer :: j
+  double precision :: sum,y1,y2
+  double precision :: theta,wi,wpi,wpr,wr,wtemp
+  
+  theta=3.141592653589793d0/dble(n)
+  wr=1.0d0
+  wi=0.0d0
+  wpr=-2.0d0*sin(0.5d0*theta)**2
+  wpi=sin(theta)
+  y(1)=0.0
+  
+  do j = 1,n/2
+    wtemp=wr
+    wr=wr*wpr-wi*wpi+wr
+    wi=wi*wpr+wtemp*wpi+wi
+    y1=wi*(y(j+1)+y(n-j+1))
+    y2=0.5*(y(j+1)-y(n-j+1))
+    y(j+1)=y1+y2
+    y(n-j+1)=y1-y2
+  enddo
+  
+  call realft(y,n/2,+1)
+  
+  sum=0.0
+  y(1)=0.5*y(1)
+  y(2)=0.0
+  
+  do j= 1, n-1, 2
+    sum=sum+y(j)
+    y(j)=y(j+1)
+    y(j+1)=sum
+  enddo
+  
+end subroutine sinft
+
+subroutine addw(w,nxflex,nyflex,iflexmin,iflexmax,jflexmin,jflexmax,cbc)
+
+  implicit none
+
+  integer :: nxflex,nyflex,i,j,iflexmin,iflexmax,jflexmin,jflexmax
+  double precision w(nxflex,nyflex)
+  character cbc*4
+
+  if (cbc(1:1).eq.'0') w(:,jflexmin)=w(:,jflexmin+1)
+  if (cbc(2:2).eq.'0') w(iflexmax,:)=w(iflexmax-1,:)
+  if (cbc(3:3).eq.'0') w(:,jflexmax)=w(:,jflexmax-1)
+  if (cbc(4:4).eq.'0') w(iflexmin,:)=w(iflexmin+1,:)
+
+  do j=jflexmin,jflexmax
+    do i=iflexmin,iflexmax
+      if (cbc(1:1).eq.'0') w(i,jflexmin-(j-jflexmin+1))=w(i,jflexmin-(j-jflexmin+1))+w(i,j)
+      if (cbc(3:3).eq.'0') w(i,jflexmax+(jflexmax-j+1))=w(i,jflexmax+(jflexmax-j+1))+w(i,j)
+      if (cbc(4:4).eq.'0') w(iflexmin-(i-iflexmin+1),j)=w(iflexmin-(i-iflexmin+1),j)+w(i,j)
+      if (cbc(2:2).eq.'0') w(iflexmax+(iflexmax-i+1),j)=w(iflexmax+(iflexmax-i+1),j)+w(i,j)
+      if (cbc(1:1).eq.'0'.and.cbc(2:2).eq.'0') w(iflexmax+(iflexmax-i+1),jflexmin-(j-jflexmin+1))= &
+      w(iflexmax+(iflexmax-i+1),jflexmin-(j-jflexmin+1))+w(i,j)
+      if (cbc(2:2).eq.'0'.and.cbc(3:3).eq.'0') w(iflexmax+(iflexmax-i+1),jflexmax+(jflexmax-j+1))= &
+      w(iflexmax+(iflexmax-i+1),jflexmax+(jflexmax-j+1))+w(i,j)
+      if (cbc(3:3).eq.'0'.and.cbc(4:4).eq.'0') w(iflexmin-(i-iflexmin+1),jflexmax+(jflexmax-j+1))= &
+      w(iflexmin-(i-iflexmin+1),jflexmax+(jflexmax-j+1))+w(i,j)
+      if (cbc(4:4).eq.'0'.and.cbc(1:1).eq.'0') w(iflexmin-(i-iflexmin+1),jflexmin-(j-jflexmin+1))= &
+      w(iflexmin-(i-iflexmin+1),jflexmin-(j-jflexmin+1))+w(i,j)
+    enddo
+  enddo
+
+  return
+
+end subroutine addw
+
+subroutine flexure(h,hp,nx,ny,xl,yl,rhos,rhoa,eet,ibc,newh)
+
+  ! Routine to compute the flexural response of erosion from Fastscape
+  ! in input:
+  ! hp(nx,ny), the topography (in isostatic equilibrium) before erosion, in m,
+  ! h(nx,ny), the topography (out of isostatic equilibrium) after erosion, in m,
+  ! rhos(nx,ny), surface rock density, in kg/m^3
+  ! rhoa, asthenospheric density, in kg/m^3
+  ! eet, effective elastic thickness, in m
+  ! nx,ny, resolution of the input topography
+  ! xl,yl, horizontal dimensions of the input topography, in m
+
+  ! Here fixed values are assumed for:
+  ! Young modulus, 1.d11 Pa
+  ! Poisson ratio, 0.25
+  ! g, 9.81 m/s^2
+
+  ! the flexural, biharmonic equation is solved by FFT method (see Nunn and Aires, 1988)
+  ! on a 1024x1024 mesh
+
+  implicit none
+
+  integer, intent(in) :: nx,ny,ibc
+  double precision, intent(in), dimension(nx,ny) :: h,hp
+  double precision, intent(in) :: xl,yl,rhoa,eet,rhos
+  double precision, intent(out), dimension(nx,ny) :: newh
+
+  integer nxflex,nyflex,i,j,ii,jj
+  double precision, dimension(:,:), allocatable :: w
+  double precision hx,hy,dflex,d,xk,pihx,pihy,g,fi,fj,tij,dx,dy,r,s,h1,h2,h3,h4
+  double precision ddxf,ddyf,xloc,yloc,dw,xflexloc,yflexloc
+  integer iflexmin,iflexmax,jflexmin,jflexmax
+  character cbc*4
+
+  double precision, dimension(:,:,:), allocatable :: hw
+  integer, dimension(:,:), allocatable :: iiw,jjw
+
+  write (cbc,'(i4)') ibc
+  if (cbc(1:1).eq.'') cbc(1:1)='0'
+  if (cbc(2:2).eq.'') cbc(2:2)='0'
+  if (cbc(3:3).eq.'') cbc(3:3)='0'
+  if (cbc(4:4).eq.'') cbc(4:4)='0'
+
+  ! allocate memory
+
+  nxflex=1
+  do while (nxflex.lt.nx)
+    nxflex=nxflex*2
+  enddo
+
+  nyflex=1
+  do while (nyflex.lt.ny)
+    nyflex=nyflex*2
+  enddo
+
+  allocate (hw(4,nx,ny), iiw(nx,ny), jjw(nx,ny))
+  allocate (w(nxflex,nyflex))
+
+  ! compute relevant geometrical, flexural and spectral parameters
+
+  iflexmin=nxflex/2-nxflex/8
+  iflexmax=nxflex/2+nxflex/8
+  jflexmin=nyflex/2-nyflex/8
+  jflexmax=nyflex/2+nyflex/8
+
+  dx=xl/(nx-1)
+  dy=yl/(ny-1)
+  ddxf=xl/(iflexmax-iflexmin)
+  ddyf=yl/(jflexmax-jflexmin)
+  hx=ddxf*(nxflex-1)
+  hy=ddyf*(nyflex-1)
+  dflex=1.d11/12.d0/(1.d0-0.25d0**2)
+  d=dflex*eet**3
+  g=9.81d0
+  xk=rhoa*g
+  pihx=3.141592654d0/hx
+  pihy=3.141592654d0/hx
+
+  ! compute weigths corresponding to the increase in topography by interpolation
+  ! from the nx,ny grid to the nflex, nflex grid, using a bilinear interpolation scheme
+
+  w=0.d0
+  jj=jflexmin
+  yflexloc=0.d0
+    do j=1,ny
+    yloc=(j-1)*dy
+    if (yloc.gt.yflexloc+ddyf) jj=jj+1
+    yflexloc=(jj-jflexmin)*ddyf
+    ii=iflexmin
+    xflexloc=0.d0
+    do i=1,nx
+      xloc=(i-1)*dx
+      if (xloc.gt.xflexloc+ddxf) ii=ii+1
+      xflexloc=(ii-iflexmin)*ddxf
+      r=(xloc-xflexloc)/ddxf*2.d0-1.d0
+      s=(yloc-yflexloc)/ddyf*2.d0-1.d0
+      h1=(1.d0-r)*(1.d0-s)/4.d0
+      h2=(1.d0+r)*(1.d0-s)/4.d0
+      h3=(1.d0-r)*(1.d0+s)/4.d0
+      h4=(1.d0+r)*(1.d0+s)/4.d0
+      iiw(i,j)=ii
+      jjw(i,j)=jj
+      hw(1,i,j)=h1
+      hw(2,i,j)=h2
+      hw(3,i,j)=h3
+      hw(4,i,j)=h4
+      dw=(hp(i,j)-h(i,j))*rhos*dx*dy*g
+      w(ii,jj) = w(ii,jj) + dw*h1
+      w(ii+1,jj) = w(ii+1,jj) + dw*h2
+      w(ii,jj+1) = w(ii,jj+1) + dw*h3
+      w(ii+1,jj+1) = w(ii+1,jj+1) + dw*h4
+    enddo
+  enddo
+
+  call addw(w,nxflex,nyflex,iflexmin,iflexmax,jflexmin,jflexmax,cbc)
+
+  ! compute FFT of weights
+
+  do j=1,nyflex
+    call sinft(w(:,j),nxflex)
+  enddo
+
+  w=transpose(w)
+
+  do i=1,nxflex
+    call sinft(w(:,i),nyflex)
+  enddo
+
+  ! apply filter to FFT of weights to simulated flexure (see Nunn and Aires, 1988)
+
+  w=w*4./hx/hy
+
+  do j=1,nyflex
+    fj=(j*pihx)**2
+    do i=1,nxflex
+      fi=(i*pihx)**2
+      tij=d/xk*(fi**2+2.d0*fi*fj+fj**2)+1.d0
+      w(j,i)=w(j,i)/xk/tij
+    enddo
+  enddo
+
+  ! compute inverse FFT of filtered weights to obtain deflection
+
+  do i=1,nxflex
+    call sinft (w(:,i),nyflex)
+  enddo
+
+  w=transpose(w)
+
+  do j=1,nyflex
+    call sinft (w(:,j),nxflex)
+  enddo
+
+  ! add  deflection by interpolation from the nflex,nflex grid to the nx,ny grid
+  ! by bilinear interpolation
+
+  do j=1,ny
+    do i=1,nx
+      ii=iiw(i,j)
+      jj=jjw(i,j)
+      h1=hw(1,i,j)
+      h2=hw(2,i,j)
+      h3=hw(3,i,j)
+      h4=hw(4,i,j)
+      newh(i,j)=h(i,j)+w(ii,jj)*h1+w(ii+1,jj)*h2+w(ii,jj+1)*h3+w(ii+1,jj+1)*h4
+    enddo
+  enddo
+
+  ! deallocate memory
+  deallocate (w,iiw,jjw,hw)
+
+end subroutine flexure

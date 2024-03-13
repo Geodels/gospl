@@ -90,7 +90,7 @@ class Model(
 
         self.modelRunTime = process_time()
         self.verbose = verbose
-
+        
         # Read input dataset
         _ReadYaml.__init__(self, filename)
 
@@ -188,6 +188,10 @@ class Model(
                 _STRAMesh.getCompaction(self)
                 self.stratStep += 1
                 self.saveStrat += self.strat
+
+            # Apply flexural isostasy
+            if self.flexOn:
+                _UnstMesh.applyFlexure(self)
 
             # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:

@@ -61,6 +61,7 @@ class ReadYaml(object):
         self._readRain()
         self._readCompaction()
         self._readIce()
+        self._readFlex()
         self._readOut()
 
         self.radius = 6378137.0
@@ -124,6 +125,11 @@ class ReadYaml(object):
             self.flowExp = domainDict["flowexp"]
         except KeyError:
             self.flowExp = 0.5
+
+        try:
+            self.boundCond = domainDict["bc"]
+        except KeyError:
+            self.boundCond = '1111'
 
         try:
             meshFile = domainDict["npdata"]
@@ -1162,6 +1168,31 @@ class ReadYaml(object):
 
         return
 
+    def _readFlex(self):
+        """
+        Parse flexural isostasy variables.
+        """
+
+        try:
+            flexDict = self.input["flexure"]
+            self.flexOn = True
+            try:
+                self.flex_rhoa = flexDict["rhoa"]
+            except KeyError:
+                self.flex_rhoa = 3250.0
+            try:
+                self.flex_eet = flexDict["thick"]
+            except KeyError:
+                self.flex_eet = 10000.0
+            try:
+                self.flex_rhos = flexDict["rhoc"]
+            except KeyError:
+                self.flex_rhos = 2400.0
+        except KeyError:
+            self.flexOn = False
+
+        return
+    
     def _readIce(self):
         """
         Parse ice flow variables.

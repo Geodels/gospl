@@ -288,7 +288,14 @@ class WriteMesh(object):
                 if not self.fast:
                     data[self.seaID] = 1.0
                 f["iceFA"][:, 0] = data
-            
+            if self.flexOn:
+                f.create_dataset(
+                    "fexIso",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["fexIso"][:, 0] = self.localFlex
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
@@ -398,6 +405,9 @@ class WriteMesh(object):
         self.dm.localToGlobal(self.FAL, self.FAG)
         self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
         self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
+
+        if self.flexOn:
+            self.localFlex = np.array(hf["/fexIso"])[:, 0]
 
         hf.close()
 
@@ -522,6 +532,16 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/iceFA</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+            if self.flexOn:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="fexIso">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/fexIso</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

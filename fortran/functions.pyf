@@ -64,6 +64,14 @@ python module _fortran
             integer, optional,check(len(dat)>=nb),depend(dat) :: nb=len(dat)
         end subroutine donorsmax
 
+        subroutine getbc(pb,elev,pts,nelev,nb)
+            integer intent(in) :: pb
+            double precision dimension(nb),intent(in) :: elev
+            integer dimension(pb),intent(in),depend(pb) :: pts
+            double precision dimension(pb),intent(out),depend(pb) :: nelev
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine getbc
+
         subroutine mfdrcvrs(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
             double precision intent(in) :: exp
@@ -292,6 +300,14 @@ python module _fortran
             integer dimension(nb),intent(out) :: labels
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine filllabel
+
+        subroutine flexure(h,hp,nx,ny,xl,yl,rhos,rhoa,eet,ibc,newh)
+            integer intent(in) :: nx,ny,ibc
+            double precision dimension(nx,ny),intent(in),depend(nx,ny) :: hp
+            double precision dimension(nx,ny),intent(in),depend(nx,ny) :: h
+            double precision,intent(in) :: rhos,xl,yl,rhoa,eet
+            double precision dimension(nx,ny),intent(out),depend(nx,ny) :: newh
+        end subroutine flexure
 
     end interface
 

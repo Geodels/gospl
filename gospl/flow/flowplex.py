@@ -11,7 +11,6 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import donorslist
     from gospl._fortran import donorsmax
-    from gospl._fortran import iceflow
     from gospl._fortran import mfdreceivers
 
 petsc4py.init(sys.argv)
@@ -50,6 +49,7 @@ class FAMesh(object):
         self.FAL = self.hLocal.duplicate()
         self.hOld = self.hGlobal.duplicate()
         self.hOldLocal = self.hLocal.duplicate()
+        self.hOldFlex = self.hLocal.duplicate()
         self.Eb = self.hGlobal.duplicate()
         self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
@@ -600,6 +600,8 @@ class FAMesh(object):
         hOldArray = self.hLocal.getArray().copy()
         self.oldH = hOldArray.copy()
         hOldArray[self.seaID] = self.sealevel
+        if self.flexOn:
+            self.hLocal.copy(result=self.hOldFlex)
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
@@ -687,25 +689,43 @@ class FAMesh(object):
             gc.collect()
 
         # Solve SPL erosion implicitly for fluvial erosion
+        t1 = process_time()
         self._solve_KSP(True, eMat, self.hOld, self.stepED)
         self.tmp.waxpy(-1.0, self.hOld, self.stepED)
         eMat.destroy()
-
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Solve SPL erosion (%0.02f seconds)" % (process_time() - t1),
+                flush=True,
+            )
         # Solve SPL erosion implicitly for glacial erosion
         if self.iceOn:
-            self._solve_KSP(True, gMat, self.hOld, self.stepED)
+            t1 = process_time()
+            self._solve_KSP(False, gMat, self.hOld, self.stepED)
             self.tmp1.waxpy(-1.0, self.hOld, self.stepED)
             gMat.destroy()
             self.tmp.axpy(1.,self.tmp1)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Solve glacial erosion (%0.02f seconds)" % (process_time() - t1),
+                    flush=True,
+                )
 
         # Implicit sediment fluxes combining upstream flux, erosion and deposition
         if self.fDepa > 0:
+            t1 = process_time()
             self.dm.globalToLocal(self.tmp, self.tmpL)
             QsL = -self.tmpL.getArray()*self.larea
             QsL = np.divide(QsL, self.dt)
+            QsL[QsL<1.e-8] = 0.
             self.tmpL.setArray(QsL)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self._solve_KSP(True, dMat, self.tmp, self.tmp1)
+            self._solve_KSP(False, dMat, self.tmp, self.tmp1)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Solve sediment fluxes (%0.02f seconds)" % (process_time() - t1),
+                    flush=True,
+                )
 
             # Destroy temporary arrays
             dMat.destroy()
