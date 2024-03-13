@@ -711,9 +711,10 @@ class UnstMesh(object):
                 regNewZ[self.flexOnIDs] = newZ[self.flexIDs[self.flexOnIDs,0]]
             regNewZ = regNewZ.reshape(self.flex_ny,self.flex_nx) 
 
+            # Force boundary to be all reflective
             newh = flexure(regNewZ,regOldZ,self.flex_ny,self.flex_nx,
                            self.flex_yl,self.flex_xl,self.flex_rhos,
-                           self.flex_rhoa,self.flex_eet,int(self.boundCond))
+                           self.flex_rhoa,self.flex_eet,0) #int(self.boundCond))
             rflexTec = (newh - regNewZ).ravel()
 
             # Interpolate back to goSPL mesh
