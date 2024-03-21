@@ -3,7 +3,7 @@ import sys
 import petsc4py
 import numpy as np
 import pandas as pd
-import ruamel.yaml as YAML
+from ruamel.yaml import YAML
 
 from operator import itemgetter
 from scipy.interpolate import interp1d
@@ -41,7 +41,8 @@ class ReadYaml(object):
 
         # Open YAML file
         with open(filename, "r") as finput:
-            self.input = YAML.load(finput, Loader=YAML.Loader)
+            yaml = YAML(typ='rt')
+            self.input = yaml.load(finput)
 
         if MPIrank == 0 and "name" in self.input.keys() and self.verbose:
             print(
