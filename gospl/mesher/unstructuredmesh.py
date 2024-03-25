@@ -17,7 +17,6 @@ from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import definetin
-    from gospl._fortran import flexure
     from gospl._fortran import getbc
 
 petsc4py.init(sys.argv)
@@ -54,16 +53,10 @@ class UnstMesh(object):
         self.rainVal = None
         self.sedfacVal = None
         self.memclear = False
-        self.flexIDs = None
-        self.localFlex = None
         self.southPts = None
-        self.flex = None
 
         # Let us define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
-
-        if self.flexOn and self.localFlex is None:
-            self.localFlex = np.zeros(self.lpoints)
 
         return
 
@@ -554,7 +547,10 @@ class UnstMesh(object):
             self.sealevel = self.seafunction(self.tNow + self.dt)
 
         # Climate information
-        self._updateRain()
+        if self.oroOn:
+            self.cptOrography()
+        else:
+            self._updateRain()
 
         # Erodibility factor information
         if self.sedfacdata is not None:
@@ -639,116 +635,6 @@ class UnstMesh(object):
         self.bL.setArray(self.rainVal * self.larea)
         self.dm.localToGlobal(self.bL, self.bG)
         
-        return
-
-    def applyFlexure(self):
-        """
-        This function computes the flexural isostasy equilibrium based on topographic change.
-        """
-
-        t0 = process_time()
-
-        # Get elevations from time of equilibrium and after erosion deposition 
-        hlflex = self.hOldFlex.getArray().copy()
-        oldZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-        oldZ[self.locIDs] = hlflex
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, oldZ, op=MPI.MAX)
-
-        hl = self.hLocal.getArray().copy()
-        newZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-        newZ[self.locIDs] = hl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, newZ, op=MPI.MAX)
-
-        if MPIrank == 0:
-            # Build regular grid for flexure calculation
-            if self.flexIDs is None:
-                xmin = self.mCoords[:,0].min()
-                xmax = self.mCoords[:,0].max()
-                ymin = self.mCoords[:,1].min()
-                ymax = self.mCoords[:,1].max()
-                dx = abs(self.mCoords[1,0] - self.mCoords[0,0])
-                if dx == 0:
-                    dx = abs(self.mCoords[1,1] - self.mCoords[0,1])
-                self.flex_xl = xmax - xmin
-                self.flex_yl = ymax - ymin
-                self.flex_dx = dx
-                self.flex_nx = int(self.flex_xl/dx+1)
-                self.flex_ny = int(self.flex_yl/dx+1)
-                
-                newx = np.arange(xmin, xmax+dx, dx)
-                newy = np.arange(ymin, ymax+dx, dx)
-                rx, ry = np.meshgrid(newx,newy)
-                rPts = np.stack((rx.ravel(), ry.ravel())).T
-                
-                treeT = spatial.cKDTree(self.mCoords[:,:2], leafsize=10)
-                distances, self.flexIDs = treeT.query(rPts, k=3)
-                # Inverse weighting distance...
-                self.flexWeights = np.divide(
-                    1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
-                )
-                self.flexSumWeights = np.sum(self.flexWeights, axis=1)
-                self.flexOnIDs = np.where(self.flexSumWeights == 0)[0]
-                self.flexSumWeights[self.flexSumWeights == 0] = 1.0e-4
-                
-                treeR = spatial.cKDTree(rPts, leafsize=10)
-                distances, self.flexrIDs = treeR.query(self.mCoords[:,:2], k=3)
-                # Inverse weighting distance...
-                self.flexrWeights = np.divide(
-                    1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
-                )
-                self.flexrSumWeights = np.sum(self.flexrWeights, axis=1)
-                self.flexrOnIDs = np.where(self.flexrSumWeights == 0)[0]
-                self.flexrSumWeights[self.flexrSumWeights == 0] = 1.0e-4
-
-            # Interpolate values on the flexural regular grid
-            regOldZ = np.sum(self.flexWeights * oldZ[self.flexIDs][:, :], axis=1) / self.flexSumWeights
-            if len(self.flexOnIDs)>0:
-                regOldZ[self.flexOnIDs] = oldZ[self.flexIDs[self.flexOnIDs,0]]
-            regOldZ = regOldZ.reshape(self.flex_ny,self.flex_nx)            
-
-            regNewZ = np.sum(self.flexWeights * newZ[self.flexIDs][:, :], axis=1) / self.flexSumWeights
-            if len(self.flexOnIDs)>0:
-                regNewZ[self.flexOnIDs] = newZ[self.flexIDs[self.flexOnIDs,0]]
-            regNewZ = regNewZ.reshape(self.flex_ny,self.flex_nx) 
-
-            # Force boundary to be all reflective
-            newh = flexure(regNewZ,regOldZ,self.flex_ny,self.flex_nx,
-                           self.flex_yl,self.flex_xl,self.flex_rhos,
-                           self.flex_rhoa,self.flex_eet,0) #int(self.boundCond))
-            rflexTec = (newh - regNewZ).ravel()
-
-            # Interpolate back to goSPL mesh
-            flexTec = np.sum(self.flexrWeights * rflexTec[self.flexrIDs][:, :], axis=1) / self.flexrSumWeights
-            if len(self.flexrOnIDs)>0:
-                flexTec[self.flexrOnIDs] = rflexTec[self.flexrIDs[self.flexrOnIDs,0]]
-        else:
-            flexTec = None
-
-        # Send flexural response globally
-        flex = MPI.COMM_WORLD.bcast(flexTec, root=0)
-
-        # Local flexural isostasy
-        tmpFlex = flex[self.locIDs]
-        if self.south == 1:
-            tmpFlex[self.southPts] = 0.
-        if self.east == 1:
-            tmpFlex[self.eastPts] = 0.
-        if self.north == 1:
-            tmpFlex[self.northPts] = 0.
-        if self.west == 1:
-            tmpFlex[self.westPts] = 0.
-        self.localFlex += tmpFlex
-        tmp = self.hLocal.getArray().copy()
-
-        # Update elevation
-        self.hLocal.setArray(tmp + tmpFlex)
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Compute Flexural Isostasy (%0.02f seconds)" % (process_time() - t0)
-            )
-
         return
 
     def _updateEroFactor(self):

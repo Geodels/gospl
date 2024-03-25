@@ -11,6 +11,7 @@ if "READTHEDOCS" not in os.environ:
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
+    from .tools import GridProcess as _GridProcess
     from .mesher import EarthPlate as _EarthPlate
     from .tools import WriteMesh as _WriteMesh
 
@@ -52,6 +53,9 @@ else:
         def __init__(self):
             pass
 
+    class _GridProcess(object):
+        def __init__(self):
+            pass
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
@@ -60,6 +64,7 @@ class Model(
     _ReadYaml,
     _WriteMesh,
     _UnstMesh,
+    _GridProcess,
     _EarthPlate,
     _FAMesh,
     _PITFill,
@@ -99,6 +104,9 @@ class Model(
 
         # Define unstructured mesh
         _UnstMesh.__init__(self)
+
+        # Define grid processes
+        _GridProcess.__init__(self)
 
         # Initialise earth plate
         _EarthPlate.__init__(self)
@@ -191,7 +199,7 @@ class Model(
 
             # Apply flexural isostasy
             if self.flexOn:
-                _UnstMesh.applyFlexure(self)
+                _GridProcess.applyFlexure(self)
 
             # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:

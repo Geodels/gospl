@@ -63,6 +63,7 @@ class ReadYaml(object):
         self._readCompaction()
         self._readIce()
         self._readFlex()
+        self._readOrography()
         self._readOut()
 
         self.radius = 6378137.0
@@ -358,10 +359,10 @@ class ReadYaml(object):
                 self.K = splDict["K"]
             except KeyError:
                 print(
-                    "When using the Surface Process Model definition of coefficient Kb is required.",
+                    "When using the Surface Process Model definition of coefficient K is required.",
                     flush=True,
                 )
-                raise ValueError("Surface Process Model: Kb coefficient not found.")
+                raise ValueError("Surface Process Model: K coefficient not found.")
             try:
                 self.coeffd = splDict["d"]
             except KeyError:
@@ -1194,6 +1195,93 @@ class ReadYaml(object):
 
         return
     
+    def _readOrography(self):
+        """
+        Parse orographic precipitation variables.
+        
+        latitude (float) : Coriolis effect decreases as latitude decreases
+        precip_base (float) : non-orographic, uniform precipitation rate [mm/h], usually [0, 10]
+        precip_min (float) : minimum precipitation [mm/h] when precipitation rate <= 0
+        wind_speed (float) : [m/s]
+        wind_dir (float) : wind direction [0: north, 270: west]
+        conv_time (float) : cloud water to hydrometeor conversion time [s]
+        fall_time (float) : hydrometeor fallout time [s]
+        nm (float) : moist stability frequency [1/s]
+        hw (float) : water vapor scale height [m]
+        cw (float) : uplift sensitivity [kg/m^3], product of saturation water vapor sensitivity ref_density [kg/m^3]
+                    and environmental lapse rate (lapse_rate_m / lapse_rate)
+
+        """
+
+        try:
+            oroDict = self.input["orography"]
+            self.oroOn = True
+
+            try:
+                self.wind_latitude = oroDict["latitude"]
+                if self.wind_latitude > 90 or self.wind_latitude < -90:
+                    print(
+                        "Latitude for orographic rain needs to be between -90 and 90.",
+                        flush=True,
+                    )
+                    raise ValueError("Latitude value not appropriately set.")
+            except KeyError:
+                self.wind_latitude = 0.0
+            try:
+                self.wind_speed = oroDict["wind_speed"]
+            except KeyError:
+                self.wind_speed = 10.
+            try:
+                self.wind_dir = oroDict["wind_dir"]
+            except KeyError:
+                self.wind_dir = 0.0
+            try:
+                self.oro_nm = oroDict["nm"]
+            except KeyError:
+                self.oro_nm = 0.01
+            try:
+                self.oro_hw = oroDict["hw"]
+            except KeyError:
+                self.oro_hw = 3400.0
+            try:
+                lapse_rate = oroDict["env_lapse_rate"]
+            except KeyError:
+                lapse_rate = -4.0
+            try:
+                lapse_rate_m = oroDict["moist_lapse_rate"]
+            except KeyError:
+                lapse_rate_m = -7.0
+            try:
+                ref_density = oroDict["ref_density"]
+            except KeyError:
+                ref_density = 7.4e-3
+            self.oro_cw = ref_density * lapse_rate_m / lapse_rate
+            try:
+                self.oro_conv_time = oroDict["conv_time"]
+            except KeyError:
+                self.oro_conv_time = 1000.0
+            try:
+                self.oro_fall_time = oroDict["fall_time"]
+            except KeyError:
+                self.oro_fall_time = 1000.0
+            try:
+                self.oro_precip_base = oroDict["precip_base"]
+            except KeyError:
+                self.oro_precip_base = 7.0
+            try:
+                self.oro_precip_min = oroDict["precip_min"]
+            except KeyError:
+                self.oro_precip_min = 0.01
+            try:
+                self.rainfall_frequency = oroDict["rainfall_frequency"]
+            except KeyError:
+                self.rainfall_frequency = 1.0
+
+        except KeyError:
+            self.oroOn = False
+
+        return
+
     def _readIce(self):
         """
         Parse ice flow variables.
