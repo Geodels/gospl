@@ -1275,7 +1275,7 @@ class ReadYaml(object):
             try:
                 self.rainfall_frequency = oroDict["rainfall_frequency"]
             except KeyError:
-                self.rainfall_frequency = 1.0
+                self.rainfall_frequency = 1
 
         except KeyError:
             self.oroOn = False
