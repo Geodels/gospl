@@ -37,6 +37,9 @@ class GridProcess(object):
 
         if self.flexOn:
             self.localFlex = np.zeros(self.lpoints)
+            self.boundflex = self.boundCond.replace('0','2')
+            self.boundflex = self.boundflex.replace('1','0')
+            self.boundflex = self.boundflex.replace('2','1')
         if self.oroOn:
             self.oroEPS = np.finfo(float).eps
 
@@ -124,10 +127,9 @@ class GridProcess(object):
                 regNewZ[self.regOnIDs] = newZ[self.regIDs[self.regOnIDs,0]]
             regNewZ = regNewZ.reshape(self.reg_ny,self.reg_nx) 
 
-            # Force boundary to be all reflective
             newh = flexure(regNewZ,regOldZ,self.reg_ny,self.reg_nx,
                            self.reg_yl,self.reg_xl,self.flex_rhos,
-                           self.flex_rhoa,self.flex_eet,0) #int(self.boundCond))
+                           self.flex_rhoa,self.flex_eet,int(self.boundflex))
             rflexTec = (newh - regNewZ).ravel()
 
             # Interpolate back to goSPL mesh
