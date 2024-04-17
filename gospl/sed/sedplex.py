@@ -202,7 +202,7 @@ class SEDMesh(object):
 
         """
 
-        # Difference between intial volume and remaining one
+        # Difference between initial volume and remaining one
         depo = self.pitParams[:, 0] - self.pitVol
         depo[depo < 0] = 0.0
         with np.errstate(divide="ignore", over="ignore"):
@@ -255,7 +255,7 @@ class SEDMesh(object):
         self.sedFilled = hl.copy()
         self._distributeSediment(hl)
         self._updateSinks(hl)
-
+        
         return
 
     def getHillslope(self):

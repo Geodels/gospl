@@ -252,7 +252,6 @@ class SEAMesh(object):
         self.vSedLocal.copy(result=self.QsL)
         sedFlux = self.QsL.getArray().copy() 
         sedFlux[np.invert(self.sinkIDs)] = 0.0
-
         flxStp = sedFlux/self.diffNb
         for k in range(self.diffNb):
             # Compute marine directions and fluxes

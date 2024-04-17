@@ -643,7 +643,7 @@ subroutine donorslist(nrcv, inIDs, rcvs, donors, nb)
   integer, intent(in) :: nrcv
   integer, intent(in) :: inIDs(nb)
   integer, intent(in) :: rcvs(nb,nrcv)
-  integer, intent(out) :: donors(nb,8)
+  integer, intent(out) :: donors(nb,12)
 
   integer :: k, i, p
   integer :: nbdonors(nb)
@@ -657,7 +657,9 @@ subroutine donorslist(nrcv, inIDs, rcvs, donors, nb)
       i = rcvs(k,p) + 1
       if(i .ne. k .and. i > 0)then
         nbdonors(i) = nbdonors(i) + 1
-        donors(i,nbdonors(i)) = k - 1
+        if(nbdonors(i) <= 12)then
+          donors(i,nbdonors(i)) = k - 1
+        endif
       endif
     enddo 
   enddo
@@ -676,7 +678,7 @@ subroutine donorsmax(dat, donors, valmax, nb)
   integer :: nb 
 
   double precision, intent(in) :: dat(nb)
-  integer, intent(in) :: donors(nb,8)
+  integer, intent(in) :: donors(nb,12)
   double precision, intent(out) :: valmax(nb)
 
   integer :: k, i, p
@@ -684,7 +686,7 @@ subroutine donorsmax(dat, donors, valmax, nb)
   valmax = -1.e8 
 
   do k = 1, nb
-    do p = 1, 8
+    do p = 1, 12
       i = donors(k,p) + 1
       if(i > 0)then
         valmax(k) = max(dat(i),valmax(k))

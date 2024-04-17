@@ -53,13 +53,13 @@ python module _fortran
             integer intent(in) :: nrcv
             integer dimension(nb),intent(in) :: inids
             integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcvs
-            integer dimension(nb,8),intent(out),depend(nb) :: donors
+            integer dimension(nb,12),intent(out),depend(nb) :: donors
             integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
         end subroutine donorslist
 
         subroutine donorsmax(dat,donors,valmax,nb)
             double precision dimension(nb),intent(in) :: dat
-            integer dimension(nb,8),intent(in),depend(nb) :: donors
+            integer dimension(nb,12),intent(in),depend(nb) :: donors
             double precision dimension(nb),intent(out),depend(nb) :: valmax
             integer, optional,check(len(dat)>=nb),depend(dat) :: nb=len(dat)
         end subroutine donorsmax

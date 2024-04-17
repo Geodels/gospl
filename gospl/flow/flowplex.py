@@ -543,14 +543,12 @@ class FAMesh(object):
 
         # Get donors list based on elevation
         donors = donorslist(flowdir, self.inIDs, self.donRcvs)
-        
         while not equal and niter < 10000:
 
             Eb = -self.EbLocal.getArray().copy()*self.dt
             elev = (Eb + h).copy()
             maxh = donorsmax(elev,donors)
             maxh[maxh==-1.e8] = elev[maxh==-1.e8]
-            
             self.tmpL.setArray(maxh)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -597,6 +595,7 @@ class FAMesh(object):
         Once the erosion rate solution has been obtained, local sediment flux depends on upstream fluxes, local eroded flux and local deposition flux. We assume that local deposition depends on the user-defined forced deposition value (:math:`fDep`), the local water flux and the cell area. Here again the sediment flux is determined implicitly and corresponding deposition flux are calculated subsequently once the local total flux is known.      
         """
 
+        t0 = process_time()
         hOldArray = self.hLocal.getArray().copy()
         self.oldH = hOldArray.copy()
         hOldArray[self.seaID] = self.sealevel
@@ -729,7 +728,6 @@ class FAMesh(object):
 
             # Destroy temporary arrays
             dMat.destroy()
-
             # Extract local sediment deposition fluxes
             self.dm.globalToLocal(self.tmp1, self.tmpL)
             QsD = self.tmpL.getArray()*fDep
@@ -737,12 +735,17 @@ class FAMesh(object):
             self.dm.localToGlobal(self.tmpL, self.tmp)
 
         # Define erosion rate (positive for incision)
+        t1 = process_time()
         E = -self.tmp.getArray().copy()
         E = np.divide(E, self.dt)
         self.Eb.setArray(E)
         self.dm.globalToLocal(self.Eb, self.EbLocal)
         E = self.EbLocal.getArray().copy()
-
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define erosion rate (%0.02f seconds)" % (process_time() - t1),
+                flush=True,
+            )
         if self.flatModel:
             E[self.idBorders] = 0.0
         E[self.lsink] = 0.0
@@ -756,6 +759,12 @@ class FAMesh(object):
         if self.memclear:
             del E, PA, Kbr, QsL, QsD, fDep
             gc.collect()
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Finalise erosion deposition rates (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
 
         return
     
