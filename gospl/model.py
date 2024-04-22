@@ -190,12 +190,9 @@ class Model(
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 
-            # Create new stratal layer
             if self.tNow >= self.saveStrat:
                 # Stratigraphic layer porosity and thicknesses under compaction
                 _STRAMesh.getCompaction(self)
-                self.stratStep += 1
-                self.saveStrat += self.strat
 
             # Apply flexural isostasy
             if self.flexOn:
@@ -207,6 +204,11 @@ class Model(
 
             # Advance time
             self.tNow += self.dt
+
+            # Create new stratal layer
+            if self.tNow >= self.saveStrat:
+                self.stratStep += 1
+                self.saveStrat += self.strat
 
             if MPIrank == 0:
                 print(

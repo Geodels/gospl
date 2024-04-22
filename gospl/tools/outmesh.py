@@ -144,6 +144,7 @@ class WriteMesh(object):
             + str(MPIrank)
             + ".h5"
         )
+
         with h5py.File(h5file, "w") as f:
 
             # Write stratal layers elevations per layers
