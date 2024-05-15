@@ -314,7 +314,7 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["uplift"][:, 0] = self.uplift
-            if self.paleoMov > 0 and self.tNow > self.tStart:
+            if self.paleoZ is not None and self.tNow > self.tStart:
                 f.create_dataset(
                     "paleotec",
                     shape=(self.lpoints, 1),
@@ -577,7 +577,7 @@ class WriteMesh(object):
                     'Dimensions="%d 1">%s:/uplift</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
-            if self.paleoMov > 0 and self.tNow > self.tStart:
+            if self.paleoZ is not None and self.tNow > self.tStart:
                 f.write(
                     '         <Attribute Type="Scalar" Center="Node" Name="paleoTec">\n'
                 )

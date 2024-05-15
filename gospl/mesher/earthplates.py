@@ -91,8 +91,14 @@ class EarthPlate(object):
             )
 
         # Get relevant files information
+        t0 = process_time()
         self._readAdvectionData()
-
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Read advection data (%0.02f seconds)"
+                % (process_time() - t0),
+                flush=True,
+            )
         # For clustered points get heights of nearest neighbours
         t0 = process_time()
         idCluster = self.isCluster > 0
@@ -300,7 +306,6 @@ class EarthPlate(object):
         # Read and load the file
         tplate = self.platedata.iloc[self.paleoMov, 2]
         mdata = np.load(tplate)
-
         # If tectonic conditions exist
         if "t" in list(mdata.keys()):
             self.uplift = mdata["t"][self.locIDs]
