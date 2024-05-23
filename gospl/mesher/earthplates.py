@@ -39,8 +39,14 @@ class EarthPlate(object):
 
         fplate = self.platedata.iloc[self.plateMov, 1]
         mdata = np.load(fplate)
-        self.isCluster = mdata["clust"]
-        self.clustNgbhs = mdata["cngbh"]
+        if "clust" in list(mdata.keys()):
+            self.isCluster = mdata["clust"]
+        else:
+            self.isCluster = None
+        if "cngbh" in list(mdata.keys()):
+            self.clustNgbhs = mdata["cngbh"]
+        else:
+            self.clustNgbhs = None
         self.distNbghs = mdata["dngbh"]
         self.idNbghs = mdata["ingbh"]
         del mdata
@@ -99,19 +105,20 @@ class EarthPlate(object):
                 % (process_time() - t0),
                 flush=True,
             )
-        # For clustered points get heights of nearest neighbours
         t0 = process_time()
-        idCluster = self.isCluster > 0
-        tmp = gZ[idCluster]
-        tmpngb = tmp[self.clustNgbhs]
-        # Set new heights to the maximum height of nearest neighbours
-        gZ[idCluster] = np.max(tmpngb, axis=1)
+        if self.clustNgbhs is not None:
+            # For clustered points get heights of nearest neighbours
+            idCluster = self.isCluster > 0
+            tmp = gZ[idCluster]
+            tmpngb = tmp[self.clustNgbhs]
+            # Set new heights to the maximum height of nearest neighbours
+            gZ[idCluster] = np.max(tmpngb, axis=1)
 
-        # For clustered points get erosion/deposition of nearest neighbours
-        tmp = gED[idCluster]
-        tmpngb = tmp[self.clustNgbhs]
-        # Set new erosion deposition to the maximum values of nearest neighbours
-        gED[idCluster] = np.min(tmpngb, axis=1)
+            # For clustered points get erosion/deposition of nearest neighbours
+            tmp = gED[idCluster]
+            tmpngb = tmp[self.clustNgbhs]
+            # Set new erosion deposition to the maximum values of nearest neighbours
+            gED[idCluster] = np.min(tmpngb, axis=1)
 
         # Update elevation and erosion/deposition
         if self.interp == 1:
