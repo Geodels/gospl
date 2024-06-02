@@ -374,6 +374,10 @@ class GlobalFlex(object):
         if regrid>1:
             xrutm = xrutm.interp(x=xcoord, y=ycoord, method="nearest")
             xrutm.flex.rio.write_nodata(np.nan, inplace=True)
+            xrutm.elevation.rio.write_nodata(np.nan, inplace=True)
+            xrutm.erodep.rio.write_nodata(np.nan, inplace=True)
+            xrutm.shiftz.rio.write_nodata(np.nan, inplace=True)
+            xrutm.shifted.rio.write_nodata(np.nan, inplace=True)
             return xrutm.rio.interpolate_na() 
 
         return xrutm
