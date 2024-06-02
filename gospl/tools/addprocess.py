@@ -32,7 +32,6 @@ class GridProcess(object):
         """
 
         self.flexIDs = None
-        self.localFlex = None
         self.flex = None
 
         if self.flexOn:

@@ -12,6 +12,7 @@ if "READTHEDOCS" not in os.environ:
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
     from .tools import GridProcess as _GridProcess
+    from .tools import GlobalFlex as _GlobalFlex
     from .mesher import EarthPlate as _EarthPlate
     from .tools import WriteMesh as _WriteMesh
 
@@ -57,6 +58,10 @@ else:
         def __init__(self):
             pass
 
+    class _GlobalFlex(object):
+        def __init__(self):
+            pass
+
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
@@ -65,6 +70,7 @@ class Model(
     _WriteMesh,
     _UnstMesh,
     _GridProcess,
+    _GlobalFlex,
     _EarthPlate,
     _FAMesh,
     _PITFill,
@@ -105,12 +111,6 @@ class Model(
         # Define unstructured mesh
         _UnstMesh.__init__(self)
 
-        # Define grid processes
-        _GridProcess.__init__(self)
-
-        # Initialise earth plate
-        _EarthPlate.__init__(self)
-
         # Initialise output mesh
         _WriteMesh.__init__(self)
 
@@ -126,12 +126,21 @@ class Model(
         # Sediment initialisation
         _SEAMesh.__init__(self, *args, **kwargs)
 
+        # Get external forces
+        _UnstMesh.applyForces(self)
+
+        # Define grid processes
+        _GridProcess.__init__(self)
+
+        # Define global flexural isostasy
+        _GlobalFlex.__init__(self)
+
+        # Initialise earth plate
+        _EarthPlate.__init__(self)
+
         # Check if simulations just restarted
         if self.rStep > 0:
             _WriteMesh.readData(self)
-
-        # Get external forces
-        _UnstMesh.applyForces(self)
 
         if not self.fast:
             # Compute flow accumulation
@@ -159,7 +168,7 @@ class Model(
          - applies user-defined tectonics forcing (horizontal and vertical displacements)
 
         """
-
+        # _GlobalFlex.globalFlex(self)
         while self.tNow <= self.tEnd:
             tstep = process_time()
 
@@ -204,6 +213,9 @@ class Model(
 
             # Advance time
             self.tNow += self.dt
+
+            if self.tNow >= self.nextFlex:
+                _GlobalFlex.globalFlexIso(self)
 
             # Create new stratal layer
             if self.tNow >= self.saveStrat:

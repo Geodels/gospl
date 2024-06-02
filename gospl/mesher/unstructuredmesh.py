@@ -444,7 +444,7 @@ class UnstMesh(object):
         gc.collect()
 
         # Map longitude/latitude coordinates
-        self._xyz2lonlat()
+        # self._xyz2lonlat()
 
         # Build stratigraphic data if any
         if self.stratNb > 0:

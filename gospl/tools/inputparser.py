@@ -63,6 +63,7 @@ class ReadYaml(object):
         self._readCompaction()
         self._readIce()
         self._readFlex()
+        self._readGFlex()
         self._readOrography()
         self._readOut()
 
@@ -1192,6 +1193,65 @@ class ReadYaml(object):
                 self.flex_rhos = 2400.0
         except KeyError:
             self.flexOn = False
+
+        return
+    
+    def _readGFlex(self):
+        """
+        Parse global flexural isostasy variables.
+        """
+
+        try:
+            flexGDict = self.input["gflex"]
+            self.gflexOn = True
+            try:
+                interpf = flexGDict["interS"]
+            except KeyError:
+                print(
+                    "Key 'interS' is required and is missing in the 'gflex' declaration!",
+                    flush=True,
+                )
+                raise KeyError("Compressed numpy dataset definition is not defined in gflex declaration!")
+            self.Interp = interpf + ".npz"
+            try:
+                with open(self.Interp) as meshfile:
+                    meshfile.close()
+            except IOError:
+                print("Unable to open numpy dataset: {}".format(self.Interp), flush=True)
+                raise IOError("The numpy dataset is not found...")
+            
+            try:
+                interpf2 = flexGDict["interR"]
+            except KeyError:
+                print(
+                    "Key 'interR' is required and is missing in the 'gflex' declaration!",
+                    flush=True,
+                )
+                raise KeyError("Compressed numpy dataset definition is not defined in gflex declaration!")
+            self.rInterp = interpf2 + ".npz"
+            try:
+                with open(self.rInterp) as meshfile:
+                    meshfile.close()
+            except IOError:
+                print("Unable to open numpy dataset: {}".format(self.interR), flush=True)
+                raise IOError("The numpy dataset is not found...")
+            
+            try:
+                self.gflexproc = flexGDict["procs"]
+            except KeyError:
+                self.gflexproc = 10
+
+            try:
+                self.gflexStep = flexGDict["step"]
+            except KeyError:
+                print(
+                    "Key 'step' is required and is missing in the 'gflex' declaration!",
+                    flush=True,
+                )
+                raise KeyError("Simulation global flexural timestep needs to be declared.")
+        except KeyError:
+            self.gflexStep = None
+            self.gflexOn = False
 
         return
     
