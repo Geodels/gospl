@@ -261,7 +261,6 @@ class FAMesh(object):
                 & (sum_weight == 0.0)
             )
             ids = ids.nonzero()[0]
-            # self.rcvID[ids, :] = np.tile(ids, (8, 1)).T
             self.rcvID[ids, :] = np.tile(ids, (self.flowDir, 1)).T
             self.rcvID[ids, 0] = self.flatDirs[ids]
             self.wghtVal[ids, :] = 0.0
@@ -543,10 +542,12 @@ class FAMesh(object):
 
         # Get donors list based on elevation
         donors = donorslist(flowdir, self.inIDs, self.donRcvs)
+        topIDs = np.where(np.max(donors, axis=1)==-1)[0]
         while not equal and niter < 10000:
 
             Eb = -self.EbLocal.getArray().copy()*self.dt
             elev = (Eb + h).copy()
+            elev[topIDs] = h[topIDs]
             maxh = donorsmax(elev,donors)
             maxh[maxh==-1.e8] = elev[maxh==-1.e8]
             self.tmpL.setArray(maxh)
@@ -725,7 +726,6 @@ class FAMesh(object):
                     "Solve sediment fluxes (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
-
             # Destroy temporary arrays
             dMat.destroy()
             # Extract local sediment deposition fluxes
@@ -759,7 +759,7 @@ class FAMesh(object):
         if self.memclear:
             del E, PA, Kbr, QsL, QsD, fDep
             gc.collect()
-
+        
         if MPIrank == 0 and self.verbose:
             print(
                 "Finalise erosion deposition rates (%0.02f seconds)" % (process_time() - t0),

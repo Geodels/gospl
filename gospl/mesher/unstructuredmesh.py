@@ -430,6 +430,8 @@ class UnstMesh(object):
         self.areaLocal = self.hLocal.duplicate()
         self.areaLocal.setArray(self.larea)
         self.dm.localToGlobal(self.areaLocal, self.areaGlobal)
+        self.dm.globalToLocal(self.areaGlobal, self.areaLocal)
+        self.larea = self.areaLocal.getArray().copy()
 
         # Forcing event number
         self.bG = self.hGlobal.duplicate()

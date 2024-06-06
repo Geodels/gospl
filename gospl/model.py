@@ -126,11 +126,11 @@ class Model(
         # Sediment initialisation
         _SEAMesh.__init__(self, *args, **kwargs)
 
-        # Get external forces
-        _UnstMesh.applyForces(self)
-
         # Define grid processes
         _GridProcess.__init__(self)
+
+        # Get external forces
+        _UnstMesh.applyForces(self)
 
         # Define global flexural isostasy
         _GlobalFlex.__init__(self)

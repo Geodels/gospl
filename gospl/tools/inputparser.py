@@ -1180,6 +1180,10 @@ class ReadYaml(object):
             flexDict = self.input["flexure"]
             self.flexOn = True
             try:
+                self.reg_dx = flexDict["regdx"]
+            except KeyError:
+                raise ValueError("Flexure definition: regular grid spacing is required.")
+            try:
                 self.flex_rhoa = flexDict["rhoa"]
             except KeyError:
                 self.flex_rhoa = 3250.0
@@ -1276,7 +1280,11 @@ class ReadYaml(object):
         try:
             oroDict = self.input["orography"]
             self.oroOn = True
-
+            
+            try:
+                self.reg_dx = oroDict["regdx"]
+            except KeyError:
+                raise ValueError("Orographic definition: regular grid spacing is required.")
             try:
                 self.wind_latitude = oroDict["latitude"]
                 if self.wind_latitude > 90 or self.wind_latitude < -90:

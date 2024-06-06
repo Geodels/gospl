@@ -56,19 +56,19 @@ class GridProcess(object):
         xmax = self.mCoords[:,0].max()
         ymin = self.mCoords[:,1].min()
         ymax = self.mCoords[:,1].max()
-        dx = abs(self.mCoords[1,0] - self.mCoords[0,0])
-        if dx == 0:
-            dx = abs(self.mCoords[1,1] - self.mCoords[0,1])
-        self.reg_xl = xmax - xmin
-        self.reg_yl = ymax - ymin
-        self.reg_dx = dx
-        self.reg_nx = int(self.reg_xl/dx+1)
-        self.reg_ny = int(self.reg_yl/dx+1)
         
-        newx = np.arange(xmin, xmax+dx, dx)
-        newy = np.arange(ymin, ymax+dx, dx)
+        newx = np.arange(xmin, xmax+self.reg_dx, self.reg_dx)
+        newy = np.arange(ymin, ymax+self.reg_dx, self.reg_dx)
         rx, ry = np.meshgrid(newx,newy)
         rPts = np.stack((rx.ravel(), ry.ravel())).T
+        xmin,xmax = newx[0],newx[-1]
+        ymin,ymax = newy[0],newy[-1]
+        self.reg_xl = xmax - xmin
+        self.reg_yl = ymax - ymin
+
+        self.reg_nx = int(self.reg_xl/self.reg_dx+1)
+        self.reg_ny = int(self.reg_yl/self.reg_dx+1)
+
         
         treeT = spatial.cKDTree(self.mCoords[:,:2], leafsize=10)
         distances, self.regIDs = treeT.query(rPts, k=3)
