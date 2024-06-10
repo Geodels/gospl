@@ -179,7 +179,7 @@ class FAMesh(object):
 
         return vector2
     
-    def matrixFlow(self, flowdir):
+    def matrixFlow(self, flowdir, dep=None):
         """
         This function defines the flow direction matrices.
 
@@ -198,7 +198,10 @@ class FAMesh(object):
         flowMat = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
-        wght = self.wghtVal
+        if dep is None:
+            wght = self.wghtVal
+        else:
+            wght = np.multiply(self.wghtVal,dep.reshape((len(dep),1)))
         rcv = self.rcvID
         for k in range(0, flowdir):
 
@@ -222,7 +225,10 @@ class FAMesh(object):
             gc.collect()
 
         # Store flow accumulation matrix
-        self.fMat = flowMat.transpose().copy()
+        if dep is None:
+            self.fMat = flowMat.transpose().copy()
+        else:
+            self.fDepMat = flowMat.transpose().copy()
 
         flowMat.destroy()
 
@@ -622,9 +628,13 @@ class FAMesh(object):
         # Dimensionless depositional coefficient
         if self.fDepa > 0:
             fDep = np.divide(self.fDepa*self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
-            dMat = self._matrix_build_diag(fDep)
-            dMat += self.fMat
-
+            if self.dmthd == 1:
+                fDep[fDep>0.99] = 0.99
+                self.matrixFlow(self.flowDir, 1.-fDep)
+            else:
+                dMat = self._matrix_build_diag(fDep)
+                dMat += self.fMat
+    
         # Initialise matrices...
         eMat = self.iMat.copy()
         wght = self.wghtVali.copy()
@@ -720,17 +730,26 @@ class FAMesh(object):
             QsL[QsL<1.e-8] = 0.
             self.tmpL.setArray(QsL)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self._solve_KSP(False, dMat, self.tmp, self.tmp1)
+            if self.dmthd == 1:
+                self._solve_KSP(False, self.fDepMat, self.tmp, self.tmp1)
+                self.fDepMat.destroy()
+            else:
+                self._solve_KSP(False, dMat, self.tmp, self.tmp1)
+                dMat.destroy()
             if MPIrank == 0 and self.verbose:
                 print(
                     "Solve sediment fluxes (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
-            # Destroy temporary arrays
-            dMat.destroy()
+            
             # Extract local sediment deposition fluxes
             self.dm.globalToLocal(self.tmp1, self.tmpL)
-            QsD = self.tmpL.getArray()*fDep
+            if self.dmthd == 1:
+                QsT = self.tmpL.getArray()
+                scale = np.divide(fDep, 1.0-fDep, out=np.zeros_like(fDep), where=fDep != 0)
+                QsD = (QsT-QsL)*scale
+            else:
+                QsD = self.tmpL.getArray()*fDep
             self.tmpL.setArray((QsD-QsL)*self.dt/self.larea)
             self.dm.localToGlobal(self.tmpL, self.tmp)
 

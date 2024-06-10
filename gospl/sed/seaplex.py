@@ -168,24 +168,36 @@ class SEAMesh(object):
         # Dimensionless depositional coefficient
         PA = self.tmpL.getArray().copy()
         fDep = np.divide(self.fDepm*self.larea, PA, out=np.zeros_like(PA), where=PA > 1.e-6)
-        dMat = self._matrix_build_diag(fDep)
-        dMat += self.fMat
+        if self.dmthd == 1:
+            fDep[fDep>0.99] = 0.99
+            self.matrixFlow(8, 1.-fDep)
+        else:
+            dMat = self._matrix_build_diag(fDep)
+            dMat += self.fMat
 
         # Implicit sediment fluxes combining upstream flux and deposition
         self.tmpL.setArray(sedflux)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
-        self._solve_KSP(True, dMat, self.tmp1, self.tmp)
+        if self.dmthd == 1:
+            self._solve_KSP(False, self.fDepMat, self.tmp1, self.tmp)
+            self.fDepMat.destroy()
+        else:
+            self._solve_KSP(True, dMat, self.tmp1, self.tmp)
+            dMat.destroy()
 
         # Destroy temporary arrays
-        dMat.destroy()
 
         if self.memclear:
-            del PA, fDep, FAL 
+            del PA, FAL 
             gc.collect()
 
         # Extract local sediment deposition thickness
         self.dm.globalToLocal(self.tmp, self.tmpL)
-        sedDep = self.tmpL.getArray()*fDep
+        if self.dmthd == 1:
+            scale = np.divide(fDep, 1.0-fDep, out=np.zeros_like(fDep), where=fDep != 0)
+            sedDep = self.tmpL.getArray()*scale
+        else:
+            sedDep = self.tmpL.getArray()*fDep
         if self.flatModel:
             sedDep[self.idBorders] = 0.0
         self.EbLocal.setArray(-sedDep/self.larea)
@@ -229,7 +241,7 @@ class SEAMesh(object):
             self.dm.localToGlobal(self.tmpL, self.tmp)
 
         if self.memclear:
-            del updateH, Eb, hl, clinoH
+            del updateH, Eb, hl, clinoH, fDep
             gc.collect()
 
         return 
