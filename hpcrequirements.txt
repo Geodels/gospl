@@ -6,7 +6,7 @@ mpi4py==3.0.0
 petsc4py==3.11.0
 h5py==2.9.0
 pandas==1.0.3
-ruamel.yaml==0.16.5
+ruamel.yaml==0.18.6
 meshio==3.3.1
 meshplex==0.11.6
 pre-commit>=2.2.0
