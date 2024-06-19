@@ -3,7 +3,7 @@ import sys
 import petsc4py
 import numpy as np
 import pandas as pd
-import ruamel.yaml as YAML
+from ruamel.yaml import YAML
 
 from operator import itemgetter
 from scipy.interpolate import interp1d
@@ -41,7 +41,7 @@ class ReadYaml(object):
 
         # Open YAML file
         with open(filename, "r") as finput:
-            yaml = YAML(typ="unsafe", pure=True)
+            yaml = YAML(typ='rt')
             self.input = yaml.load(finput)
 
         if MPIrank == 0 and "name" in self.input.keys() and self.verbose:
@@ -57,21 +57,15 @@ class ReadYaml(object):
         self._readHillslope()
         self._readSealevel()
         self._readTectonic()
+        self._readErofactor()
         self._readPlate()
         self._readRain()
         self._readCompaction()
-
-        if self.raindata is not None:
-            if self.rStep > 0:
-                self.raindata = self.raindata[
-                    self.raindata["start"] >= self.tStart + self.rStep * self.tout
-                ]
-                self.raindata.reset_index(drop=True, inplace=True)
-                self.rainNb = len(self.raindata)
-
-        self._readBackwardPaleo()
+        self._readIce()
+        self._readFlex()
+        self._readGFlex()
+        self._readOrography()
         self._readOut()
-        self._readForcePaleo()
 
         self.radius = 6378137.0
         self.gravity = 9.81
@@ -81,6 +75,34 @@ class ReadYaml(object):
             self.saveStrat = self.tNow + self.strat
         else:
             self.saveStrat = self.tEnd + self.tout
+
+        # In case of restarting simulation
+        if self.rStep > 0:
+            rNow = self.tStart + self.rStep * self.tout
+
+            if self.raindata is not None:
+                for k in range(len(self.raindata)):
+                    if self.raindata["start"][k] < rNow and k < len(self.raindata) - 1:
+                        self.raindata.loc[k, ["start"]] = rNow - self.tout
+                    elif (
+                        self.raindata["start"][k] < rNow and k == len(self.raindata) - 1
+                    ):
+                        self.raindata.loc[k, ["start"]] = rNow
+                self.raindata = self.raindata[self.raindata["start"] >= rNow]
+                self.raindata.reset_index(drop=True, inplace=True)
+                self.rainNb = len(self.raindata)
+
+            if self.sedfacdata is not None:
+                for k in range(len(self.sedfacdata)):
+                    if self.sedfacdata["start"][k] < rNow and k < len(self.sedfacdata) - 1:
+                        self.sedfacdata.loc[k, ["start"]] = rNow - self.tout
+                    elif (
+                        self.sedfacdata["start"][k] < rNow and k == len(self.sedfacdata) - 1
+                    ):
+                        self.sedfacdata.loc[k, ["start"]] = rNow
+                self.sedfacdata = self.sedfacdata[self.sedfacdata["start"] >= rNow]
+                self.sedfacdata.reset_index(drop=True, inplace=True)
+                self.sedfactNb = len(self.sedfacdata)
 
         return
 
@@ -105,7 +127,12 @@ class ReadYaml(object):
         try:
             self.flowExp = domainDict["flowexp"]
         except KeyError:
-            self.flowExp = 0.42
+            self.flowExp = 0.5
+
+        try:
+            self.boundCond = domainDict["bc"]
+        except KeyError:
+            self.boundCond = '1111'
 
         try:
             meshFile = domainDict["npdata"]
@@ -132,17 +159,14 @@ class ReadYaml(object):
             self.fast = False
 
         try:
-            self.backward = domainDict["backward"]
-        except KeyError:
-            self.backward = False
-
-        try:
             self.interp = domainDict["interp"]
         except KeyError:
-            self.interp = 1
+            self.interp = 3
 
-        # if self.interp > 1:
-        #     self.interp = 3
+        try:
+            self.seaDepo = domainDict["seadepo"]
+        except KeyError:
+            self.seaDepo = True
 
         self._extraDomain()
 
@@ -185,6 +209,11 @@ class ReadYaml(object):
                 strataFile.close()
         except KeyError:
             self.strataFile = None
+
+        try:
+            self.fitMarine = domainDict["fitmarine"]
+        except KeyError:
+            self.fitMarine = False
 
         return
 
@@ -331,17 +360,37 @@ class ReadYaml(object):
                 self.K = splDict["K"]
             except KeyError:
                 print(
-                    "When using the Surface Process Model definition of coefficient Kb is required.",
+                    "When using the Surface Process Model definition of coefficient K is required.",
                     flush=True,
                 )
-                raise ValueError("Surface Process Model: Kb coefficient not found.")
+                raise ValueError("Surface Process Model: K coefficient not found.")
             try:
                 self.coeffd = splDict["d"]
             except KeyError:
                 self.coeffd = 0.0
+            try:
+                self.fDepa = splDict["fDa"]
+            except KeyError:
+                self.fDepa = 0.0
+            try:
+                self.fDepm = splDict["fDm"]
+            except KeyError:
+                self.fDepm = 0.0
+            try:
+                self.spl_m = splDict["m"]
+            except KeyError:
+                self.spl_m = 0.5
+            try:
+                self.dmthd = splDict["mthd"]
+            except KeyError:
+                self.dmthd = 1
         except KeyError:
             self.K = 1.0e-12
             self.coeffd = 0.0
+            self.fDepa = 0.0
+            self.fDepm = 30.0
+            self.spl_m = 0.5
+            self.dmthd = 1
 
         return
 
@@ -373,19 +422,6 @@ class ReadYaml(object):
                 raise ValueError(
                     "Hillslope: Cd coefficient for marine environment not found."
                 )
-
-            try:
-                self.sedimentK = hillDict["nlK"]
-            except KeyError:
-                self.sedimentK = 1.0e3
-            try:
-                self.sedimentKf = hillDict["nlKf"]
-            except KeyError:
-                self.sedimentKf = 3.0e3
-            try:
-                self.sedimentKw = hillDict["nlKw"]
-            except KeyError:
-                self.sedimentKw = 5.0e3
             try:
                 self.oFill = hillDict["oFill"]
             except KeyError:
@@ -395,9 +431,6 @@ class ReadYaml(object):
             self.Cda = 0.0
             self.Cdm = 0.0
             self.sedimentK = 1.0e3
-            self.sedimentKf = 3.0e3
-            self.sedimentKw = 5.0e3
-            self.oFill = -6000.0
 
         self._extraHillslope()
 
@@ -412,37 +445,22 @@ class ReadYaml(object):
             hillDict = self.input["diffusion"]
 
             try:
-                self.cexp = hillDict["nlf"]
-            except KeyError:
-                self.cexp = 0.001
-            try:
-                self.marineNl = hillDict["nldep"]
-            except KeyError:
-                self.marineNl = False
-            try:
-                self.smthK = hillDict["smthS"]
-            except KeyError:
-                self.smthK = 1.0e3
-            try:
-                self.smthD = hillDict["smthD"]
+                self.smthD = hillDict["smthDep"]
             except KeyError:
                 self.smthD = 1.0e3
-            try:
-                self.offset = hillDict["offset"]
-            except KeyError:
-                self.offset = 400.0
             try:
                 self.clinSlp = hillDict["clinSlp"]
             except KeyError:
                 self.clinSlp = 1.0e-6
+            try:
+                self.diffNb = hillDict["diffNb"]
+            except KeyError:
+                self.diffNb = 1
 
         except KeyError:
-            self.cexp = 0.001
-            self.marineNl = False
-            self.smthK = 1.0e3
             self.smthD = 1.0e3
-            self.offset = 400.0
             self.clinSlp = 1.0e-7
+            self.diffNb = 1
 
         self.clinSlp = max(1.0e-7, self.clinSlp)
 
@@ -672,17 +690,172 @@ class ReadYaml(object):
                     ignore_index=True,
                 )
             self.tecdata = tecdata[tecdata["start"] >= self.tStart]
+
             if self.rStep > 0:
-                self.tecdata = tecdata[
-                    tecdata["start"] >= self.tStart + self.rStep * self.tout
-                ]
-            self.tecdata.reset_index(drop=True, inplace=True)
+                rNow = self.tStart + self.rStep * self.tout
+                for k in range(len(self.tecdata)):
+                    if self.tecdata["start"][k] < rNow and k < len(self.tecdata) - 1:
+                        self.tecdata.loc[k, ["start"]] = rNow - self.tout
+                    elif self.tecdata["start"][k] < rNow and k == len(self.tecdata) - 1:
+                        self.tecdata.loc[k, ["start"]] = rNow
+                self.tecdata = self.tecdata[self.tecdata["start"] >= rNow]
+                self.tecdata.reset_index(drop=True, inplace=True)
 
         except KeyError:
             self.tecdata = None
 
         return
 
+    def _defineErofactor(self, k, sStart, sMap, sUniform, sedfacdata):
+        """
+        Define sediment surface erodibility factor conditions.
+
+        :arg k: erodibility factor map number
+        :arg sStart: erodibility factor map start time
+        :arg sMap: erodibility factor map file event
+        :arg sUniform: erodibility factor uniform value event
+        :arg sedfacdata: pandas dataframe storing each erodibility factor map
+        :return: appended sedfacdata
+        """
+
+        if sMap is None and sUniform is None:
+            print(
+                "For each erodibility factor map a factor value (uniform) or a factor \
+                grid (map) is required.",
+                flush=True,
+            )
+            raise ValueError(
+                "Sediment erodibility factor {} has no value (uniform) or a \
+                map (map).".format(
+                    k
+                )
+            )
+
+        tmpErof = []
+        if sMap is None:
+            tmpErof.insert(
+                0,
+                {"start": sStart, "rUni": sUniform, "sMap": None, "sKey": None},
+            )
+        else:
+            tmpErof.insert(
+                0,
+                {
+                    "start": sStart,
+                    "sUni": None,
+                    "sMap": sMap[0] + ".npz",
+                    "sKey": sMap[1],
+                },
+            )
+
+        if k == 0:
+            sedfacdata = pd.DataFrame(tmpErof, columns=["start", "sUni", "sMap", "sKey"])
+        else:
+            sedfacdata = pd.concat(
+                [
+                    sedfacdata,
+                    pd.DataFrame(tmpErof, columns=["start", "sUni", "sMap", "sKey"]),
+                ],
+                ignore_index=True,
+            )
+
+        return sedfacdata
+    
+    def _readErofactor(self):
+        """
+        Parse erodibility factor based on surface geology.
+        """
+
+        sedfacdata = None
+        try:
+            sedDict = self.input["sedfactor"]
+            sedSort = sorted(sedDict, key=itemgetter("start"))
+            for k in range(len(sedSort)):
+                sStart = None
+                sUniform = None
+                sMap = None
+                try:
+                    sStart = sedSort[k]["start"]
+                except Exception:
+                    print(
+                        "For each sediment factor a start time is required.", flush=True
+                    )
+                    raise ValueError(
+                        "Sediment factor map {} has no parameter start".format(k)
+                    )
+                try:
+                    sUniform = sedSort[k]["uniform"]
+                except Exception:
+                    pass
+                try:
+                    sMap = sedSort[k]["map"]
+                except Exception:
+                    pass
+
+                if sMap is not None:
+                    try:
+                        with open(sMap[0] + ".npz") as sedfacfile:
+                            sedfacfile.close()
+
+                    except IOError:
+                        print(
+                            "Unable to open sediment factor file: {}.npz".format(sMap[0]),
+                            flush=True,
+                        )
+                        raise IOError(
+                            "The sediment factor file {} is not found for event {}.".format(
+                                sMap[0] + ".npz", k
+                            )
+                        )
+                    mdata = np.load(sMap[0] + ".npz")
+                    sedfacSet = mdata.files
+
+                    try:
+                        sedKey = mdata[sMap[1]]
+                        if sedKey is not None:
+                            pass
+                    except KeyError:
+                        print(
+                            "Field name {} is missing from sediment factor file {}.npz".format(
+                                sMap[1], sMap[0]
+                            ),
+                            flush=True,
+                        )
+                        print(
+                            "The following fields are available: {}".format(sedfacSet),
+                            flush=True,
+                        )
+                        print("Check your sediment factor file fields definition...", flush=True)
+                        raise KeyError(
+                            "Field name for sediment factor is not defined correctly or does not exist!"
+                        )
+
+                sedfacdata = self._defineErofactor(k, sStart, sMap, sUniform, sedfacdata)
+
+            if sedfacdata["start"][0] > self.tStart:
+                tmpSedF = []
+                tmpSedF.insert(
+                    0, {"start": self.tStart, "sUni": 1.0, "sMap": None, "sKey": None}
+                )
+                sedfacdata = pd.concat(
+                    [
+                        pd.DataFrame(
+                            tmpSedF, columns=["start", "sUni", "sMap", "sKey"]
+                        ),
+                        sedfacdata,
+                    ],
+                    ignore_index=True,
+                )
+            self.sedfacdata = sedfacdata.copy()  
+            self.sedfacdata.reset_index(drop=True, inplace=True)
+            self.sedfactNb = len(self.sedfacdata)
+
+        except KeyError:
+            self.sedfactNb = 0
+            self.sedfacdata = None
+
+        return
+    
     def _storePlate(self, k, pStart, pMap, pTec, pEnd, platedata):
         """
         Record plate movement conditions.
@@ -709,10 +882,6 @@ class ReadYaml(object):
                 )
         else:
             pMap = "empty"
-            # print(
-            #     "For each plate event a plate id grid is required.", flush=True,
-            # )
-            # raise ValueError("Plate event {} has no plate map (plate).".format(k))
 
         if pTec is not None:
             try:
@@ -811,6 +980,22 @@ class ReadYaml(object):
                     platedata["start"] >= self.tStart + self.rStep * self.tout
                 ]
             self.platedata.reset_index(drop=True, inplace=True)
+
+            if self.rStep > 0:
+                rNow = self.tStart + self.rStep * self.tout
+                for k in range(len(self.platedata)):
+                    if (
+                        self.platedata["start"][k] < rNow
+                        and k < len(self.platedata) - 1
+                    ):
+                        self.platedata.loc[k, ["start"]] = rNow - self.tout
+                    elif (
+                        self.platedata["start"][k] < rNow
+                        and k == len(self.platedata) - 1
+                    ):
+                        self.platedata.loc[k, ["start"]] = rNow
+                self.platedata = self.platedata[self.platedata["start"] >= rNow]
+                self.platedata.reset_index(drop=True, inplace=True)
 
         except KeyError:
             self.platedata = None
@@ -969,116 +1154,6 @@ class ReadYaml(object):
 
         return
 
-    def _readBackwardPaleo(self):
-        """
-        Force model with backward paleomaps.
-        """
-        try:
-            paleoDict = self.input["paleomap"]
-            paleoSort = sorted(paleoDict, key=itemgetter("time"))
-            for k in range(len(paleoSort)):
-                pTime = None
-                pMap = None
-                try:
-                    pTime = paleoSort[k]["time"]
-                except Exception:
-                    print("For each paleomap a given time is required.", flush=True)
-                    raise ValueError("Paleomap {} has no parameter time".format(k))
-                try:
-                    pMap = paleoSort[k]["npdata"]
-                except Exception:
-                    pass
-
-                if pMap is not None:
-                    try:
-                        with open(pMap + ".npz") as meshfile:
-                            meshfile.close()
-
-                    except IOError:
-                        print(
-                            "Unable to open numpy dataset: {}.npz".format(pMap),
-                            flush=True,
-                        )
-                        raise IOError("The numpy dataset is not found...")
-
-                tmpPaleo = []
-                tmpPaleo.insert(0, {"time": pTime, "pMap": pMap + ".npz"})
-                if k == 0:
-                    paleodata = pd.DataFrame(tmpPaleo, columns=["time", "pMap"])
-                else:
-                    paleodata = pd.concat(
-                        [paleodata, pd.DataFrame(tmpPaleo, columns=["time", "pMap"])],
-                        ignore_index=True,
-                    )
-
-            self.paleodata = paleodata[paleodata["time"] >= self.tStart]
-            if self.rStep > 0:
-                self.paleodata = paleodata[
-                    paleodata["start"] >= self.tStart + self.rStep * self.tout
-                ]
-
-            self.paleodata.reset_index(drop=True, inplace=True)
-            self.paleoNb = len(self.paleodata)
-
-        except KeyError:
-            self.paleodata = None
-            self.paleoNb = 0
-
-        return
-
-    def _readForcePaleo(self):
-        """
-        Get series of paleomaps to force the model through time.
-        """
-
-        try:
-            fpaleoDict = self.input["forcepaleo"]
-
-            try:
-                self.forceDir = fpaleoDict["dir"]
-                if not os.path.exists(self.forceDir):
-                    print("Forcing paleo directory does not exist!", flush=True)
-                    raise ValueError("Forcing paleo directory does not exist!")
-                try:
-                    forceNb = fpaleoDict["steps"]
-                except KeyError:
-                    print(
-                        "New Paleomap loading frequency 'steps' is required",
-                        flush=True,
-                    )
-                outNb = np.sum(forceNb)
-                self.stepb = np.flip(np.arange(0, outNb, dtype=int))
-                self.alpha = np.zeros(len(self.stepb))
-                p = 0
-                for k in range(len(forceNb)):
-                    out_nb = forceNb[k] + 1
-                    stepf = np.arange(1, out_nb, dtype=int)
-                    self.alpha[p : p + len(stepf)] = stepf.astype(float) / (out_nb - 1)
-                    p += len(stepf)
-                self.forceStep = 0
-
-                if self.rStep > 0:
-                    steptime = np.arange(0, outNb, dtype=int) * self.tout + self.tStart
-                    id = np.where(steptime == self.tStart + self.rStep * self.tout)[0]
-                    if len(id) == 0:
-                        raise steptime(
-                            "Something went wrong with the restart time, it needs to be related to the forcing step."
-                        )
-                    self.forceStep = id[0]
-
-            except Exception:
-                print(
-                    "A directory is required to force the model with paleodata.",
-                    flush=True,
-                )
-                raise ValueError("forcepaleo key requires a directory")
-
-        except KeyError:
-            self.forceDir = None
-            self.forceStep = -1
-
-        return
-
     def _readCompaction(self):
         """
         Read compaction parameters.
@@ -1090,67 +1165,232 @@ class ReadYaml(object):
                 self.phi0s = compDict["phis"]
             except KeyError:
                 self.phi0s = 0.49
-
-            try:
-                self.phi0f = compDict["phif"]
-            except KeyError:
-                self.phi0f = 0.63
-
-            try:
-                self.phi0w = compDict["phiw"]
-            except KeyError:
-                self.phi0w = 0.63
-
-            try:
-                self.phi0c = compDict["phic"]
-            except KeyError:
-                self.phi0c = 0.65
-
-        except KeyError:
-            self.phi0s = 0.49
-            self.phi0f = 0.63
-            self.phi0w = 0.63
-            self.phi0c = 0.65
-
-        self._extraCompaction()
-
-        return
-
-    def _extraCompaction(self):
-        """
-        Read compaction additional parameters.
-        """
-
-        try:
-            compDict = self.input["compaction"]
             try:
                 self.z0s = compDict["z0s"]
             except KeyError:
                 self.z0s = 3700.0
 
-            try:
-                self.z0f = compDict["z0f"]
-            except KeyError:
-                self.z0f = 1960.0
-
-            try:
-                self.z0w = compDict["z0w"]
-            except KeyError:
-                self.z0w = 1960.0
-
-            try:
-                self.z0c = compDict["z0c"]
-            except KeyError:
-                self.z0c = 2570.0
-
         except KeyError:
+            self.phi0s = 0.49
             self.z0s = 3700.0
-            self.z0f = 1960.0
-            self.z0w = 1960.0
-            self.z0c = 2570.0
 
         return
 
+    def _readFlex(self):
+        """
+        Parse flexural isostasy variables.
+        """
+
+        try:
+            flexDict = self.input["flexure"]
+            self.flexOn = True
+            try:
+                self.reg_dx = flexDict["regdx"]
+            except KeyError:
+                raise ValueError("Flexure definition: regular grid spacing is required.")
+            try:
+                self.flex_rhoa = flexDict["rhoa"]
+            except KeyError:
+                self.flex_rhoa = 3250.0
+            try:
+                self.flex_eet = flexDict["thick"]
+            except KeyError:
+                self.flex_eet = 10000.0
+            try:
+                self.flex_rhos = flexDict["rhoc"]
+            except KeyError:
+                self.flex_rhos = 2400.0
+        except KeyError:
+            self.flexOn = False
+
+        return
+    
+    def _readGFlex(self):
+        """
+        Parse global flexural isostasy variables.
+        """
+
+        try:
+            flexGDict = self.input["gflex"]
+            self.gflexOn = True
+            try:
+                interpf = flexGDict["interS"]
+            except KeyError:
+                print(
+                    "Key 'interS' is required and is missing in the 'gflex' declaration!",
+                    flush=True,
+                )
+                raise KeyError("Compressed numpy dataset definition is not defined in gflex declaration!")
+            self.Interp = interpf + ".npz"
+            try:
+                with open(self.Interp) as meshfile:
+                    meshfile.close()
+            except IOError:
+                print("Unable to open numpy dataset: {}".format(self.Interp), flush=True)
+                raise IOError("The numpy dataset is not found...")
+            
+            try:
+                interpf2 = flexGDict["interR"]
+            except KeyError:
+                print(
+                    "Key 'interR' is required and is missing in the 'gflex' declaration!",
+                    flush=True,
+                )
+                raise KeyError("Compressed numpy dataset definition is not defined in gflex declaration!")
+            self.rInterp = interpf2 + ".npz"
+            try:
+                with open(self.rInterp) as meshfile:
+                    meshfile.close()
+            except IOError:
+                print("Unable to open numpy dataset: {}".format(self.interR), flush=True)
+                raise IOError("The numpy dataset is not found...")
+            
+            try:
+                self.gflexproc = flexGDict["procs"]
+            except KeyError:
+                self.gflexproc = 10
+
+            try:
+                self.gflexStep = flexGDict["step"]
+            except KeyError:
+                print(
+                    "Key 'step' is required and is missing in the 'gflex' declaration!",
+                    flush=True,
+                )
+                raise KeyError("Simulation global flexural timestep needs to be declared.")
+        except KeyError:
+            self.gflexStep = None
+            self.gflexOn = False
+
+        return
+    
+    def _readOrography(self):
+        """
+        Parse orographic precipitation variables.
+        
+        latitude (float) : Coriolis effect decreases as latitude decreases
+        precip_base (float) : non-orographic, uniform precipitation rate [mm/h], usually [0, 10]
+        precip_min (float) : minimum precipitation [mm/h] when precipitation rate <= 0
+        wind_speed (float) : [m/s]
+        wind_dir (float) : wind direction [0: north, 270: west]
+        conv_time (float) : cloud water to hydrometeor conversion time [s]
+        fall_time (float) : hydrometeor fallout time [s]
+        nm (float) : moist stability frequency [1/s]
+        hw (float) : water vapor scale height [m]
+        cw (float) : uplift sensitivity [kg/m^3], product of saturation water vapor sensitivity ref_density [kg/m^3]
+                    and environmental lapse rate (lapse_rate_m / lapse_rate)
+
+        """
+
+        try:
+            oroDict = self.input["orography"]
+            self.oroOn = True
+            
+            try:
+                self.reg_dx = oroDict["regdx"]
+            except KeyError:
+                raise ValueError("Orographic definition: regular grid spacing is required.")
+            try:
+                self.wind_latitude = oroDict["latitude"]
+                if self.wind_latitude > 90 or self.wind_latitude < -90:
+                    print(
+                        "Latitude for orographic rain needs to be between -90 and 90.",
+                        flush=True,
+                    )
+                    raise ValueError("Latitude value not appropriately set.")
+            except KeyError:
+                self.wind_latitude = 0.0
+            try:
+                self.wind_speed = oroDict["wind_speed"]
+            except KeyError:
+                self.wind_speed = 10.
+            try:
+                self.wind_dir = oroDict["wind_dir"]
+            except KeyError:
+                self.wind_dir = 0.0
+            try:
+                self.oro_nm = oroDict["nm"]
+            except KeyError:
+                self.oro_nm = 0.01
+            try:
+                self.oro_hw = oroDict["hw"]
+            except KeyError:
+                self.oro_hw = 3400.0
+            try:
+                lapse_rate = oroDict["env_lapse_rate"]
+            except KeyError:
+                lapse_rate = -4.0
+            try:
+                lapse_rate_m = oroDict["moist_lapse_rate"]
+            except KeyError:
+                lapse_rate_m = -7.0
+            try:
+                ref_density = oroDict["ref_density"]
+            except KeyError:
+                ref_density = 7.4e-3
+            self.oro_cw = ref_density * lapse_rate_m / lapse_rate
+            try:
+                self.oro_conv_time = oroDict["conv_time"]
+            except KeyError:
+                self.oro_conv_time = 1000.0
+            try:
+                self.oro_fall_time = oroDict["fall_time"]
+            except KeyError:
+                self.oro_fall_time = 1000.0
+            try:
+                self.oro_precip_base = oroDict["precip_base"]
+            except KeyError:
+                self.oro_precip_base = 7.0
+            try:
+                self.oro_precip_min = oroDict["precip_min"]
+            except KeyError:
+                self.oro_precip_min = 0.01
+            try:
+                self.rainfall_frequency = oroDict["rainfall_frequency"]
+            except KeyError:
+                self.rainfall_frequency = 1
+
+        except KeyError:
+            self.oroOn = False
+
+        return
+
+    def _readIce(self):
+        """
+        Parse ice flow variables.
+        """
+
+        try:
+            iceDict = self.input["ice"]
+            self.iceOn = True
+            try:
+                self.gaussIce = iceDict["gauss"]
+            except KeyError:
+                print("Check your ice fields definition...", flush=True)
+                raise KeyError(
+                    "Field name gauss is not defined correctly or does not exist!"
+                )
+            try:
+                self.elaH = iceDict["hela"]
+            except KeyError:
+                self.elaH = 1800.0
+            try:
+                self.iceH = iceDict["hice"]
+            except KeyError:
+                self.iceH = 2100.0
+            try:
+                self.scaleIce = iceDict["fice"]
+            except KeyError:
+                self.scaleIce = 1.0
+            try:
+                self.Kice = iceDict["Ki"]
+            except KeyError:
+                self.Kice = 0.0
+        except KeyError:
+            self.iceOn = False
+
+        return
+    
     def _readOut(self):
         """
         Parse output directory.

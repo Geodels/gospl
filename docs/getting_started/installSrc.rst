@@ -89,7 +89,7 @@ A dependency ``XXXX`` is installed via the following command in a terminal::
 ========================= ================== =============================================================
 Dependency                Minimum Version    Notes
 ========================= ================== =============================================================
-NumPy                     1.19.2             Numerical computing tools.
+NumPy                     1.22.2             Numerical computing tools.
 SciPy                     1.5.2              Optimization, linear algebra, integration, interpolation
 Cython                    0.29.21            Superset of the Python programming language
 mpi4py                    3.1.1              Bindings for the Message Passing Interface standard
@@ -102,7 +102,6 @@ meshplex                  0.13.4             Fast tools for simplex meshes
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       9.0.3              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
-scikit-fuzzy              0.4.2              Collection of fuzzy logic algorithms for the SciPy Stack
 ========================= ================== =============================================================
 
 

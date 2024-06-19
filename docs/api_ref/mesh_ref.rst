@@ -19,9 +19,6 @@ Class UnstMesh
       ~UnstMesh.applyForces
       ~UnstMesh.applyTectonics
       ~UnstMesh.destroy_DMPlex
-      ~UnstMesh.initExtForce
-      ~UnstMesh.reInitialiseElev
-      ~UnstMesh.updatePaleomap
 
    .. rubric:: Private Methods
 
@@ -37,6 +34,7 @@ Class UnstMesh
       ~UnstMesh._readErosionDeposition
       ~UnstMesh._set_DMPlex_boundary_points
       ~UnstMesh._updateRain
+      ~UnstMesh._updateEroFactor
       ~UnstMesh._updateTectonics
       ~UnstMesh._xyz2lonlat
 
@@ -46,9 +44,6 @@ Public functions
 .. automethod:: mesher.unstructuredmesh.UnstMesh.applyForces
 .. automethod:: mesher.unstructuredmesh.UnstMesh.applyTectonics
 .. automethod:: mesher.unstructuredmesh.UnstMesh.destroy_DMPlex
-.. automethod:: mesher.unstructuredmesh.UnstMesh.initExtForce
-.. automethod:: mesher.unstructuredmesh.UnstMesh.reInitialiseElev
-.. automethod:: mesher.unstructuredmesh.UnstMesh.updatePaleomap
 
 
 Private functions
@@ -64,5 +59,6 @@ Private functions
 .. automethod:: mesher.unstructuredmesh.UnstMesh._readErosionDeposition
 .. automethod:: mesher.unstructuredmesh.UnstMesh._set_DMPlex_boundary_points
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateRain
+.. automethod:: mesher.unstructuredmesh.UnstMesh._updateEroFactor
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateTectonics
 .. automethod:: mesher.unstructuredmesh.UnstMesh._xyz2lonlat

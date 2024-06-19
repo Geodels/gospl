@@ -1,15 +1,81 @@
-[tool.black]
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
+[build-system]
+build-backend = "mesonpy"
+requires = [
+    "numpy",
+    "pip",
+    "meson-python>=0.15.0",
+    "setuptools>=61.0",
+    "build",
+]
+
+[project]
+name = "gospl"
+dynamic = ["version"]
+description = "Global Landscape Evolution Model"
+readme = "README.md"
+authors = [
+  {name = "Tristan Salles", email = "tristan.salles@sydney.edu.au"},
+]
+maintainers = [
+  {name = "Tristan Salles", email = "tristan.salles@sydney.edu.au"},
+]
+license = { file = "LICENSE" }
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = [
+            "python",
+            "paleogeography",
+            "sediment-transport",
+            "paleoclimate",
+            "model",
+            "landscape",
+            "landscape-evolution",
+            "basin-modeling",
+            "erosion-process",
+            "compaction",
+            "lithology",
+            "science",
+        ]
+dependencies = [
+    "numpy>=1.16.0",
+    "petsc4py",
+    "scipy",
+    "numpy-indexed",
+    "pandas",
+    "h5py",
+    "meshio",
+    "vtk",
+    "ruamel.yaml",
+    "mpi4py",
+    "meshplex",
+    "gflex",
+    "xarray",
+    "pyproj",
+]
+
+[tool.setuptools]
+packages = [
+    "gospl",
+    "gospl._fortran",
+]
+
+# [tool.setuptools.dynamic]
+# version = {attr = "gospl.__version__"}
+
+[project.optional-dependencies]
+dev = ["pip-tools", "pytest"]
+
+[project.urls]
+Homepage = "https://github.com/Geodels/gospl"
+Documentation = "https://gospl.readthedocs.io"

@@ -17,7 +17,10 @@ pip install scipy==1.5.4 --user
 pip install ruamel.yaml==0.16.5 --user
 pip install mpi4py==3.0.0 --user
 pip install petsc4py==3.11.0 --user
-pip install scikit-fuzzy==0.4.2 --user
+# pip install scikit-fuzzy==0.4.2 --user
+pip install xarray==0.16.2 --user
+pip install rioxarray==0.3.1 --user
+pip install gflex==1.1.1 --user
 
 mv hpcrequirements.txt requirements.txt
 

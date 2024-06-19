@@ -23,6 +23,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import combine_edges
     from gospl._fortran import label_pits
     from gospl._fortran import spill_pts
+    from gospl._fortran import sort_ids
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -99,24 +100,7 @@ class PITFill(object):
         :return: df sorted pandas dataframe containing depression numbers.
         """
 
-        p1 = []
-        p2 = []
-        for k in range(len(df)):
-            id1 = df["p1"].iloc[k]
-            if k == 0:
-                id2 = df["p2"].iloc[0]
-            else:
-                if df["p2"].iloc[k] == df["p2"].iloc[k - 1]:
-                    id2 = df["p1"].iloc[k - 1]
-                else:
-                    id2 = df["p2"].iloc[k]
-            p1.append(id1)
-            p2.append(id2)
-        data = {
-            "p1": p1,
-            "p2": p2,
-        }
-        df = pd.DataFrame(data, columns=["p1", "p2"])
+        df["p2"] = sort_ids( df["p1"].values.astype(int), df["p2"].values.astype(int) )
         df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
 
         return df
@@ -180,9 +164,15 @@ class PITFill(object):
         """
 
         # Define globally unique watershed index
+        t0 = process_time()
         fillIDs = pitIDs >= 0
         offset, _ = self._offsetGlobal(np.amax(pitIDs))
         pitIDs[fillIDs] += offset[MPIrank]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Offset Global pit ids (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Transfer depression IDs along local borders
         self.tmpL.setArray(pitIDs)
@@ -194,9 +184,14 @@ class PITFill(object):
         df = self._buildPitDataframe(label[ids], pitIDs[ids])
         ids = label > pitIDs
         df2 = self._buildPitDataframe(pitIDs[ids], label[ids])
-        df = df.append(df2, ignore_index=True)
+        df = pd.concat([df, df2], ignore_index=True)
         df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
         df = df[(df["p1"] >= 0) & (df["p2"] >= 0)]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Build pit dataframe (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Send depression IDs globally
         offset, _ = self._offsetGlobal(len(df))
@@ -206,15 +201,26 @@ class PITFill(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, combIds, op=MPI.MAX)
         df = self._buildPitDataframe(combIds[:, 0], combIds[:, 1])
         df = df[(df["p1"] >= 0) & (df["p2"] >= 0)]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Combine pit dataframe (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Sorting label transfer between processors
-        sorting = True
-        while sorting:
-            df2 = self._sortingPits(df)
-            sorting = not df.equals(df2)
-            df = df2.copy()
+        if len(df)>1:
+            sorting = True
+            while sorting:
+                df2 = self._sortingPits(df)
+                sorting = not df.equals(df2)
+                df = df2.copy()
         for k in range(len(df)):
             label[label == df["p2"].iloc[k]] = df["p1"].iloc[k]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Sorting pits (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Transfer depression IDs along local borders
         self.tmpL.setArray(label)
@@ -236,6 +242,11 @@ class PITFill(object):
         valpit[unique] = 1
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, valpit, op=MPI.MAX)
         pitNb = np.where(valpit > 0)[0]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define consecutive pit ids (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         self.pitIDs = pits_cons(self.pitIDs, pitNb)
 
@@ -452,16 +463,37 @@ class PITFill(object):
             pitIDs = label_pits(level, self.lFill)
         else:
             pitIDs = label_pits(self.sealevel, self.lFill)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define pit labels (%0.02f seconds)" % (process_time() - t0)
+            )
+
+        t0 = process_time()
         pitIDs[self.idBorders] = -1
         pitNb = self._transferIDs(pitIDs)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define transfer IDs (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
         pitnbs = len(pitNb) + 1
         spillIDs, lspill, rank = spill_pts(
             MPIrank, pitnbs, self.lFill, self.pitIDs, self.borders[:, 1]
         )
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define spill points (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
         self.lspillIDs = np.where(lspill == 1)[0]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, rank, op=MPI.MAX)
         spillIDs[rank != MPIrank] = -1
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, spillIDs, op=MPI.MAX)
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define spill points (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Get depression informations:
         self.pitInfo = np.zeros((pitnbs, 2), dtype=int)
@@ -490,6 +522,11 @@ class PITFill(object):
             self.flatDirs[id] = -1
             # Only compute the water volume for incoming water fluxes above sea level
             h[h < self.sealevel] = self.sealevel
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Define flat directions (%0.02f seconds)" % (process_time() - t0)
+            )
+        t0 = process_time()
 
         # Get pit parameters
         self._getPitParams(h, pitnbs)

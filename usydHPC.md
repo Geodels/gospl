@@ -58,7 +58,6 @@ Then you might want to install manually all the dependencies and see the ones th
 + meshio | 3.3.1 
 + petsc4py | 3.11.0 
 + meshplex | 0.11.6 
-+ scikit-fuzzy | 0.4.2 
 + vtk | 9.0.1 
 
 To install them successively run:
@@ -76,7 +75,6 @@ pip install scipy==1.5.4 --user
 pip install ruamel.yaml==0.16.5 --user
 pip install mpi4py==3.0.0 --user
 pip install petsc4py==3.11.0 --user
-pip install scikit-fuzzy==0.4.2 --user
 ```
 
 You might want to report any issue to goSPL developper.

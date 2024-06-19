@@ -20,13 +20,11 @@ Class Model
 
    .. autosummary::
 
-      ~Model.reInitialiseZ
       ~Model.runProcesses
       ~Model.destroy
 
 Public functions
 ---------------------
 
-.. automethod:: model.Model.reInitialiseZ
 .. automethod:: model.Model.runProcesses
 .. automethod:: model.Model.destroy
