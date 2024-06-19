@@ -7,7 +7,7 @@ import pyproj
 import petsc4py
 import numpy as np
 
-import rioxarray
+# import rioxarray
 import xarray as xr
 from mpi4py import MPI
 from pathlib import Path
