@@ -4,13 +4,13 @@
 
 |    |    |
 | --- | --- |
-| Build Status | [![Linux/MacOS Build Status](https://travis-ci.org/Geodels/gospl.svg?branch=master)](https://travis-ci.org/Geodels/gospl) [![Coverage Status](https://coveralls.io/repos/github/Geodels/gospl/badge.svg?branch=master)](https://coveralls.io/github/Geodels/gospl?branch=master) [![Documentation Status](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/?badge=latest)  [![Updates](https://pyup.io/repos/github/Geodels/gospl/shield.svg)](https://pyup.io/repos/github/Geodels/gospl/) |
-| Latest release | [![Github release](https://img.shields.io/github/release/Geodels/gospl.svg?label=tag&colorB=11ccbb)](https://github.com/Geodels/gospl/releases) [![PyPI version](https://badge.fury.io/py/gospl.svg?colorB=cc77dd)](https://pypi.org/project/gospl) [![DOI](https://zenodo.org/badge/206898115.svg)](https://zenodo.org/badge/latestdoi/206898115) |
-| Features | [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)    [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/Geodels/gospl.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Geodels/gospl/context:python) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black) [![Total alerts](https://img.shields.io/lgtm/alerts/g/Geodels/gospl.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Geodels/gospl/alerts/) |
+| Build Status | [![Coverage Status](https://coveralls.io/repos/github/Geodels/gospl/badge.svg?branch=master)](https://coveralls.io/github/Geodels/gospl?branch=master)  [![DOI](https://zenodo.org/badge/206898115.svg)](https://zenodo.org/badge/latestdoi/206898115) |
+| Latest release | [![Github release](https://img.shields.io/github/release/Geodels/gospl.svg?label=tag&colorB=11ccbb)](https://github.com/Geodels/gospl/releases) [![PyPI version](https://badge.fury.io/py/gospl.svg?colorB=cc77dd)](https://pypi.org/project/gospl) |
+| Features | [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)  [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)|
 
 
+![gospl](https://github.com/Geodels/gospl/blob/master/docs/images/earth.png?raw=true)
 
-![gospl](docs/images/earth.png "gospl")
 
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.02804/status.svg)](https://doi.org/10.21105/joss.02804)
 
@@ -20,19 +20,12 @@
 
 > Yet, we were still missing a tool to evaluate global scale evolution of Earth surface and its interaction with the atmosphere, the hydrosphere, the tectonic and mantle dynamics. gospl is the first model designed to address this gap. It can be used to better characterise many aspects of the Earth system ranging from the role of atmospheric circulation on physical denudation, from the influence of erosion and deposition of sediments on mantle convection, from the location and abundance of natural resources to the evolution of life.
 
-## Interested?
-
-Check out the documentation:
-
-[![Documentation Status](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/?badge=latest)
-
-In short, it contains:
+## Documentation
 
 1. an overview of the different ways to **install** the code,
 2. some **technical** notes on the underlying physics and implementation,
 3. a **user guide** with some notebook examples, and
 4. the **API** references.
-5. a user group [Slack channel](https://join.slack.com/t/gosplworkspace/shared_invite/zt-svd9ioyr-xPQTS0Z0ml4pKseIZZ7N6A)
 
 ## Contributing to gospl
 
