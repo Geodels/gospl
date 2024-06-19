@@ -1,7 +1,7 @@
 numpy>=1.22.2
 scipy>=1.5.2
 pandas>=1.1.2
-numpy-indexed==0.3.5
+numpy-indexed==0.3.7
 ruamel.yaml>=0.16.12
 sphinx_rtd_theme>=0.5.0
 sphinxcontrib-napoleon>=0.7
