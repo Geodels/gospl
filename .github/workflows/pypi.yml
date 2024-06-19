@@ -21,7 +21,7 @@ jobs:
       #   uses: pypa/cibuildwheel@v2.16.2
         env:
           # Disable building PyPy wheels on all platforms
-          CIBW_SKIP: 'pp*'
+          # CIBW_SKIP: 'pp*'
           CIBW_ENVIRONMENT_WINDOWS: "CFLAGS='-lquadmath'"
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_ARCHS: 'auto64'

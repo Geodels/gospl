@@ -1,7 +1,7 @@
 project(
     'gospl', 
     'c',
-    version: '1.1b0',
+    version: '1.1.0',
     meson_version: '>= 1.0',)
 
 name = 'gospl'
