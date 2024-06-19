@@ -7,7 +7,7 @@ petsc4py==3.11.0
 h5py==2.9.0
 pandas==1.0.3
 ruamel.yaml==0.16.5
-meshio==3.3.1
+meshio==5.3.5
 meshplex==0.11.6
 pre-commit>=2.2.0
 vtk==9.0.1
