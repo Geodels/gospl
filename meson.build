@@ -42,7 +42,7 @@ fortran_source = custom_target('_fortranmodule.c',
 )
 
 py.extension_module('_fortran',
-  ['fortran/functions.f90', fortran_source],
+  ['fortran/functions.F90', fortran_source],
   incdir_f2py / 'fortranobject.c',
   subdir: 'gospl',
   include_directories: inc_np,
