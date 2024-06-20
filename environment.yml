@@ -1,0 +1,30 @@
+name: gospl
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - meson-python>=0.15.0
+  - setuptools>=61.0
+  - pkg-config
+  - build
+  - numpy
+  - petsc4py
+  - pip
+  - scipy
+  - numpy-indexed
+  - pandas
+  - h5py
+  - meshio
+  - vtk
+  - pre-commit
+  - ruamel.yaml
+  - mpi4py
+  - cython
+  - compilers
+  - meshplex
+  - xarray
+  - pyproj
+  - gflex
+  - pip:
+    - git+https://github.com/Geodels/gospl.git

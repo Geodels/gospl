@@ -16,7 +16,7 @@
 
 ## Statement of need
 
-> Since the ’90s, many software have been designed to estimate long-term catchment dynamic, drainage evolution as well as sedimentary basins formation in response to various mechanisms such as tectonic or climatic forcing. These models rely on a set of mathematical and physical expressions that simulates sediment erosion, transport and deposition and can reproduce the first order complexity of Earth’s surface geomorphological evolution.
+> Since the ’90s, much software has been designed to estimate long-term catchment dynamics, drainage evolution as well as sedimentary basin formation in response to various mechanisms such as tectonic or climatic forcing. These models rely on a set of mathematical and physical expressions that simulates sediment erosion, transport and deposition and can reproduce the first order complexity of Earth’s surface geomorphological evolution.
 
 > Yet, we were still missing a tool to evaluate global scale evolution of Earth surface and its interaction with the atmosphere, the hydrosphere, the tectonic and mantle dynamics. gospl is the first model designed to address this gap. It can be used to better characterise many aspects of the Earth system ranging from the role of atmospheric circulation on physical denudation, from the influence of erosion and deposition of sediments on mantle convection, from the location and abundance of natural resources to the evolution of life.
 
@@ -35,7 +35,7 @@ All contributions should go through our GitHub repository. Bug reports, ideas or
 
 If you decide to contribute to the codebase, ensure that you are using an up-to-date master branch. The latest development version will always be there, including the documentation (powered by sphinx).
 
-Details are available in the documentation.
+Details are available in the [documentation](https://gospl.readthedocs.io).
 
 ## License
 
