@@ -50,9 +50,9 @@ author = "Tristan Salles"
 # release = version
 
 # The short X.Y version
-version = "0.3.2"
+version = "1.1.1"
 # The full version, including alpha/beta/rc tags
-release = "0.3.2"
+release = "1.1.1"
 
 # -- General configuration ---------------------------------------------------
 
@@ -65,7 +65,7 @@ release = "0.3.2"
 # ones.
 extensions = [
     "sphinx.ext.todo",
-    "sphinxcontrib.napoleon",
+    "sphinx.ext.napoleon",
     "sphinx.ext.autodoc",
     "sphinxemoji.sphinxemoji",
     "sphinx.ext.autodoc",
