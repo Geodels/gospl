@@ -1,7 +1,7 @@
 import glob
 import h5py
 import numpy as np
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
 from scipy import spatial
 
 
@@ -18,7 +18,8 @@ class getTecto:
 
         # Open YAML file
         with open(filename, "r") as finput:
-            self.input = yaml.load(finput, Loader=yaml.Loader)
+            yaml = YAML()
+            self.input = yaml.load(finput)
 
         self.radius = 6378137.0
         self._inputParser()
