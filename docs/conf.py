@@ -167,6 +167,22 @@ html_theme_options = {
     # },
 }
 
+if 'dev' in version:
+    html_theme_options["switcher"]["version_match"] = "development"
+    html_theme_options["show_version_warning_banner"] = False
+
+if 'versionwarning' in tags:  # noqa: F821
+    # Specific to docs.scipy.org deployment.
+    # See https://github.com/scipy/docs.scipy.org/blob/main/_static/versionwarning.js_t
+    src = ('var script = document.createElement("script");\n'
+           'script.type = "text/javascript";\n'
+           'script.src = "/doc/_static/versionwarning.js";\n'
+           'document.head.appendChild(script);')
+    html_context = {
+        'VERSIONCHECK_JS': src
+    }
+    html_js_files = ['versioncheck.js']
+
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
@@ -181,10 +197,11 @@ html_css_files = [
     "try_examples.css",
 ]
 
-# html_css_files = [
-#     "css/getting_started.css",
-#     "css/gospl.css",
-# ]
+html_additional_pages = {}
+html_use_modindex = True
+html_domain_indices = False
+html_copy_source = False
+html_file_suffix = '.html'
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
@@ -216,7 +233,7 @@ html_favicon = "images/favicon.ico"
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = "gospldoc"
+htmlhelp_basename = "gospl"
 
 
 # -- Options for LaTeX output ------------------------------------------------
