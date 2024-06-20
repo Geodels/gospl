@@ -2,7 +2,7 @@ import re
 import os
 import glob
 import shutil
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
 
 
 def createOutputDir(output=None, makedir=False):
@@ -39,8 +39,8 @@ def readOutputs(filename=None):
         raise IOError("The input file is not found...")
 
     # Open YAML file
-    with open(filename, "r") as finput:
-        input = yaml.load(finput, Loader=yaml.Loader)
+    yaml = YAML()
+    input = yaml.load(finput)
 
     tStart, tEnd, tOut, outputDir = inputParser(input)
 
