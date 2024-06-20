@@ -1,0 +1,5 @@
+{
+    "mesonbuild.configureOnOpen": true,
+    "C_Cpp.default.compileCommands": "/Users/galois/codes/gospl/builddir/compile_commands.json",
+    "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild"
+}

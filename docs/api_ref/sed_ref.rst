@@ -26,7 +26,6 @@ Class SEDMesh
    .. autosummary::
 
       ~SEDMesh._distributeSediment
-      ~SEDMesh._getSedVol
       ~SEDMesh._hillSlope
       ~SEDMesh._moveDownstream
       ~SEDMesh._updateSinks
@@ -43,7 +42,6 @@ Private functions
 ---------------------
 
 .. automethod:: sed.sedplex.SEDMesh._distributeSediment
-.. automethod:: sed.sedplex.SEDMesh._getSedVol
 .. automethod:: sed.sedplex.SEDMesh._hillSlope
 .. automethod:: sed.sedplex.SEDMesh._moveDownstream
 .. automethod:: sed.sedplex.SEDMesh._updateSinks

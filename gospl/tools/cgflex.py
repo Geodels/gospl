@@ -7,12 +7,13 @@ import pyproj
 import petsc4py
 import numpy as np
 
-# import rioxarray
 import xarray as xr
 from mpi4py import MPI
 from pathlib import Path
-from gflex.f2d import F2D
 from time import process_time
+
+if "READTHEDOCS" not in os.environ:
+    from gflex.f2d import F2D
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()

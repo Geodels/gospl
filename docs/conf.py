@@ -308,6 +308,8 @@ MOCK_MODULES = [
     "scipy.interpolate",
     "vtk",
     "vtk.util",
+    "gflex",
+    "xarray",
 ]
 
 for m in MOCK_MODULES:

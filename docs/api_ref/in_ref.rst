@@ -20,7 +20,6 @@ Class ReadYaml
       ~ReadYaml._addTime
       ~ReadYaml._defineRain
       ~ReadYaml._defineTectonic
-      ~ReadYaml._extraCompaction
       ~ReadYaml._extraDomain
       ~ReadYaml._readCompaction
       ~ReadYaml._readDomain
@@ -40,7 +39,6 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._addTime
 .. automethod:: tools.inputparser.ReadYaml._defineRain
 .. automethod:: tools.inputparser.ReadYaml._defineTectonic
-.. automethod:: tools.inputparser.ReadYaml._extraCompaction
 .. automethod:: tools.inputparser.ReadYaml._extraDomain
 .. automethod:: tools.inputparser.ReadYaml._readCompaction
 .. automethod:: tools.inputparser.ReadYaml._readDomain

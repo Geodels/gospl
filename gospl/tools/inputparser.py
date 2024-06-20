@@ -3,10 +3,12 @@ import sys
 import petsc4py
 import numpy as np
 import pandas as pd
-from ruamel.yaml import YAML
 
 from operator import itemgetter
-from scipy.interpolate import interp1d
+
+if "READTHEDOCS" not in os.environ:
+    from ruamel.yaml import YAML
+    from scipy.interpolate import interp1d
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
