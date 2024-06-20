@@ -15,8 +15,8 @@
 }
 
 button.btn.version-switcher__button, button.btn.version-switcher__button:hover {
-  background-color: var(--pst-color-danger);
-  border-color: var(--pst-color-danger);
+  background-color: var(--pst-color-primary);
+  border-color: var(--pst-color-primary);
   opacity: 0.9;
 }
 
