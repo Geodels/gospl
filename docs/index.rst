@@ -1,7 +1,7 @@
 .. :notoc:
 :html_theme.sidebar_secondary.remove: true
 
-.. gospl documentation master file, created by
+.. goSPL documentation master file, created by
 
 .. module:: goSPL
 
