@@ -8,85 +8,86 @@ Getting started
 Python version support
 ----------------------
 
-Officially Python 3.7.1 and above, 3.8, and 3.9.
+goSPL supports versions :mod:`3.3` to :mod:`3.12` of Python.
 
 Installation instructions
 -------------------------
 
-The easiest way to start using :mod:`gospl` is to install it as part of the
-`Docker <https://hub.docker.com/r/geodels/gospl>`__ distribution, a cross platform
-distribution for data analysis and scientific computing. This is the recommended
-installation method for most users.
+The easiest way to start using goSPL is to install it from its Docker image, a cross platform distribution for data analysis and scientific computing. This is the recommended installation method for most users.
 
-Instructions for installing from PyPI, Anaconda, or source are also provided.
+Instructions for installing it via Anaconda or from source are also provided.
 
 
-.. raw:: html
+.. grid:: 1 1 2 2
+    :gutter: 2 3 4 4
 
-    <div class="container">
-        <div class="row">
-            <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
-                <div class="card text-center intro-card shadow">
-                <img src="../_static/docker.svg" class="card-img-top" alt="Docker logo" height="72">
-                <div class="card-body flex-fill">
-                    <p class="card-text">Lightweight virtualisation with <a href="https://hub.docker.com/r/geodels/gospl">Docker container</a> provides a simple approach for running <code>gospl</code> model.</p>
+    .. grid-item-card::
+        :img-top: ../_static/docker.svg
+        :text-align: center
 
-.. container:: custom-button
+        **Docker image**
+        ^^^
 
-    :ref:`Learn more <installDocker>`
+        Lightweight virtualisation with `Docker container <https://hub.docker.com/r/geodels/gospl>`_ provides a simple approach for running goSPL simulation.
 
-.. raw:: html
+        +++
 
-                </div>
-                </div>
-            </div>
-            <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
-                <div class="card text-center intro-card shadow">
-                <img src="../_static/Conda_logo.svg" class="card-img-top" alt="Conda logo" height="42">
-                <div class="card-body flex-fill">
-                    <p class="card-text">For <code>Anaconda</code> users, an environment with specific collection of conda packages and <code>gospl</code> dependencies is available.</p>
+        .. button-ref:: installDocker
+            :color: secondary
+            :click-parent:
 
-.. container:: custom-button
+            Learn more
 
-    :ref:`Learn more <installConda>`
+    .. grid-item-card::
+        :img-top: ../_static/anaconda.svg
+        :text-align: center
 
-.. raw:: html
+        **Conda environment**
+        ^^^
 
-                    </div>
-                    </div>
-                </div>
-                <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
-                    <div class="card text-center intro-card shadow">
-                    <img src="../_static/PyPI_logo.svg" class="card-img-top" alt="PyPI logo" height="72">
-                    <div class="card-body flex-fill">
-                        <p class="card-text">For Linux user we provide a step-by-step guide on how to install <code>gospl</code> and its dependencies using <code>PyPI</code>.</p>
+        For Anaconda users, an environment with specific collection of conda packages and goSPL dependencies is available.
 
-.. container:: custom-button
+        +++
 
-    :ref:`Learn more <installPypi>`
+        .. button-ref:: installConda
+            :color: secondary
+            :click-parent:
 
-.. raw:: html
+            Learn more
 
-                    </div>
-                    </div>
-                </div>
-                <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12 d-flex">
-                    <div class="card text-center intro-card shadow">
-                    <img src="../_static/Pythonlogo.svg" class="card-img-top" alt="Python logo" height="62">
-                    <div class="card-body flex-fill">
-                        <p class="card-text"><code>gospl</code> can also be installed directly from source but this requires installation of all other dependencies.</p>
+    .. grid-item-card::
+        :img-top: ../_static/pypi.svg
+        :text-align: center
 
-.. container:: custom-button
+        **PyPI Linux wheel**
+        ^^^
 
-    :ref:`Learn more <installSrc>`
+        For Linux user we provide a step-by-step guide on how to install goSPL and its dependencies using PyPI.
 
-.. raw:: html
+        +++
 
-                    </div>
-                    </div>
-                </div>
-        </div>
-    </div>
+        .. button-ref:: installPypi
+            :color: secondary
+            :click-parent:
+
+            Learn more
+
+    .. grid-item-card::
+        :img-top: ../_static/python.svg
+        :text-align: center
+
+        **Install from source**
+        ^^^
+
+        goSPL can also be installed directly from source but this requires installation of all other dependencies. 
+
+        +++
+
+        .. button-ref:: installSrc
+            :color: secondary
+            :click-parent:
+
+            Learn more
 
 
 .. toctree::
