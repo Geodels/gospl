@@ -15,7 +15,9 @@
 }
 
 button.btn.version-switcher__button, button.btn.version-switcher__button:hover {
-  color: black;
+  background-color: var(--pst-color-danger);
+  border-color: var(--pst-color-danger);
+  opacity: 0.9;
 }
 
 /* Main index page overview cards */

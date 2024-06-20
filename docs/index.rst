@@ -112,7 +112,7 @@ Quick links to the Doc
 Citing
 ------
 
-To cite goSPL please use following `software paper <https://joss.theoj.org/papers/10.21105/joss.02804>`__ published in the JOSS.
+As a matter of courtesy, we request that people using this code please cite our initial `paper <https://joss.theoj.org/papers/10.21105/joss.02804>`__ published in JOSS.
 
 Salles et al. (2020) ’gospl: Global Scalable Paleo Landscape Evolution’, Journal of Open Source Software, 5(56), p. 2804. doi: 10.21105/joss.02804.
 
@@ -132,24 +132,13 @@ BibTeX::
 Contributing to goSPL
 --------------------------
 
-Contributions of any kind to goSPL are more than welcome. That does not mean
-new code only, but also improvements of documentation and user guide, additional
-tests (ideally filling the gaps in existing suite) or bug report or idea what
-could be added or done better.
+Contributions of any kind to goSPL are more than welcome. That does not mean new code only, but also improvements of documentation and user guide, additional tests (ideally filling the gaps in existing suite) or bug report or idea what could be added or done better.
 
-All contributions should go through our GitHub repository. Bug reports, ideas or
-even questions should be raised by opening an issue on the GitHub tracker.
-Suggestions for changes in code or documentation should be submitted as a pull
-request. However, if you are not sure what to do, feel free to open an issue.
-All discussion will then take place on GitHub to keep the development of goSPL
-transparent.
+All contributions should go through our GitHub repository. Bug reports, ideas or even questions should be raised by opening an issue on the GitHub tracker. Suggestions for changes in code or documentation should be submitted as a pull request. However, if you are not sure what to do, feel free to open an issue. All discussion will then take place on GitHub to keep the development of goSPL transparent.
 
-If you decide to contribute to the codebase, ensure that you are using an
-up-to-date ``master`` branch. The latest development version will always be there,
-including the documentation (powered by ``sphinx``).
+If you decide to contribute to the codebase, ensure that you are using an up-to-date ``master`` branch. The latest development version will always be there, including the documentation (powered by ``sphinx``).
 
 Details are available in the :doc:`contributing guide <contributing>`.
-
 
 .. toctree::
     :maxdepth: 3
