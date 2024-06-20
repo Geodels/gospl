@@ -90,6 +90,7 @@ Navigate to the directory containing the `conda-env.yml <https://raw.githubuserc
 This will create an environment with the dependencies and packages required to run :mod:`gospl`.
 
 note: There is no anaconda petsc4py win64 package. A WSL conda install will work once you have make installed. You will need make and libgl1.so
+e.g. on ubuntu  apt-get install libgl1
 
 To put yourself inside this environment run::
 
