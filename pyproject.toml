@@ -70,9 +70,6 @@ packages = [
     "gospl._fortran",
 ]
 
-# [tool.setuptools.dynamic]
-# version = {attr = "gospl.__version__"}
-
 [project.optional-dependencies]
 dev = ["pip-tools", "pytest"]
 

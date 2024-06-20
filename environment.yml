@@ -1,9 +1,14 @@
-name: gospl-package
+name: gospl
 channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.9
+  - python=3.11
+  - meson-python>=0.15.0
+  - setuptools>=61.0
+  - pkg-config
+  - build
+  - numpy
   - petsc4py
   - pip
   - scipy
@@ -11,7 +16,6 @@ dependencies:
   - pandas
   - h5py
   - meshio
-  - numpy
   - vtk
   - pre-commit
   - ruamel.yaml
@@ -19,5 +23,8 @@ dependencies:
   - cython
   - compilers
   - meshplex
+  - xarray
+  - pyproj
+  - gflex
   - pip:
-    - gospl
+    - git+https://github.com/Geodels/gospl.git
