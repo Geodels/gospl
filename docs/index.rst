@@ -27,6 +27,8 @@ Since the '90s, many software have been designed to estimate long-term catchment
 
 Yet, we were still missing a tool to evaluate **global scale** evolution of Earth surface and its interaction with the atmosphere, the hydrosphere, the tectonic and mantle dynamics. goSPL is the first model designed to address this gap. It can be used to better characterise many aspects of the Earth system ranging from the role of atmospheric circulation on physical denudation, from the influence of erosion and deposition of sediments on mantle convection, from the location and abundance of natural resources to the evolution of life.
 
+.. image:: images/global.png
+  :align: center
 
 Quick links to the Doc
 ------------------------
