@@ -152,7 +152,7 @@ html_theme_options = {
     "navbar_end": ["version-switcher", "theme-switcher", "navbar-icon-links"],
     "navbar_persistent": [],
     "switcher": {
-        "json_url": "https://github.com/Geodels/gospl/blob/master/docs/_static/version_switcher.json",
+        "json_url": "https://raw.githubusercontent.com/Geodels/gospl/master/docs/_static/version_switch.json",
         "version_match": version,
     },
     "show_version_warning_banner": True,
