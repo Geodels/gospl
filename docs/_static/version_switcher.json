@@ -1,0 +1,13 @@
+[
+    {
+        "name": "development",
+        "version": "development",
+        "url": "https://gospl.readthedocs.io"
+    },
+    {
+        "name": "1.1.1 (stable)",
+        "version":"1.1.1",
+        "preferred": true,
+        "url": "https://gospl.readthedocs.io"
+    },
+]

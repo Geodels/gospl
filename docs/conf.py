@@ -13,8 +13,16 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
+from os.path import relpath, dirname
+import re
 import sys
+import warnings
+from datetime import date
+from docutils import nodes
+from docutils.parsers.rst import Directive
 import sphinx_rtd_theme
+
+from intersphinx_registry import get_intersphinx_mapping
 
 from mock import Mock as MagicMock
 
@@ -41,7 +49,8 @@ SingleFileHTMLBuilder.supported_image_types = html_img_types
 # -- Project information -----------------------------------------------------
 
 project = "gospl"
-copyright = "2020-2024, EarthCodeLab Group"
+copyright = '2020-%s, The goSPL community' % date.today().year
+# copyright = "2020-2024, EarthCodeLab Group"
 author = "Tristan Salles"
 
 # version = '%s r%s' % (pandas.__version__, svn_version())
@@ -52,7 +61,7 @@ author = "Tristan Salles"
 # The short X.Y version
 version = "1.1.1"
 # The full version, including alpha/beta/rc tags
-release = "1.1.1"
+release = version
 
 # -- General configuration ---------------------------------------------------
 
@@ -64,28 +73,15 @@ release = "1.1.1"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "sphinx.ext.todo",
-    "sphinx.ext.napoleon",
-    "sphinx.ext.autodoc",
-    "sphinxemoji.sphinxemoji",
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
-    "sphinx.ext.doctest",
-    "sphinx.ext.todo",
-    "sphinx.ext.autosummary",
-    "IPython.sphinxext.ipython_directive",
-    "IPython.sphinxext.ipython_console_highlighting",
-    "sphinx.ext.intersphinx",
-    "sphinx.ext.coverage",
-    "sphinx.ext.ifconfig",
-    "sphinx.ext.linkcode",
-    "nbsphinx",
-    "sphinx.ext.mathjax",
-    "sphinx.ext.doctest",
-    "sphinx.ext.intersphinx",
-    # "numpydoc",
-    "myst_parser",
-    "sphinxcontrib.bibtex",
+    'sphinx.ext.autodoc',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.coverage',
+    'sphinx.ext.mathjax',
+    'sphinx.ext.intersphinx',
+    'numpydoc',
+    'sphinx_design',
+    'myst_nb',
+    'jupyterlite_sphinx',
 ]
 bibtex_bibfiles = ["refs.bib"]
 
@@ -111,7 +107,7 @@ master_doc = "index"
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -137,26 +133,58 @@ todo_include_todos = False
 html_theme = "pydata_sphinx_theme"
 html_logo = "_static/gospl.svg"
 
+
+html_sidebars = {
+    "index": "search-button-field",
+    "**": ["search-button-field", "sidebar-nav-bs"]
+}
+
 # html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 html_theme_options = {
     "github_url": "https://github.com/Geodels/gospl",
-    "search_bar_text": "Search GOSPL docs ...",
+    "search_bar_text": "Search goSPL docs ...",
+    "header_links_before_dropdown": 6,
+    "icon_links": [],
+    "logo": {
+        "text": "goSPL",
+    },
+    "navbar_start": ["navbar-logo"],
+    "navbar_end": ["version-switcher", "theme-switcher", "navbar-icon-links"],
+    "navbar_persistent": [],
+    "switcher": {
+        "json_url": "https://github.com/Geodels/gospl/blob/master/docs/_static/version_switcher.json",
+        "version_match": version,
+    },
+    "show_version_warning_banner": True,
+    "secondary_sidebar_items": ["page-toc"],
+    # The service https://plausible.io is used to gather simple
+    # and privacy-friendly analytics for the site. The dashboard can be accessed
+    # at https://analytics.scientific-python.org/docs.scipy.org
+    # The Scientific-Python community is hosting and managing the account.
+    # "analytics": {
+    #     "plausible_analytics_domain": "docs.scipy.org",
+    #     "plausible_analytics_url": "https://views.scientific-python.org/js/script.js",
+    # },
 }
-# html_theme_options = {
-#     "logo_only": True,
-#     "display_version": False,
-# }
-
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
+html_title = f"{project} v{version} Manual"
+html_static_path = ['_static']
+html_last_updated_fmt = '%b %d, %Y'
+
 html_css_files = [
-    "css/getting_started.css",
-    "css/gospl.css",
+    "gospl.css",
+    "try_examples.css",
 ]
+
+# html_css_files = [
+#     "css/getting_started.css",
+#     "css/gospl.css",
+# ]
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
