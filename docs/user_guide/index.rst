@@ -4,7 +4,7 @@
 User Guide
 ================
 
-This user guide covers essential features of :mod:`gospl`, mostly in the form of interactive Jupyter notebooks and Python scripts. Reading this guide, you will learn:
+This user guide covers essential features of goSPL, mostly in the form of interactive Jupyter notebooks and Python scripts. Reading this guide, you will learn:
 
 - data structure used in the gospl input file,
 - how to generate initial conditions like topography, precipitation and tectonic maps to force a simulation,
@@ -12,11 +12,11 @@ This user guide covers essential features of :mod:`gospl`, mostly in the form of
 - how to run a sequence of backward/forward gospl models using Python functions,
 - how to set a script for running gospl on HPC.
 
-Notebooks cover just a small selection of functions as an illustration of principles. For a full overview of ``gospl`` capabilities, head to the `API reference <https://gospl.readthedocs.io/en/latest/api_ref/index.html>`_. For additional examples, you might be interested in the following set of examples available from the `Stellar-SFM project <https://geodels.github.io/stellar-sfm/welcome.html>`_.
+Notebooks cover just a small selection of functions as an illustration of principles. For a full overview of goSPL capabilities, head to the `API reference <https://gospl.readthedocs.io/en/latest/api_ref/index.html>`_. For additional examples, you might be interested in the following set of examples available from the `Stellar-SFM project <https://geodels.github.io/stellar-sfm/welcome.html>`_.
+
 
 Step 1 - The input file
 ------------------------------
-
 
 .. toctree::
     :maxdepth: 3
@@ -25,30 +25,25 @@ Step 1 - The input file
     inputfile
 
 
-.. raw:: html
+.. grid:: 1
+    :padding: 3
 
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Understanding the input file structure
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> Imposing initial conditions, specifying physical processes parameters and understanding how the input file is structured... </p>
+    .. grid-item-card::  
+        :text-align: center
+        
+        **Understanding the input file structure**
+        ^^^
 
-.. container:: custom-button
+        Imposing initial conditions, specifying physical processes parameters and understanding how the input file is structured...
 
-    :ref:`Learn more <inputfile>`
+        +++
 
-.. raw:: html
+        .. button-ref:: inputfile
+            :color: secondary
+            :click-parent:
 
-                </div>
-                </div>
-            </div>
+            Learn more.
 
-        </div>
-    </div>
 
 Step 2 - Tutorials via Jupyter notebooks
 -------------------------------------------
@@ -158,31 +153,25 @@ Step 3 - Advanced workflows
 This section does not provide any datasets but some of Jupyter notebooks, post-processing functions and scripts that one can use to run and analyse complex paleo-forcing global scale models.
 
 
-.. raw:: html
 
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Workflows for backward / forward model on moving mesh
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> A set of scripts and proposed workflows to run
-                  a model with plate motion and surface remeshing conditions. </p>
+.. grid:: 1
+    :padding: 3
 
-.. container:: custom-button
+    .. grid-item-card::  
+        :text-align: center
+        
+        **Workflows for backward / forward model on moving mesh**
+        ^^^
 
-    :ref:`Look at the workflows <advance>`
+        A set of scripts and proposed workflows to run a model with plate motion and surface remeshing conditions.
 
-.. raw:: html
+        +++
 
-                </div>
-                </div>
-            </div>
+        .. button-ref:: advance
+            :color: secondary
+            :click-parent:
 
-        </div>
-    </div>
+            Learn more.
 
 
 
