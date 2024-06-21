@@ -10,9 +10,9 @@ Stratigraphic record
 
 .. note::
 
-  Stratigraphic architecture records surface evolution history from sediment production in the continental domain to its transport and deposition to the marine realm. To interpret stratigraphic architecture, :mod:`gospl` integrates the complete source-to-sink system: river erosion, sediment transport and deposition.
+  Stratigraphic architecture records surface evolution history from sediment production in the continental domain to its transport and deposition to the marine realm. To interpret stratigraphic architecture, goSPL integrates the complete source-to-sink system: river erosion, sediment transport and deposition.
 
-When the stratigraphic record option is turned on in :mod:`gospl`, stratigraphic layers are defined locally on
+When the stratigraphic record option is turned on in goSPL, stratigraphic layers are defined locally on
 each partition and for each nodes and consist in the following information:
 
 - elevation at time of deposition,
@@ -24,7 +24,7 @@ each partition and for each nodes and consist in the following information:
 
 The model has the capability to consider two lithologies to simulate the first order behaviour of different sediment sizes on  sediment transport and subsequent deposition. Specifically it allows to represent the efficiency of transport of fine grains against coarser ones in the marine environment by enabling the fine fraction to be transported over longer distances.
 
-When the dual lithology is activated in :mod:`gospl`, the erosion, transport and deposition of the different proportions of sediments are recorded at any given time steps. This requires to keep track of the **fine fraction** in all layers previously deposited, and therefore is computationally much more demanding than simulation with only one sediment type. In this case, several assumptions are made. **First**, the model assumes that the volume of rock eroded using the :ref:`stream power law <ero>` accounts for both the solid and void phase. **Second**, the volume of each eroded lithology corresponds to the solid phase only and has the same composition (volume of fine versus coarse) as the eroded stratigraphic layers. **Third**, for sediment deposited inland in depression, the coarser sediments are deposited first and the finest sediments follow in case the depressions have not already been over-filled.
+When the dual lithology is activated in goSPL, the erosion, transport and deposition of the different proportions of sediments are recorded at any given time steps. This requires to keep track of the **fine fraction** in all layers previously deposited, and therefore is computationally much more demanding than simulation with only one sediment type. In this case, several assumptions are made. **First**, the model assumes that the volume of rock eroded using the :ref:`stream power law <ero>` accounts for both the solid and void phase. **Second**, the volume of each eroded lithology corresponds to the solid phase only and has the same composition (volume of fine versus coarse) as the eroded stratigraphic layers. **Third**, for sediment deposited inland in depression, the coarser sediments are deposited first and the finest sediments follow in case the depressions have not already been over-filled.
 
 Inland deposits thicknesses and composition are then updated and recorded in the top stratigraphic layer and the porosities are set to uncompacted sediments values.
 
@@ -32,7 +32,7 @@ Inland deposits thicknesses and composition are then updated and recorded in the
 Porosity and compaction
 -------------------------
 
-To properly simulate stratigraphic evolution, sediment compaction is also considered in :mod:`gospl` as it modifies the geometry and the properties of the deposits.
+To properly simulate stratigraphic evolution, sediment compaction is also considered in goSPL as it modifies the geometry and the properties of the deposits.
 
 Sediments compaction is assumed to be dependent of deposition rate and porosity :math:`\mathrm{\phi}` is considered to varies with depth :math:`\mathrm{z}` following the formulation proposed by `Sclater and Christie, 1980 <https://agupubs.onlinelibrary.wiley.com/doi/10.1029/JB085iB07p03711>`_ based on many sedimentary basins observations:
 

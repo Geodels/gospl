@@ -24,7 +24,7 @@ where :math:`\mathrm{q_{ds}}` is the volumetric soil flux of transportable sedim
 
 in which :math:`\mathrm{D}` is the diffusion coefficient that encapsulates a variety of processes operating on the superficial soil layer. As an example, :math:`\mathrm{D}` may vary as a function of substrate, lithology, soil depth, climate and biological activity.
 
-In :mod:`gospl`, hillslope processes rely on this approximation even though field evidence suggest that the creep approximation is only rarely appropriate.
+In goSPL, hillslope processes rely on this approximation even though field evidence suggest that the creep approximation is only rarely appropriate.
 
 For a discrete element, considering a node :math:`\mathrm{i}` the implicit finite volume representation of the above equation is:
 
@@ -43,7 +43,7 @@ Applied to the entire domain, the equation above can be rewritten as a matrix sy
 
 where :math:`\mathrm{\mathbf Q}` is sparse. The matrix terms  only depend on the diffusion coefficient :math:`\mathrm{D}`, the grid parameters and voronoi variables (:math:`\mathrm{\chi_{i,j}}`,  :math:`\mathrm{\lambda_{i,j}}`, :math:`\mathrm{\Omega_i}`).
 
-In :mod:`gospl`, these parameters remain fixed  during a model run and therefore :math:`\mathrm{\mathbf Q}` needs to be created only once at initialisation. At each iteration, hillslope induced changes in elevation :math:`\mathrm{\boldsymbol \eta}` are then obtained in a similar way as for the solution of the other systems using `PETSc <https://www.mcs.anl.gov/petsc/>`_ *Richardson solver* and *block Jacobi* preconditioning.
+In goSPL, these parameters remain fixed  during a model run and therefore :math:`\mathrm{\mathbf Q}` needs to be created only once at initialisation. At each iteration, hillslope induced changes in elevation :math:`\mathrm{\boldsymbol \eta}` are then obtained in a similar way as for the solution of the other systems using `PETSc <https://www.mcs.anl.gov/petsc/>`_ *Richardson solver* and *block Jacobi* preconditioning.
 
 Marine deposition
 --------------------
