@@ -1,3 +1,6 @@
+.. _contributing:
+
+=========================
 Contributing to goSPL
 =========================
 
