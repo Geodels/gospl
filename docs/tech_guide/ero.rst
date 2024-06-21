@@ -29,7 +29,7 @@ The volumetric entrainment flux of sediment per unit bed area :math:`\mathrm{E}`
   \mathrm{E} =  \mathrm{\kappa P^d Q^m S^n}
 
 
-where :math:`\mathrm{\kappa}` is the precipitation-independent sediment erodibility parameter, :math:`\mathrm{P}` the annual precipitation rate, :math:`\mathrm{d}` is a positive exponent, :math:`\mathrm{Q}=\bar{P}A` is the water discharge (computed in the :ref:`River Discharge <flow>` section with :math:`\mathrm{A}` the flow accumulation) and :math:`\mathrm{S}` is the river local slope. :math:`\mathrm{m}` and :math:`\mathrm{n}` are scaling exponents.  In :mod:`gospl`, :math:`\mathrm{\kappa}` is user defined and the coefficients :math:`\mathrm{m}` and :math:`\mathrm{n}` are set to 0.5 and 1 respectively.  :math:`\mathrm{E}` is in :math:`\mathrm{m/y}` and therefore the erodibility dimension is :math:`\mathrm{m\,y^{-0.5}}`.
+where :math:`\mathrm{\kappa}` is the precipitation-independent sediment erodibility parameter, :math:`\mathrm{P}` the annual precipitation rate, :math:`\mathrm{d}` is a positive exponent, :math:`\mathrm{Q}=\bar{P}A` is the water discharge (computed in the :ref:`River Discharge <flow>` section with :math:`\mathrm{A}` the flow accumulation) and :math:`\mathrm{S}` is the river local slope. :math:`\mathrm{m}` and :math:`\mathrm{n}` are scaling exponents.  In goSPL, :math:`\mathrm{\kappa}` is user defined and the coefficients :math:`\mathrm{m}` and :math:`\mathrm{n}` are set to 0.5 and 1 respectively.  :math:`\mathrm{E}` is in :math:`\mathrm{m/y}` and therefore the erodibility dimension is :math:`\mathrm{m\,y^{-0.5}}`.
 
 The elevation (:math:`\mathrm{\eta_i}`) will change due to local river erosion rate and is defined implicitly by:
 

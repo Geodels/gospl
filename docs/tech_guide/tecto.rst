@@ -31,7 +31,7 @@ Considering the spatial resolution of goSPL mesh (above 5 km), the horizontal ad
 
 .. warning::
 
-  Compared to vertical displacements applied at each time step, the horizontal advection is only performed at specific intervals (of the order of several thousands to millions years) specified in the :mod:`gospl` input file by the :yaml:`tec` parameter in the :yaml:`time` section.
+  Compared to vertical displacements applied at each time step, the horizontal advection is only performed at specific intervals (of the order of several thousands to millions years) specified in the goSPL input file by the :yaml:`tec` parameter in the :yaml:`time` section.
 
 
 .. figure:: ../images/tecto.png
@@ -42,7 +42,7 @@ Considering the spatial resolution of goSPL mesh (above 5 km), the horizontal ad
 
 Due to tectonic advection, the density of the surface nodes evolves over time, which leads to areas showing rarefaction or accumulation of nodes. In order for the finite volume schema to remain accurate, local addition and deletion of nodes and remeshing of the triangulated spherical surface are therefore required. However, the remeshing process is computationally expensive and requires to rebuild not only the delaunay mesh but also the associated voronoi one and to redistribute, balance the mesh and its vertices parameters with `PETSc <https://www.mcs.anl.gov/petsc/>`_.
 
-Two options are proposed to deal with vertices advection in :mod:`gospl`.
+Two options are proposed to deal with vertices advection in goSPL.
 
 In the first one and to avoid remeshing, the initial mesh is assumed to remain fixed and the advected points are then used to interpolate the advected nodes informations (elevation, erosion, deposition, stratigraphic information...) onto the fixed ones using an inverse weighting distance approach and `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_. The number of points used for the interpolation is defined by the user in the input file (:yaml:`interp` field). An example based on this option is provided in the User Guide - `backward forward <https://gospl.readthedocs.io/en/latest/user_guide/bfModel/bfModel.html>`_ example. In this version, a unique number of points is given for the interpolation but we plan to make it spatially varying to avoid *over-smoothing* node parameters in specific regions (such as subduction zones).
 

@@ -25,7 +25,7 @@ In addition, nearly all of these parallel approaches assume a **single flow dire
 Single and multiple flow directions
 ------------------------------------
 
-:mod:`gospl` allows for both SFD and MFD routing by using an adapted version of the parallel implicit drainage area (IDA) method from `Richardson et al. (2014) <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_  to unstructured meshes. It consists in writing the FA calculation as a *sparse matrix system of linear equations* and takes full advantage of purpose-built, efficient linear algebra routines available in `PETSc <https://www.mcs.anl.gov/petsc/>`_.
+goSPL allows for both SFD and MFD routing by using an adapted version of the parallel implicit drainage area (IDA) method from `Richardson et al. (2014) <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_  to unstructured meshes. It consists in writing the FA calculation as a *sparse matrix system of linear equations* and takes full advantage of purpose-built, efficient linear algebra routines available in `PETSc <https://www.mcs.anl.gov/petsc/>`_.
 
 The river discharge is computed from the calculated FA and the net precipitation rate :math:`\mathrm{P}`.
 At node :math:`\mathrm{i}`, the river discharge (:math:`\mathrm{q_i}`) is determined as follows:
