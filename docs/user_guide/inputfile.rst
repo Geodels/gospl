@@ -66,8 +66,6 @@ Initial mesh definition and simulation declaration
         i. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file containing for each vertex of the mesh the cumulative erosion deposition values in metres.
         j. to start a simulation using an initial stratigraphic layer use the ``npstrata`` key and specify a file containing for each vertex of the mesh the stratigraphic layer thickness, the percentage of fine lithology inside each layer and the porosities of the coarse and fine sediments (the multi-lithology option is only available for model without horizontal displacement and when the ``backward`` key is set to `False`).
 
-
-
 .. warning::
 
   It is worth noting that all the input files require to run a goSPL simulation must be defined as numpy zip array (**.npz**). This allows to directly and efficiently load the dataset during initialisation. This is specially efficient when running large models.

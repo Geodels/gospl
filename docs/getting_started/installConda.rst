@@ -44,6 +44,12 @@ After getting Anaconda installed, the user will have already access to some esse
 Installing Miniconda
 ----------------------------
 
+
+.. warning::
+
+    If you have installed Anaconda already no need to install Miniconda and you can skip this section.
+    
+
 The previous section outlined how to download the `Anaconda <https://docs.continuum.io/anaconda/>`__ distribution. However this approach means you will install well over one hundred packages and involves downloading the installer which is a few hundred megabytes in size.
 
 If you want to have more control on which packages, or have a limited internet
