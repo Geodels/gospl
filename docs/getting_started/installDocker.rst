@@ -26,7 +26,7 @@ The goSPL image contains all the dependencies and configuration files required t
 
 .. important::
   
-  The goSPL docker image is a easy-to-use approach for running our code especially if you have limited experience with Anaconda environments. 
+  The goSPL docker image is an easy-to-use approach for running our code especially if you have limited experience with Anaconda environments. 
 
 Different flavors could be pulled using a tag and recommended ones are:
 

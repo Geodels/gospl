@@ -4,158 +4,135 @@
 Technical Guide
 ================
 
-The Technical Guide covers the implicit, iterative approaches used to solve the multiple flow direction water routing and the erosion deposition processes main algorithms implemented in :mod:`gospl`.
+This guide covers the implicit, iterative approaches used to solve the multiple flow direction water routing and the erosion deposition processes main algorithms implemented in goSPL.
 
-:mod:`gospl` is mostly written in ``Python`` with some functions in ``Fortran`` and takes advantage of ``PETSc`` solvers over parallel computing architectures using ``MPI``.
+goSPL is mostly written in ``Python`` with some functions in ``Fortran`` and takes advantage of ``PETSc`` solvers over parallel computing architectures using ``MPI``.
 
-Further information on any specific method can be obtained in the
-:ref:`api_ref`.
+Further information on any specific methods can be obtained in the :ref:`api_ref`.
 
+.. grid:: 1
+    :padding: 3
 
-.. raw:: html
+    .. grid-item-card::  
+        
+        **Short Description**
+        ^^^
 
-    <div class="shadow gs-callout gs-callout-remember">
-        <h4>Short Description</h4>
+        The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. It has the ability to track **two types of clastic sediment size**. The following processes are considered:
 
-The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. It has the ability to track **two types of clastic sediment size**. The following processes are considered:
+        - **river incision** and **deposition** using stream power law,
+        - continental **deposition** in depressions,
+        - **marine deposition** at river mouth,
+        - **hillslope processes** in both marine and inland areas,
+        - **sediment compaction** as stratigraphic layers geometry and properties change, 
+        - spatially and temporally varying **tectonics** (horizontal and vertical displacements).
+        - spatially and temporally varying **precipitation** grids as well as **orographic** rain and sea-level fluctuations, 
+        - possibility to account for **flexural** isostasy driven by changes in surface loading.
 
-- **river incision** using stream power law,
-- inland **river deposition** in depressions,
-- **marine deposition** at river mouth,
-- **hillslope processes** in both marine and inland areas,
-- **sediment compaction** as stratigraphic layers geometry and properties change, and
-- spatially and temporally varying **tectonics** (horizontal and vertical displacements).
+.. grid:: 1 1 2 2
+    :gutter: 2 3 4 4
 
-It can also be forced with varying climatic forces (temporal and spatial precipitation changes and sea-level fluctuations).
+    .. grid-item-card::
+        :img-top: ../_static/rivers.png
+        :text-align: center
 
-.. raw:: html
+        **River flow implementation**
+        ^^^
 
-    </div>
+        Based on a parallel implicit drainage area (IDA) method. Want to gain insights on the implemented approach?
 
+        +++
 
+        .. button-ref:: flow
+            :color: secondary
+            :click-parent:
 
+            Learn more about goSPL flow.
 
-.. raw:: html
+    .. grid-item-card::
+        :img-top: ../_static/erosion.png
+        :text-align: center
 
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header2">
-                    River flow implementation
-                </div>
-                <div class="card-body">
-                    <p class="card-text">Based on a parallel implicit
-                      drainage area (IDA) method.
-                      Want to gain insights on the implemented approach?</p>
+        **Erosion rate and sediment flux**
+        ^^^
 
-.. container:: custom-button
+        Based on the stream power law (SPL), river erosion depends on local slope,discharge and erodibility coefficient.
 
-    :ref:`Learn more <flow>`
+        +++
 
-.. raw:: html
+        .. button-ref:: ero
+            :color: secondary
+            :click-parent:
 
-                </div>
-                </div>
-            </div>
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header2">
-                    Erosion rate and sediment flux
-                </div>
-                <div class="card-body">
-                    <p class="card-text">Based on the stream power law
-                      (SPL), river erosion depends on local slope,
-                      discharge and erodibility coefficient.</p>
+            Learn more about the SPL.
 
-.. container:: custom-button
+    .. grid-item-card::
+        :img-top: ../_static/depression.png
+        :text-align: center
 
-    :ref:`Learn more <ero>`
+        **Inland depressions & deposition**
+        ^^^
 
-.. raw:: html
+        Computes the evolution in internally drained basins using a priority-flood algorithm.
 
-                </div>
-                </div>
-            </div>
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header2">
-                    Inland depressions & deposition
-                </div>
-                <div class="card-body">
-                    <p class="card-text">Computes the evolution in
-                    internally drained basins using a priority-flood
-                    algorithm.</p>
+        +++
 
-.. container:: custom-button
+        .. button-ref:: dep
+            :color: secondary
+            :click-parent:
 
-    :ref:`Learn more <dep>`
+            Learn more about inland depressions.
 
-.. raw:: html
+    .. grid-item-card::
+        :img-top: ../_static/deltaDiagram.jpg
+        :text-align: center
 
-                </div>
-                </div>
-            </div>
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header2">
-                    Hillslope and marine deposition
-                </div>
-                <div class="card-body">
-                    <p class="card-text">Change in elevation induced by creep
-                    law and transport of river sediment in the marine realm based on diffusion equations.</p>
+        **Hillslope and marine deposition**
+        ^^^
 
-.. container:: custom-button
+        Change in elevation induced by creep law and transport of river sediment in the marine realm based on diffusion equations.
 
-    :ref:`Learn more <hill>`
+        +++
 
-.. raw:: html
+        .. button-ref:: hill
+            :color: secondary
+            :click-parent:
 
-                </div>
-                </div>
-            </div>
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header2">
-                    Stratigraphy and compaction
-                </div>
-                <div class="card-body">
-                    <p class="card-text">Record stratigraphic layers through
-                    time, track two sediment types and compute porosity
-                    changes induced by deposition.</p>
+            Learn more about hillslope processes.
 
-.. container:: custom-button
+    .. grid-item-card::
+        :img-top: ../_static/strati.png
+        :text-align: center
 
-    :ref:`Learn more <strat>`
+        **Stratigraphy and compaction**
+        ^^^
 
+        Record stratigraphic layers through time, track two sediment types and compute porosity changes induced by deposition.
 
-.. raw:: html
+        +++
 
-                </div>
-                </div>
-            </div>
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header2">
-                    Tectonic
-                </div>
-                <div class="card-body">
-                    <p class="card-text">Displacements either induced by lithospheric or mantle forcing are
-                    used to move the surface both horizontally and vertically.</p>
+        .. button-ref:: strat
+            :color: secondary
+            :click-parent:
 
-.. container:: custom-button
+            Stratigraphic and compaction implementation.
 
-    :ref:`Learn more <tecto>`
+    .. grid-item-card::
+        :img-top: ../_static/tectonic.png
+        :text-align: center
 
+        **Tectonic forcing**
+        ^^^
 
-.. raw:: html
+        Displacements either induced by lithospheric or mantle forcing are used to move the surface both horizontally and vertically.
 
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
+        +++
 
+        .. button-ref:: tecto
+            :color: secondary
+            :click-parent:
+
+            Learn more about the tectonics implementation.
 
 
 .. toctree::
