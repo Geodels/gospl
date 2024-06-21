@@ -6,18 +6,20 @@ Installation via Source
 
 .. note::
 
-  Below are some of the main instructions to build :mod:`gospl` from the git source tree. This approach is mainly for experienced users working on a Linux environment. It is highly recommended to use ``docker`` or ``conda``, for quick installation and for package and dependency updates.
+  Below are some of the main instructions to build goSPL from the git source tree. This approach is mainly for **experienced** users working on a Linux environment. It is highly recommended to use ``conda``, for quick installation and for packages and dependencies updates.
 
 
 Update System
 --------------
 
-  apt-get update -qq
-  apt-get install -yq --no-install-recommends bash-completion build-essential
-  apt-get install -yq --no-install-recommends python3-minimal python3-dev python3-pip
-  apt-get install -yq --no-install-recommends python3-tk python3-dbg cmake
-  apt-get install -yq --no-install-recommends python3-setuptools wget gfortran
+::
 
+      apt-get update -qq
+      apt-get install -yq --no-install-recommends bash-completion build-essential
+      apt-get install -yq --no-install-recommends python3-minimal python3-dev python3-pip
+      apt-get install -yq --no-install-recommends python3-tk python3-dbg cmake
+      apt-get install -yq --no-install-recommends python3-setuptools wget gfortran
+      apt-get install -yq --no-install-recommends proj-bin
 
 MPICH
 -------
@@ -77,9 +79,7 @@ PETSc
 Dependencies
 ----------------------
 
-:mod:`gospl` has many required dependencies. If a
-dependency is not installed, :mod:`gospl` will raise an ``ImportError`` when
-the method/class requiring that dependency is called.
+goSPL has many required dependencies. If a dependency is not installed, goSPL will raise an ``ImportError`` when the method/class requiring that dependency is called.
 
 A dependency ``XXXX`` is installed via the following command in a terminal::
 
@@ -102,26 +102,34 @@ meshplex                  0.13.4             Fast tools for simplex meshes
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       9.0.3              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
+xarray                    0.15.0             Labelled multi-dimensional arrays 
+pyproj                    2.5.0              Interface to PROJ (coordinate transformations)
+gflex                     1.1.0              Methods to solve elastic plate flexure
 ========================= ================== =============================================================
 
 
-Setup install
+Meshplex work-around
 ----------------------
 
-Once all the listed dependencies above have been installed, :mod:`gospl`
-source files are available through `GitHub <https://github.com/Geodels/gospl>`_::
+
+In case where you are asked to download a licensed version of Meshplex, you might want to try the following alternatives:
+
+1. Use the version available from conda (conda install meshplex) this is version ``v0.15.14`` which is open-source and should work well.
+2. Download an older repository of Meshplex such as the one from `Geodels <https://github.com/Geodels/meshplex>`_ ``v0.8.0`` or from `here <https://github.com/kinnala/meshplex>`_ ``v0.13.3`` or `here <https://github.com/cottrell/meshplex>`_ ``v0.17.0`` 
+
+If you use option 2 and once the folder is downloaded, you can install the code by running in a terminal:: 
+      
+      python3 -m pip install . 
+
+
+goSPL installation
+----------------------
+
+Once all the listed dependencies above have been installed, goSPL source files are available through `GitHub <https://github.com/Geodels/gospl>`_::
 
       git clone https://github.com/Geodels/gospl
 
 It can then be installed locally on your system using::
 
-      python setup.py install --user
+      pip install --no-build-isolation -e .
 
-If you wish to uninstall **gospl** you can do::
-
-      python3 setup.py install --record gospl-files.txt
-
-To record a list of installed files in ``gospl-files.txt``. Once you want to uninstall you can
-use ``xargs`` to proceed with the uninstall::
-
-      xargs rm -rf < gospl-files.txt

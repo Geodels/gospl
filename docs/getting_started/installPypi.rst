@@ -1,31 +1,28 @@
 .. _installPypi:
 
 
-The following installation guidelines are mainly for experienced users working on a Linux environment. It is highly recommended to use ``docker`` or ``conda``, for quick installation and for package and dependency updates.
-You can find simple installation instructions for :mod:`gospl` in this document.
+The following installation guidelines are mainly for **experienced** users working on a Linux environment. It is highly recommended to use ``conda`` for quick installation and for packages and dependencies updates. 
 
 =========================
 Installation via PyPI
 =========================
 
-:mod:`gospl` can be installed via pip from
-`PyPI <https://pypi.org/project/gospl>`__.
+.. warning::
 
-::
+    The `PyPI <https://pypi.org/project/gospl>`__ goSPL installation is limited and might not be fully functional in many cases
+
+You might want to give it a try by running the following command::
 
     pip install gospl
 
-The installation however requires additional dependencies and is likely to
-failed if some initial packages are not already available. When using ``pip``,
-it is recommended to use ``virtualenv``. For a guide on how to use it, readers
-are invited to look at visit the `Python documentation <https://docs.python.org/3/tutorial/venv.html>`_.
+The installation however requires additional dependencies and is likely to failed if some initial packages are not already available. When using ``pip``, it is recommended to use ``virtualenv``. For a guide on how to use it, readers are invited to look at visit the `Python documentation <https://docs.python.org/3/tutorial/venv.html>`_.
 
 
 Installing dependencies
 -----------------------------
 
 
-On linux, you will need to install ``MPI``, ``PETSc`` and ``Hdf5`` via the your Linux distribution's package manager.
+On linux, you will need to install ``MPI``, ``PETSc`` and ``Hdf5`` from your Linux distribution's package manager.
 
 
 For example, the commands in this table will install ``MPICH`` from your distribution.
@@ -58,12 +55,23 @@ If you have ``PETSc`` already installed, you can point to your ``PETSC_DIR`` and
     unset PETSC_ARCH
 
 
-Installing ``PETSc`` and ``gospl``
+Installing PETSc and dependencies
 -----------------------------------
 
-Then the remaining library are installed locally by running::
+Then the remaining libraries are installed locally by running::
 
+    sudo apt-get install proj-bin
     pip install --upgrade pip setuptools wheel
     pip install petsc --user
     pip install petsc4py --user
-    pip install gospl --user
+    pip install xarray --user
+    pip install pyproj --user
+    
+
+And finally to install goSPL::
+
+    pip install git+https://github.com/Geodels/gospl.git
+
+Alternatively, you could clone or download the goSPL `repository <https://github.com/Geodels/gospl/archive/refs/heads/master.zip>`_ and run the following command in the repository directory::
+
+    pip install --no-build-isolation -e .

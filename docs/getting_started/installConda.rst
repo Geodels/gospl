@@ -1,6 +1,6 @@
 .. _installConda:
 
-Installing goSPL and its dependencies stack from source can be a **tedious and difficult**.
+Installing goSPL and its dependencies stack from source can be **tedious and difficult**.
 
 
 =========================
@@ -12,7 +12,7 @@ Installation via Conda
 
 .. important::
 
-    This is the recommended approach to install and use goSPL.
+    This is the preferred approach to install and use goSPL.
 
 
 .. warning::
@@ -114,3 +114,18 @@ To verify that the environment was removed, in your terminal window or an Anacon
 
 
 The ``gospl`` conda environment should not be in your list of environment anymore.
+
+
+Alternative goSPL installation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You might want to try another branch/version of goSPL. To do so you could once your conda environment has been activated run the following::
+
+    pip install git+https://github.com/Geodels/gospl.git@NAME
+
+
+where ``NAME`` needs to be replaced by the branch/version you want to try.
+
+Alternatively, you could clone or download the goSPL `repository <https://github.com/Geodels/gospl/archive/refs/heads/master.zip>`_ and run the following command in the repository directory::
+
+    pip install --no-build-isolation -e .
