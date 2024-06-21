@@ -17,7 +17,7 @@ Once you have installed Docker Desktop for your operating system then enable the
 
 
 `Docker containers <https://hub.docker.com/r/geodels/gospl>`_ provide an easy-way to set up and distribute applications. They are also safe and consistent environments which
-facilitate debugging and reproducibility of models/simulations.
+facilitate debugging and reproducibility of models / simulations.
 
 goSPL on DockerHub
 ^^^^^^^^^^^^^^^^^^
