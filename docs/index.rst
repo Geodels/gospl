@@ -21,7 +21,7 @@ goSPL documentation
 
 
 .. grid:: 1
-    :padding: 3
+    :padding: 4
 
     .. grid-item-card::  
         
