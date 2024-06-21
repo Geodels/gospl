@@ -4,214 +4,163 @@
 API reference
 ==============
 
-This page gives an overview of all :mod:`gospl` objects, functions and methods.
 
-.. image:: https://img.shields.io/badge/code%20style-black-000000.svg
-  :target: https://github.com/psf/black
-  :alt: Code style: black
+.. note::
+    
+    This section provides an overview of main goSPL objects, functions and methods.
 
-.. image:: https://img.shields.io/lgtm/alerts/g/Geodels/gospl.svg?logo=lgtm&logoWidth=18
-  :target: https://lgtm.com/projects/g/Geodels/gospl/alerts/
-  :alt: Total alerts
+.. grid:: 1
+    :padding: 5
+    :gutter: 4
 
-.. image:: https://img.shields.io/lgtm/grade/python/g/Geodels/gospl.svg?logo=lgtm&logoWidth=18
-  :target: https://lgtm.com/projects/g/Geodels/gospl/context:python
-  :alt: Language grade: Python
+    .. grid-item-card::
+        :text-align: center
 
-Model class
---------------
+        **Class Model**
+        ^^^
 
-.. raw:: html
+        Instantiates model object and performs surface processes evolution. 
 
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Class Model
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> Instantiates model <code>object</code> and performs <code>surface processes</code> evolution. </p>
+        +++
 
-.. container:: custom-button
+        .. button-ref:: model_ref
+            :color: secondary
+            :click-parent:
 
-    :ref:`See functions and source code <model_ref>`
-
-.. raw:: html
-
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-Mesh class
---------------
-
-.. raw:: html
-
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Class Mesh
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> Defines spherical mesh characteristics and builds <code>PETSc DMPlex</code>. </p>
+            See functions and source code.
 
 
-.. container:: custom-button
+    .. grid-item-card::
+        :text-align: center
 
-    :ref:`See functions and source code <mesh_ref>`
+        **Class Mesh**
+        ^^^
 
-.. raw:: html
+        Defines spherical mesh characteristics and builds PETSc DMPlex.
 
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+        +++
 
-Depression filling class
---------------------------
+        .. button-ref:: mesh_ref
+            :color: secondary
+            :click-parent:
 
-.. raw:: html
-
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Class Pit
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> Performs parallel <code>depression filling</code> of the surface. </p>
-
-.. container:: custom-button
-
-    :ref:`See functions and source code <pit_ref>`
-
-.. raw:: html
-
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-Flow & erosion class
---------------------------
-
-.. raw:: html
-
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Class Flow
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> <code>Flow accumulation</code> computation for global unstructured mesh. </p>
-
-.. container:: custom-button
-
-    :ref:`See functions and source code <flow_ref>`
-
-.. raw:: html
-
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-Sediment deposition classes
------------------------------
-
-.. raw:: html
-
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Class Sediment
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> Functions related to <code>sediment transport</code> and <code>deposition</code> for both land & sea. </p>
+            See functions and source code.
 
 
-.. container:: custom-button
+    .. grid-item-card::
+        :text-align: center
 
-    :ref:`Land functions <sed_ref>` - :ref:`marine functions<sea_ref>`
+        **Class Pit**
+        ^^^
 
-.. raw:: html
+        Performs parallel depression filling of the surface.
 
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+        +++
 
+        .. button-ref:: pit_ref
+            :color: secondary
+            :click-parent:
 
-Stratigraphy class
---------------------------
+            See functions and source code.
 
+    .. grid-item-card::
+        :text-align: center
 
-.. raw:: html
+        **Class Flow**
+        ^^^
 
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Class Stratigraphy
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> Functions related to <code>stratigraphic</code> architecture and <code>compaction</code>. </p>
+        Flow accumulation computation for global unstructured mesh.
 
+        +++
 
-.. container:: custom-button
+        .. button-ref:: flow_ref
+            :color: secondary
+            :click-parent:
 
-    :ref:`See functions and source code <stra_ref>`
+            See functions and source code.
 
-.. raw:: html
+    .. grid-item-card::
+        :text-align: center
 
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+        **Class Sediment Continent**
+        ^^^
 
-Inputs & outputs classes
---------------------------
+        Functions related to sediment transport and deposition for continental regions. 
 
-.. raw:: html
+        +++
 
-    <div class="container">
-        <div class="row">
-            <div class="col-12 d-flex install-block">
-                <div class="card install-card shadow w-100">
-                <div class="card-header">
-                    Class Input & Class Output
-                </div>
-                <div class="card-body">
-                  <p class="card-text"> <code>Input/output</code> methods declaration. </p>
+        .. button-ref:: sed_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
 
 
-.. container:: custom-button
+    .. grid-item-card::
+        :text-align: center
 
-    See :ref:`input <in_ref>` & :ref:`output<out_ref>` functions
+        **Class Sediment Marine**
+        ^^^
 
-.. raw:: html
+        Functions related to sediment transport and deposition for marine continental regions. 
 
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
+        +++
+
+        .. button-ref:: sea_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class Stratigraphy**
+        ^^^
+
+        Functions related to stratigraphic architecture and compaction.
+
+        +++
+
+        .. button-ref:: stra_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class Input**
+        ^^^
+
+        Input methods declaration.
+
+        +++
+
+        .. button-ref:: in_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class Output**
+        ^^^
+
+        Output methods declaration.
+
+        +++
+
+        .. button-ref:: out_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
 
 .. toctree::
     :maxdepth: 3
