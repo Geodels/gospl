@@ -22,23 +22,6 @@ Instructions for installing it via Anaconda or from source are also provided.
     :gutter: 2 3 4 4
 
     .. grid-item-card::
-        :img-top: ../_static/docker.svg
-        :text-align: center
-
-        **Docker image**
-        ^^^
-
-        Lightweight virtualisation with `Docker container <https://hub.docker.com/r/geodels/gospl>`_ provides a simple approach for running goSPL simulation.
-
-        +++
-
-        .. button-ref:: installDocker
-            :color: secondary
-            :click-parent:
-
-            Learn more
-
-    .. grid-item-card::
         :img-top: ../_static/anaconda.svg
         :text-align: center
 
@@ -53,7 +36,24 @@ Instructions for installing it via Anaconda or from source are also provided.
             :color: secondary
             :click-parent:
 
-            Learn more
+            Install via Conda
+
+    .. grid-item-card::
+        :img-top: ../_static/docker.svg
+        :text-align: center
+
+        **Docker image**
+        ^^^
+
+        Lightweight virtualisation with `Docker container <https://hub.docker.com/r/geodels/gospl>`_ provides a simple approach for running goSPL simulation.
+
+        +++
+
+        .. button-ref:: installDocker
+            :color: secondary
+            :click-parent:
+
+            Install via Docker
 
     .. grid-item-card::
         :img-top: ../_static/pypi.svg
@@ -70,7 +70,7 @@ Instructions for installing it via Anaconda or from source are also provided.
             :color: secondary
             :click-parent:
 
-            Learn more
+            Install via PyPI
 
     .. grid-item-card::
         :img-top: ../_static/python.svg
@@ -94,7 +94,7 @@ Instructions for installing it via Anaconda or from source are also provided.
     :maxdepth: 2
     :hidden:
 
-    installDocker
     installConda
+    installDocker
     installPypi
     installSrc

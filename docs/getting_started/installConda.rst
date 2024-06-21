@@ -108,7 +108,7 @@ To remove the environment, in your terminal window or an Anaconda Prompt, run::
     conda remove --name gospl --all
 
 
-To verify that the environment was removed, in your terminal window or an Anaconda Prompt, run:
+To verify that the environment was removed, in your terminal window or an Anaconda Prompt, run::
 
     conda info --envs
 
