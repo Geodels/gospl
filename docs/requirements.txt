@@ -17,4 +17,4 @@ myst_nb
 numpydoc
 sphinx_design
 jupyterlite_sphinx
-intersphinx_registry
+intersphinx_registry==0.2406.4
