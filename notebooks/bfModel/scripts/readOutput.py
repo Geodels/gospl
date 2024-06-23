@@ -4,7 +4,7 @@ import h5py
 import meshio
 import numpy as np
 from scipy import spatial
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
 
 
 class readOutput:
@@ -20,7 +20,8 @@ class readOutput:
 
         # Open YAML file
         with open(filename, "r") as finput:
-            self.input = yaml.load(finput, Loader=yaml.Loader)
+            yaml = YAML()
+            self.input = yaml.load(finput)
 
         self.radius = 6378137.0
         self._inputParser()
