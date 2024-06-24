@@ -42,14 +42,7 @@ Input file
 
 
 Required parameters
----------------------
-
-.. toctree::
-    :maxdepth: 3
-    :hidden:
-
-    inputfile
-
+^^^^^^^^^^^^^^^^^^^^
 
 .. grid:: 1
     :padding: 3
@@ -72,13 +65,7 @@ Required parameters
 
 
 Parameters related to surface processes
-----------------------------------------------
-
-.. toctree::
-    :maxdepth: 3
-    :hidden:
-
-    surfproc
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 .. grid:: 1
@@ -102,14 +89,7 @@ Parameters related to surface processes
 
 
 Optional parameters related to climate
-----------------------------------------------
-
-.. toctree::
-    :maxdepth: 3
-    :hidden:
-
-    optfile1
-
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. grid:: 1
     :padding: 3
@@ -132,14 +112,7 @@ Optional parameters related to climate
 
 
 Optional parameters related to tectonics
-----------------------------------------------
-
-.. toctree::
-    :maxdepth: 3
-    :hidden:
-
-    optfile2
-
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. grid:: 1
     :padding: 3
