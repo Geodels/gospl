@@ -39,7 +39,7 @@ Initial mesh definition and simulation declaration
         a. the initial spherical or 2D surface mesh ``npdata`` (**.npz** file). This file contains the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells.
         b. the flow direction method to be used ``flowdir`` that takes an integer value between 1 (for SFD) and 6 (for MFD)
         c. the exponent (``flowexp``) used in the flow direction approach. Default value is set to 0.42.
-        d. boundary conditions (``bc``) when not running a global model. Each integer corresponds to an edge defined in the following order: south, east, north, and west. The integer is set to either 0 for open or to 1 for closed boundaries.
+        d. boundary conditions (``bc``) when not running a global model. Each integer corresponds to an edge defined in the following order: south, east, north, and west. The integer is set to either 0 for open or to 1 for fixed boundaries.
 
         In addition the following optional parameters could be set:
 
@@ -54,7 +54,7 @@ Initial mesh definition and simulation declaration
   
 .. note::
 
-  It is also possible to have only one **.npz** file containing the required keys. For example you could set an input file containing the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells, ``ed`` erosion deposition and call it for both the ``npdata`` and ``nperodep`` parameters.
+  It is also possible to have only one **.npz** file containing the required keys. For example you could set an input file containing the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells, and ``ed`` the erosion deposition node values and call it for both the ``npdata`` and ``nperodep`` parameters.
 
 
 Setting model temporal evolution
