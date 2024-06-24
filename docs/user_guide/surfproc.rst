@@ -66,6 +66,32 @@ Hillslope and marine deposition parameters
         d. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore. 
         e. ``diffNb`` is the number of steps used to distribute the sediment fluxes in the marine domain. Default value is set to 1.        
 
+Sediment surface erodibility factor
+-------------------------------------
+
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::  
+        
+        **Declaration example**:
+
+        .. code:: python
+
+            sedfactor:
+                - start: 200000.
+                  uniform: 3
+                - start: 400000.
+                  map: ['facErosion4k','fsed']
+
+        One could choose to impose variable erodibility factors through space and time to reflect different surficial rock composition. For example, those maps could be set to represent different rock erodibility index as proposed in `Mossdorf et al. (2018) <https://www.sciencedirect.com/science/article/abs/pii/S0143622817306859>`_. The factor are then used in front of the erodibility coefficient (``K`` in the SPL).
+
+        .. important::
+
+            When defining your variable erodibility factors grid, you needs to use the **npz** format and your factors would be specified by a key corresponding to the factor values for each vertice of the mesh. In the above example this key is ``'fsed'``. 
+
+
 Compaction & porosity variables definition
 ------------------------------------------
 
