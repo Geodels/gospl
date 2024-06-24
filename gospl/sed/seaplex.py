@@ -10,7 +10,7 @@ import numpy_indexed as npi
 
 from mpi4py import MPI
 from time import process_time
-from vtk.util import numpy_support
+from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdrcvrs
@@ -23,10 +23,10 @@ MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 
 class SEAMesh(object):
     """
-    This class encapsulates all the functions related to sediment transport and deposition in the marine environment for **river delivered sediments**. `gospl` has the ability to track three types of clastic sediment size and one type of carbonate (still under development).
+    This class encapsulates all the functions related to sediment transport and deposition in the marine environment for **river delivered sediments**.
 
     .. note::
-        All of these functions are ran in parallel using the underlying PETSc library.
+        All of these functions are run in parallel using the underlying PETSc library.
 
     For an overview of solution to nonlinear ODE and PDE problems, one might found the online book from `Langtangen (2016) <http://hplgit.github.io/num-methods-for-PDEs/doc/pub/nonlin/pdf/nonlin-4print-A4-2up.pdf>`_ relevant.
 
@@ -40,11 +40,7 @@ class SEAMesh(object):
         self.coastDist = None
 
         self.zMat = self._matrix_build_diag(np.zeros(self.lpoints))
-
         self.dh = self.hGlobal.duplicate()
-
-        if self.excessIn:
-            self.ePit = np.zeros(self.lpoints)
 
         return
 
@@ -82,14 +78,13 @@ class SEAMesh(object):
 
     def _distanceCoasts(self, data, k_neighbors=1):
         """
-        This function computes for every marine vertices the distance to the closest coastline.
+        This function computes for every marine vertices the distance to the closest coastline. It calls the private functions:
+
+        - _globalCoastsTree
 
         .. important::
 
-            The calculation takes advantage of the `vtkContourFilter` function from VTK library
-            which is performed on the **global** VTK mesh. Once the coastlines have been extracted,
-            the distances are obtained by querying a kd-tree (initialised with the coastal nodes) for
-            marine vertices contained within each partition.
+            The calculation takes advantage of the `vtkContourFilter` function from VTK library which is performed on the **global** VTK mesh. Once the coastlines have been extracted, the distances are obtained by querying a kd-tree (initialised with the coastal nodes) for marine vertices contained within each partition.
 
         :arg data: local elevation numpy array
         :arg k_neighbors: number of nodes to use when querying the kd-tree
@@ -130,22 +125,22 @@ class SEAMesh(object):
 
         return
 
-    def _waterFluxes(self, sedflux):
+    def _marineFluxes(self, sedflux):
         """
-        Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute
-        sediments downslope.
+        Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute sediments downslope.
 
+        :arg sedflux: volumetric marine sediment rate
         """
-        
+
         # Define multiple flow directions under water
         self.donRcvs, self.distRcv, self.wghtVal = mfdrcvrs(
             self.flowDir, 0.01, self.oceanFill, self.sealevel
         )
-        
+
         self.rcvID = self.donRcvs.copy()
-        self.rcvID[self.ghostIDs,:] = -1
-        self.distRcv[self.ghostIDs,:] = 0
-        self.wghtVal[self.ghostIDs,:] = 0
+        self.rcvID[self.ghostIDs, :] = -1
+        self.distRcv[self.ghostIDs, :] = 0
+        self.wghtVal[self.ghostIDs, :] = 0
 
         # Set borders nodes
         if self.flatModel:
@@ -155,7 +150,6 @@ class SEAMesh(object):
 
         # Define the flow direction matrix
         self.matrixFlow(8)
-        
         FAL = self.fillFAL.getArray().copy()
         FAL[np.invert(self.sinkIDs)] = 0.0
         self.tmpL.setArray(FAL)
@@ -167,10 +161,10 @@ class SEAMesh(object):
 
         # Dimensionless depositional coefficient
         PA = self.tmpL.getArray().copy()
-        fDep = np.divide(self.fDepm*self.larea, PA, out=np.zeros_like(PA), where=PA > 1.e-6)
+        fDep = np.divide(self.fDepm * self.larea, PA, out=np.zeros_like(PA), where=PA > 1.e-6)
         if self.dmthd == 1:
-            fDep[fDep>0.99] = 0.99
-            self.matrixFlow(8, 1.-fDep)
+            fDep[fDep > 0.99] = 0.99
+            self.matrixFlow(8, 1.0 - fDep)
         else:
             dMat = self._matrix_build_diag(fDep)
             dMat += self.fMat
@@ -188,19 +182,19 @@ class SEAMesh(object):
         # Destroy temporary arrays
 
         if self.memclear:
-            del PA, FAL 
+            del PA, FAL
             gc.collect()
 
         # Extract local sediment deposition thickness
         self.dm.globalToLocal(self.tmp, self.tmpL)
         if self.dmthd == 1:
-            scale = np.divide(fDep, 1.0-fDep, out=np.zeros_like(fDep), where=fDep != 0)
-            sedDep = self.tmpL.getArray()*scale
+            scale = np.divide(fDep, 1.0 - fDep, out=np.zeros_like(fDep), where=fDep != 0)
+            sedDep = self.tmpL.getArray() * scale
         else:
-            sedDep = self.tmpL.getArray()*fDep
+            sedDep = self.tmpL.getArray() * fDep
         if self.flatModel:
             sedDep[self.idBorders] = 0.0
-        self.EbLocal.setArray(-sedDep/self.larea)
+        self.EbLocal.setArray(-sedDep / self.larea)
         self.dm.localToGlobal(self.EbLocal, self.Eb)
 
         # Limiting deposition rates based on upstream conditions
@@ -208,7 +202,7 @@ class SEAMesh(object):
 
         # Get deposition thicknesses
         Eb = self.EbLocal.getArray().copy()
-        Eb[Eb>0] = 0.0
+        Eb[Eb > 0] = 0.0
 
         # Define coastal distance for marine points
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
@@ -224,7 +218,7 @@ class SEAMesh(object):
         else:
             clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)
         clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
-        
+
         # Update the marine maximal depositional thicknesses
         updateH = hl - Eb * self.dt
         updateH[updateH >= clinoH] = clinoH[updateH >= clinoH]
@@ -244,30 +238,30 @@ class SEAMesh(object):
             del updateH, Eb, hl, clinoH, fDep
             gc.collect()
 
-        return 
+        return
 
     def seaChange(self):
         """
         This function is the main entry point to perform marine river-induced deposition. It calls the private functions:
 
         - _distanceCoasts
-        - _waterFluxes
+        - _marineFluxes
 
         """
 
         t0 = process_time()
-        
+
         # Set all nodes below sea-level as sinks
         self.sinkIDs = self.lFill <= self.sealevel
-        
+
         # Get the volumetric marine sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
         self.vSedLocal.copy(result=self.QsL)
-        sedFlux = self.QsL.getArray().copy() 
+        sedFlux = self.QsL.getArray().copy()
         sedFlux[np.invert(self.sinkIDs)] = 0.0
-        flxStp = sedFlux/self.diffNb
+        flxStp = sedFlux / self.diffNb
         for k in range(self.diffNb):
             # Compute marine directions and fluxes
-            self._waterFluxes(flxStp)
+            self._marineFluxes(flxStp)
 
             # Update cumulative erosion and deposition as well as elevation
             self.cumED.axpy(1.0, self.tmp)

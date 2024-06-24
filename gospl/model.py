@@ -83,7 +83,7 @@ class Model(
 
     This object contains methods for the following operations:
 
-     - initialisation of gospl mesh based on input file options
+     - initialisation of goSPL mesh based on input file options
      - computation of surface processes over time
      - cleaning/destruction of PETSC objects
 
@@ -101,7 +101,7 @@ class Model(
 
         self.modelRunTime = process_time()
         self.verbose = verbose
-        
+
         # Read input dataset
         _ReadYaml.__init__(self, filename)
 
@@ -184,10 +184,10 @@ class Model(
             if not self.fast:
                 # Compute flow accumulation
                 _FAMesh.flowAccumulation(self)
-                
+
                 # Perform River Incision
                 _FAMesh.erodepSPL(self)
-                
+
                 if not self.nodep:
                     # Downstream sediment deposition inland
                     _FAMesh.flowAccumulation(self)
@@ -195,7 +195,7 @@ class Model(
                     if self.seaDepo:
                         # Downstream sediment deposition in sea
                         _SEAMesh.seaChange(self)
-                
+
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 

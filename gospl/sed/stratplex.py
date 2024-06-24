@@ -18,7 +18,7 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class STRAMesh(object):
     """
-    This class encapsulates all the functions related to underlying stratigraphic information. As mentionned previously, `gospl` has the ability to track different types of clastic sediment size and one type of carbonate (still under development). Sediment compaction in stratigraphic layers geometry and properties change are also considered.
+    This class encapsulates all the functions related to underlying stratigraphic information. Sediment compaction in stratigraphic layers geometry and properties change are also considered.
 
     """
 
@@ -29,7 +29,6 @@ class STRAMesh(object):
 
         self.stratH = None
         self.stratZ = None
-
         self.phiS = None
 
         return
@@ -41,15 +40,8 @@ class STRAMesh(object):
         The following variables will be read from the file:
 
         - thickness of each stratigrapic layer `strataH` accounting for both erosion & deposition events.
-        - proportion of fine sediment `strataF` contains in each stratigraphic layer.
-        - proportion of weathered sediment `strataW` contains in each stratigraphic layer.
         - elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer `strataZ`.
         - porosity of coarse sediment `phiS` in each stratigraphic layer computed at center of each layer.
-        - porosity of fine sediment `phiF` in each stratigraphic layer computed at center of each layer.
-        - porosity of weathered sediment `phiW` in each stratigraphic layer computed at center of each layer.
-        - proportion of carbonate sediment `strataC` contains in each stratigraphic layer if the carbonate module is turned on.
-        - porosity of carbonate sediment `phiC` in each stratigraphic layer computed at center of each layer when the carbonate module is turned on.
-
         """
 
         if self.strataFile is not None:
@@ -86,7 +78,6 @@ class STRAMesh(object):
 
         - thickness of each stratigrapic layer `stratH` accounting for both erosion & deposition events.
         - porosity of sediment `phiS` in each stratigraphic layer computed at center of each layer.
-        
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -95,20 +86,11 @@ class STRAMesh(object):
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         self.phiS[ids, self.stratStep] = self.phi0s
-   
+
         # Cleaning arrays
         if self.memclear:
             del depo, ids
             gc.collect()
-
-        return
-
-    def _initialiseStrat(self):
-        """
-        This function initialise zeros thickness arrays in regions experiencing no erosion at a given iteration.
-        """
-
-        self.thCoarse = np.zeros(self.lpoints)
 
         return
 
@@ -130,7 +112,7 @@ class STRAMesh(object):
         # Nodes experiencing erosion
         nids = np.where(ero < 0)[0]
         if len(nids) == 0:
-            self._initialiseStrat()
+            self.thCoarse = np.zeros(self.lpoints)
             return
 
         # Cumulative thickness for each node
@@ -169,7 +151,7 @@ class STRAMesh(object):
         self.stratH[self.stratH < 0] = 0.0
         self.phiS[self.stratH < 0] = 0.0
         self.thCoarse /= self.dt
-        
+
         return
 
     def elevStrat(self):
@@ -197,7 +179,7 @@ class STRAMesh(object):
         # Depth-porosity functions
         phiS = self.phi0s * np.exp(depth / self.z0s)
         phiS = np.minimum(phiS, self.phiS[:, : self.stratStep + 1])
-        
+
         # Compute the solid phase in each layers
         tmpS = self.stratH[:, : self.stratStep + 1]
         tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
@@ -274,10 +256,7 @@ class STRAMesh(object):
         """
         Once the interpolation has been performed, the following function updates the stratigraphic records based on the advected mesh.
 
-        The function relies on 3 fortran subroutines (for loop performance purposes):
-
-        1. strataonesed
-        2. stratathreesed
+        The function relies on fortran subroutines strataonesed.
 
         :arg indices: indices of the closest nodes used for interpolation
         :arg weights: weights based on the distances to closest nodes

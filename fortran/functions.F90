@@ -1,10 +1,3 @@
-! #include "petsc/finclude/petsc.h"
-! #include "petsc/finclude/petscmat.h"
-! #include "petscversion.h"
-
-! #undef  CHKERRQ
-! #define CHKERRQ(n) if ((n) .ne. 0) return;
-
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                 INTERNAL MODULE                  !!
 !!           Fortran Module: meshparams             !!
@@ -80,6 +73,7 @@ module meshparams
   end type
   type (ptqueue) :: pitqueue
 
+  ! Definition of watershed queue (no priority)
   type wgraph
     type(wnode), allocatable :: buf(:)
     integer :: n = 0
@@ -739,8 +733,7 @@ end subroutine getbc
 
 subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
-! Compute receiver characteristics based on multiple flow direction
-! algorithm.
+! Compute receiver characteristics based on multiple flow direction algorithm.
 ! The exponent is referred to as the flow‐partition exponent following: Quin et al., 2007
 ! An adaptive approach to selecting a flow‐partition exponent for a multiple‐flow‐direction algorithm
 ! The larger the value of the exponent, the more similar MFD is to SFD.
@@ -836,8 +829,7 @@ end subroutine mfdreceivers
 
 subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
-! Compute receiver characteristics based on multiple flow direction
-! algorithm.
+! Compute receiver characteristics based on multiple flow direction algorithm for marine environment.
 ! The exponent is referred to as the flow‐partition exponent following: Quin et al., 2007
 ! An adaptive approach to selecting a flow‐partition exponent for a multiple‐flow‐direction algorithm
 ! The larger the value of the exponent, the more similar MFD is to SFD.
@@ -1060,94 +1052,6 @@ subroutine stratathreesed(n, stratnb, ids, weights, strath, stratz, stratf, &
   return
 
 end subroutine stratathreesed
-
-subroutine stratafullsed(n, stratnb, ids, weights, strath, stratz, stratf, &
-                           stratw, stratc, phis, phif, phiw, phic, nstrath, &
-                           nstratz, nstratf, nstratw, nstratc, nphis, nphif, &
-                           nphiw, nphic, nb)
-!*****************************************************************************
-! Record stratigraphic layers through time with carbonate module turned on.
-
-  implicit none
-
-  integer :: nb
-  integer, intent(in) :: n
-  integer, intent(in) :: stratnb
-
-  integer, intent(in) :: ids(nb,3)
-  double precision,intent(in) :: weights(nb,3)
-
-  double precision, intent(in) :: stratz(n,stratnb)
-  double precision, intent(in) :: strath(n,stratnb)
-  double precision, intent(in) :: stratf(n,stratnb)
-  double precision, intent(in) :: stratw(n,stratnb)
-  double precision, intent(in) :: stratc(n,stratnb)
-  double precision, intent(in) :: phis(n,stratnb)
-  double precision, intent(in) :: phif(n,stratnb)
-  double precision, intent(in) :: phiw(n,stratnb)
-  double precision, intent(in) :: phic(n,stratnb)
-
-  double precision, intent(out) :: nstratz(nb,stratnb)
-  double precision, intent(out) :: nstrath(nb,stratnb)
-  double precision, intent(out) :: nstratf(nb,stratnb)
-  double precision, intent(out) :: nstratw(nb,stratnb)
-  double precision, intent(out) :: nstratc(nb,stratnb)
-  double precision, intent(out) :: nphis(nb,stratnb)
-  double precision, intent(out) :: nphif(nb,stratnb)
-  double precision, intent(out) :: nphiw(nb,stratnb)
-  double precision, intent(out) :: nphic(nb,stratnb)
-
-  integer :: k, p, kk
-  double precision :: tmp1, tmp2, tmp3, tmp4, tmp5, tmp6
-  double precision :: tmp7, tmp8, tmp9, sum_weight, tot
-
-  do k = 1, nb
-    sum_weight = weights(k,1) + weights(k,2) + weights(k,3)
-    do kk = 1, stratnb
-      tmp1 = 0.0
-      tmp2 = 0.0
-      tmp3 = 0.0
-      tmp4 = 0.0
-      tmp5 = 0.0
-      tmp6 = 0.0
-      tmp7 = 0.0
-      tmp8 = 0.0
-      tmp9 = 0.0
-      do p = 1, 3
-        tmp1 = tmp1 + weights(k,p)*stratz(ids(k,p)+1,kk)
-        tmp2 = tmp2 + weights(k,p)*strath(ids(k,p)+1,kk)
-        tmp3 = tmp3 + weights(k,p)*stratf(ids(k,p)+1,kk)
-        tmp8 = tmp8 + weights(k,p)*stratw(ids(k,p)+1,kk)
-        tmp4 = tmp4 + weights(k,p)*stratc(ids(k,p)+1,kk)
-        tmp5 = tmp5 + weights(k,p)*phis(ids(k,p)+1,kk)
-        tmp6 = tmp6 + weights(k,p)*phif(ids(k,p)+1,kk)
-        tmp7 = tmp7 + weights(k,p)*phic(ids(k,p)+1,kk)
-        tmp9 = tmp9 + weights(k,p)*phiw(ids(k,p)+1,kk)
-      enddo
-      nstratz(k,kk) = tmp1/sum_weight
-      nstrath(k,kk) = tmp2/sum_weight
-      nstratf(k,kk) = tmp3/sum_weight
-      nstratc(k,kk) = tmp4/sum_weight
-      nstratw(k,kk) = tmp8/sum_weight
-      if(nstratf(k,kk)<0.) nstratf(k,kk) = 0.0
-      if(nstratc(k,kk)<0.) nstratc(k,kk) = 0.0
-      if(nstratw(k,kk)<0.) nstratw(k,kk) = 0.0
-      tot = nstratw(k,kk)+nstratf(k,kk)+nstratc(k,kk)
-      if(tot>1.)then
-        nstratf(k,kk) = nstratf(k,kk)/tot
-        nstratw(k,kk) = nstratw(k,kk)/tot
-        nstratc(k,kk) = nstratc(k,kk)/tot
-      endif
-      nphis(k,kk) = tmp5/sum_weight
-      nphif(k,kk) = tmp6/sum_weight
-      nphic(k,kk) = tmp7/sum_weight
-      nphiw(k,kk) = tmp9/sum_weight
-    enddo
-  enddo
-
-  return
-
-end subroutine stratafullsed
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
@@ -2339,7 +2243,9 @@ end subroutine filllabel
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine four1(data1,nn,isign)
-  
+!*****************************************************************************
+! This function is from Fastscape.
+
   integer :: isign,nn
   double precision :: data1(2*nn)
   integer i,istep,j,m,mmax,n
@@ -2393,6 +2299,8 @@ subroutine four1(data1,nn,isign)
 end subroutine four1
 
 subroutine realft(data1,n,isign)
+!*****************************************************************************
+! This function extracts the real part of the FFT, the routine is from Fastscape.
 
   double precision :: wr,wi,wpi,wpr,wtemp,theta
   double precision :: data1(2*n)
@@ -2449,6 +2357,9 @@ subroutine realft(data1,n,isign)
 end subroutine realft
 
 subroutine sinft(y,n)
+!*****************************************************************************
+! This function computes FFT of weights, the routine is from Fastscape.
+
   integer :: n
   double precision, intent(inout) :: y(n)
   
@@ -2488,6 +2399,8 @@ subroutine sinft(y,n)
 end subroutine sinft
 
 subroutine addw(w,nxflex,nyflex,iflexmin,iflexmax,jflexmin,jflexmax,cbc)
+!*****************************************************************************
+! This function add flexural weights, the routine is from Fastscape
 
   implicit none
 
@@ -2522,24 +2435,24 @@ subroutine addw(w,nxflex,nyflex,iflexmin,iflexmax,jflexmin,jflexmax,cbc)
 end subroutine addw
 
 subroutine flexure(h,hp,nx,ny,xl,yl,rhos,rhoa,eet,ibc,newh)
+!*****************************************************************************
+! Routine to compute the flexural response of erosion from Fastscape
+! in input:
+! hp(nx,ny), the topography (in isostatic equilibrium) before erosion, in m,
+! h(nx,ny), the topography (out of isostatic equilibrium) after erosion, in m,
+! rhos(nx,ny), surface rock density, in kg/m^3
+! rhoa, asthenospheric density, in kg/m^3
+! eet, effective elastic thickness, in m
+! nx,ny, resolution of the input topography
+! xl,yl, horizontal dimensions of the input topography, in m
 
-  ! Routine to compute the flexural response of erosion from Fastscape
-  ! in input:
-  ! hp(nx,ny), the topography (in isostatic equilibrium) before erosion, in m,
-  ! h(nx,ny), the topography (out of isostatic equilibrium) after erosion, in m,
-  ! rhos(nx,ny), surface rock density, in kg/m^3
-  ! rhoa, asthenospheric density, in kg/m^3
-  ! eet, effective elastic thickness, in m
-  ! nx,ny, resolution of the input topography
-  ! xl,yl, horizontal dimensions of the input topography, in m
+! Here fixed values are assumed for:
+! Young modulus, 1.d11 Pa
+! Poisson ratio, 0.25
+! g, 9.81 m/s^2
 
-  ! Here fixed values are assumed for:
-  ! Young modulus, 1.d11 Pa
-  ! Poisson ratio, 0.25
-  ! g, 9.81 m/s^2
-
-  ! the flexural, biharmonic equation is solved by FFT method (see Nunn and Aires, 1988)
-  ! on a 1024x1024 mesh
+! the flexural, biharmonic equation is solved by FFT method (see Nunn and Aires, 1988)
+! on a 1024x1024 mesh
 
   implicit none
 
@@ -2676,7 +2589,6 @@ subroutine flexure(h,hp,nx,ny,xl,yl,rhos,rhoa,eet,ibc,newh)
 
   ! add  deflection by interpolation from the nflex,nflex grid to the nx,ny grid
   ! by bilinear interpolation
-
   do j=1,ny
     do i=1,nx
       ii=iiw(i,j)

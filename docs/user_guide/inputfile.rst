@@ -3,7 +3,7 @@
 
 .. important::
 
-    The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. It has the ability to track **two types of clastic sediment size**. The following processes are considered:
+    The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. The following processes are considered:
 
     - **river incision** and **deposition** using stream power law,
     - continental **deposition** in depressions,
@@ -42,11 +42,9 @@ Initial mesh definition and simulation declaration
                 npdata: 'input8/elev20Ma'
                 flowdir: 5
                 flowexp: 0.5
+                bc:'0101'
                 fast: False
-                backward: False
-                interp: 1
-                overlap: 1
-                rstep: 25
+                seadepo: True
                 nperodep: 'strat8/erodep20Ma'
                 npstrata: 'strat8/sed20Ma'
 
@@ -54,17 +52,15 @@ Initial mesh definition and simulation declaration
 
         a. the initial spherical surface mesh ``npdata`` as well as
         b. the flow direction method to be used ``flowdir`` that takes an integer value between 1 (for SFD) and 6 (for MFD)
-        c. the exponent used in the flow direction approach. Default value is set to 0.42.
+        c. the exponent (``flowexp``) used in the flow direction approach. Default value is set to 0.42.
+        d. boundary conditions (``bc``) when not running a global model. Each integer corresponds to an edge defined in the following order: south, east, north, and west. The integer is set to 0 for open and 1 closed boundaries.
 
         In addition the following optional parameters can be set:
 
-        d. the ``fast`` key allows you to run a model without applying any surface processes on top. This is used to run backward model in a quick way, but can also potential be set to *True* if you want to check your input files prior to running a forward model with all options.
-        e. when running a backward model the ``backward`` key has to be set to *True* as well!
-        f. the ``interp`` key is set when running model with 3D cartesian displacements and allows you to choose the number of points that will be used when interpolating the spherical mesh after displacements. The key has 2 possible values: **1** or **3**. A value of **3** will take the 3 closest nodes to perform the interpolation and will tend to smooth the topography over time. A value of **1** will pick the closest point when performing the interpolation thus limiting the smoothing but potentially increasing the distorsion.
-        g. the ``overlap`` key is set when running model with 3D cartesian displacements and specifies the number of ghost nodes used when defining the PETSc partition. It needs to be set so that all the points belonging to a single processors will not move further than the distances between the maximum horizontal displacement distance. The value will change depending of the resolution of your mesh.
-        h. to restart a simulation use the ``rstep`` key and specify the time step number.
-        i. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file containing for each vertex of the mesh the cumulative erosion deposition values in metres.
-        j. to start a simulation using an initial stratigraphic layer use the ``npstrata`` key and specify a file containing for each vertex of the mesh the stratigraphic layer thickness, the percentage of fine lithology inside each layer and the porosities of the coarse and fine sediments (the multi-lithology option is only available for model without horizontal displacement and when the ``backward`` key is set to `False`).
+        e. the ``fast`` key allows you to run a model without applying any surface processes on top. This is used to run backward model in a quick way, but can also potential be set to *True* if you want to check your input files prior to running a forward model with all options.
+        f. ``seadepo`` performing marine deposition or not
+        g. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file containing for each vertex of the mesh the cumulative erosion deposition values in metres.
+        h. to start a simulation using an initial stratigraphic layer use the ``npstrata`` key and specify a file containing for each vertex of the mesh the stratigraphic layer thickness and the porosities of the sediments.
 
 .. warning::
 
@@ -87,8 +83,9 @@ Setting model temporal evolution
             time:
                 start: -20000000.
                 end: 0.
-                tout: 1000000.
                 dt: 250000.
+                tout: 1000000.
+                rstep: 25
                 tec: 1000000.
                 strat: 500000.
 
@@ -96,10 +93,11 @@ Setting model temporal evolution
 
         a. ``start`` is the model start time in years,
         b. ``end``` is the model end time in years,
-        c. ``tout`` is the output interval used to create model outputs,
-        d. ``dt`` is the model internal time step (the approach in goSPL uses an implicit time step).
-        e. ``tec`` is the tectonic timestep interval used to update the tectonic meshes and perform the required horizontal displacements (vertical displacements are done every ``dt``).
-        f. ``strat`` is the stratigraphic timestep interval used to update the stratigraphic record.
+        c. ``dt`` is the model internal time step (the approach in goSPL uses an implicit time step).
+        d. ``tout`` is the output interval used to create model outputs,
+        e. to restart a simulation use the ``rstep`` key and specify the time step number.
+        f. ``tec`` is the tectonic timestep interval used to update the tectonic meshes and perform the required horizontal displacements (vertical displacements are done every ``dt``).
+        g. ``strat`` is the stratigraphic timestep interval used to update the stratigraphic record.
 
 
 .. important::
@@ -122,16 +120,23 @@ Stream Power Law parameters
             spl:
                 K: 3.e-8
                 d: 0.42
+                m: 0.4
+                fDa: 10.
+                fDm: 40.
+                mthd = 1
 
         This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
         a. ``K`` representing the erodibility coefficient which is scale-dependent and its value depend on lithology and mean precipitation rate, channel width, flood frequency, channel hydraulics. It is used in the SPL law: :math:`E = K (\bar{P}A)^m S^n`
 
         .. warning::
-        It is worth noting that the coefficient *m* and *n* are fixed in this version of goSPL and take the value of *0.5* & *1* respectively.
+            It is worth noting that the coefficient *n* is fixed and take the value *1*.
 
         b. Studies have shown that the physical strength of bedrock which varies with the degree of chemical weathering, increases systematically with local rainfall rate. Following `Murphy et al. (2016) <https://doi.org/10.1038/nature17449>`_, the stream power equation is adapted to explicitly incorporate the effect of local mean annual precipitation rate, P, on erodibility: :math:`E = (K_i P^d) (\bar{P}A)^m S^n`. ``d`` (:math:`d` in the equation) is a positive exponent that has been estimated from field-based relationships to 0.42. Its default value is set to 0.
-
+        c. ``m`` is the coefficient from the SPL law: :math:`E = K (\bar{P}A)^m S^n` and takes the default value of 0.5.
+        d. ``fDa`` vg
+        e. ``fDm`` vg
+        f. ``mthd`` chosen approach 
 
 Hillslope and marine deposition parameters
 -------------------------------------------
@@ -148,35 +153,15 @@ Hillslope and marine deposition parameters
             diffusion:
                 hillslopeKa: 0.02
                 hillslopeKm: 0.2
+                smthDep: 20.0
                 clinSlp: 5.e-5
-                smthS: 2.e5
-                smthD: 1.e5
-                offset: 500.
-                nldep: False
-                nlf: 1.e-3
-                nlK: 3.e5
-                nlKf: 5.e5
-                nlKw: 7.e5
 
-
-        Hillslope processes in *gospl* is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
+        Hillslope processes in goSPL is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
 
         a. ``hillslopeKa`` is the diffusion coefficient for the aerial domain,
         b. ``hillslopeKm`` is the diffusion coefficient for the marine domain,
-        c. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore,
-        d. ``smthS`` is the initial surface smoothing used to define the downstream transport of the marine sediments coming from rivers,
-        e. ``smthD`` is the smoothing of the surface added to the freshly deposited sediments thicknesses used to define the downstream transport of the marine sediments coming from rivers
-        f. ``offset`` is the offset in meters used to evaluate from the smoothed surface the maximum marine deposition thicknesses as sediments move on the continal slope and deep offshore basins.
-
-        .. warning::
-            The following parameters are used to specify non-linear diffusion of rivers' sediments entering the ocean. This option is quite slow when not used on multi-processors and you might want to first look at the results of the simulation without this option turned on.
-
-        g. ``nldep`` boolean set to *True* to account for non linear marine deposition,
-        h. ``nlf`` nonlinear marine diffusion exponential factor for the freshly river deposited thicknesses (only accounted for if ``nldep`` is True),
-        i. ``nlK`` is the non linear diffusion coefficient for sediment deposited by rivers entering the marine environment (only accounted for if ``nldep`` is True),
-        j. ``nlKf`` is the diffusion coefficient for fine sediment deposited by rivers entering the marine environment. This parameter is only used when the multi-lithology and ``nlf`` options are turned on,
-        k. ``nlKw`` is the diffusion coefficient for weathered sediment deposited by hillslope processes and transported by rivers into the marine environment. This parameter is only used when the multi-lithology and ``nlf`` options are turned on.
-
+        c. ``smthDep`` is the transport coefficient of freshly deposited sediments entering the ocean from rivers,
+        d. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.        
 
 Sea-level (eustatic) forcing
 -----------------------------
@@ -253,20 +238,12 @@ Compaction & porosity variables defintion
 
             compaction:
                 phis: 0.49
-                phif: 0.63
-                phiw: 0.65
                 z0s: 3700.0
-                z0f: 1960.0
-                z0w: 1580.0
 
-        The compaction module is turned-on when a multi-lithology model is ran (_i.e._ the ``npstrata`` key is defined). We assume  different depth-porosity relationships for the 3 considered lithology types, the following parameters are required:
+        We assume  a depth-porosity relationship for the sediment compaction based on the following parameters:
 
-        a. lithology one (coarser lithology) porosity at the surface ``phis``,
-        b. lithology two (finer lithology) porosity at the surface ``phif``,
-        c. lithology three (weathered lithology) porosity at the surface ``phiw``,
-        d. e-folding depth ``z0s`` of lithology one (in metres)
-        e. e-folding depth ``z0f`` of lithology two (in metres)
-        f. e-folding depth ``z0w`` of lithology three (in metres)
+        a. porosity at the surface ``phis``,
+        b. e-folding depth ``z0s`` (in metres)
 
 
 Climatic (rainfall) forcing conditions
@@ -289,6 +266,49 @@ Climatic (rainfall) forcing conditions
 
 
         The climatic forcing is defined in a similar fashion as the tectonic one with again a sequence of events by a starting time (``start``) and either an uniform rainfall over the entire mesh (``uniform``) or with a precipitation mesh ``map``. The rainfall values have to be in metres per year.
+
+Orographic rain definition
+---------------------------
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::  
+        
+        **Declaration example**:
+
+        .. code:: python
+
+            orography:
+                latitude: 40.0  
+                wind_speed: 10.0 
+                wind_dir: 0 
+                nm: 0.005 
+                env_lapse_rate: -4
+                moist_lapse_rate: -7 
+                ref_density: 7.4e-3 
+                hw:  5000 
+                conv_time: 1000. 
+                fall_time: 1000. 
+                oro_precip_base: 7.0 
+                oro_precip_min: 0.01
+                rainfall_frequency: 1 
+            
+        This part of the input file define the parameters for the orographic rain:
+
+        a. ``latitude``: average latitude used to compute the Coriolis factors [degrees btw -90 and 90]; default 0
+        b. ``wind_speed``: wind speed in m/s; default 10
+        c. ``wind_dir``: wind direction [0: north, 270: west]; default 0
+        d. ``nm``: moist stability frequency [1/s]; default 0.01
+        e. ``env_lapse_rate``: environmental lapse rate [degrees Celsius/km]; default -4.0
+        f. ``moist_lapse_rate``: moist adiabatic lapse rate [degrees Celsius/km]; default -7.0
+        g. ``ref_density``: reference saturation water vapor density [kg/m^3]; default 7.4e-3
+        h. ``hw``:  water vapor scale height [m]; default 3400
+        i. ``conv_time``: cloud water to hydrometeor conversion time [s]; default 1000
+        j. ``fall_time``: hydrometeor fallout time [s]; default 1000
+        k. ``oro_precip_base``: non-orographic, uniform precipitation rate [mm/h]; default 7.
+        l. ``oro_precip_min``: minimum precipitation [mm/h] when precipitation rate <= 0; default 0.01
+        m. ``rainfall_frequency``: number of storm of 1 hour duration per day; default 1
 
 
 Forcing paleo-topography definition
@@ -315,7 +335,6 @@ Forcing paleo-topography definition
 .. important::
 
   The ``steps`` often correspond to the time where you have a paleotopography dataset that you want to match for example from a Scotese paleotopography map.
-
 
 Output folder definition
 -------------------------

@@ -20,13 +20,13 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class SEDMesh(object):
     """
-    This class encapsulates all the functions related to sediment transport, production and deposition in the continental domain. `gospl` has the ability to track three types of clastic sediment size and one type of carbonate (still under development). The following processes are considered:
+    This class encapsulates all the functions related to sediment transport, production and deposition in the continental domain. The following processes are considered:
 
     - inland river deposition in depressions and enclosed sea
     - hillslope processes in both marine and inland areas
 
     .. note::
-        All these functions are ran in parallel using the underlying PETSc library.
+        All these functions are run in parallel using the underlying PETSc library.
 
     """
 
@@ -148,13 +148,14 @@ class SEDMesh(object):
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
-    
+
         return excess
 
     def _distributeSediment(self, hl):
         """
         This function finds the continental sediment volumes to distribute downstream (down to the ocean or sinks) for a given iteration.
 
+        :arg hl: local elevation prior deposition
         """
 
         t0 = process_time()
@@ -186,7 +187,7 @@ class SEDMesh(object):
                 )
             step += 1
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
-        
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Distribute Continental Sediments (%0.02f seconds)"
@@ -200,6 +201,7 @@ class SEDMesh(object):
         """
         This function updates depressions elevations based on incoming sediment volumes. The function runs until all inland sediments have reached either a sink which is not completely filled or the open ocean.
 
+        :arg hl: local elevation prior deposition
         """
 
         # Difference between initial volume and remaining one
@@ -255,7 +257,7 @@ class SEDMesh(object):
         self.sedFilled = hl.copy()
         self._distributeSediment(hl)
         self._updateSinks(hl)
-        
+
         return
 
     def getHillslope(self):
@@ -284,7 +286,7 @@ class SEDMesh(object):
 
         # Update erosion/deposition rates
         h = self.hLocal.getArray().copy()
-        EDrates = (h - self.oldH)/self.dt
+        EDrates = (h - self.oldH) / self.dt
         self.EbLocal.setArray(EDrates)
 
         if self.memclear:
@@ -319,7 +321,7 @@ class SEDMesh(object):
             Cd = np.full(self.lpoints, self.smthD, dtype=np.float64)
         elif smooth == 2:
             Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
-            Cd[~self.iceIDs] = 0.        
+            Cd[~self.iceIDs] = 0.0
         else:
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
             Cd[self.seaID] = self.Cdm
@@ -350,7 +352,7 @@ class SEDMesh(object):
 
         # Get elevation values for considered time step
         if smooth > 0:
-            if self.tmp1.max()[1]>0:
+            if self.tmp1.max()[1] > 0:
                 self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
             else:
                 self.tmp1.copy(result=self.tmp)

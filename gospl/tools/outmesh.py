@@ -90,6 +90,7 @@ class WriteMesh(object):
         Create a directory to store outputs. By default the folder will be called `output`. If a folder name is specified in the YAML input file, this name will be used.
 
         .. note::
+
             The input option `makedir` gives the ability to delete any existing output folder with the same name (if set to `False`) or to create a new folder with the given dir name plus a number at the end (*e.g.* `outputDir_XX` if set to `True` with `XX` the run number). It prevents overwriting on top of previous runs.
 
         """
@@ -124,12 +125,8 @@ class WriteMesh(object):
 
         - elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer `stratZ`.
         - thickness of each stratigrapic layer `stratH` accounting for both erosion & deposition events.
-        - proportion of fine sediment `stratF` contains in each stratigraphic layer.
-        - proportion of weathered sediment `stratW` contains in each stratigraphic layer.
-        - porosity of coarse sediment `phiS` in each stratigraphic layer computed at center of each layer.
-        - porosity of fine sediment `phiF` in each stratigraphic layer computed at center of each layer.
-        - porosity of weathered sediment `phiW` in each stratigraphic layer computed at center of each layer.
-        
+        - porosity of sediment `phiS` in each stratigraphic layer computed at center of each layer.
+
         .. important::
 
             It is worth mentioning that the stratigraphic architecture is only outputed as HDF5 files and does not record the XMF and XDMF files. A set of post-processing scripts are then required to extract the informations and visualise the stratigraphic records of any specific simulations.
@@ -193,13 +190,11 @@ class WriteMesh(object):
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
         - erosion & deposition rate values `EDrate` for the considered time step.
-        - flow accumulation `flowAcc` before pit filling.
+        - flow accumulation `fillFA` considering pit filling.
         - river sediment load `sedLoad`.
-        - fine sediment load `sedLoadf` when dual lithologies are accounted for.
-        - carbonate sediment load `sedLoadc` when carbonate module is turned on.
         - uplift subsidence values if vertical tectonic forcing is considered `uplift`.
-        - horizontal displacement values when considered `hdisp`.
-        - precipitation maps based on forcing conditions `rain`.
+        - flexural isostasy rebound `fexIso` if flexure is considered.
+        - precipitation maps based on forcing conditions `rain` (could also correspond to the orographic rain if the functionality is turned on).
 
         """
 
@@ -276,7 +271,7 @@ class WriteMesh(object):
             if not self.fast:
                 data[self.seaID] = 1.0
             f["fillFA"][:, 0] = data
-            
+
             if self.iceOn:
                 f.create_dataset(
                     "iceFA",
@@ -381,10 +376,13 @@ class WriteMesh(object):
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
         - erosion & deposition values `EDrate` for the considered time step.
+        - flow accumulation `fillFA` considering pit filling.
         - river sediment load `sedLoad`.
-        - fine sediment load `sedLoadf` when dual lithologies are accounted for.
-        - weathered sediment load `sedLoadw` when dual lithologies are accounted for.
-        - carbonate sediment load `sedLoadc` when carbonate module is turned on.
+        - flexural isostasy induced tectonics `fexIso`.
+
+        .. note::
+
+            If stratigraphy is turned on, the function also reads underlying stratigraphic information.
 
         """
 
@@ -438,11 +436,11 @@ class WriteMesh(object):
                 raise ValueError("Restart file is missing...")
 
             self.stratZ.fill(0.0)
-            self.stratZ[:, : self.stratStep-1] = np.array(hf["/stratZ"])
+            self.stratZ[:, : self.stratStep - 1] = np.array(hf["/stratZ"])
             self.stratH.fill(0.0)
-            self.stratH[:, : self.stratStep-1] = np.array(hf["/stratH"])
+            self.stratH[:, : self.stratStep - 1] = np.array(hf["/stratH"])
             self.phiS.fill(0.0)
-            self.phiS[:, : self.stratStep-1] = np.array(hf["/phiS"])
+            self.phiS[:, : self.stratStep - 1] = np.array(hf["/phiS"])
 
             hf.close()
 

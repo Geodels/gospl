@@ -7,7 +7,7 @@ API reference
 
 .. note::
     
-    This section provides an overview of main goSPL objects, functions and methods.
+    This section provides an overview of goSPL main objects, functions and methods.
 
 .. grid:: 1
     :padding: 5
@@ -112,7 +112,21 @@ API reference
 
             See functions and source code.
 
+    .. grid-item-card::
+        :text-align: center
 
+        **Class Earth Plates**
+        ^^^
+
+        Functions to evaluate horizontal interpolation when considering tectonic plate reconstruction.
+
+        +++
+
+        .. button-ref:: plate_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
 
     .. grid-item-card::
         :text-align: center
@@ -146,6 +160,39 @@ API reference
 
             See functions and source code.
 
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class Grid Processes**
+        ^^^
+
+        Functions related to additional processes performed on a regular grid.
+
+        +++
+
+        .. button-ref:: grid_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class Global Flexure**
+        ^^^
+
+        This class solves flexural isostasy at global scale.
+
+        +++
+
+        .. button-ref:: gflex_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
     .. grid-item-card::
         :text-align: center
 
@@ -173,5 +220,8 @@ API reference
     sed_ref
     sea_ref
     stra_ref
+    plate_ref
     in_ref
+    grid_ref
+    gflex_ref
     out_ref

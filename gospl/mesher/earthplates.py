@@ -16,11 +16,17 @@ class EarthPlate(object):
 
     """
     This class defines how spherical mesh surface is changing given a plate reconstruction model.
+
+    The horizontal dipslacement over time is done through a series of input files that defines the neighboring nodes that will be used for interpolation.
+
+    .. note::
+
+        The interpolation is based on nearest neighbour search based on the tree built from the spherical mesh and is weighted by distance. This is an efficient approach but it might not be the most accurate one.
     """
 
     def __init__(self):
         """
-        The initialisation of `EarthPlate` class.
+        The initialisation of the `EarthPlate` class.
         """
 
         self.paleoZ = None
@@ -34,7 +40,12 @@ class EarthPlate(object):
 
     def _readAdvectionData(self):
         """
-        From a plate input file read the plate advection information, elevation and subsidence/uplift for each point of the mesh.
+        From a plate input file reads the plate advection information, containing:
+
+        - `clust` the cluster of nodes used for interpolation,
+        - `cngbh` the indices of the nodes in the considered cluster neighborhood,
+        - `dngbh` the distances between the advected nodes and the underformed  mesh,
+        - `ingbh` the nodes that remain at the same position after advection.
         """
 
         fplate = self.platedata.iloc[self.plateMov, 1]
@@ -55,7 +66,11 @@ class EarthPlate(object):
 
     def advectPlates(self):
         """
-        Advect surface and stratigraphic information based on plate evolution.
+        Advects surface information based on plate evolution and performs interpolation.
+
+        .. important::
+
+            The interpolated values are the elevation, flexural response and cumulative erosion deposition and the interpolation is done on the spherical mesh on a single provessor.
         """
 
         if self.platedata is None:
@@ -95,7 +110,7 @@ class EarthPlate(object):
             gcED = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
             gcED[self.locIDs] = ced
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gcED, op=MPI.MAX)
-            
+
             # Send local flexural isostasy globally
             cfl = self.cumFlexL.getArray().copy()
             gcFL = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
@@ -147,8 +162,8 @@ class EarthPlate(object):
             nelev = gZ[self.idNbghs]
             nerodep = gED[self.idNbghs]
             if self.gflexOn:
-               nf_ed = gcED[self.idNbghs]
-               nflex = gcFL[self.idNbghs]
+                nf_ed = gcED[self.idNbghs]
+                nflex = gcFL[self.idNbghs]
         else:
             # Inverse weighting distance...
             weights = np.divide(
@@ -175,17 +190,31 @@ class EarthPlate(object):
                     nf_ed[onIDs] = gcED[self.idNbghs[onIDs, 0]]
                     nflex[onIDs] = gcFL[self.idNbghs[onIDs, 0]]
 
-        # Remove marine erosion
-        if self.fitMarine:
-            seanIDs = np.where(np.logical_and(nelev < self.sealevel, nerodep < 0))[0]
-            nerodep[seanIDs] = 0.0
-
         if MPIrank == 0 and self.verbose:
             print(
                 "Define local elevation and erosion/deposition after advection (%0.02f seconds)"
                 % (process_time() - t0),
                 flush=True,
             )
+
+        self._stratPlates(nb, nelev, nerodep, nflex, nf_ed, weights)
+
+        return
+
+    def _stratPlates(self, nb, nelev, nerodep, nflex, nf_ed, weights):
+        """
+        Advects stratigraphy information based on plate evolution and performs interpolation.
+
+        .. note::
+
+            This function also updates the advected variables on the global and local mesh.
+        """
+
+        # Remove marine erosion
+        if self.fitMarine:
+            seanIDs = np.where(np.logical_and(nelev < self.sealevel, nerodep < 0))[0]
+            nerodep[seanIDs] = 0.0
+
         self.plateMov = nb
 
         self.hGlobal.setArray(nelev[self.glbIDs])
@@ -200,7 +229,7 @@ class EarthPlate(object):
 
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:
-            self._advectStrata(weights, onIDs)
+            self._advectStrata(weights)
 
         # Get the tectonic forcing from the paleo-reconstruction data
         self._getPaleoInfo()
@@ -210,6 +239,9 @@ class EarthPlate(object):
         return
 
     def _updateStrataVars(self, reduceIDs, variable, sumw, onIDs, weights, nghs):
+        """
+        Update stratigraphic variables based on interpolated values.
+        """
 
         # Reduce variable so that all values that needs to be read from another partition can be
         vals = np.zeros((self.mpoints, self.stratStep), dtype=np.float64) - 1.0e8
@@ -231,6 +263,9 @@ class EarthPlate(object):
         return nvar
 
     def _findPts2Reduce(self):
+        """
+        Finds the nodes part of another partition that are required for interpolation.
+        """
 
         # Global neighbours for each local partition
         lgNghbs = self.idNbghs[self.locIDs, :].flatten()
@@ -245,7 +280,10 @@ class EarthPlate(object):
 
         return np.where(vals > 0)[0]
 
-    def _advectStrata(self, weights, onIDs):
+    def _advectStrata(self, weights):
+        """
+        From advected stratigraphic information, retrieve points that are part of another partition and perform the interpolation.
+        """
 
         # Get lobal point IDs that will need to be transferred globally
         t0 = process_time()

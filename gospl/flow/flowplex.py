@@ -28,6 +28,7 @@ class FAMesh(object):
 
     For drainage computation, the class uses a depression-less surface and computes river incision expressed using a **stream power formulation** function of river discharge and slope.
 
+    If the user has turned-on the sedimentation capability, this class solves implicitly the **stream power formulation** accounting for a sediment transport/deposition term (`Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_).
     """
 
     def __init__(self, *args, **kwargs):
@@ -116,6 +117,19 @@ class FAMesh(object):
         )
 
     def _solve_KSP2(self, matrix, vector1, vector2):
+        """
+        Solution of Krylov subspace iterative method (PETSc *scalable linear equations solvers* - **KSP**) implemented using the Flexible Generalized Minimal Residual method (`fgmres`) with Additive Schwarz preconditioning (`asm`).
+
+        .. note::
+
+            This function is used if the KSP convergence failed using the PETSc Richardson solver with block Jacobian preconditioning.
+
+        :arg matrix: PETSc sparse matrix used by the KSP solver composed of diagonal terms set to unity (identity matrix) and off-diagonal terms (weights between 0 and 1). The weights are calculated based on the number of downslope neighbours (based on the chosen number of flow direction directions) and are proportional to the slope.
+        :arg vector1: PETSc vector corresponding to the local volume of water available for runoff during a given time step (*e.g.* voronoi area times local precipitation rate)
+        :arg vector2: PETSc vector corresponding to the unknown flow discharge values
+
+        :return: vector2 PETSc vector of the new flow discharge values
+        """
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
         ksp.setInitialGuessNonzero(True)
         ksp.setOperators(matrix, matrix)
@@ -144,7 +158,6 @@ class FAMesh(object):
 
     def _solve_KSP(self, guess, matrix, vector1, vector2):
         """
-
         PETSc *scalable linear equations solvers* (**KSP**) component provides Krylov subspace iterative method and a preconditioner. Here, flow accumulation solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
         .. note::
@@ -178,7 +191,7 @@ class FAMesh(object):
             ksp.destroy()
 
         return vector2
-    
+
     def matrixFlow(self, flowdir, dep=None):
         """
         This function defines the flow direction matrices.
@@ -192,7 +205,7 @@ class FAMesh(object):
         The  matrix coefficients consist of weights (comprised between 0 and 1) calculated based on the number of downslope neighbours and proportional to the slope.
 
         :arg flow: boolean to compute matrix for either downstream water or sediment transport
-
+        :arg dep: deposition flux coefficient in case where the sediment transport/deposition term is considered.
         """
 
         flowMat = self.iMat.copy()
@@ -201,7 +214,7 @@ class FAMesh(object):
         if dep is None:
             wght = self.wghtVal
         else:
-            wght = np.multiply(self.wghtVal,dep.reshape((len(dep),1)))
+            wght = np.multiply(self.wghtVal, dep.reshape((len(dep), 1)))
         rcv = self.rcvID
         for k in range(0, flowdir):
 
@@ -219,7 +232,7 @@ class FAMesh(object):
             # Add the weights from each direction
             flowMat += tmpMat
             tmpMat.destroy()
-            
+
         if self.memclear:
             del data, indptr, nodes
             gc.collect()
@@ -243,8 +256,9 @@ class FAMesh(object):
         - the associated weights calculated based on the number of receivers and proportional to the slope.
 
         :arg h: elevation numpy array
+        :arg down: boolean to indicate whether the filled elevation needs to be considered or not.
         """
-        
+
         # Get open marine regions
         self.seaID = np.where(self.lFill <= self.sealevel)[0]
 
@@ -252,12 +266,12 @@ class FAMesh(object):
         self.donRcvs, self.distRcv, self.wghtVal = mfdreceivers(
             self.flowDir, self.flowExp, h, self.sealevel
         )
-        
+
         self.rcvID = self.donRcvs.copy()
-        self.rcvID[self.ghostIDs,:] = -1
-        self.distRcv[self.ghostIDs,:] = 0
-        self.wghtVal[self.ghostIDs,:] = 0
-              
+        self.rcvID[self.ghostIDs, :] = -1
+        self.distRcv[self.ghostIDs, :] = 0
+        self.wghtVal[self.ghostIDs, :] = 0
+
         if down:
             sum_weight = np.sum(self.wghtVal, axis=1)
             ids = (
@@ -305,8 +319,9 @@ class FAMesh(object):
         :arg FA: excess flow accumulation array
         :arg hl: current elevation array
         :arg step: downstream distribution step
+        :arg ice: boolean indicating where the ice flow is considered or not.
 
-        :return: pitVol, excess (updated volume in each depression and boolean set to True is excess flow remains to be distributed)
+        :return: pitVol, excess, nFA (updated volume in each depression, boolean set to True is excess flow remains to be distributed and new flow accumulation values)
         """
 
         excess = False
@@ -324,7 +339,7 @@ class FAMesh(object):
 
         # Combine incoming volume globally
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)
-        
+
         # Get excess volume to distribute downstream
         eV = inV - pitVol
         if (eV > 0.0).any():
@@ -378,10 +393,20 @@ class FAMesh(object):
         return excess, pitVol, nFA
 
     def _iceFlow(self):
+        """
+        This function computes downstream ice flow when the ice module is turned-on.
 
+        The ice flow accumulation uses the same approach as the river flow and follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_.
+
+        Once the ice flow accumulation is calculated a subsequent step is performed and consists in smoothing the ice flow accumulation values.
+
+        .. note::
+
+          This approach is used in order to represent, in a simple manner, the differences between fluvial and glacier flows and their impact on landscape erosion. One could see this approach as extending the cardinal flow line (main river trunk) laterally to simulate concave glacial erosion.
+        """
 
         ti = process_time()
-        
+
         # Get depressions information
         ti1 = process_time()
         pitVol = self.pitParams[:, 0].copy()
@@ -392,15 +417,15 @@ class FAMesh(object):
         iceA[self.seaID] = 0.
         tmp = (hl - self.elaH) / (self.iceH - self.elaH)
         self.iceIDs = tmp > 0
-        tmp[tmp>1.] = 1. 
-        tmp[tmp<0.] = 0.
+        tmp[tmp > 1.] = 1.0
+        tmp[tmp < 0.] = 0.0
         iceA = np.multiply(iceA, tmp)
         self.tmpL.setArray(iceA)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self._solve_KSP(True, self.fMat, self.tmp, self.iceFAG)
         self.dm.globalToLocal(self.iceFAG, self.iceFAL)
 
-        # # Volume of ice flowing downstream
+        # Volume of ice flowing downstream
         self.waterFilled = hl.copy()
         if (pitVol > 0.0).any():
             iFA = self.iceFAL.getArray().copy() * self.dt
@@ -417,7 +442,7 @@ class FAMesh(object):
         tmp = self.tmpL.getArray().copy()
         self.dm.localToGlobal(self.tmpL, self.tmp1)
         smthIce = self._hillSlope(smooth=2)
-        self.tmpL.setArray(smthIce*self.scaleIce)
+        self.tmpL.setArray(smthIce * self.scaleIce)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
         smthIce[~self.iceIDs] = tmp[~self.iceIDs]
         self.iceFAL.setArray(smthIce)
@@ -432,14 +457,14 @@ class FAMesh(object):
         PA = self.FAL.getArray().copy()
         PA[self.iceIDs] -= smthIce[self.iceIDs]
         PA[~self.iceIDs] += smthIce[~self.iceIDs]
-        PA[PA<0] = 0.
+        PA[PA < 0] = 0.
         self.FAL.setArray(PA)
         self.dm.localToGlobal(self.FAL, self.FAG)
 
         PA = self.fillFAL.getArray().copy()
         PA[self.iceIDs] -= smthIce[self.iceIDs]
         PA[~self.iceIDs] += smthIce[~self.iceIDs]
-        PA[PA<0] = 0.
+        PA[PA < 0] = 0.
         self.fillFAL.setArray(PA)
 
         if MPIrank == 0 and self.verbose:
@@ -447,7 +472,7 @@ class FAMesh(object):
                 "Compute IceFlow Accumulation (%0.02f seconds)" % (process_time() - ti),
                 flush=True,
             )
-        
+
         return
 
     def flowAccumulation(self):
@@ -458,13 +483,14 @@ class FAMesh(object):
 
             Flow accumulation (`FA`) calculations are a core component of landscape evolution models as they are often used as proxy to estimate flow discharge, sediment load, river width, bedrock erosion, and sediment deposition. Until recently, conventional `FA` algorithms were serial and limited to small spatial problems.
 
-        `gospl` model computes the flow discharge from `FA` and the net precipitation rate using a **parallel implicit drainage area (IDA) method** proposed by `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ but adapted to unstructured grids.
+        goSPL model computes the flow discharge from `FA` and the net precipitation rate using a **parallel implicit drainage area (IDA) method** proposed by `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ but adapted to unstructured grids.
 
         It calls the following *private functions*:
 
         1. _buildFlowDirection
         2. _solve_KSP
         3. _distributeDownstream
+        4. _iceFlow
 
         """
 
@@ -538,37 +564,38 @@ class FAMesh(object):
 
     def _upstreamDeposition(self, flowdir):
         """
-        Check if over deposition occurs in depressions and/or flat regions and enforce a maximum deposition rate based on upstream elevations computed from the implicit erosion/deposition equation.
+        In cases where too much deposition occurs in depressions and/or flat regions, this function enforces a maximum deposition rate based on upstream elevations computed from the implicit erosion/deposition equation.
 
+        :arg flowdir: number of flow direction
         """
         niter = 0
-        tolerance = 1e-3 
+        tolerance = 1e-3
         equal = False
         h = self.hLocal.getArray().copy()
 
         # Get donors list based on elevation
         donors = donorslist(flowdir, self.inIDs, self.donRcvs)
-        topIDs = np.where(np.max(donors, axis=1)==-1)[0]
+        topIDs = np.where(np.max(donors, axis=1) == -1)[0]
         while not equal and niter < 10000:
 
-            Eb = -self.EbLocal.getArray().copy()*self.dt
+            Eb = -self.EbLocal.getArray().copy() * self.dt
             elev = (Eb + h).copy()
             elev[topIDs] = h[topIDs]
-            maxh = donorsmax(elev,donors)
-            maxh[maxh==-1.e8] = elev[maxh==-1.e8]
+            maxh = donorsmax(elev, donors)
+            maxh[maxh == -1.e8] = elev[maxh == -1.e8]
             self.tmpL.setArray(maxh)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             self.dm.globalToLocal(self.tmp, self.tmpL)
-            maxh = self.tmpL.getArray().copy()-1.e-6
-            maxh[maxh>elev] = elev[maxh>elev]
-            
-            self.tmpL.setArray(maxh-elev)
+            maxh = self.tmpL.getArray().copy() - 1.e-6
+            maxh[maxh > elev] = elev[maxh > elev]
+
+            self.tmpL.setArray(maxh - elev)
             self.dm.localToGlobal(self.tmpL, self.dh)
             self.dh.abs()
             maxdh = self.dh.max()[1]
 
             equal = maxdh < tolerance
-            self.EbLocal.setArray(-(maxh - h)/self.dt)
+            self.EbLocal.setArray(-(maxh - h) / self.dt)
             self.dm.localToGlobal(self.EbLocal, self.Eb)
             self.dm.globalToLocal(self.Eb, self.EbLocal)
             niter += 1
@@ -579,35 +606,16 @@ class FAMesh(object):
 
         return
 
-    def _getEroDepRate(self):
-        r"""
-        This function computes erosion deposition rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion/deposition is not going to be underestimated by small depressions which are likely to be filled (either by sediments or water) during a single time step.
+    def _eroMats(self, hOldArray):
+        """
+        Builds the erosion matrices used to solve implicitly the stream power equations for the river and ice processes.
 
-        The simplest law to simulate fluvial incision is based on the detachment-limited stream power law, in which erosion rate  depends on drainage area :math:`A`, net precipitation :math:`P` and local slope :math:`S` and takes the form:
+        :arg hOldArray: local elevation array from previous time step
 
-        .. math::
-
-          E = − \kappa P^d (PA)^m S^n
-
-        :math:`\kappa` is a dimensional coefficient describing the erodibility of the channel bed as a function of rock strength, bed roughness and climate, :math:`d`, :math:`m` and :math:`n` are dimensionless positive constants.
-
-        Default formulation assumes :math:`d = 0`, :math:`m = 0.5` and :math:`n = 1`. The precipitation exponent :math:`d` allows for representation of climate-dependent chemical weathering of river bed across non-uniform rainfall.
-
-        .. important::
-
-            In `gospl`, the coefficient `n` is fixed and the only variables that the user can tune are the coefficients `m`, `d` and the erodibility :math:`\kappa`.
-
-        The erosion rate is solved by an implicit time integration method, the matrix system is based on the receiver distributions and is assembled from local Compressed Sparse Row (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers* (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
-
-        Once the erosion rate solution has been obtained, local sediment flux depends on upstream fluxes, local eroded flux and local deposition flux. We assume that local deposition depends on the user-defined forced deposition value (:math:`fDep`), the local water flux and the cell area. Here again the sediment flux is determined implicitly and corresponding deposition flux are calculated subsequently once the local total flux is known.      
+        :return: eMat, gMat, PA where the first two are sparse PETSc matrices related to river and glacial erosion and PA is the accumulation rate.
         """
 
-        t0 = process_time()
-        hOldArray = self.hLocal.getArray().copy()
-        self.oldH = hOldArray.copy()
-        hOldArray[self.seaID] = self.sealevel
-        if self.flexOn:
-            self.hLocal.copy(result=self.hOldFlex)
+        gMat = None
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
@@ -625,16 +633,6 @@ class FAMesh(object):
             GA[~self.iceIDs] = 0.
             Kbi = self.Kice * GA
 
-        # Dimensionless depositional coefficient
-        if self.fDepa > 0:
-            fDep = np.divide(self.fDepa*self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
-            if self.dmthd == 1:
-                fDep[fDep>0.99] = 0.99
-                self.matrixFlow(self.flowDir, 1.-fDep)
-            else:
-                dMat = self._matrix_build_diag(fDep)
-                dMat += self.fMat
-    
         # Initialise matrices...
         eMat = self.iMat.copy()
         wght = self.wghtVali.copy()
@@ -698,6 +696,48 @@ class FAMesh(object):
             del dh, limiter, wght, data
             gc.collect()
 
+        return eMat, gMat, PA
+
+    def _getEroDepRate(self):
+        r"""
+        This function computes erosion deposition rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion/deposition is not going to be underestimated by small depressions which are likely to be filled (either by sediments or water) during a single time step.
+
+        The simplest law to simulate fluvial incision is based on the detachment-limited stream power law, in which erosion rate  depends on drainage area :math:`A`, net precipitation :math:`P` and local slope :math:`S` and takes the form:
+
+        .. math::
+
+          E = − \kappa P^d (PA)^m S^n
+
+        :math:`\kappa` is a dimensional coefficient describing the erodibility of the channel bed as a function of rock strength, bed roughness and climate, :math:`d`, :math:`m` and :math:`n` are dimensionless positive constants.
+
+        A similar approach is used to compute ice induced erosion where the ice flow accumulation is defined based on downstream nodes and is smoothed to better represent the erosion induced by glaciers. The ice-induced erosion uses the stream power law equation with a eordibility coefficient which is user defined. Under glacier terminus point, melted glacier flow is added to river flow accumulation likewise is the glacier-induced transported sediment flux.
+
+        Default formulation assumes :math:`d = 0`, :math:`m = 0.5` and :math:`n = 1`. The precipitation exponent :math:`d` allows for representation of climate-dependent chemical weathering of river bed across non-uniform rainfall.
+
+        .. important::
+
+            In goSPL, the coefficient `n` is fixed and the only variables that the user can tune are the coefficients `m`, `d` and the erodibility :math:`\kappa`.
+
+        The erosion rate is solved by an implicit time integration method, the matrix system is based on the receiver distributions and is assembled from local Compressed Sparse Row (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers* (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
+
+        Once the erosion rate solution has been obtained, local sediment flux depends on upstream fluxes, local eroded flux and local deposition flux. We assume that local deposition depends on user-defined forced deposition value (:math:`fDep`), the local water flux and the cell area. Here again the sediment flux is determined implicitly and corresponding deposition flux are calculated subsequently once the local total flux is known.
+
+        .. math::
+
+          Qs_{in} = Qs_e + (1 - GA/FA) \sum_{j \in upstream} w_{j,i} Qs_{in_j}
+
+        where the incoming sediment flux adds the local erosion flux obtained from the stream power law equation and the upstream sediment flux minus the deposition flux. Following `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`A` and flow accumulation :math:`FA`.
+        """
+
+        t0 = process_time()
+        hOldArray = self.hLocal.getArray().copy()
+        self.oldH = hOldArray.copy()
+        hOldArray[self.seaID] = self.sealevel
+        if self.flexOn:
+            self.hLocal.copy(result=self.hOldFlex)
+
+        eMat, gMat, PA = self._eroMats(hOldArray)
+
         # Solve SPL erosion implicitly for fluvial erosion
         t1 = process_time()
         self._solve_KSP(True, eMat, self.hOld, self.stepED)
@@ -705,7 +745,7 @@ class FAMesh(object):
         eMat.destroy()
         if MPIrank == 0 and self.verbose:
             print(
-                "Solve SPL erosion (%0.02f seconds)" % (process_time() - t1),
+                "Solve simple SPL erosion (%0.02f seconds)" % (process_time() - t1),
                 flush=True,
             )
         # Solve SPL erosion implicitly for glacial erosion
@@ -714,20 +754,29 @@ class FAMesh(object):
             self._solve_KSP(False, gMat, self.hOld, self.stepED)
             self.tmp1.waxpy(-1.0, self.hOld, self.stepED)
             gMat.destroy()
-            self.tmp.axpy(1.,self.tmp1)
+            self.tmp.axpy(1., self.tmp1)
             if MPIrank == 0 and self.verbose:
                 print(
-                    "Solve glacial erosion (%0.02f seconds)" % (process_time() - t1),
+                    "Solve glacial SPL erosion (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
 
-        # Implicit sediment fluxes combining upstream flux, erosion and deposition
+        # Dimensionless depositional coefficient
         if self.fDepa > 0:
+            fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+            if self.dmthd == 1:
+                fDep[fDep > 0.99] = 0.99
+                self.matrixFlow(self.flowDir, 1.0 - fDep)
+            else:
+                dMat = self._matrix_build_diag(fDep)
+                dMat += self.fMat
+
+            # Implicit sediment fluxes combining upstream flux, erosion and deposition
             t1 = process_time()
             self.dm.globalToLocal(self.tmp, self.tmpL)
-            QsL = -self.tmpL.getArray()*self.larea
+            QsL = -self.tmpL.getArray() * self.larea
             QsL = np.divide(QsL, self.dt)
-            QsL[QsL<1.e-8] = 0.
+            QsL[QsL < 1.e-8] = 0.
             self.tmpL.setArray(QsL)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             if self.dmthd == 1:
@@ -741,16 +790,16 @@ class FAMesh(object):
                     "Solve sediment fluxes (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
-            
+
             # Extract local sediment deposition fluxes
             self.dm.globalToLocal(self.tmp1, self.tmpL)
             if self.dmthd == 1:
                 QsT = self.tmpL.getArray()
-                scale = np.divide(fDep, 1.0-fDep, out=np.zeros_like(fDep), where=fDep != 0)
-                QsD = (QsT-QsL)*scale
+                scale = np.divide(fDep, 1.0 - fDep, out=np.zeros_like(fDep), where=fDep != 0)
+                QsD = (QsT - QsL) * scale
             else:
-                QsD = self.tmpL.getArray()*fDep
-            self.tmpL.setArray((QsD-QsL)*self.dt/self.larea)
+                QsD = self.tmpL.getArray() * fDep
+            self.tmpL.setArray((QsD - QsL) * self.dt / self.larea)
             self.dm.localToGlobal(self.tmpL, self.tmp)
 
         # Define erosion rate (positive for incision)
@@ -778,7 +827,7 @@ class FAMesh(object):
         if self.memclear:
             del E, PA, Kbr, QsL, QsD, fDep
             gc.collect()
-        
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Finalise erosion deposition rates (%0.02f seconds)" % (process_time() - t0),
@@ -786,15 +835,12 @@ class FAMesh(object):
             )
 
         return
-    
+
     def erodepSPL(self):
         """
         Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediment in modulating erosion and deposition rate.
-        
+
         It calls the private function `_getEroDepRate <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._getEroDepRate>`_ described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
-
-        If multiple lithologies are considered, the stratigraphic record is updated based on eroded/deposited thicknesses.
-
         """
 
         t0 = process_time()

@@ -25,6 +25,7 @@ Class SEAMesh
 
       ~SEAMesh._distanceCoasts
       ~SEAMesh._globalCoastsTree
+      ~SEAMesh._marineFluxes
 
 Public functions
 ---------------------
@@ -37,3 +38,4 @@ Private functions
 
 .. automethod:: sed.seaplex.SEAMesh._distanceCoasts
 .. automethod:: sed.seaplex.SEAMesh._globalCoastsTree
+.. automethod:: sed.seaplex.SEAMesh._marineFluxes

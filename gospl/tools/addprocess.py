@@ -1,10 +1,11 @@
 import os
+import gc
 import sys
-import petsc4py
+import petsc4py  # type: ignore
 import numpy as np
 
-from mpi4py import MPI
-from scipy import spatial
+from mpi4py import MPI  # type: ignore
+from scipy import spatial  # type: ignore
 from time import process_time
 
 petsc4py.init(sys.argv)
@@ -13,22 +14,25 @@ MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import flexure
+    from gospl._fortran import flexure  # type: ignore
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
+
 class GridProcess(object):
     """
-    This class defines additional processes operating on a regular grid.
+    When running goSPL on a 2D grid (*i.e.* not a global simulation), this class defines two processes operating on a regular grid:
 
+    1. **Flexural isostasy**: it allows to compute isostatic deflections of Earth's lithosphere with uniform or non-uniform flexural rigidity. Evolving surface loads are defined from erosion/deposition values associated to modelled surface processes.
+    2. **Orographic rain**: it accounts for change in rainfall patterns associated to change in topography. The orographic precipitation function is based on `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_ linear model.
     """
 
     def __init__(self):
         """
-        The initialisation of `gridProcess` class.
+        Initialisation of the `gridProcess` class.
         """
 
         self.flexIDs = None
@@ -36,9 +40,9 @@ class GridProcess(object):
 
         if self.flexOn:
             self.localFlex = np.zeros(self.lpoints)
-            self.boundflex = self.boundCond.replace('0','2')
-            self.boundflex = self.boundflex.replace('1','0')
-            self.boundflex = self.boundflex.replace('2','1')
+            self.boundflex = self.boundCond.replace('0', '2')
+            self.boundflex = self.boundflex.replace('1', '0')
+            self.boundflex = self.boundflex.replace('2', '1')
         if self.oroOn:
             self.oroEPS = np.finfo(float).eps
 
@@ -48,29 +52,38 @@ class GridProcess(object):
                 self._buildRegGrid()
 
         return
-    
+
     def _buildRegGrid(self):
+        """
+        Builds the regular grid based on nodes coordinates and instantiates two `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_ objects.
+
+        The first one `treeT` is used to interpolate values from the unstructured mesh onto the regular grid based on an inverse weighting distance approach.
+
+        The second `treeR` is used to interpolate values back to the unstructured mesh from the regular grid.
+
+        .. note::
+            Here both trees are not kept in memory, instead we store the interpolation information, namely the indices of the neighborhing nodes, and the weights of each node in the neighborhood (based on the distance).
+        """
 
         # Build regular grid for flexure and orographoic precipitation calculation
-        xmin = self.mCoords[:,0].min()
-        xmax = self.mCoords[:,0].max()
-        ymin = self.mCoords[:,1].min()
-        ymax = self.mCoords[:,1].max()
-        
-        newx = np.arange(xmin, xmax+self.reg_dx, self.reg_dx)
-        newy = np.arange(ymin, ymax+self.reg_dx, self.reg_dx)
-        rx, ry = np.meshgrid(newx,newy)
+        xmin = self.mCoords[:, 0].min()
+        xmax = self.mCoords[:, 0].max()
+        ymin = self.mCoords[:, 1].min()
+        ymax = self.mCoords[:, 1].max()
+
+        newx = np.arange(xmin, xmax + self.reg_dx, self.reg_dx)
+        newy = np.arange(ymin, ymax + self.reg_dx, self.reg_dx)
+        rx, ry = np.meshgrid(newx, newy)
         rPts = np.stack((rx.ravel(), ry.ravel())).T
-        xmin,xmax = newx[0],newx[-1]
-        ymin,ymax = newy[0],newy[-1]
+        xmin, xmax = newx[0], newx[-1]
+        ymin, ymax = newy[0], newy[-1]
         self.reg_xl = xmax - xmin
         self.reg_yl = ymax - ymin
 
-        self.reg_nx = int(self.reg_xl/self.reg_dx+1)
-        self.reg_ny = int(self.reg_yl/self.reg_dx+1)
+        self.reg_nx = int(self.reg_xl / self.reg_dx + 1)
+        self.reg_ny = int(self.reg_yl / self.reg_dx + 1)
 
-        
-        treeT = spatial.cKDTree(self.mCoords[:,:2], leafsize=10)
+        treeT = spatial.cKDTree(self.mCoords[:, :2], leafsize=10)
         distances, self.regIDs = treeT.query(rPts, k=3)
         # Inverse weighting distance...
         self.regWeights = np.divide(
@@ -79,9 +92,9 @@ class GridProcess(object):
         self.regSumWeights = np.sum(self.regWeights, axis=1)
         self.regOnIDs = np.where(self.regSumWeights == 0)[0]
         self.regSumWeights[self.regSumWeights == 0] = 1.0e-4
-        
+
         treeR = spatial.cKDTree(rPts, leafsize=10)
-        distances, self.regrIDs = treeR.query(self.mCoords[:,:2], k=3)
+        distances, self.regrIDs = treeR.query(self.mCoords[:, :2], k=3)
         # Inverse weighting distance...
         self.regrWeights = np.divide(
             1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
@@ -90,16 +103,31 @@ class GridProcess(object):
         self.regrOnIDs = np.where(self.regrSumWeights == 0)[0]
         self.regrSumWeights[self.regrSumWeights == 0] = 1.0e-4
 
+        if self.memclear:
+            del treeR, treeT
+            gc.collect()
+
         return
-    
+
     def applyFlexure(self):
-        """
-        This function computes the flexural isostasy equilibrium based on topographic change.
+        r"""
+        This function computes the flexural isostasy equilibrium based on topographic change. It is a simple routine that accounts for flexural isostatic rebound associated with erosional loading/unloading.
+
+        The function takes an initial (at time t) and final topography (at time t+Dt) (i.e. before and after erosion/deposition) and returns a corrected final topography that includes the effect of erosional/depositional unloading/loading. It uses a spectral method to solve the bi-harmonic equation governing the bending/flexure of a thin elastic plate floating on an inviscid fluid (the asthenosphere).
+
+        .. math::
+
+          D (d^4 w / d^4 x ) + \Delta \rho g w = q
+
+        where :math:`D` is the flexural rigidity,  :math:`w` is vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material.
+
+        .. warning ::
+            This function assumes a value of 1011 Pa for Young's modulus, 0.25 for Poisson's ratio and 9.81 m/s2 for g, the gravitational acceleration.
         """
 
         t0 = process_time()
 
-        # Get elevations from time of equilibrium and after erosion deposition 
+        # Get elevations from time of equilibrium and after erosion deposition
         hlflex = self.hOldFlex.getArray().copy()
         oldZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
         oldZ[self.locIDs] = hlflex
@@ -114,27 +142,27 @@ class GridProcess(object):
             # Build regular grid for flexure calculation
             if self.regIDs is None:
                 self._buildRegGrid()
-                
+
             # Interpolate values on the flexural regular grid
             regOldZ = np.sum(self.regWeights * oldZ[self.regIDs][:, :], axis=1) / self.regSumWeights
-            if len(self.regOnIDs)>0:
-                regOldZ[self.regOnIDs] = oldZ[self.regIDs[self.regOnIDs,0]]
-            regOldZ = regOldZ.reshape(self.reg_ny,self.reg_nx)            
+            if len(self.regOnIDs) > 0:
+                regOldZ[self.regOnIDs] = oldZ[self.regIDs[self.regOnIDs, 0]]
+            regOldZ = regOldZ.reshape(self.reg_ny, self.reg_nx)
 
             regNewZ = np.sum(self.regWeights * newZ[self.regIDs][:, :], axis=1) / self.regSumWeights
-            if len(self.regOnIDs)>0:
-                regNewZ[self.regOnIDs] = newZ[self.regIDs[self.regOnIDs,0]]
-            regNewZ = regNewZ.reshape(self.reg_ny,self.reg_nx) 
+            if len(self.regOnIDs) > 0:
+                regNewZ[self.regOnIDs] = newZ[self.regIDs[self.regOnIDs, 0]]
+            regNewZ = regNewZ.reshape(self.reg_ny, self.reg_nx)
 
-            newh = flexure(regNewZ,regOldZ,self.reg_ny,self.reg_nx,
-                           self.reg_yl,self.reg_xl,self.flex_rhos,
-                           self.flex_rhoa,self.flex_eet,int(self.boundflex))
+            newh = flexure(regNewZ, regOldZ, self.reg_ny, self.reg_nx,
+                           self.reg_yl, self.reg_xl, self.flex_rhos,
+                           self.flex_rhoa, self.flex_eet, int(self.boundflex))
             rflexTec = (newh - regNewZ).ravel()
 
             # Interpolate back to goSPL mesh
             flexTec = np.sum(self.regrWeights * rflexTec[self.regrIDs][:, :], axis=1) / self.regrSumWeights
-            if len(self.regrOnIDs)>0:
-                flexTec[self.regrOnIDs] = rflexTec[self.regrIDs[self.regrOnIDs,0]]
+            if len(self.regrOnIDs) > 0:
+                flexTec[self.regrOnIDs] = rflexTec[self.regrIDs[self.regrOnIDs, 0]]
         else:
             flexTec = None
 
@@ -174,9 +202,9 @@ class GridProcess(object):
         .. note::
 
             Please refer to the original manuscript of Smith and Barstad (2004) to understand the model physics and limitations.
-        
+
         Common bounds:
-        
+
          - latitude : 0-90 [degrees]
          - precip_base : 0-10 [mm/h]
          - precip_min : 0.001 - 1  [mm/h]
@@ -190,7 +218,7 @@ class GridProcess(object):
 
         t0 = process_time()
 
-        # Get elevations from the unstructured mesh structure 
+        # Get elevations from the unstructured mesh structure
         hl = self.hLocal.getArray().copy()
         newZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
         newZ[self.locIDs] = hl
@@ -203,9 +231,9 @@ class GridProcess(object):
 
             # Interpolate values on the regular grid
             regNewZ = np.sum(self.regWeights * newZ[self.regIDs][:, :], axis=1) / self.regSumWeights
-            if len(self.regOnIDs)>0:
-                regNewZ[self.regOnIDs] = newZ[self.regIDs[self.regOnIDs,0]]
-            regNewZ = regNewZ.reshape(self.reg_ny,self.reg_nx) 
+            if len(self.regOnIDs) > 0:
+                regNewZ[self.regOnIDs] = newZ[self.regIDs[self.regOnIDs, 0]]
+            regNewZ = regNewZ.reshape(self.reg_ny, self.reg_nx)
 
             # Wind components
             u0 = -np.sin(self.wind_dir * 2 * np.pi / 360) * self.wind_speed
@@ -221,10 +249,8 @@ class GridProcess(object):
 
             # FFT
             hhat = np.fft.fft2(h)
-
             x_n_value = np.fft.fftfreq(ny, (1. / ny))
             y_n_value = np.fft.fftfreq(nx, (1. / nx))
-
             x_len = nx * self.reg_dx
             y_len = ny * self.reg_dx
             kx_line = 2 * np.pi * x_n_value / x_len
@@ -245,9 +271,7 @@ class GridProcess(object):
             m = sign * np.sqrt(np.abs(mf_num / mf_den * (kx ** 2 + ky ** 2)))
 
             # Transfer function
-            P_karot = ((self.oro_cw * 1j * sigma * hhat) / ((1 - (self.oro_hw * m * 1j)) *
-                        (1 + (sigma * self.oro_conv_time * 1j)) *
-                        (1 + (sigma * self.oro_fall_time * 1j))))
+            P_karot = ((self.oro_cw * 1j * sigma * hhat) / ((1 - (self.oro_hw * m * 1j)) * (1 + (sigma * self.oro_conv_time * 1j)) * (1 + (sigma * self.oro_fall_time * 1j))))
 
             # Inverse FFT, de-pad, convert units, add uniform rate
             oroRain = np.fft.ifft2(P_karot)
@@ -262,8 +286,8 @@ class GridProcess(object):
             # Interpolate back to goSPL mesh
             rORain = oroRain.ravel()
             oRain = np.sum(self.regrWeights * rORain[self.regrIDs][:, :], axis=1) / self.regrSumWeights
-            if len(self.regrOnIDs)>0:
-                oRain[self.regrOnIDs] = rORain[self.regrIDs[self.regrOnIDs,0]]
+            if len(self.regrOnIDs) > 0:
+                oRain[self.regrOnIDs] = rORain[self.regrIDs[self.regrOnIDs, 0]]
         else:
             oRain = None
 
@@ -281,4 +305,4 @@ class GridProcess(object):
                 "Compute Orographic Rain (%0.02f seconds)" % (process_time() - t0)
             )
 
-        return 
+        return

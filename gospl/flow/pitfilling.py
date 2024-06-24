@@ -100,7 +100,7 @@ class PITFill(object):
         :return: df sorted pandas dataframe containing depression numbers.
         """
 
-        df["p2"] = sort_ids( df["p1"].values.astype(int), df["p2"].values.astype(int) )
+        df["p2"] = sort_ids(df["p1"].values.astype(int), df["p2"].values.astype(int))
         df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
 
         return df
@@ -208,7 +208,7 @@ class PITFill(object):
         t0 = process_time()
 
         # Sorting label transfer between processors
-        if len(df)>1:
+        if len(df) > 1:
             sorting = True
             while sorting:
                 df2 = self._sortingPits(df)

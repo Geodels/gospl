@@ -18,7 +18,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
         **Short Description**
         ^^^
 
-        The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. It has the ability to track **two types of clastic sediment size**. The following processes are considered:
+        The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. The following processes are considered:
 
         - **river incision** and **deposition** using stream power law,
         - continental **deposition** in depressions,

@@ -13,7 +13,7 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
-from vtk.util import numpy_support
+from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import definetin
@@ -31,7 +31,7 @@ class UnstMesh(object):
 
     .. note::
 
-        `gospl` is built around a **Finite-Volume** method (FVM) for representing and evaluating  partial differential equations. It requires the definition of several mesh variables such as:
+        goSPL is built around a **Finite-Volume** method (FVM) for representing and evaluating  partial differential equations. It requires the definition of several mesh variables such as:
 
             - the number of neighbours surrounding every node,
             - the cell area defined using  Voronoi area,
@@ -386,14 +386,14 @@ class UnstMesh(object):
             self.east = int(self.boundCond[1])
             self.north = int(self.boundCond[2])
             self.west = int(self.boundCond[3])
-            xmin = self.mCoords[:,0].min()
-            xmax = self.mCoords[:,0].max()
-            ymin = self.mCoords[:,1].min()
-            ymax = self.mCoords[:,1].max()
-            self.southPts = np.where(self.lcoords[:,1]==ymin)[0]
-            self.northPts = np.where(self.lcoords[:,1]==ymax)[0]
-            self.eastPts = np.where(self.lcoords[:,0]==xmax)[0]
-            self.westPts = np.where(self.lcoords[:,0]==xmin)[0]
+            xmin = self.mCoords[:, 0].min()
+            xmax = self.mCoords[:, 0].max()
+            ymin = self.mCoords[:, 1].min()
+            ymax = self.mCoords[:, 1].max()
+            self.southPts = np.where(self.lcoords[:, 1] == ymin)[0]
+            self.northPts = np.where(self.lcoords[:, 1] == ymax)[0]
+            self.eastPts = np.where(self.lcoords[:, 0] == xmax)[0]
+            self.westPts = np.where(self.lcoords[:, 0] == xmin)[0]
 
         del idLocal
         vIS.destroy()
@@ -571,13 +571,13 @@ class UnstMesh(object):
         if self.flatModel:
             tmp = self.hLocal.getArray().copy()
             if self.south == 0 and len(self.southPts) > 0:
-                tmp[self.southPts] = getbc(len(self.southPts),tmp,self.southPts)
+                tmp[self.southPts] = getbc(len(self.southPts), tmp, self.southPts)
             if self.north == 0 and len(self.northPts) > 0:
-                tmp[self.northPts] = getbc(len(self.northPts),tmp,self.northPts)
+                tmp[self.northPts] = getbc(len(self.northPts), tmp, self.northPts)
             if self.east == 0 and len(self.eastPts) > 0:
-                tmp[self.eastPts] = getbc(len(self.eastPts),tmp,self.eastPts)
+                tmp[self.eastPts] = getbc(len(self.eastPts), tmp, self.eastPts)
             if self.west == 0 and len(self.westPts) > 0:
-                tmp[self.westPts] = getbc(len(self.westPts),tmp,self.westPts)
+                tmp[self.westPts] = getbc(len(self.westPts), tmp, self.westPts)
             self.hLocal.setArray(tmp)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
@@ -636,7 +636,7 @@ class UnstMesh(object):
         self.rainVal = self.rainMesh[self.locIDs]
         self.bL.setArray(self.rainVal * self.larea)
         self.dm.localToGlobal(self.bL, self.bG)
-        
+
         return
 
     def _updateEroFactor(self):
@@ -794,7 +794,7 @@ class UnstMesh(object):
         if len(onIDs) > 0:
             if self.interp > 1:
                 nelev[onIDs] = loc_elev[indices[onIDs, 0]]
-            nerodep[onIDs] = loc_erodep[indices[onIDs, 0]]
+                nerodep[onIDs] = loc_erodep[indices[onIDs, 0]]
 
         self.hGlobal.setArray(nelev)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
@@ -849,7 +849,7 @@ class UnstMesh(object):
         if self.iceOn:
             self.iceFAG.destroy()
             self.iceFAL.destroy()
-        
+
         self.iMat.destroy()
         if not self.fast:
             self.fMat.destroy()

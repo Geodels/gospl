@@ -165,11 +165,6 @@ class ReadYaml(object):
         except KeyError:
             self.interp = 3
 
-        try:
-            self.seaDepo = domainDict["seadepo"]
-        except KeyError:
-            self.seaDepo = True
-
         self._extraDomain()
 
         return
@@ -182,9 +177,9 @@ class ReadYaml(object):
         domainDict = self.input["domain"]
 
         try:
-            self.excessIn = domainDict["excess"]
+            self.seaDepo = domainDict["seadepo"]
         except KeyError:
-            self.excessIn = False
+            self.seaDepo = True
 
         try:
             self.overlap = domainDict["overlap"]
@@ -353,7 +348,7 @@ class ReadYaml(object):
 
     def _readSPL(self):
         """
-        Read surface processes bedrock parameters.
+        Read surface processes erosion and deposition laws parameters.
         """
 
         try:
@@ -432,7 +427,7 @@ class ReadYaml(object):
         except KeyError:
             self.Cda = 0.0
             self.Cdm = 0.0
-            self.sedimentK = 1.0e3
+            self.oFill = -6000.0
 
         self._extraHillslope()
 
@@ -762,7 +757,7 @@ class ReadYaml(object):
             )
 
         return sedfacdata
-    
+
     def _readErofactor(self):
         """
         Parse erodibility factor based on surface geology.
@@ -848,7 +843,7 @@ class ReadYaml(object):
                     ],
                     ignore_index=True,
                 )
-            self.sedfacdata = sedfacdata.copy()  
+            self.sedfacdata = sedfacdata.copy()
             self.sedfacdata.reset_index(drop=True, inplace=True)
             self.sedfactNb = len(self.sedfacdata)
 
@@ -857,7 +852,7 @@ class ReadYaml(object):
             self.sedfacdata = None
 
         return
-    
+
     def _storePlate(self, k, pStart, pMap, pTec, pEnd, platedata):
         """
         Record plate movement conditions.
@@ -1206,7 +1201,7 @@ class ReadYaml(object):
             self.flexOn = False
 
         return
-    
+
     def _readGFlex(self):
         """
         Parse global flexural isostasy variables.
@@ -1230,7 +1225,7 @@ class ReadYaml(object):
             except IOError:
                 print("Unable to open numpy dataset: {}".format(self.Interp), flush=True)
                 raise IOError("The numpy dataset is not found...")
-            
+
             try:
                 interpf2 = flexGDict["interR"]
             except KeyError:
@@ -1246,7 +1241,7 @@ class ReadYaml(object):
             except IOError:
                 print("Unable to open numpy dataset: {}".format(self.interR), flush=True)
                 raise IOError("The numpy dataset is not found...")
-            
+
             try:
                 self.gflexproc = flexGDict["procs"]
             except KeyError:
@@ -1265,29 +1260,16 @@ class ReadYaml(object):
             self.gflexOn = False
 
         return
-    
+
     def _readOrography(self):
         """
         Parse orographic precipitation variables.
-        
-        latitude (float) : Coriolis effect decreases as latitude decreases
-        precip_base (float) : non-orographic, uniform precipitation rate [mm/h], usually [0, 10]
-        precip_min (float) : minimum precipitation [mm/h] when precipitation rate <= 0
-        wind_speed (float) : [m/s]
-        wind_dir (float) : wind direction [0: north, 270: west]
-        conv_time (float) : cloud water to hydrometeor conversion time [s]
-        fall_time (float) : hydrometeor fallout time [s]
-        nm (float) : moist stability frequency [1/s]
-        hw (float) : water vapor scale height [m]
-        cw (float) : uplift sensitivity [kg/m^3], product of saturation water vapor sensitivity ref_density [kg/m^3]
-                    and environmental lapse rate (lapse_rate_m / lapse_rate)
-
         """
 
         try:
             oroDict = self.input["orography"]
             self.oroOn = True
-            
+
             try:
                 self.reg_dx = oroDict["regdx"]
             except KeyError:
@@ -1318,42 +1300,52 @@ class ReadYaml(object):
                 self.oro_hw = oroDict["hw"]
             except KeyError:
                 self.oro_hw = 3400.0
-            try:
-                lapse_rate = oroDict["env_lapse_rate"]
-            except KeyError:
-                lapse_rate = -4.0
-            try:
-                lapse_rate_m = oroDict["moist_lapse_rate"]
-            except KeyError:
-                lapse_rate_m = -7.0
-            try:
-                ref_density = oroDict["ref_density"]
-            except KeyError:
-                ref_density = 7.4e-3
-            self.oro_cw = ref_density * lapse_rate_m / lapse_rate
-            try:
-                self.oro_conv_time = oroDict["conv_time"]
-            except KeyError:
-                self.oro_conv_time = 1000.0
-            try:
-                self.oro_fall_time = oroDict["fall_time"]
-            except KeyError:
-                self.oro_fall_time = 1000.0
-            try:
-                self.oro_precip_base = oroDict["precip_base"]
-            except KeyError:
-                self.oro_precip_base = 7.0
-            try:
-                self.oro_precip_min = oroDict["precip_min"]
-            except KeyError:
-                self.oro_precip_min = 0.01
-            try:
-                self.rainfall_frequency = oroDict["rainfall_frequency"]
-            except KeyError:
-                self.rainfall_frequency = 1
+
+            self._extraOrography(oroDict)
 
         except KeyError:
             self.oroOn = False
+
+        return
+
+    def _extraOrography(self, oroDict):
+        """
+        Read domain additional information.
+        """
+
+        try:
+            lapse_rate = oroDict["env_lapse_rate"]
+        except KeyError:
+            lapse_rate = -4.0
+        try:
+            lapse_rate_m = oroDict["moist_lapse_rate"]
+        except KeyError:
+            lapse_rate_m = -7.0
+        try:
+            ref_density = oroDict["ref_density"]
+        except KeyError:
+            ref_density = 7.4e-3
+        self.oro_cw = ref_density * lapse_rate_m / lapse_rate
+        try:
+            self.oro_conv_time = oroDict["conv_time"]
+        except KeyError:
+            self.oro_conv_time = 1000.0
+        try:
+            self.oro_fall_time = oroDict["fall_time"]
+        except KeyError:
+            self.oro_fall_time = 1000.0
+        try:
+            self.oro_precip_base = oroDict["precip_base"]
+        except KeyError:
+            self.oro_precip_base = 7.0
+        try:
+            self.oro_precip_min = oroDict["precip_min"]
+        except KeyError:
+            self.oro_precip_min = 0.01
+        try:
+            self.rainfall_frequency = oroDict["rainfall_frequency"]
+        except KeyError:
+            self.rainfall_frequency = 1
 
         return
 
@@ -1392,7 +1384,7 @@ class ReadYaml(object):
             self.iceOn = False
 
         return
-    
+
     def _readOut(self):
         """
         Parse output directory.
