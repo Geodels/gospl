@@ -53,3 +53,7 @@ For regions of diverging or converging lateral movement, the elevation and strat
 .. note::
 
   Additional constrained for mesh refinement can be set if needed. As an example, one can use the horizontal velocity field magnitude as a parameter for refinement and create meshes with higher resolutions for regions with higher magnitudes in order to better represent the deformation in these areas.
+
+
+Flexural isostasy
+---------------------------------

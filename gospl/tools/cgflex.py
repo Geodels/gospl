@@ -3,16 +3,16 @@ import gc
 import sys
 import glob
 import pickle
-import pyproj
 import petsc4py
 import numpy as np
 
-import xarray as xr
 from mpi4py import MPI
 from pathlib import Path
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
+    import pyproj
+    import xarray as xr
     from gflex.f2d import F2D
 
 petsc4py.init(sys.argv)
