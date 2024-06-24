@@ -23,7 +23,7 @@ Sea-level (eustatic) forcing
 
             sea:
                 position: 0.
-                curve: 'data/sealevel.csv'
+                curve: 'sealevel.csv'
 
 
         The sea-level declaration is defined with 2 optional parameters:
@@ -48,9 +48,9 @@ Climatic (rainfall) forcing conditions
         .. code:: python
 
             climate:
-                - start: -20000000.
-                  map: ['input8/rain20Ma','r']
-                - start: -15000000.
+                - start: 1000.
+                  map: ['rain20Ma','r']
+                - start: 20000.
                   uniform: 1.
 
 

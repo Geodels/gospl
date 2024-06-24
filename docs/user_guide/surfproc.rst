@@ -64,7 +64,7 @@ Hillslope and marine deposition parameters
         b. ``hillslopeKm`` is the diffusion coefficient for the marine domain,
         c. ``smthDep`` is the transport coefficient of freshly deposited sediments entering the ocean from rivers,
         d. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore. 
-        d. ``diffNb`` is the number of steps used to distribute the sediment fluxes in the marine domain. Default value is set to 1.        
+        e. ``diffNb`` is the number of steps used to distribute the sediment fluxes in the marine domain. Default value is set to 1.        
 
 Compaction & porosity variables definition
 ------------------------------------------

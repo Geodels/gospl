@@ -44,7 +44,7 @@ class EarthPlate(object):
 
         - `clust` the cluster of nodes used for interpolation,
         - `cngbh` the indices of the nodes in the considered cluster neighborhood,
-        - `dngbh` the distances between the advected nodes and the underformed  mesh,
+        - `dngbh` the distances between the advected nodes and the mesh,
         - `ingbh` the nodes that remain at the same position after advection.
         """
 
