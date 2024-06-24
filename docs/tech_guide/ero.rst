@@ -188,3 +188,34 @@ where :math:`\mathrm{e_{i} = E_{i} \Omega_i}` and :math:`\mathrm{N_d}` is the nu
   \end{align}
 
 It is worth noting that in this system, the matrix **W** is the same as the one proposed for the :ref:`River Discharge <flow>` and therefore does not have to be built.  As for the previous system, this one is solved using the `PETSc <https://www.mcs.anl.gov/petsc/>`_ solver previously defined to find the :math:`\mathrm{q_{s,i}}` values implicitly.
+
+SPL with sediment deposition
+--------------------------------
+
+An alternative method to the detachment-limited approach proposed above consists in accounting for the role played by sediment in modulating erosion and deposition rates. It follows the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, whereby the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`\mathrm{\Omega}` and water discharge :math:`\mathrm{Q}=\bar{P}A`. 
+
+The approach considers the local balance between erosion and deposition and is based on sediment flux resulting from net upstream erosion. 
+
+.. math::
+
+   \mathrm{Q_s^{out}} = (1.0 - G \Omega / Q) \mathrm{Q_s^{in} + E \Omega}
+
+This equation is solved similarly to the one detailed above using the same matrix system where the weighted in sparse matrix are multiplied by :math:`G \Omega / Q` based on local cell areas and water fluxes.
+
+.. note::
+  
+  As our previous technique, this implicit method is unconditionally stable ans allows to study the dynamics of fluvial systems including the transition from detachment-limited to transport-limited behavior.
+
+In turn, the deposition flux (:math:`Q_{d}`) at any point in the mesh is given by:
+
+.. math::
+
+   \mathrm{Q_d} = \Upsilon \mathrm{Q_s^{\star}}
+
+where :math:`\Upsilon` is expressed as: 
+
+.. math::
+
+   \Upsilon = \frac{G \Omega / Q}{1.0 - G \Omega / Q} 
+
+and local :math:`\mathrm{Q_s^{\star}}` equals :math:`\mathrm{Q_s^{out}} - E \Omega`.

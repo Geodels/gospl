@@ -57,3 +57,25 @@ For regions of diverging or converging lateral movement, the elevation and strat
 
 Flexural isostasy
 ---------------------------------
+
+
+.. figure:: ../images/flex.png
+  :scale: 40 %
+  :align: center
+
+  Flexural isostasy can be produced in response to a range of geological loads (from `Wickert, 2016 <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_).
+
+
+When running goSPL in 2D (*i.e.* not at global scale), it is possible to compute the flexural isostasy equilibrium based on topographic change. The function accounts for flexural isostatic rebound associated with erosional loading/unloading.
+
+It takes an initial (at time :math:`t`) and final topography (at time :math:`D + \Delta t`) (*i.e.* before and after erosion/deposition) and returns a corrected final topography that includes the effect of erosional/depositional unloading/loading. 
+
+The approach relies on a spectral method to solve the bi-harmonic equation governing the bending/flexure of a thin elastic plate floating on an inviscid fluid (the asthenosphere).
+
+.. math::
+
+  D \frac{d^4 w}{d^4 x} + \Delta \rho g w = q
+
+where :math:`D` is the flexural rigidity,  :math:`w` is vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material.
+
+
