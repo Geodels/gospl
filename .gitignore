@@ -2,6 +2,7 @@
 build
 docs/_build/*
 *.pyc
+.vscode/*
 dist
 gospl.egg-info
 fortran/_fortran-f2pywrappers.f
