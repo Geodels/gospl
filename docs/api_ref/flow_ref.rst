@@ -27,6 +27,7 @@ Class FAMesh
 
       ~FAMesh._buildFlowDirection
       ~FAMesh._distributeDownstream
+      ~FAMesh._eroMats
       ~FAMesh._getEroDepRate
       ~FAMesh._iceFlow
       ~FAMesh._matrix_build
@@ -47,6 +48,7 @@ Private functions
 
 .. automethod:: flow.flowplex.FAMesh._buildFlowDirection
 .. automethod:: flow.flowplex.FAMesh._distributeDownstream
+.. automethod:: flow.flowplex.FAMesh._eroMats
 .. automethod:: flow.flowplex.FAMesh._getEroDepRate
 .. automethod:: flow.flowplex.FAMesh._iceFlow
 .. automethod:: flow.flowplex.FAMesh._matrix_build
