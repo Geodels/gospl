@@ -48,8 +48,7 @@ class UnstMesh(object):
         The initialisation of `UnstMesh` class calls the private function **_buildMesh**.
         """
 
-        self.hdisp = None
-        self.uplift = None
+        self.upsub = None
         self.rainVal = None
         self.sedfacVal = None
         self.memclear = False
@@ -261,10 +260,10 @@ class UnstMesh(object):
         # Read mesh attributes from file
         t0 = process_time()
         loadData = np.load(self.meshFile)
-        self.mCoords = loadData["v"]
+        self.mCoords = loadData[self.infoCoords]
         self.mpoints = len(self.mCoords)
-        gZ = loadData["z"]
-        self.mCells = loadData["c"].astype(int)
+        gZ = loadData[self.infoElev]
+        self.mCells = loadData[self.infoCells].astype(int)
         self.vtkMesh = None
         self.flatModel = False
         if MPIrank == 0 and self.verbose:
@@ -437,11 +436,10 @@ class UnstMesh(object):
         self.bG = self.hGlobal.duplicate()
         self.bL = self.hLocal.duplicate()
         self.rainNb = -1
-        self.tecNb = -1
         self.flexNb = -1
         self.sedfactNb = -1
 
-        del tree, distances, tmp2  # , indices, tmp
+        del tree, distances, tmp2
         del l2g, offproc, gZ, out, ptscells
         gc.collect()
 
@@ -565,7 +563,7 @@ class UnstMesh(object):
             )
 
         # Tectonic forcing
-        self._updateTectonics()
+        self.applyTectonics()
 
         # Assign mesh boundaries
         if self.flatModel:
@@ -590,10 +588,10 @@ class UnstMesh(object):
 
         t0 = process_time()
 
-        if self.tecdata is None and self.uplift is not None:
+        if self.upsub is not None:
             # Define vertical displacements
             tmp = self.hLocal.getArray().copy()
-            self.hLocal.setArray(tmp + self.uplift * self.dt)
+            self.hLocal.setArray(tmp + self.upsub * self.dt)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
         if MPIrank == 0 and self.verbose:
@@ -672,148 +670,6 @@ class UnstMesh(object):
 
         return
 
-    def _updateTectonics(self):
-        """
-        Finds the current tectonic regimes (horizontal and vertical) for the considered time interval.
-
-        For horizontal displacements, the mesh variables will have to be first advected over the grid and then reinterpolated on the initial mesh coordinates. The approach here does not allow for mesh refinement in zones of convergence and thus can be limiting but using a fixed mesh has one main advantage: the mesh and Finite Volume discretisation do not have to be rebuilt each time the mesh is advected.
-
-        This function calls the following 2 private functions:
-
-        - _meshAdvector
-        - _meshUpliftSubsidence
-
-        """
-
-        if self.tecdata is None:
-            self.tectonic = None
-            return
-
-        nb = self.tecNb
-        if nb < len(self.tecdata) - 1:
-            if self.tecdata.iloc[nb + 1, 0] < self.tNow + self.dt:
-                nb += 1
-
-        if nb > self.tecNb or nb == -1:
-            if nb == -1:
-                nb = 0
-
-            self.tecNb = nb
-            self.upsubs = False
-            if nb < len(self.tecdata.index) - 1:
-                timer = self.tecdata.iloc[nb + 1, 0] - self.tecdata.iloc[nb, 0]
-            else:
-                timer = self.tEnd - self.tecdata.iloc[nb, 0]
-
-            mdata = None
-            if self.tecdata.iloc[nb, 1] != "empty":
-                mdata = np.load(self.tecdata.iloc[nb, 1])
-                self.hdisp = mdata["xyz"][self.locIDs, :]
-                self._meshAdvector(mdata["xyz"], timer)
-
-            if self.tecdata.iloc[nb, 2] != "empty":
-                mdata = np.load(self.tecdata.iloc[nb, 2])
-                self._meshUpliftSubsidence(mdata["z"])
-                self.upsubs = True
-
-            if mdata is not None:
-                del mdata
-
-        elif self.upsubs and self.tNow + self.dt < self.tEnd:
-            tmp = self.hLocal.getArray().copy()
-            self.hLocal.setArray(tmp + self.uplift * self.dt)
-            self.dm.localToGlobal(self.hLocal, self.hGlobal)
-            del tmp
-            gc.collect()
-
-        return
-
-    def _meshUpliftSubsidence(self, tectonic):
-        """
-        Applies vertical displacements based on tectonic rates.
-
-        :arg tectonic: local tectonic rates
-        """
-
-        # Define vertical displacements
-        tmp = self.hLocal.getArray().copy()
-        if tectonic is not None:
-            self.uplift = tectonic[self.locIDs]
-        self.hLocal.setArray(tmp + self.uplift * self.dt)
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        del tmp
-        gc.collect()
-
-        return
-
-    def _meshAdvector(self, tectonic, timer):
-        """
-        Advects the mesh horizontally and interpolates mesh information.
-
-        The advection proceeds in each partition seprately in the following way:
-
-        1. based on the horizontal displacement velocities, the mesh coordinates and associated variables (cumulative erosion deposition and stratigraphic layers composition) are moved.
-        2. a kdtree is built with the advected coordinates and used to interpolate the mesh variables on the initial local mesh position. The interpolation is based on a weighting distance function accounting for the 3 closest advected vertices.
-        3. interpolated variables on the initial mesh coordinates are then stored in PETSc vectors and class parameters are updated accordingly.
-
-
-        :arg tectonic: local tectonic rates in 3D
-        :arg timer: tectonic time step in years
-        """
-
-        t1 = process_time()
-
-        # Move local coordinates
-        XYZ = self.lcoords + tectonic[self.locIDs, :] * timer
-
-        # Get local elevation and erosion/deposition information
-        loc_elev = self.hLocal.getArray().copy()
-        loc_erodep = self.cumEDLocal.getArray().copy()
-
-        # Build and query local kd-tree
-        tree = spatial.cKDTree(XYZ, leafsize=10)
-        distances, indices = tree.query(self.gcoords, k=3)
-
-        # Inverse weighting distance...
-        weights = np.divide(
-            1.0, distances, out=np.zeros_like(distances), where=distances != 0
-        )
-        onIDs = np.where(distances[:, 0] == 0)[0]
-        temp = np.sum(weights, axis=1)
-
-        # Update elevation
-        if self.interp == 1:
-            nelev = loc_elev[indices[:, 0]]
-        else:
-            tmp = np.sum(weights * loc_elev[indices], axis=1)
-            nelev = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
-
-        # Update erosion deposition
-        tmp = np.sum(weights * loc_erodep[indices], axis=1)
-        nerodep = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
-        if len(onIDs) > 0:
-            if self.interp > 1:
-                nelev[onIDs] = loc_elev[indices[onIDs, 0]]
-                nerodep[onIDs] = loc_erodep[indices[onIDs, 0]]
-
-        self.hGlobal.setArray(nelev)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-        self.cumED.setArray(nerodep)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-
-        # Update stratigraphic record
-        if self.stratNb > 0 and self.stratStep > 0:
-            self.stratalRecord(indices, weights, onIDs)
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Advect Mesh Information Horizontally (%0.02f seconds)"
-                % (process_time() - t1),
-                flush=True,
-            )
-
-        return
-
     def destroy_DMPlex(self):
         """
         Destroys PETSc DMPlex objects and associated PETSc local/global Vectors and Matrices at the end of the simulation.
@@ -838,14 +694,17 @@ class UnstMesh(object):
         self.hOld.destroy()
         self.hOldLocal.destroy()
         self.Qs.destroy()
+        self.rhs.destroy()
+        self.newH.destroy()
         self.tmpL.destroy()
         self.tmp.destroy()
+        self.Qs.destroy()
+        self.QsL.destroy()
+        self.nQs.destroy()
         self.tmp1.destroy()
         self.stepED.destroy()
         self.Eb.destroy()
         self.EbLocal.destroy()
-        self.upsG.destroy()
-        self.upsL.destroy()
         if self.iceOn:
             self.iceFAG.destroy()
             self.iceFAL.destroy()

@@ -21,6 +21,7 @@ Class ReadYaml
       ~ReadYaml._defineErofactor
       ~ReadYaml._definePlate
       ~ReadYaml._defineRain
+      ~ReadYaml._defineTe
       ~ReadYaml._defineTectonic
       ~ReadYaml._extraDomain
       ~ReadYaml._extraHillslope
@@ -39,8 +40,10 @@ Class ReadYaml
       ~ReadYaml._readSPL
       ~ReadYaml._readSealevel
       ~ReadYaml._readTectonic
+      ~ReadYaml._readTeData
       ~ReadYaml._readTime
       ~ReadYaml._storePlate
+      ~ReadYaml._storeTe
       ~ReadYaml._storeTectonic
 
 
@@ -51,6 +54,7 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._defineErofactor
 .. automethod:: tools.inputparser.ReadYaml._definePlate
 .. automethod:: tools.inputparser.ReadYaml._defineRain
+.. automethod:: tools.inputparser.ReadYaml._defineTe
 .. automethod:: tools.inputparser.ReadYaml._defineTectonic
 .. automethod:: tools.inputparser.ReadYaml._extraDomain
 .. automethod:: tools.inputparser.ReadYaml._extraHillslope
@@ -69,6 +73,8 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._readSPL
 .. automethod:: tools.inputparser.ReadYaml._readSealevel
 .. automethod:: tools.inputparser.ReadYaml._readTectonic
+.. automethod:: tools.inputparser.ReadYaml._readTeData
 .. automethod:: tools.inputparser.ReadYaml._readTime
 .. automethod:: tools.inputparser.ReadYaml._storePlate
+.. automethod:: tools.inputparser.ReadYaml._storeTe
 .. automethod:: tools.inputparser.ReadYaml._storeTectonic

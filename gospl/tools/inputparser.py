@@ -58,14 +58,14 @@ class ReadYaml(object):
         self._readSPL()
         self._readHillslope()
         self._readSealevel()
-        self._readTectonic()
+        self._readTectonics()
         self._readErofactor()
-        self._readPlate()
         self._readRain()
         self._readCompaction()
         self._readIce()
         self._readFlex()
         self._readGFlex()
+        self._readTeData()
         self._readOrography()
         self._readOut()
 
@@ -124,7 +124,7 @@ class ReadYaml(object):
         try:
             self.flowDir = domainDict["flowdir"]
         except KeyError:
-            self.flowDir = 6
+            self.flowDir = 8
 
         try:
             self.flowExp = domainDict["flowexp"]
@@ -137,7 +137,7 @@ class ReadYaml(object):
             self.boundCond = '1111'
 
         try:
-            meshFile = domainDict["npdata"]
+            meshInfo = domainDict["npdata"]
         except KeyError:
             print(
                 "Key 'npdata' is required and is missing in the 'domain' declaration!",
@@ -145,7 +145,10 @@ class ReadYaml(object):
             )
             raise KeyError("Compressed numpy dataset definition is not defined!")
 
-        self.meshFile = meshFile + ".npz"
+        self.meshFile = meshInfo[0] + ".npz"
+        self.infoCoords = meshInfo[1]
+        self.infoCells = meshInfo[2]
+        self.infoElev = meshInfo[3]
 
         try:
             with open(self.meshFile) as meshfile:
@@ -159,11 +162,6 @@ class ReadYaml(object):
             self.fast = domainDict["fast"]
         except KeyError:
             self.fast = False
-
-        try:
-            self.interp = domainDict["interp"]
-        except KeyError:
-            self.interp = 3
 
         self._extraDomain()
 
@@ -372,22 +370,17 @@ class ReadYaml(object):
             try:
                 self.fDepm = splDict["fDm"]
             except KeyError:
-                self.fDepm = 40.0
+                self.fDepm = 10.0
             try:
                 self.spl_m = splDict["m"]
             except KeyError:
                 self.spl_m = 0.5
-            try:
-                self.dmthd = splDict["mthd"]
-            except KeyError:
-                self.dmthd = 1
         except KeyError:
             self.K = 1.0e-12
             self.coeffd = 0.0
             self.fDepa = 0.0
-            self.fDepm = 40.0
+            self.fDepm = 10.0
             self.spl_m = 0.5
-            self.dmthd = 1
 
         return
 
@@ -449,17 +442,12 @@ class ReadYaml(object):
                 self.clinSlp = hillDict["clinSlp"]
             except KeyError:
                 self.clinSlp = 1.0e-6
-            try:
-                self.diffNb = hillDict["diffNb"]
-            except KeyError:
-                self.diffNb = 1
 
         except KeyError:
             self.smthD = 1.0e3
-            self.clinSlp = 1.0e-7
-            self.diffNb = 1
+            self.clinSlp = 1.0e-6
 
-        self.clinSlp = max(1.0e-7, self.clinSlp)
+        self.clinSlp = max(1.0e-6, self.clinSlp)
 
         return
 
@@ -541,91 +529,95 @@ class ReadYaml(object):
 
         return
 
-    def _storeTectonic(self, k, tecStart, zMap, tMap, tStep, tEnd, tecdata):
+    def _isKeyinFile(self, dmap):
+        '''
+        Check if a numpy compressed file exists and that the corresponding keys are present in it.
+        '''
+
+        if dmap is not None:
+            try:
+                with open(dmap[0] + ".npz") as file:
+                    file.close()
+            except IOError:
+                print(
+                    "Unable to open file: {}.npz".format(dmap[0]),
+                    flush=True,
+                )
+                raise IOError(
+                    "The following file {} is not found.".format(
+                        dmap[0] + ".npz"
+                    )
+                )
+            mdata = np.load(dmap[0] + ".npz")
+
+            try:
+                vkey = mdata[dmap[1]]
+                if vkey is not None:
+                    pass
+            except KeyError:
+                print(
+                    "Field name {} is missing from file {}.npz".format(
+                        dmap[1], dmap[0]
+                    ),
+                    flush=True,
+                )
+            del mdata
+
+        return
+
+    def _storeTectonics(self, k, tecStart, hMap, tMap, zMap, tecEnd, tecdata):
         """
         Record tectonic conditions.
 
         :arg k: tectonic event number
         :arg tecStart: tectonic event start time
-        :arg zMap: horizontal tectonic displacement file
-        :arg tMap: vertical tectonic displacement file
-        :arg tStep: tectonic time step
+        :arg hMap: horizontal tectonic information
+        :arg tMap: vertical tectonic displacement information
+        :arg zMap: elevation information
         :arg tEnd: tectonic event end time
         :arg tecdata: pandas dataframe storing each tectonic event
 
         :return: appended tecdata
         """
 
-        if tMap is not None:
-            if self.meshFile != tMap:
-                try:
-                    with open(tMap) as tecfile:
-                        tecfile.close()
-
-                except IOError:
-                    print("Unable to open tectonic file: {}".format(tMap), flush=True)
-                    raise IOError(
-                        "The tectonic file {} is not found for climatic event {}.".format(
-                            tMap, k
-                        )
-                    )
-        else:
+        if tMap is None:
             tMap = "empty"
-
-        if zMap is not None:
-            if self.meshFile != zMap:
-                try:
-                    with open(zMap) as tecfile:
-                        tecfile.close()
-
-                except IOError:
-                    print("Unable to open tectonic file: {}".format(zMap), flush=True)
-                    raise IOError(
-                        "The tectonic file {} is not found for tectonic event {}.".format(
-                            zMap, k
-                        )
-                    )
-        else:
+        if hMap is None:
+            hMap = "empty"
+        if zMap is None:
             zMap = "empty"
 
-        if tMap == "empty" and zMap == "empty":
-            print(
-                "For each tectonic event a tectonic grid (mapH or mapV) is required.",
-                flush=True,
-            )
-            raise ValueError("Tectonic event {} has no tectonic map (map).".format(k))
-
         tmpTec = []
-        tmpTec.insert(0, {"start": tecStart, "tMap": tMap, "zMap": zMap})
+        tmpTec.insert(0, {"start": tecStart, "tMap": tMap, "zMap": zMap, "hMap": hMap})
 
         if k == 0:
-            tecdata = pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap"])
+            tecdata = pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"])
         else:
             tecdata = pd.concat(
-                [tecdata, pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap"])],
+                [tecdata, pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"])],
                 ignore_index=True,
             )
 
-        if tStep is not None:
-            if tEnd is not None:
-                tectime = tecStart + tStep
-                while tectime < tEnd:
+        if self.tecStep is not None:
+            if tecEnd is not None:
+                tectime = tecStart + self.tecStep
+                while tectime < tecEnd:
                     tmpTec = []
-                    tmpTec.insert(0, {"start": tectime, "tMap": tMap, "zMap": zMap})
+                    tmpTec.insert(0, {"start": tectime, "tMap": tMap, "zMap": zMap, "hMap": hMap})
                     tecdata = pd.concat(
                         [
                             tecdata,
-                            pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap"]),
+                            pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"]),
                         ],
                         ignore_index=True,
                     )
-                    tectime = tectime + tStep
+                    tectime = tectime + self.tecStep
 
         return tecdata
 
-    def _defineTectonic(self, k, tecSort, tecdata):
+    def _defineTectonics(self, k, tecSort, tecdata):
         """
-        Define tectonic conditions.
+        Define tectonics conditions.
 
         :arg k: tectonic event number
         :arg tecSort: sorted tectonic event
@@ -634,56 +626,64 @@ class ReadYaml(object):
         """
 
         tecStart = None
-        tEnd = None
-        tStep = None
-        tMap = None
+        tecEnd = None
         zMap = None
+        tMap = None
+        hMap = None
 
         try:
             tecStart = tecSort[k]["start"]
         except Exception:
             print("For each tectonic event a start time is required.", flush=True)
             raise ValueError("Tectonic event {} has no parameter start".format(k))
-        try:
-            tMap = tecSort[k]["mapH"] + ".npz"
-        except Exception:
-            pass
-        try:
-            zMap = tecSort[k]["mapV"] + ".npz"
-        except Exception:
-            pass
-        try:
-            tStep = self.tecStep
-        except Exception:
-            pass
-        try:
-            tEnd = tecSort[k]["end"]
-        except Exception:
-            pass
 
-        tecdata = self._storeTectonic(k, tecStart, zMap, tMap, tStep, tEnd, tecdata)
+        try:
+            tecEnd = tecSort[k]["end"]
+        except Exception:
+            print("For each tectonic event an end time is required.", flush=True)
+            raise ValueError("Tectonic event {} has no parameter end".format(k))
+
+        try:
+            tMap = tecSort[k]["upsub"]
+        except Exception:
+            pass
+        self._isKeyinFile(tMap)
+
+        try:
+            hMap = tecSort[k]["hdisp"]
+        except Exception:
+            pass
+        self._isKeyinFile(hMap)
+
+        try:
+            zMap = tecSort[k]["zfit"]
+        except Exception:
+            pass
+        self._isKeyinFile(zMap)
+
+        tecdata = self._storeTectonics(k, tecStart, hMap, tMap, zMap, tecEnd, tecdata)
 
         return tecdata
 
-    def _readTectonic(self):
+    def _readTectonics(self):
         """
-        Parse tectonic forcing conditions.
+        Parse tectonics forcing conditions.
         """
 
         tecdata = None
         try:
-            tecDict = self.input["tectonic"]
+            tecDict = self.input["tectonics"]
             tecSort = sorted(tecDict, key=itemgetter("start"))
             for k in range(len(tecSort)):
-                tecdata = self._defineTectonic(k, tecSort, tecdata)
+                tecdata = self._defineTectonics(k, tecSort, tecdata)
 
             if tecdata["start"][0] > self.tStart:
                 tmpTec = []
                 tmpTec.insert(
-                    0, {"start": self.tStart, "tMap": "empty", "zMap": "empty"}
+                    0, {"start": self.tStart, "tMap": "empty", "zMap": "empty", "hMap": "empty"}
                 )
                 tecdata = pd.concat(
-                    [pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap"]), tecdata],
+                    [pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"]), tecdata],
                     ignore_index=True,
                 )
             self.tecdata = tecdata[tecdata["start"] >= self.tStart]
@@ -850,152 +850,6 @@ class ReadYaml(object):
         except KeyError:
             self.sedfactNb = 0
             self.sedfacdata = None
-
-        return
-
-    def _storePlate(self, k, pStart, pMap, pTec, pEnd, platedata):
-        """
-        Record plate movement conditions.
-
-        :arg k: plate event number
-        :arg pStart: plate event start time
-        :arg pMap: plate advection information file
-        :arg pTec: plate uplift/subsidence file
-        :arg pEnd: tectonic event end time
-        :arg platedata: pandas dataframe storing each plate movement event
-
-        :return: appended platedata
-        """
-
-        if pMap is not None:
-            try:
-                with open(pMap) as platefile:
-                    platefile.close()
-
-            except IOError:
-                print("Unable to open plate file: {}".format(pMap), flush=True)
-                raise IOError(
-                    "The plate file {} is not found for event {}.".format(pMap, k)
-                )
-        else:
-            pMap = "empty"
-
-        if pTec is not None:
-            try:
-                with open(pTec) as platetec:
-                    platetec.close()
-
-            except IOError:
-                print(
-                    "Unable to open uplift/subsidence file in plates: {}".format(pTec),
-                    flush=True,
-                )
-                raise IOError(
-                    "The plate file {} is not found for event {}.".format(pTec, k)
-                )
-        else:
-            pTec = "empty"
-
-        tmpPlate = []
-        tmpPlate.insert(0, {"start": pStart, "pMap": pMap, "pTec": pTec})
-
-        if k == 0:
-            platedata = pd.DataFrame(tmpPlate, columns=["start", "pMap", "pTec"])
-        else:
-            platedata = pd.concat(
-                [platedata, pd.DataFrame(tmpPlate, columns=["start", "pMap", "pTec"])],
-                ignore_index=True,
-            )
-
-        return platedata
-
-    def _definePlate(self, k, plateSort, platedata):
-        """
-        Define plate rotation IDs.
-
-        :arg k: plate movement event number
-        :arg plateSort: sorted plate ids event through time
-        :arg platedata: pandas dataframe storing each plate IDs
-        :return: appended platedata
-        """
-
-        pStart = None
-        pEnd = None
-        pMap = None
-        pTec = None
-
-        try:
-            pStart = plateSort[k]["start"]
-        except Exception:
-            print("For each tectonic event a start time is required.", flush=True)
-            raise ValueError("Tectonic event {} has no parameter start".format(k))
-        try:
-            pMap = plateSort[k]["plate"] + ".npz"
-        except Exception:
-            pass
-        try:
-            pTec = plateSort[k]["upsub"] + ".npz"
-        except Exception:
-            pass
-        try:
-            pEnd = plateSort[k]["end"]
-        except Exception:
-            pass
-
-        platedata = self._storePlate(k, pStart, pMap, pTec, pEnd, platedata)
-
-        return platedata
-
-    def _readPlate(self):
-        """
-        Parse plates movement forcing conditions.
-        """
-
-        platedata = None
-        try:
-            plateDict = self.input["plates"]
-
-            plateSort = sorted(plateDict, key=itemgetter("start"))
-            for k in range(len(plateSort)):
-                platedata = self._definePlate(k, plateSort, platedata)
-
-            if platedata["start"][0] > self.tStart:
-                tmpPlate = []
-                tmpPlate.insert(
-                    0, {"start": self.tStart, "pMap": "empty", "pTec": "empty"}
-                )
-                platedata = pd.concat(
-                    [
-                        pd.DataFrame(tmpPlate, columns=["start", "pMap", "pTec"]),
-                        platedata,
-                    ],
-                    ignore_index=True,
-                )
-            self.platedata = platedata[platedata["start"] >= self.tStart]
-            if self.rStep > 0:
-                self.platedata = platedata[
-                    platedata["start"] >= self.tStart + self.rStep * self.tout
-                ]
-            self.platedata.reset_index(drop=True, inplace=True)
-
-            if self.rStep > 0:
-                rNow = self.tStart + self.rStep * self.tout
-                for k in range(len(self.platedata)):
-                    if (
-                        self.platedata["start"][k] < rNow
-                        and k < len(self.platedata) - 1
-                    ):
-                        self.platedata.loc[k, ["start"]] = rNow - self.tout
-                    elif (
-                        self.platedata["start"][k] < rNow
-                        and k == len(self.platedata) - 1
-                    ):
-                        self.platedata.loc[k, ["start"]] = rNow
-                self.platedata = self.platedata[self.platedata["start"] >= rNow]
-                self.platedata.reset_index(drop=True, inplace=True)
-
-        except KeyError:
-            self.platedata = None
 
         return
 
@@ -1258,6 +1112,132 @@ class ReadYaml(object):
         except KeyError:
             self.gflexStep = None
             self.gflexOn = False
+
+        return
+
+    def _storeTe(self, k, teStart, teEnd, teMap, lithodata):
+        """
+        Record elastic thickness map conditions.
+
+        :arg k: Te map number
+        :arg teStart: Te map start time
+        :arg teStart: Te map end time
+        :arg teMap: Te map file
+        :arg lithodata: pandas dataframe storing each elastic map
+
+        :return: appended lithodata
+        """
+
+        try:
+            with open(teMap) as tefile:
+                tefile.close()
+
+        except IOError:
+            print("Unable to open elastic thickness map file: {}".format(teMap), flush=True)
+            raise IOError(
+                "The elastic thickness file {} is not found for event {}.".format(
+                    teMap, k
+                )
+            )
+
+        tmpTe = []
+        tmpTe.insert(0, {"start": teStart, "teMap": teMap})
+
+        if k == 0:
+            lithodata = pd.DataFrame(tmpTe, columns=["start", "teMap"])
+        else:
+            lithodata = pd.concat(
+                [lithodata, pd.DataFrame(tmpTe, columns=["start", "teMap"])],
+                ignore_index=True,
+            )
+
+        tetime = teStart + self.gflexStep
+        while tetime < teEnd:
+            tmpTe = []
+            tmpTe.insert(0, {"start": tetime, "teMap": teMap})
+            lithodata = pd.concat(
+                [
+                    lithodata,
+                    pd.DataFrame(tmpTe, columns=["start", "teMap"]),
+                ],
+                ignore_index=True,
+            )
+            tetime = tetime + self.gflexStep
+
+        return lithodata
+
+    def _defineTe(self, k, lithoSort, lithodata):
+        """
+        Define elastic thickness conditions.
+
+        :arg k: Te map number
+        :arg lithoSort: sorted Te map
+        :arg lithodata: pandas dataframe storing each elastic map
+
+        :return: appended lithodata
+        """
+
+        teStart = None
+        teMap = None
+
+        try:
+            teStart = lithoSort[k]["start"]
+        except Exception:
+            print("For each elastic thickness map a start time is required.", flush=True)
+            raise ValueError("Te map {} has no parameter start".format(k))
+        try:
+            teEnd = lithoSort[k]["end"]
+        except Exception:
+            print("For each elastic thickness map a end time is required.", flush=True)
+            raise ValueError("Te map {} has no parameter end".format(k))
+        try:
+            teMap = lithoSort[k]["mapTe"] + ".npz"
+        except Exception:
+            print("An elastic thickness map is required.", flush=True)
+            raise ValueError("Te map {} has no parameter start".format(k))
+
+        lithodata = self._storeTe(k, teStart, teEnd, teMap, lithodata)
+
+        return lithodata
+
+    def _readTeData(self):
+        """
+        Parse global elastic thickness grids.
+        """
+
+        try:
+            lithoDict = self.input["litho"]
+            lithodata = None
+            lithoSort = sorted(lithoDict, key=itemgetter("start"))
+            for k in range(len(lithoSort)):
+                lithodata = self._defineTe(k, lithoSort, lithodata)
+
+            if lithodata["start"][0] > self.tStart:
+                tmpTe = []
+                tmpTe.insert(
+                    0, {"start": self.tStart, "teMap": "empty"}
+                )
+                lithodata = pd.concat(
+                    [pd.DataFrame(tmpTe, columns=["start", "teMap"]), lithodata],
+                    ignore_index=True,
+                )
+            self.lithodata = lithodata[lithodata["start"] >= self.tStart]
+
+            if self.rStep > 0:
+                rNow = self.tStart + self.rStep * self.tout
+                for k in range(len(self.lithodata)):
+                    if self.lithodata["start"][k] < rNow and k < len(self.lithodata) - 1:
+                        self.lithodata.loc[k, ["start"]] = rNow - self.tout
+                    elif self.lithodata["start"][k] < rNow and k == len(self.lithodata) - 1:
+                        self.lithodata.loc[k, ["start"]] = rNow
+                self.lithodata = self.lithodata[self.lithodata["start"] >= rNow]
+                self.lithodata.reset_index(drop=True, inplace=True)
+
+        except KeyError:
+            self.lithodata = None
+
+        if self.gflexOn and self.lithodata is None:
+            raise KeyError("Global flexure needs elastic thickness grids to be defined in `litho`.")
 
         return
 

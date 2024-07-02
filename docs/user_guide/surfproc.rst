@@ -22,7 +22,6 @@ Stream Power Law parameters
                 m: 0.4
                 fDa: 10.
                 fDm: 40.
-                mthd = 1
 
         This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
@@ -37,8 +36,7 @@ Stream Power Law parameters
             It is worth noting that the coefficient *n* in the SPL is fixed and take the value *1*.
 
         d. ``fDa`` dimensionless deposition coefficient for continental domain when accounting for sedimentation rate in the SPL following the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_. The default value is 0.0 (purely detachment-limited model).
-        e. ``fDm`` dimensionless deposition coefficient for marine domain. The default value is 40.0.
-        f. ``mthd`` chosen approach to account for sediment deposition (should be either 1 or 2). The default value is set to 1 (other choice is 2). While the first method uses the approach from `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, the second provides a faster calculation but might not be conservative.
+        e. ``fDm`` dimensionless deposition coefficient for marine domain. The default value is 10.0.
 
 Hillslope and marine deposition parameters
 -------------------------------------------
@@ -63,8 +61,7 @@ Hillslope and marine deposition parameters
         a. ``hillslopeKa`` is the diffusion coefficient for the aerial domain,
         b. ``hillslopeKm`` is the diffusion coefficient for the marine domain,
         c. ``smthDep`` is the transport coefficient of freshly deposited sediments entering the ocean from rivers,
-        d. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore. 
-        e. ``diffNb`` is the number of steps used to distribute the sediment fluxes in the marine domain. Default value is set to 1.        
+        d. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.       
 
 Sediment surface erodibility factor
 -------------------------------------

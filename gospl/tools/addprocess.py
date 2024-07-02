@@ -1,11 +1,11 @@
 import os
 import gc
 import sys
-import petsc4py  # type: ignore
+import petsc4py
 import numpy as np
 
-from mpi4py import MPI  # type: ignore
-from scipy import spatial  # type: ignore
+from mpi4py import MPI
+from scipy import spatial
 from time import process_time
 
 petsc4py.init(sys.argv)
@@ -14,7 +14,7 @@ MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import flexure  # type: ignore
+    from gospl._fortran import flexure
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -37,6 +37,7 @@ class GridProcess(object):
 
         self.flexIDs = None
         self.flex = None
+        self.xIndices = None
 
         if self.flexOn:
             self.localFlex = np.zeros(self.lpoints)
@@ -53,19 +54,36 @@ class GridProcess(object):
 
         return
 
+    def _regInterp(self, field):
+        """
+        Perform bilinear interpolation of ``field`` on the regular grid to unstructured 2D mesh.
+
+        :arg field: data to interpolate of size m x n
+
+        :return: ufield ``field`` interpolated to unstructured nodes
+        """
+
+        ufield = \
+            (1. - self.xFrac) * (1. - self.yFrac) * field[self.yIndices, self.xIndices] + \
+            self.xFrac * (1. - self.yFrac) * field[self.yIndices, self.xIndices + 1] + \
+            (1. - self.xFrac) * self.yFrac * field[self.yIndices + 1, self.xIndices] + \
+            self.xFrac * self.yFrac * field[self.yIndices + 1, self.xIndices + 1]
+
+        return ufield
+
     def _buildRegGrid(self):
         """
-        Builds the regular grid based on nodes coordinates and instantiates two `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_ objects.
+        Builds the regular grid based on nodes coordinates and instantiates two interpolation objects.
 
-        The first one `treeT` is used to interpolate values from the unstructured mesh onto the regular grid based on an inverse weighting distance approach.
+        The first one uses  `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_ to interpolate values from the unstructured mesh onto the regular grid based on an inverse weighting distance approach.
 
-        The second `treeR` is used to interpolate values back to the unstructured mesh from the regular grid.
+        The second performs a bilinear interpolation from the regular grid to unstructured 2D mesh.
 
         .. note::
-            Here both trees are not kept in memory, instead we store the interpolation information, namely the indices of the neighborhing nodes, and the weights of each node in the neighborhood (based on the distance).
+            Here that the KDTree is not kept in memory, instead we store the interpolation information, namely the indices of the neighbouring nodes, and the weights of each node in the neighborhood (based on the distance).
         """
 
-        # Build regular grid for flexure and orographoic precipitation calculation
+        # Build regular grid for flexure and orographic precipitation calculation
         xmin = self.mCoords[:, 0].min()
         xmax = self.mCoords[:, 0].max()
         ymin = self.mCoords[:, 1].min()
@@ -83,8 +101,28 @@ class GridProcess(object):
         self.reg_nx = int(self.reg_xl / self.reg_dx + 1)
         self.reg_ny = int(self.reg_yl / self.reg_dx + 1)
 
+        assert np.all(self.mCoords[:, 0] >= newx[0])
+        assert np.all(self.mCoords[:, 0] <= newx[-1])
+        assert np.all(self.mCoords[:, 1] >= newy[0])
+        assert np.all(self.mCoords[:, 1] <= newy[-1])
+
+        self.xFrac = np.interp(self.mCoords[:, 0], newx, np.arange(self.reg_nx))
+        self.yFrac = np.interp(self.mCoords[:, 1], newy, np.arange(self.reg_ny))
+
+        self.xIndices = np.array(self.xFrac, dtype=int)
+        self.xFrac -= self.xIndices
+        self.yIndices = np.array(self.yFrac, dtype=int)
+        self.yFrac -= self.yIndices
+
+        mask = self.xIndices == self.reg_nx - 1
+        self.xIndices[mask] -= 1
+        self.xFrac[mask] += 1.
+        mask = self.yIndices == self.reg_ny - 1
+        self.yIndices[mask] -= 1
+        self.yFrac[mask] += 1.
+
         treeT = spatial.cKDTree(self.mCoords[:, :2], leafsize=10)
-        distances, self.regIDs = treeT.query(rPts, k=3)
+        distances, self.regIDs = treeT.query(rPts, k=4)
         # Inverse weighting distance...
         self.regWeights = np.divide(
             1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
@@ -93,19 +131,8 @@ class GridProcess(object):
         self.regOnIDs = np.where(self.regSumWeights == 0)[0]
         self.regSumWeights[self.regSumWeights == 0] = 1.0e-4
 
-        treeR = spatial.cKDTree(rPts, leafsize=10)
-        distances, self.regrIDs = treeR.query(self.mCoords[:, :2], k=3)
-        # Inverse weighting distance...
-        self.regrWeights = np.divide(
-            1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
-        )
-        self.regrSumWeights = np.sum(self.regrWeights, axis=1)
-        self.regrOnIDs = np.where(self.regrSumWeights == 0)[0]
-        self.regrSumWeights[self.regrSumWeights == 0] = 1.0e-4
-
-        if self.memclear:
-            del treeR, treeT
-            gc.collect()
+        del treeT, distances, mask, rPts, newx, newy
+        gc.collect()
 
         return
 
@@ -140,7 +167,7 @@ class GridProcess(object):
 
         if MPIrank == 0:
             # Build regular grid for flexure calculation
-            if self.regIDs is None:
+            if self.xIndices is None:
                 self._buildRegGrid()
 
             # Interpolate values on the flexural regular grid
@@ -157,12 +184,10 @@ class GridProcess(object):
             newh = flexure(regNewZ, regOldZ, self.reg_ny, self.reg_nx,
                            self.reg_yl, self.reg_xl, self.flex_rhos,
                            self.flex_rhoa, self.flex_eet, int(self.boundflex))
-            rflexTec = (newh - regNewZ).ravel()
+            rflexTec = newh - regNewZ
 
             # Interpolate back to goSPL mesh
-            flexTec = np.sum(self.regrWeights * rflexTec[self.regrIDs][:, :], axis=1) / self.regrSumWeights
-            if len(self.regrOnIDs) > 0:
-                flexTec[self.regrOnIDs] = rflexTec[self.regrIDs[self.regrOnIDs, 0]]
+            flexTec = self._regInterp(rflexTec)
         else:
             flexTec = None
 
@@ -226,7 +251,7 @@ class GridProcess(object):
 
         if MPIrank == 0:
             # Build regular grid for flexure calculation
-            if self.regIDs is None:
+            if self.xIndices is None:
                 self._buildRegGrid()
 
             # Interpolate values on the regular grid
@@ -284,10 +309,7 @@ class GridProcess(object):
             oroRain *= 0.366 * self.rainfall_frequency
 
             # Interpolate back to goSPL mesh
-            rORain = oroRain.ravel()
-            oRain = np.sum(self.regrWeights * rORain[self.regrIDs][:, :], axis=1) / self.regrSumWeights
-            if len(self.regrOnIDs) > 0:
-                oRain[self.regrOnIDs] = rORain[self.regrIDs[self.regrOnIDs, 0]]
+            oRain = self._regInterp(oroRain)
         else:
             oRain = None
 

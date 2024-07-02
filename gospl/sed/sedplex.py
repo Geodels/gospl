@@ -36,11 +36,13 @@ class SEDMesh(object):
         """
 
         # Petsc vectors
+        self.rhs = self.hGlobal.duplicate()
         self.tmp = self.hGlobal.duplicate()
         self.tmpL = self.hLocal.duplicate()
         self.tmp1 = self.hGlobal.duplicate()
         self.Qs = self.hGlobal.duplicate()
         self.QsL = self.hLocal.duplicate()
+        self.nQs = self.hLocal.duplicate()
 
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
@@ -63,7 +65,6 @@ class SEDMesh(object):
 
         # Multi-lithology case
         if self.stratNb > 0:
-            # Coarse sediment
             # Get erosion rate (m/yr) to volume
             self.tmpL.setArray(self.thCoarse)
             self.dm.localToGlobal(self.tmpL, self.tmp)
@@ -325,7 +326,6 @@ class SEDMesh(object):
         else:
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
             Cd[self.seaID] = self.Cdm
-
         diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
         if self.flatModel:
             diffCoeffs[self.idBorders, 1:] = 0.0

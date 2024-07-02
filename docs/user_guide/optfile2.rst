@@ -115,9 +115,64 @@ This function computes the flexural isostasy equilibrium based on topographic ch
                 rhoc: 2800.0
                 rhoa: 3150.0
 
-        Used to consider flexural isostasy in 2D simulation (*i.e.* not global scale).  paleo-topography maps obtained from backward models, you will also have to set this key composed of 2 parameters:
+        Used to consider flexural isostasy in 2D simulation (*i.e.* not global scale) where:
 
         a. ``regdx``: the resolution of the regular grid used to perform the flexural isostasy calculation,
         b. ``thick`` effective elastic plate thickness in m,
         c. ``rhoc`` crust density in kg/m3,
         d. ``rhoa`` asthenospheric density in kg/m3.
+
+
+.. Global flexural isostasy declaration
+.. -------------------------------------
+
+.. This section computes the flexural isostasy equilibrium based on topographic change at global scale. Like previous section, it uses a simple routine that accounts for flexural isostatic rebound associated with erosional loading/unloading.
+
+.. .. note::
+
+..     This function is a simple hack to compute global flexural response based on 2D local loading changes and is likely not the best way for solving this problem. Preferred methods would consist in using spherical harmonics instead...
+
+.. .. warning::
+
+..     This function uses the following default variable values:
+..       - Acceleration due to gravity: 9.8
+..       - Young's Modulus: 65e9  
+..       - Poisson's Ratio: 0.25
+..       - Mantle density: 3300.0
+..       - Infill material density: 2300.0
+
+.. .. grid:: 1
+..     :padding: 3
+
+..     .. grid-item-card::  
+        
+..         **Declaration example**:
+
+..         .. code:: python
+
+..             gflex: 
+..                 interpS: 'data/sflex_info'
+..                 interR: 'data/rflex_info'
+..                 procs: 8
+..                 step: 5.0e5
+..                 young: 65e9
+..                 poisson: 0.25
+..                 rhom: 3300.
+
+
+..         Used to consider flexural isostasy in 2D simulation (*i.e.* not global scale).  paleo-topography maps obtained from backward models, you will also have to set this key composed of 2 parameters:
+
+..         a. ``interpS``: spherical mesh information used to interpolate goSPL variable to a lon/lat grid,
+..         b. ``interR`` regular grid information used to perform interpolation from lon/lat grid to the spherical mesh,
+..         c. ``procs`` number of CPUs to use when performing the flexural isostasy calculation,
+..         d. ``step`` time interval in years used to compute flexural response.
+
+..         .. important::
+
+..             The interpolation information files are **.npz** files containing the following keys:  ``plate``:
+..               - ``wghts``: the weights used for interpolation,
+..               - ``ids`` the indices of the nodes in the neighborhood of a given vertex,
+..               - ``sumwght`` the sum of the weights used for interpolation,
+..               - ``oids`` the nodes that remain at the same position after advection.
+
+..             As for now the interpolation assumes a resolution of **0.25 degrees** for the lont/lat grid.

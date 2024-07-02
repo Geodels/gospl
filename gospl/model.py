@@ -13,7 +13,7 @@ if "READTHEDOCS" not in os.environ:
     from .mesher import UnstMesh as _UnstMesh
     from .tools import GridProcess as _GridProcess
     from .tools import GlobalFlex as _GlobalFlex
-    from .mesher import EarthPlate as _EarthPlate
+    from .mesher import Tectonics as _Tectonics
     from .tools import WriteMesh as _WriteMesh
 
 else:
@@ -26,7 +26,7 @@ else:
         def __init__(self):
             pass
 
-    class _EarthPlate(object):
+    class _Tectonics(object):
         def __init__(self):
             pass
 
@@ -71,7 +71,7 @@ class Model(
     _UnstMesh,
     _GridProcess,
     _GlobalFlex,
-    _EarthPlate,
+    _Tectonics,
     _FAMesh,
     _PITFill,
     _SEDMesh,
@@ -135,8 +135,8 @@ class Model(
         # Define global flexural isostasy
         _GlobalFlex.__init__(self)
 
-        # Initialise earth plate
-        _EarthPlate.__init__(self)
+        # Initialise tectonics forcings
+        _Tectonics.__init__(self)
 
         # Check if simulations just restarted
         if self.rStep > 0:
@@ -173,13 +173,13 @@ class Model(
             tstep = process_time()
 
             # Output time step
+            _Tectonics.updatePaleoZ(self)
             _WriteMesh.visModel(self)
             if self.tNow == self.tEnd:
                 return
 
             # Perform plates advection and tectonics
-            _UnstMesh.applyTectonics(self)
-            _EarthPlate.advectPlates(self)
+            _Tectonics.getTectonics(self)
 
             if not self.fast:
                 # Compute flow accumulation
@@ -224,9 +224,8 @@ class Model(
 
             if MPIrank == 0:
                 print(
-                    "--- Computational Step \
-                      (%0.02f seconds)"
-                    % (process_time() - tstep),
+                    "--- Computational Step (%0.02f seconds) | Time Step: %d years"
+                    % (process_time() - tstep, self.tNow),
                     flush=True,
                 )
 

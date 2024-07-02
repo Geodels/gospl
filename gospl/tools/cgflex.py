@@ -68,7 +68,7 @@ class GlobalFlex(object):
                 self.rflex_wghts = interpRData["wghts"]
                 self.rflex_ids = interpRData["ids"]
                 self.rflex_oIDs = interpRData["oids"]
-                self.rflex_denum = interpRData["denum"]
+                self.rflex_sumwght = interpRData["sumwght"]
                 del interpRData
                 gc.collect()
 
@@ -776,6 +776,7 @@ class GlobalFlex(object):
         if gED[self.gflex_ids].ndim == 2:
             erodep = (np.sum(self.gflex_wghts * gED[self.gflex_ids][:, :], axis=1) / self.gflex_sumwght)
             elev = (np.sum(self.gflex_wghts * newZ[self.gflex_ids][:, :], axis=1) / self.gflex_sumwght)
+            # te = (np.sum(self.gflex_wghts * newZ[self.gflex_ids][:, :], axis=1) / self.gflex_sumwght)
         else:
             erodep = (np.sum(self.gflex_wghts * gED[self.gflex_ids][:, :, 0], axis=1) / self.gflex_sumwght)
             elev = (np.sum(self.gflex_wghts * newZ[self.gflex_ids][:, :, 0], axis=1) / self.gflex_sumwght)
@@ -789,10 +790,10 @@ class GlobalFlex(object):
         # Compute the flexural responses associated with the corresponding loads.
         flexds = self._runFlexure(ds)
 
-        # Interpolate the calculate global thickness on the spherical mesh
+        # Interpolate the calculate global flexure on the spherical mesh
         if MPIrank == 0:
             flexg = flexds.flex.values.flatten()
-            uflex = np.sum(self.rflex_wghts * flexg[self.rflex_ids], axis=1) * self.rflex_denum
+            uflex = np.sum(self.rflex_wghts * flexg[self.rflex_ids], axis=1) / self.rflex_sumwght
             if len(self.rflex_oIDs) > 0:
                 uflex[self.rflex_oIDs] = flexg[self.rflex_ids[self.rflex_oIDs, 0]]
         else:

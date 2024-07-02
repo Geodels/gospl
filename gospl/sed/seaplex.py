@@ -13,6 +13,8 @@ from time import process_time
 from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import donorslist
+    from gospl._fortran import donorsmax
     from gospl._fortran import mfdrcvrs
 
 petsc4py.init(sys.argv)
@@ -125,6 +127,50 @@ class SEAMesh(object):
 
         return
 
+    def _upstreamDeposition(self, flowdir):
+        """
+        In cases where too much deposition occurs in depressions and/or flat regions, this function enforces a maximum deposition rate based on upstream elevations computed from the implicit erosion/deposition equation.
+
+        :arg flowdir: number of flow direction
+        """
+        niter = 0
+        tolerance = 1.e-3
+        equal = False
+        h = self.hLocal.getArray().copy()
+
+        # Get donors list based on rcvs
+        donors = donorslist(flowdir, self.inIDs, self.donRcvs)
+        topIDs = np.where(np.max(donors, axis=1) == -1)[0]
+        while not equal and niter < 1000:
+
+            dh = self.tmpL.getArray()  # -self.EbLocal.getArray().copy() * self.dt
+            elev = (dh + h).copy()
+            elev[topIDs] = h[topIDs]
+            maxh = donorsmax(elev, donors)
+            maxh[maxh == -1.e8] = elev[maxh == -1.e8]
+            self.tmpL.setArray(maxh)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            maxh = self.tmpL.getArray().copy() - 1.e-6
+            maxh[maxh > elev] = elev[maxh > elev]
+
+            self.tmpL.setArray(maxh - elev)
+            self.dm.localToGlobal(self.tmpL, self.dh)
+            self.dh.abs()
+            maxdh = self.dh.max()[1]
+
+            equal = maxdh < tolerance
+            self.tmpL.setArray(maxh - h)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            niter += 1
+
+        if self.memclear:
+            del donors, h, elev, maxh, Eb
+            gc.collect()
+
+        return
+
     def _marineFluxes(self, sedflux):
         """
         Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute sediments downslope.
@@ -133,20 +179,14 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions under water
+        hl = self.hLocal.getArray().copy()
         self.donRcvs, self.distRcv, self.wghtVal = mfdrcvrs(
-            self.flowDir, 0.01, self.oceanFill, self.sealevel
+            self.flowDir, 0.01, hl, self.sealevel
         )
-
         self.rcvID = self.donRcvs.copy()
         self.rcvID[self.ghostIDs, :] = -1
         self.distRcv[self.ghostIDs, :] = 0
         self.wghtVal[self.ghostIDs, :] = 0
-
-        # Set borders nodes
-        if self.flatModel:
-            self.rcvID[self.idBorders, :] = np.tile(self.idBorders, (8, 1)).T
-            self.distRcv[self.idBorders, :] = 0.0
-            self.wghtVal[self.idBorders, :] = 0.0
 
         # Define the flow direction matrix
         self.matrixFlow(8)
@@ -162,81 +202,73 @@ class SEAMesh(object):
         # Dimensionless depositional coefficient
         PA = self.tmpL.getArray().copy()
         fDep = np.divide(self.fDepm * self.larea, PA, out=np.zeros_like(PA), where=PA > 1.e-6)
-        if self.dmthd == 1:
-            fDep[fDep > 0.99] = 0.99
-            self.matrixFlow(8, 1.0 - fDep)
-        else:
-            dMat = self._matrix_build_diag(fDep)
-            dMat += self.fMat
+        fDep[fDep > 0.99] = 0.99
+        self.fDep = fDep
+        ids = np.where(hl > self.clinoH)[0]
+        self.fDep[ids] = 0.
 
-        # Implicit sediment fluxes combining upstream flux and deposition
+        # Set the RHS vector to the incoming marine sediment flux
+        sedflux[self.idBorders] = 0.
         self.tmpL.setArray(sedflux)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
-        if self.dmthd == 1:
-            self._solve_KSP(False, self.fDepMat, self.tmp1, self.tmp)
+
+        tolerance = 1.e-2
+        niter = 0
+        sumExcess = tolerance + 1.0
+        upH = hl.copy()
+        self.fDep[upH >= self.clinoH] = 0.
+
+        while sumExcess > tolerance and niter < 100:
+            self.matrixFlow(8, 1. - self.fDep)
+            self._solve_KSP(True, self.fDepMat, self.tmp1, self.tmp)
             self.fDepMat.destroy()
-        else:
-            self._solve_KSP(True, dMat, self.tmp1, self.tmp)
-            dMat.destroy()
 
-        # Destroy temporary arrays
+            # Get the corresponding sedimentation flux
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            qs = self.tmpL.getArray().copy()
+            self.fMat.transpose().mult(self.tmp, self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            sedDep = (qs - self.tmpL.getArray()) * self.fDep
+            sedDep[sedDep < 0] = 0.
+            self.tmpL.setArray(sedDep * self.dt / self.larea)
+            depH = self.tmpL.getArray().copy()
+            depH[depH < 0] = 0.
 
-        if self.memclear:
-            del PA, FAL
-            gc.collect()
+            # Get over-deposition
+            currH = depH + upH
+            ids = np.where(currH > self.clinoH)[0]
+            currH[ids] = self.clinoH[ids]
+            self.fDep[ids] = 0.
+            excess = (depH + upH - currH) * self.larea / self.dt
+            excess[excess < 0.] = 0.
+            excess[hl > self.sealevel] = 0
+            self.tmpL.setArray(excess)
+            upH = currH.copy()
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            niter += 1
+            sumExcess = self.tmp1.sum()
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "  --- Marine excess (sum) %0.01f m"
+                    % (sumExcess),
+                    flush=True
+                )
 
-        # Extract local sediment deposition thickness
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        if self.dmthd == 1:
-            scale = np.divide(fDep, 1.0 - fDep, out=np.zeros_like(fDep), where=fDep != 0)
-            sedDep = self.tmpL.getArray() * scale
-        else:
-            sedDep = self.tmpL.getArray() * fDep
-        if self.flatModel:
-            sedDep[self.idBorders] = 0.0
-        self.EbLocal.setArray(-sedDep / self.larea)
-        self.dm.localToGlobal(self.EbLocal, self.Eb)
+        # upH[lsink] = hl[lsink]
+        self.tmpL.setArray(upH - hl)
 
         # Limiting deposition rates based on upstream conditions
         self._upstreamDeposition(8)
-
-        # Get deposition thicknesses
-        Eb = self.EbLocal.getArray().copy()
-        Eb[Eb > 0] = 0.0
-
-        # Define coastal distance for marine points
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-        hl = self.hLocal.getArray().copy()
-        if self.clinSlp > 0.0:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                self._distanceCoasts(hl)
-
-        # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
-        if self.clinSlp > 0.0:
-            clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp
-        else:
-            clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)
-        clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
-
-        # Update the marine maximal depositional thicknesses
-        updateH = hl - Eb * self.dt
-        updateH[updateH >= clinoH] = clinoH[updateH >= clinoH]
-        self.tmpL.setArray(updateH - hl)
 
         # Smoothing marine deposition
         if self.smthD > 0:
             self.dm.localToGlobal(self.tmpL, self.tmp1)
             smthH = self._hillSlope(smooth=1) + hl
-            smthH[smthH >= clinoH] = clinoH[smthH >= clinoH]
+            smthH[smthH >= self.clinoH] = self.clinoH[smthH >= self.clinoH]
             self.tmpL.setArray(smthH - hl)
             self.dm.localToGlobal(self.tmpL, self.tmp)
         else:
             self.dm.localToGlobal(self.tmpL, self.tmp)
-
-        if self.memclear:
-            del updateH, Eb, hl, clinoH, fDep
-            gc.collect()
 
         return
 
@@ -254,24 +286,36 @@ class SEAMesh(object):
         # Set all nodes below sea-level as sinks
         self.sinkIDs = self.lFill <= self.sealevel
 
+        # Define coastal distance for marine points
+        if self.clinSlp > 0.0:
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            hl = self.hLocal.getArray().copy()
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                self._distanceCoasts(hl)
+            # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
+            self.clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp
+        else:
+            self.clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)
+        self.clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
+        self.maxDepQs = (self.clinoH - hl) * self.larea / self.dt
+
         # Get the volumetric marine sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
         self.vSedLocal.copy(result=self.QsL)
         sedFlux = self.QsL.getArray().copy()
         sedFlux[np.invert(self.sinkIDs)] = 0.0
-        flxStp = sedFlux / self.diffNb
-        for k in range(self.diffNb):
-            # Compute marine directions and fluxes
-            self._marineFluxes(flxStp)
+        sedFlux[sedFlux < 0] = 0.0
+        self._marineFluxes(sedFlux)
 
-            # Update cumulative erosion and deposition as well as elevation
-            self.cumED.axpy(1.0, self.tmp)
-            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-            self.hGlobal.axpy(1.0, self.tmp)
-            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        # Update cumulative erosion and deposition as well as elevation
+        self.cumED.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-            # Update stratigraphic layer parameters
-            if self.stratNb > 0:
-                self.deposeStrat()
+        # Update stratigraphic layer parameters
+        if self.stratNb > 0:
+            self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
             print(

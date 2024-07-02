@@ -6,8 +6,6 @@ import glob
 import shutil
 import petsc4py
 import numpy as np
-from scipy import spatial
-from scipy import ndimage
 
 from mpi4py import MPI
 from time import process_time
@@ -190,10 +188,11 @@ class WriteMesh(object):
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
         - erosion & deposition rate values `EDrate` for the considered time step.
+        - flow accumulation `FA`.
         - flow accumulation `fillFA` considering pit filling.
         - river sediment load `sedLoad`.
         - uplift subsidence values if vertical tectonic forcing is considered `uplift`.
-        - flexural isostasy rebound `fexIso` if flexure is considered.
+        - flexural isostasy rebound `flexIso` if flexure is considered.
         - precipitation maps based on forcing conditions `rain` (could also correspond to the orographic rain if the functionality is turned on).
 
         """
@@ -271,6 +270,17 @@ class WriteMesh(object):
             if not self.fast:
                 data[self.seaID] = 1.0
             f["fillFA"][:, 0] = data
+            f.create_dataset(
+                "FA",
+                shape=(self.lpoints, 1),
+                dtype="float32",
+                compression="gzip",
+            )
+            data = self.FAL.getArray().copy()
+            data[data <= 1.0e-8] = 1.0e-8
+            if not self.fast:
+                data[self.seaID] = 1.0
+            f["FA"][:, 0] = data
 
             if self.iceOn:
                 f.create_dataset(
@@ -286,21 +296,21 @@ class WriteMesh(object):
                 f["iceFA"][:, 0] = data
             if self.flexOn:
                 f.create_dataset(
-                    "fexIso",
+                    "flexIso",
                     shape=(self.lpoints, 1),
                     dtype="float32",
                     compression="gzip",
                 )
-                f["fexIso"][:, 0] = self.localFlex
+                f["flexIso"][:, 0] = self.localFlex
             if self.gflexOn:
                 f.create_dataset(
-                    "fexIso",
+                    "flexIso",
                     shape=(self.lpoints, 1),
                     dtype="float32",
                     compression="gzip",
                 )
                 data = self.cumFlexL.getArray().copy()
-                f["fexIso"][:, 0] = data
+                f["flexIso"][:, 0] = data
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
@@ -310,30 +320,14 @@ class WriteMesh(object):
             data = self.vSedLocal.getArray().copy()
             data[data <= 1.0e-8] = 1.0e-8
             f["sedLoad"][:, 0] = data
-            if self.uplift is not None:
+            if self.upsub is not None:
                 f.create_dataset(
                     "uplift",
                     shape=(self.lpoints, 1),
                     dtype="float32",
                     compression="gzip",
                 )
-                f["uplift"][:, 0] = self.uplift
-            if self.paleoZ is not None and self.tNow > self.tStart:
-                f.create_dataset(
-                    "paleotec",
-                    shape=(self.lpoints, 1),
-                    dtype="float32",
-                    compression="gzip",
-                )
-                f["paleotec"][:, 0] = self.tecL.getArray().copy()
-            if self.hdisp is not None:
-                f.create_dataset(
-                    "hdisp",
-                    shape=(self.lpoints, 3),
-                    dtype="float32",
-                    compression="gzip",
-                )
-                f["hdisp"][:, :] = self.hdisp
+                f["uplift"][:, 0] = self.upsub
             if self.rainVal is not None:
                 f.create_dataset(
                     "rain",
@@ -378,7 +372,7 @@ class WriteMesh(object):
         - erosion & deposition values `EDrate` for the considered time step.
         - flow accumulation `fillFA` considering pit filling.
         - river sediment load `sedLoad`.
-        - flexural isostasy induced tectonics `fexIso`.
+        - flexural isostasy induced tectonics `flexIso`.
 
         .. note::
 
@@ -408,16 +402,16 @@ class WriteMesh(object):
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
         self.EbLocal.setArray(np.array(hf["/EDrate"])[:, 0])
         self.dm.localToGlobal(self.EbLocal, self.Eb)
-        self.FAL.setArray(np.array(hf["/fillFA"])[:, 0])
+        self.FAL.setArray(np.array(hf["/FA"])[:, 0])
         self.fillFAL.setArray(np.array(hf["/fillFA"])[:, 0])
         self.dm.localToGlobal(self.FAL, self.FAG)
         self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
         self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
 
         if self.flexOn:
-            self.localFlex = np.array(hf["/fexIso"])[:, 0]
+            self.localFlex = np.array(hf["/flexIso"])[:, 0]
         if self.gflexOn:
-            self.cumFlexL.setArray(np.array(hf["/fexIso"])[:, 0])
+            self.cumFlexL.setArray(np.array(hf["/flexIso"])[:, 0])
             self.cumEDFlex.setArray(np.array(hf["/erodep"])[:, 0])
         hf.close()
 
@@ -526,6 +520,15 @@ class WriteMesh(object):
             )
             f.write("         </Attribute>\n")
 
+            f.write('         <Attribute Type="Scalar" Center="Node" Name="FA">\n')
+            f.write(
+                '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+            )
+            f.write(
+                'Dimensions="%d 1">%s:/FA</DataItem>\n' % (self.nodes[p], pfile)
+            )
+            f.write("         </Attribute>\n")
+
             f.write('         <Attribute Type="Scalar" Center="Node" Name="fillFA">\n')
             f.write(
                 '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
@@ -546,12 +549,12 @@ class WriteMesh(object):
                 f.write("         </Attribute>\n")
 
             if self.flexOn or self.gflexOn:
-                f.write('         <Attribute Type="Scalar" Center="Node" Name="fexIso">\n')
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="flexIso">\n')
                 f.write(
                     '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
                 )
                 f.write(
-                    'Dimensions="%d 1">%s:/fexIso</DataItem>\n' % (self.nodes[p], pfile)
+                    'Dimensions="%d 1">%s:/flexIso</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 
@@ -564,18 +567,7 @@ class WriteMesh(object):
             )
             f.write("         </Attribute>\n")
 
-            if self.hdisp is not None:
-                f.write(
-                    '         <Attribute Type="Vector" Center="Node" Name="hTec">\n'
-                )
-                f.write(
-                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
-                )
-                f.write(
-                    'Dimensions="%d 3">%s:/hdisp</DataItem>\n' % (self.nodes[p], pfile)
-                )
-                f.write("         </Attribute>\n")
-            if self.uplift is not None:
+            if self.upsub is not None:
                 f.write(
                     '         <Attribute Type="Scalar" Center="Node" Name="vTec">\n'
                 )
@@ -584,18 +576,6 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/uplift</DataItem>\n' % (self.nodes[p], pfile)
-                )
-                f.write("         </Attribute>\n")
-            if self.paleoZ is not None and self.tNow > self.tStart:
-                f.write(
-                    '         <Attribute Type="Scalar" Center="Node" Name="paleoTec">\n'
-                )
-                f.write(
-                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
-                )
-                f.write(
-                    'Dimensions="%d 1">%s:/paleotec</DataItem>\n'
-                    % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
             if self.rainVal is not None:

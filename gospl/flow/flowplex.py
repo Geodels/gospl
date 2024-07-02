@@ -9,8 +9,6 @@ from mpi4py import MPI
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import donorslist
-    from gospl._fortran import donorsmax
     from gospl._fortran import mfdreceivers
 
 petsc4py.init(sys.argv)
@@ -54,6 +52,8 @@ class FAMesh(object):
         self.Eb = self.hGlobal.duplicate()
         self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
+        self.rhs = self.hGlobal.duplicate()
+        self.newH = self.hGlobal.duplicate()
         self.EbLocal.set(0.0)
 
         if self.iceOn:
@@ -562,47 +562,25 @@ class FAMesh(object):
 
         return
 
-    def _upstreamDeposition(self, flowdir):
+    def _getRHS(self):
         """
-        In cases where too much deposition occurs in depressions and/or flat regions, this function enforces a maximum deposition rate based on upstream elevations computed from the implicit erosion/deposition equation.
+        This function builds the right hand side of the coupled linear systems when solving the stream power law model taking into account sediment deposition.
 
-        :arg flowdir: number of flow direction
+        .. note::
+
+            The approach follows `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, where the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`A` and flow accumulation :math:`FA`.
         """
-        niter = 0
-        tolerance = 1e-3
-        equal = False
-        h = self.hLocal.getArray().copy()
 
-        # Get donors list based on elevation
-        donors = donorslist(flowdir, self.inIDs, self.donRcvs)
-        topIDs = np.where(np.max(donors, axis=1) == -1)[0]
-        while not equal and niter < 10000:
+        # Compute the sum of all upstream elevations
+        self._solve_KSP(True, self.fMati, self.newH, self.tmp)
+        # Remove the contribution from the local node elevation
+        self.dh.waxpy(-1., self.newH, self.tmp)
+        self.dm.globalToLocal(self.dh, self.tmpL)
 
-            Eb = -self.EbLocal.getArray().copy() * self.dt
-            elev = (Eb + h).copy()
-            elev[topIDs] = h[topIDs]
-            maxh = donorsmax(elev, donors)
-            maxh[maxh == -1.e8] = elev[maxh == -1.e8]
-            self.tmpL.setArray(maxh)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            maxh = self.tmpL.getArray().copy() - 1.e-6
-            maxh[maxh > elev] = elev[maxh > elev]
-
-            self.tmpL.setArray(maxh - elev)
-            self.dm.localToGlobal(self.tmpL, self.dh)
-            self.dh.abs()
-            maxdh = self.dh.max()[1]
-
-            equal = maxdh < tolerance
-            self.EbLocal.setArray(-(maxh - h) / self.dt)
-            self.dm.localToGlobal(self.EbLocal, self.Eb)
-            self.dm.globalToLocal(self.Eb, self.EbLocal)
-            niter += 1
-
-        if self.memclear:
-            del donors, h, elev, maxh, Eb
-            gc.collect()
+        # Scale the upstream elevations using deposition ratios
+        self.tmpL.setArray(-self.tmpL.getArray() * self.fDep)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp.axpy(1.0, self.rhs)
 
         return
 
@@ -730,102 +708,98 @@ class FAMesh(object):
         """
 
         t0 = process_time()
+        # Build the SPL erosion arrays
         hOldArray = self.hLocal.getArray().copy()
         self.oldH = hOldArray.copy()
-        hOldArray[self.seaID] = self.sealevel
         if self.flexOn:
             self.hLocal.copy(result=self.hOldFlex)
-
         eMat, gMat, PA = self._eroMats(hOldArray)
 
-        # Solve SPL erosion implicitly for fluvial erosion
-        t1 = process_time()
-        self._solve_KSP(True, eMat, self.hOld, self.stepED)
-        self.tmp.waxpy(-1.0, self.hOld, self.stepED)
-        eMat.destroy()
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Solve simple SPL erosion (%0.02f seconds)" % (process_time() - t1),
-                flush=True,
-            )
-        # Solve SPL erosion implicitly for glacial erosion
-        if self.iceOn:
+        # Solve SPL erosion implicitly for fluvial and glacial erosion
+        if self.fDepa == 0:
             t1 = process_time()
-            self._solve_KSP(False, gMat, self.hOld, self.stepED)
-            self.tmp1.waxpy(-1.0, self.hOld, self.stepED)
-            gMat.destroy()
-            self.tmp.axpy(1., self.tmp1)
+            self._solve_KSP(True, eMat, self.hOld, self.stepED)
+            self.tmp.waxpy(-1.0, self.hOld, self.stepED)
             if MPIrank == 0 and self.verbose:
                 print(
-                    "Solve glacial SPL erosion (%0.02f seconds)" % (process_time() - t1),
+                    "Solve simple SPL erosion (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
-
-        # Dimensionless depositional coefficient
-        if self.fDepa > 0:
-            fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
-            if self.dmthd == 1:
-                fDep[fDep > 0.99] = 0.99
-                self.matrixFlow(self.flowDir, 1.0 - fDep)
-            else:
-                dMat = self._matrix_build_diag(fDep)
-                dMat += self.fMat
-
-            # Implicit sediment fluxes combining upstream flux, erosion and deposition
+            # In the case of glacial erosion
+            if self.iceOn:
+                t1 = process_time()
+                self._solve_KSP(False, gMat, self.hOld, self.stepED)
+                self.tmp1.waxpy(-1.0, self.hOld, self.stepED)
+                # gMat.destroy()
+                self.tmp.axpy(1., self.tmp1)
+                if MPIrank == 0 and self.verbose:
+                    print(
+                        "Solve glacial SPL erosion (%0.02f seconds)" % (process_time() - t1),
+                        flush=True,
+                    )
+        # Accounting for continental sediment deposition
+        else:
             t1 = process_time()
+            tolerance = 1.e-3
+            equal = False
+            niter = 0
+            # Dimensionless depositional coefficient
+            self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+            self.fDep[self.seaID] = 0.
+            if self.flatModel:
+                self.fDep[self.idBorders] = 0.
+            # Get the RHS vector from start time
+            self._solve_KSP(True, self.fMati, self.hOld, self.tmp)
             self.dm.globalToLocal(self.tmp, self.tmpL)
-            QsL = -self.tmpL.getArray() * self.larea
-            QsL = np.divide(QsL, self.dt)
-            QsL[QsL < 1.e-8] = 0.
-            self.tmpL.setArray(QsL)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            if self.dmthd == 1:
-                self._solve_KSP(False, self.fDepMat, self.tmp, self.tmp1)
-                self.fDepMat.destroy()
-            else:
-                self._solve_KSP(False, dMat, self.tmp, self.tmp1)
-                dMat.destroy()
+            self.tmpL.setArray(hOldArray + (self.tmpL.getArray() - hOldArray) * self.fDep)
+            self.dm.localToGlobal(self.tmpL, self.rhs)
+            # Define the initial guess as the elevations at the start of the step
+            self.hOld.copy(result=self.newH)
+            self.hOld.copy(result=self.tmp1)  # tmp1 is the old elevation values
+            # Update RHS (using newH and fMati)
+            self._getRHS()  # The rhs is stored in self.tmp
+            while not equal:
+                # Solve the LHS
+                self._solve_KSP(True, eMat, self.tmp, self.newH)
+                # Update RHS (using newH and fMati)
+                self._getRHS()  # The rhs is stored in self.tmp
+                # Get difference between newH and oldH
+                self.dh.waxpy(-1.0, self.newH, self.tmp1)
+                self.dh.abs()
+                maxdh = self.dh.max()[1]
+                if MPIrank == 0 and self.verbose:
+                    print(
+                        "  --- Diff. %0.04f m - iter %d"
+                        % (np.round(maxdh, 4), niter),
+                        flush=True
+                    )
+                equal = maxdh < tolerance
+                self.newH.copy(result=self.tmp1)
+                niter += 1
             if MPIrank == 0 and self.verbose:
                 print(
-                    "Solve sediment fluxes (%0.02f seconds)" % (process_time() - t1),
+                    "Solve SPL accounting for sediment deposition (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
+            self.tmp.waxpy(-1.0, self.hOld, self.newH)
+        eMat.destroy()
+        if self.iceOn:
+            gMat.destroy()
 
-            # Extract local sediment deposition fluxes
-            self.dm.globalToLocal(self.tmp1, self.tmpL)
-            if self.dmthd == 1:
-                QsT = self.tmpL.getArray()
-                scale = np.divide(fDep, 1.0 - fDep, out=np.zeros_like(fDep), where=fDep != 0)
-                QsD = (QsT - QsL) * scale
-            else:
-                QsD = self.tmpL.getArray() * fDep
-            self.tmpL.setArray((QsD - QsL) * self.dt / self.larea)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-
-        # Define erosion rate (positive for incision)
-        t1 = process_time()
+        # Update erosion rate (positive for incision)
         E = -self.tmp.getArray().copy()
         E = np.divide(E, self.dt)
         self.Eb.setArray(E)
         self.dm.globalToLocal(self.Eb, self.EbLocal)
         E = self.EbLocal.getArray().copy()
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Define erosion rate (%0.02f seconds)" % (process_time() - t1),
-                flush=True,
-            )
         if self.flatModel:
             E[self.idBorders] = 0.0
         E[self.lsink] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)
 
-        # Limiting deposition rates based on upstream conditions
-        if self.fDepa > 0:
-            self._upstreamDeposition(self.flowDir)
-
         if self.memclear:
-            del E, PA, Kbr, QsL, QsD, fDep
+            del PA, hOldArray, E
             gc.collect()
 
         if MPIrank == 0 and self.verbose:
