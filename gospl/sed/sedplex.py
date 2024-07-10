@@ -286,12 +286,13 @@ class SEDMesh(object):
             gc.collect()
 
         # Update erosion/deposition rates
-        h = self.hLocal.getArray().copy()
-        EDrates = (h - self.oldH) / self.dt
-        self.EbLocal.setArray(EDrates)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        add_rate = self.tmpL.getArray() / self.dt
+        self.tmpL.setArray(add_rate)
+        self.EbLocal.axpy(1.0, self.tmpL)
 
         if self.memclear:
-            del h, EDrates
+            del h, add_rate
             gc.collect()
 
         return
@@ -319,8 +320,6 @@ class SEDMesh(object):
 
         # Diffusion matrix construction
         if smooth == 1:
-            Cd = np.full(self.lpoints, self.smthD, dtype=np.float64)
-        elif smooth == 2:
             Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
             Cd[~self.iceIDs] = 0.0
         else:

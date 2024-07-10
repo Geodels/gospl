@@ -302,15 +302,6 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["flexIso"][:, 0] = self.localFlex
-            if self.gflexOn:
-                f.create_dataset(
-                    "flexIso",
-                    shape=(self.lpoints, 1),
-                    dtype="float32",
-                    compression="gzip",
-                )
-                data = self.cumFlexL.getArray().copy()
-                f["flexIso"][:, 0] = data
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
@@ -410,9 +401,6 @@ class WriteMesh(object):
 
         if self.flexOn:
             self.localFlex = np.array(hf["/flexIso"])[:, 0]
-        if self.gflexOn:
-            self.cumFlexL.setArray(np.array(hf["/flexIso"])[:, 0])
-            self.cumEDFlex.setArray(np.array(hf["/erodep"])[:, 0])
         hf.close()
 
         if self.stratNb > 0 and self.stratStep > 0:
@@ -548,7 +536,7 @@ class WriteMesh(object):
                 )
                 f.write("         </Attribute>\n")
 
-            if self.flexOn or self.gflexOn:
+            if self.flexOn:
                 f.write('         <Attribute Type="Scalar" Center="Node" Name="flexIso">\n')
                 f.write(
                     '          <DataItem Format="HDF" NumberType="Float" Precision="4" '

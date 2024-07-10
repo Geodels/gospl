@@ -64,8 +64,6 @@ class ReadYaml(object):
         self._readCompaction()
         self._readIce()
         self._readFlex()
-        self._readGFlex()
-        self._readTeData()
         self._readOrography()
         self._readOut()
 
@@ -365,12 +363,14 @@ class ReadYaml(object):
                 self.coeffd = 0.0
             try:
                 self.fDepa = splDict["fDa"]
+                if self.fDepa > 1.0:
+                    if MPIrank == 0:
+                        print(
+                            "The variable `fDa` has been rescaled to 1.", flush=True,
+                        )
+                    self.fDepa = 1.0
             except KeyError:
                 self.fDepa = 0.0
-            try:
-                self.fDepm = splDict["fDm"]
-            except KeyError:
-                self.fDepm = 10.0
             try:
                 self.spl_m = splDict["m"]
             except KeyError:
@@ -379,7 +379,6 @@ class ReadYaml(object):
             self.K = 1.0e-12
             self.coeffd = 0.0
             self.fDepa = 0.0
-            self.fDepm = 10.0
             self.spl_m = 0.5
 
         return
@@ -435,16 +434,16 @@ class ReadYaml(object):
             hillDict = self.input["diffusion"]
 
             try:
-                self.smthD = hillDict["smthDep"]
+                self.nlK = hillDict["nonlinKm"]
             except KeyError:
-                self.smthD = 1.0e3
+                self.nlK = 10.0
             try:
                 self.clinSlp = hillDict["clinSlp"]
             except KeyError:
                 self.clinSlp = 1.0e-6
 
         except KeyError:
-            self.smthD = 1.0e3
+            self.nlK = 10.0
             self.clinSlp = 1.0e-6
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
@@ -1056,191 +1055,6 @@ class ReadYaml(object):
 
         return
 
-    def _readGFlex(self):
-        """
-        Parse global flexural isostasy variables.
-        """
-
-        try:
-            flexGDict = self.input["gflex"]
-            self.gflexOn = True
-            try:
-                interpf = flexGDict["interS"]
-            except KeyError:
-                print(
-                    "Key 'interS' is required and is missing in the 'gflex' declaration!",
-                    flush=True,
-                )
-                raise KeyError("Compressed numpy dataset definition is not defined in gflex declaration!")
-            self.Interp = interpf + ".npz"
-            try:
-                with open(self.Interp) as meshfile:
-                    meshfile.close()
-            except IOError:
-                print("Unable to open numpy dataset: {}".format(self.Interp), flush=True)
-                raise IOError("The numpy dataset is not found...")
-
-            try:
-                interpf2 = flexGDict["interR"]
-            except KeyError:
-                print(
-                    "Key 'interR' is required and is missing in the 'gflex' declaration!",
-                    flush=True,
-                )
-                raise KeyError("Compressed numpy dataset definition is not defined in gflex declaration!")
-            self.rInterp = interpf2 + ".npz"
-            try:
-                with open(self.rInterp) as meshfile:
-                    meshfile.close()
-            except IOError:
-                print("Unable to open numpy dataset: {}".format(self.interR), flush=True)
-                raise IOError("The numpy dataset is not found...")
-
-            try:
-                self.gflexproc = flexGDict["procs"]
-            except KeyError:
-                self.gflexproc = 10
-
-            try:
-                self.gflexStep = flexGDict["step"]
-            except KeyError:
-                print(
-                    "Key 'step' is required and is missing in the 'gflex' declaration!",
-                    flush=True,
-                )
-                raise KeyError("Simulation global flexural timestep needs to be declared.")
-        except KeyError:
-            self.gflexStep = None
-            self.gflexOn = False
-
-        return
-
-    def _storeTe(self, k, teStart, teEnd, teMap, lithodata):
-        """
-        Record elastic thickness map conditions.
-
-        :arg k: Te map number
-        :arg teStart: Te map start time
-        :arg teStart: Te map end time
-        :arg teMap: Te map file
-        :arg lithodata: pandas dataframe storing each elastic map
-
-        :return: appended lithodata
-        """
-
-        try:
-            with open(teMap) as tefile:
-                tefile.close()
-
-        except IOError:
-            print("Unable to open elastic thickness map file: {}".format(teMap), flush=True)
-            raise IOError(
-                "The elastic thickness file {} is not found for event {}.".format(
-                    teMap, k
-                )
-            )
-
-        tmpTe = []
-        tmpTe.insert(0, {"start": teStart, "teMap": teMap})
-
-        if k == 0:
-            lithodata = pd.DataFrame(tmpTe, columns=["start", "teMap"])
-        else:
-            lithodata = pd.concat(
-                [lithodata, pd.DataFrame(tmpTe, columns=["start", "teMap"])],
-                ignore_index=True,
-            )
-
-        tetime = teStart + self.gflexStep
-        while tetime < teEnd:
-            tmpTe = []
-            tmpTe.insert(0, {"start": tetime, "teMap": teMap})
-            lithodata = pd.concat(
-                [
-                    lithodata,
-                    pd.DataFrame(tmpTe, columns=["start", "teMap"]),
-                ],
-                ignore_index=True,
-            )
-            tetime = tetime + self.gflexStep
-
-        return lithodata
-
-    def _defineTe(self, k, lithoSort, lithodata):
-        """
-        Define elastic thickness conditions.
-
-        :arg k: Te map number
-        :arg lithoSort: sorted Te map
-        :arg lithodata: pandas dataframe storing each elastic map
-
-        :return: appended lithodata
-        """
-
-        teStart = None
-        teMap = None
-
-        try:
-            teStart = lithoSort[k]["start"]
-        except Exception:
-            print("For each elastic thickness map a start time is required.", flush=True)
-            raise ValueError("Te map {} has no parameter start".format(k))
-        try:
-            teEnd = lithoSort[k]["end"]
-        except Exception:
-            print("For each elastic thickness map a end time is required.", flush=True)
-            raise ValueError("Te map {} has no parameter end".format(k))
-        try:
-            teMap = lithoSort[k]["mapTe"] + ".npz"
-        except Exception:
-            print("An elastic thickness map is required.", flush=True)
-            raise ValueError("Te map {} has no parameter start".format(k))
-
-        lithodata = self._storeTe(k, teStart, teEnd, teMap, lithodata)
-
-        return lithodata
-
-    def _readTeData(self):
-        """
-        Parse global elastic thickness grids.
-        """
-
-        try:
-            lithoDict = self.input["litho"]
-            lithodata = None
-            lithoSort = sorted(lithoDict, key=itemgetter("start"))
-            for k in range(len(lithoSort)):
-                lithodata = self._defineTe(k, lithoSort, lithodata)
-
-            if lithodata["start"][0] > self.tStart:
-                tmpTe = []
-                tmpTe.insert(
-                    0, {"start": self.tStart, "teMap": "empty"}
-                )
-                lithodata = pd.concat(
-                    [pd.DataFrame(tmpTe, columns=["start", "teMap"]), lithodata],
-                    ignore_index=True,
-                )
-            self.lithodata = lithodata[lithodata["start"] >= self.tStart]
-
-            if self.rStep > 0:
-                rNow = self.tStart + self.rStep * self.tout
-                for k in range(len(self.lithodata)):
-                    if self.lithodata["start"][k] < rNow and k < len(self.lithodata) - 1:
-                        self.lithodata.loc[k, ["start"]] = rNow - self.tout
-                    elif self.lithodata["start"][k] < rNow and k == len(self.lithodata) - 1:
-                        self.lithodata.loc[k, ["start"]] = rNow
-                self.lithodata = self.lithodata[self.lithodata["start"] >= rNow]
-                self.lithodata.reset_index(drop=True, inplace=True)
-
-        except KeyError:
-            self.lithodata = None
-
-        if self.gflexOn and self.lithodata is None:
-            raise KeyError("Global flexure needs elastic thickness grids to be defined in `litho`.")
-
-        return
-
     def _readOrography(self):
         """
         Parse orographic precipitation variables.
@@ -1379,10 +1193,10 @@ class ReadYaml(object):
             try:
                 self.makedir = outDict["makedir"]
             except KeyError:
-                self.makedir = True
+                self.makedir = False
         except KeyError:
             self.outputDir = "output"
-            self.makedir = True
+            self.makedir = False
 
         if self.rStep > 0:
             self.makedir = False

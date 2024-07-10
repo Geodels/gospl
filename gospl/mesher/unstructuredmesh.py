@@ -680,6 +680,8 @@ class UnstMesh(object):
         self.hLocal.destroy()
         self.hGlobal.destroy()
         self.hOldFlex.destroy()
+        self.h.destroy()
+        self.hl.destroy()
         self.dh.destroy()
         self.FAG.destroy()
         self.FAL.destroy()
@@ -716,6 +718,7 @@ class UnstMesh(object):
         self.lgmap_row.destroy()
         self.dm.destroy()
         self.zMat.destroy()
+        self.mat.destroy()
 
         del self.lcoords, self.lcells, self.inIDs
 

@@ -392,89 +392,6 @@ class FAMesh(object):
 
         return excess, pitVol, nFA
 
-    def _iceFlow(self):
-        """
-        This function computes downstream ice flow when the ice module is turned-on.
-
-        The ice flow accumulation uses the same approach as the river flow and follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_.
-
-        Once the ice flow accumulation is calculated a subsequent step is performed and consists in smoothing the ice flow accumulation values.
-
-        .. note::
-
-          This approach is used in order to represent, in a simple manner, the differences between fluvial and glacier flows and their impact on landscape erosion. One could see this approach as extending the cardinal flow line (main river trunk) laterally to simulate concave glacial erosion.
-        """
-
-        ti = process_time()
-
-        # Get depressions information
-        ti1 = process_time()
-        pitVol = self.pitParams[:, 0].copy()
-        hl = self.hLocal.getArray().copy()
-
-        # Solve ice flow accumulation
-        iceA = self.bL.getArray().copy()
-        iceA[self.seaID] = 0.
-        tmp = (hl - self.elaH) / (self.iceH - self.elaH)
-        self.iceIDs = tmp > 0
-        tmp[tmp > 1.] = 1.0
-        tmp[tmp < 0.] = 0.0
-        iceA = np.multiply(iceA, tmp)
-        self.tmpL.setArray(iceA)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(True, self.fMat, self.tmp, self.iceFAG)
-        self.dm.globalToLocal(self.iceFAG, self.iceFAL)
-
-        # Volume of ice flowing downstream
-        self.waterFilled = hl.copy()
-        if (pitVol > 0.0).any():
-            iFA = self.iceFAL.getArray().copy() * self.dt
-            _, _, iFA = self._distributeDownstream(pitVol, iFA, hl, 100, ice=True)
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Downstream ice flow computation (%0.02f seconds)" % (process_time() - ti1),
-                flush=True,
-            )
-
-        # Smooth the ice flow across cells
-        ti1 = process_time()
-        self.iceFAL.copy(result=self.tmpL)
-        tmp = self.tmpL.getArray().copy()
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
-        smthIce = self._hillSlope(smooth=2)
-        self.tmpL.setArray(smthIce * self.scaleIce)
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
-        smthIce[~self.iceIDs] = tmp[~self.iceIDs]
-        self.iceFAL.setArray(smthIce)
-        self.dm.localToGlobal(self.iceFAL, self.iceFAG)
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti1),
-                flush=True,
-            )
-
-        # Update fluvial flow accumulation
-        PA = self.FAL.getArray().copy()
-        PA[self.iceIDs] -= smthIce[self.iceIDs]
-        PA[~self.iceIDs] += smthIce[~self.iceIDs]
-        PA[PA < 0] = 0.
-        self.FAL.setArray(PA)
-        self.dm.localToGlobal(self.FAL, self.FAG)
-
-        PA = self.fillFAL.getArray().copy()
-        PA[self.iceIDs] -= smthIce[self.iceIDs]
-        PA[~self.iceIDs] += smthIce[~self.iceIDs]
-        PA[PA < 0] = 0.
-        self.fillFAL.setArray(PA)
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Compute IceFlow Accumulation (%0.02f seconds)" % (process_time() - ti),
-                flush=True,
-            )
-
-        return
-
     def flowAccumulation(self):
         """
         This function is the **main entry point** for flow accumulation computation.
@@ -490,7 +407,6 @@ class FAMesh(object):
         1. _buildFlowDirection
         2. _solve_KSP
         3. _distributeDownstream
-        4. _iceFlow
 
         """
 
@@ -510,17 +426,46 @@ class FAMesh(object):
         self.fMati = self.fMat.copy()
         self.lsinki = self.lsink.copy()
 
-        # Solve flow accumulation
+        # Get amount of water or ice
         rainA = self.bL.getArray().copy()
         rainA[self.seaID] = 0.
+        if self.iceOn:
+            tmp = (hl - self.elaH) / (self.iceH - self.elaH)
+            self.iceIDs = tmp > 0
+            tmp[tmp > 1.] = 1.0
+            tmp[tmp < 0.] = 0.0
+            iceA = np.multiply(rainA, tmp)
+            rainA = np.multiply(rainA, 1. - tmp)
+
+        #  Solve flow/ice accumulation
         self.bL.setArray(rainA)
         self.dm.localToGlobal(self.bL, self.bG)
         self._solve_KSP(True, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
+        if self.iceOn:
+            self.tmpL.setArray(iceA)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self._solve_KSP(True, self.fMat, self.tmp, self.iceFAG)
+            self.dm.globalToLocal(self.iceFAG, self.iceFAL)
 
         # Volume of water flowing downstream
         self.waterFilled = hl.copy()
         if (pitVol > 0.0).any():
+            if self.iceOn:
+                iFA = self.iceFAL.getArray().copy() * self.dt
+                # excess, pitVol, iFA = self._distributeDownstream(pitVol, iFA, hl, 100, ice=True)
+                excess = True
+                step = 0
+                while excess:
+                    t1 = process_time()
+                    excess, pitVol, iFA = self._distributeDownstream(pitVol, iFA, hl, step, ice=True)
+                    if MPIrank == 0 and self.verbose:
+                        print(
+                            "Downstream ice flow computation step %d (%0.02f seconds)"
+                            % (step, process_time() - t1),
+                            flush=True,
+                        )
+                    step += 1
             FA = self.FAL.getArray().copy() * self.dt
             excess = True
             step = 0
@@ -550,15 +495,38 @@ class FAMesh(object):
         # Get water level
         self.waterFilled -= hl
 
+        # Smooth the ice flow across cells
+        if self.iceOn:
+            ti = process_time()
+            self.iceFAL.copy(result=self.tmpL)
+            tmp = self.tmpL.getArray().copy()
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            smthIce = self._hillSlope(smooth=1)
+            self.tmpL.setArray(smthIce * self.scaleIce)
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            smthIce[~self.iceIDs] = tmp[~self.iceIDs]
+            self.iceFAL.setArray(smthIce)
+            self.dm.localToGlobal(self.iceFAL, self.iceFAG)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti),
+                    flush=True,
+                )
+
+            # Update fluvial flow accumulation
+            PA = self.FAL.getArray().copy()
+            PA[~self.iceIDs] += smthIce[~self.iceIDs]
+            self.FAL.setArray(PA)
+            self.dm.localToGlobal(self.FAL, self.FAG)
+            PA = self.fillFAL.getArray().copy()
+            PA[~self.iceIDs] += smthIce[~self.iceIDs]
+            self.fillFAL.setArray(PA)
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Flow Accumulation (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
-
-        # Compute glacier flows
-        if self.iceOn:
-            self._iceFlow()
 
         return
 
@@ -590,10 +558,8 @@ class FAMesh(object):
 
         :arg hOldArray: local elevation array from previous time step
 
-        :return: eMat, gMat, PA where the first two are sparse PETSc matrices related to river and glacial erosion and PA is the accumulation rate.
+        :return: eMat, PA where the first is a sparse PETSc matrices related to river and glacial erosion and PA is the accumulation rate.
         """
-
-        gMat = None
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
@@ -610,6 +576,7 @@ class FAMesh(object):
             GA = self.iceFAL.getArray()
             GA[~self.iceIDs] = 0.
             Kbi = self.Kice * GA
+            PA += GA
 
         # Initialise matrices...
         eMat = self.iMat.copy()
@@ -617,9 +584,6 @@ class FAMesh(object):
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
         wght[self.seaID, :] = 0.0
-
-        if self.iceOn:
-            gMat = self.iMat.copy()
 
         # Define erosion coefficients
         for k in range(0, self.flowDir):
@@ -666,15 +630,15 @@ class FAMesh(object):
                     data,
                 )
                 tmpMat.assemblyEnd()
-                gMat += tmpMat
-                gMat -= self._matrix_build_diag(data)
+                eMat += tmpMat
+                eMat -= self._matrix_build_diag(data)
                 tmpMat.destroy()
 
         if self.memclear:
             del dh, limiter, wght, data
             gc.collect()
 
-        return eMat, gMat, PA
+        return eMat, PA
 
     def _getEroDepRate(self):
         r"""
@@ -713,7 +677,7 @@ class FAMesh(object):
         self.oldH = hOldArray.copy()
         if self.flexOn:
             self.hLocal.copy(result=self.hOldFlex)
-        eMat, gMat, PA = self._eroMats(hOldArray)
+        eMat, PA = self._eroMats(hOldArray)
 
         # Solve SPL erosion implicitly for fluvial and glacial erosion
         if self.fDepa == 0:
@@ -722,21 +686,9 @@ class FAMesh(object):
             self.tmp.waxpy(-1.0, self.hOld, self.stepED)
             if MPIrank == 0 and self.verbose:
                 print(
-                    "Solve simple SPL erosion (%0.02f seconds)" % (process_time() - t1),
+                    "Solve SPL erosion (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
-            # In the case of glacial erosion
-            if self.iceOn:
-                t1 = process_time()
-                self._solve_KSP(False, gMat, self.hOld, self.stepED)
-                self.tmp1.waxpy(-1.0, self.hOld, self.stepED)
-                # gMat.destroy()
-                self.tmp.axpy(1., self.tmp1)
-                if MPIrank == 0 and self.verbose:
-                    print(
-                        "Solve glacial SPL erosion (%0.02f seconds)" % (process_time() - t1),
-                        flush=True,
-                    )
         # Accounting for continental sediment deposition
         else:
             t1 = process_time()
@@ -746,10 +698,11 @@ class FAMesh(object):
             # Dimensionless depositional coefficient
             self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
             self.fDep[self.seaID] = 0.
+            self.fDep[self.fDep > 0.99] = 0.99
             if self.flatModel:
                 self.fDep[self.idBorders] = 0.
             # Get the RHS vector from start time
-            self._solve_KSP(True, self.fMati, self.hOld, self.tmp)
+            self._solve_KSP(False, self.fMati, self.hOld, self.tmp)
             self.dm.globalToLocal(self.tmp, self.tmpL)
             self.tmpL.setArray(hOldArray + (self.tmpL.getArray() - hOldArray) * self.fDep)
             self.dm.localToGlobal(self.tmpL, self.rhs)
@@ -760,7 +713,7 @@ class FAMesh(object):
             self._getRHS()  # The rhs is stored in self.tmp
             while not equal:
                 # Solve the LHS
-                self._solve_KSP(True, eMat, self.tmp, self.newH)
+                self._solve_KSP(False, eMat, self.tmp, self.newH)
                 # Update RHS (using newH and fMati)
                 self._getRHS()  # The rhs is stored in self.tmp
                 # Get difference between newH and oldH
@@ -783,8 +736,6 @@ class FAMesh(object):
                 )
             self.tmp.waxpy(-1.0, self.hOld, self.newH)
         eMat.destroy()
-        if self.iceOn:
-            gMat.destroy()
 
         # Update erosion rate (positive for incision)
         E = -self.tmp.getArray().copy()
@@ -832,6 +783,12 @@ class FAMesh(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        # Update erosion/deposition rates
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        add_rate = self.tmpL.getArray() / self.dt
+        self.tmpL.setArray(add_rate)
+        self.tmpL.copy(result=self.EbLocal)
 
         # Update stratigraphic layers
         if self.stratNb > 0:

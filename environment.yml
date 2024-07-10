@@ -23,8 +23,6 @@ dependencies:
   - cython
   - compilers
   - meshplex
-  - xarray
-  - pyproj
   - gflex
   - pip:
     - git+https://github.com/Geodels/gospl.git

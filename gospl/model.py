@@ -12,7 +12,6 @@ if "READTHEDOCS" not in os.environ:
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
     from .tools import GridProcess as _GridProcess
-    from .tools import GlobalFlex as _GlobalFlex
     from .mesher import Tectonics as _Tectonics
     from .tools import WriteMesh as _WriteMesh
 
@@ -58,10 +57,6 @@ else:
         def __init__(self):
             pass
 
-    class _GlobalFlex(object):
-        def __init__(self):
-            pass
-
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
@@ -70,7 +65,6 @@ class Model(
     _WriteMesh,
     _UnstMesh,
     _GridProcess,
-    _GlobalFlex,
     _Tectonics,
     _FAMesh,
     _PITFill,
@@ -131,9 +125,6 @@ class Model(
 
         # Get external forces
         _UnstMesh.applyForces(self)
-
-        # Define global flexural isostasy
-        _GlobalFlex.__init__(self)
 
         # Initialise tectonics forcings
         _Tectonics.__init__(self)
@@ -213,9 +204,6 @@ class Model(
 
             # Advance time
             self.tNow += self.dt
-
-            if self.tNow >= self.nextFlex:
-                _GlobalFlex.globalFlexIso(self)
 
             # Create new stratal layer
             if self.tNow >= self.saveStrat:

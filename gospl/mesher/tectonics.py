@@ -160,19 +160,6 @@ class Tectonics(object):
         gED[self.locIDs] = edl
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
 
-        if self.gflexOn:
-            # Send local erosion deposition from flexure globally
-            ced = self.cumEDFlex.getArray().copy()
-            gcED = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
-            gcED[self.locIDs] = ced
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gcED, op=MPI.MAX)
-
-            # Send local flexural isostasy globally
-            cfl = self.cumFlexL.getArray().copy()
-            gcFL = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
-            gcFL[self.locIDs] = cfl
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gcFL, op=MPI.MAX)
-
         if MPIrank == 0 and self.verbose:
             print(
                 "Transfer local elevation, erosion deposition and flexural information globally (%0.02f seconds)"
@@ -188,18 +175,9 @@ class Tectonics(object):
         tmp = np.sum(self.tec_weights * gED[self.tec_IDs], axis=1)
         nerodep = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
 
-        if self.gflexOn:
-            tmp = np.sum(self.tec_weights * gcED[self.tec_IDs], axis=1)
-            nf_ed = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
-            tmp = np.sum(self.tec_weights * gcFL[self.tec_IDs], axis=1)
-            nflex = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
-
         if len(self.tec_onIDs) > 0:
             nelev[self.tec_onIDs] = gZ[self.tec_IDs[self.tec_onIDs, 0]]
             nerodep[self.tec_onIDs] = gED[self.tec_IDs[self.tec_onIDs, 0]]
-            if self.gflexOn:
-                nf_ed[self.tec_onIDs] = gcED[self.tec_IDs[self.tec_onIDs, 0]]
-                nflex[self.tec_onIDs] = gcFL[self.tec_IDs[self.tec_onIDs, 0]]
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -213,10 +191,6 @@ class Tectonics(object):
 
         self.cumED.setArray(nerodep[self.glbIDs])
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-
-        if self.gflexOn:
-            self.cumEDFlex.setArray(nf_ed[self.locIDs])
-            self.cumFlexL.setArray(nflex[self.locIDs])
 
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:
