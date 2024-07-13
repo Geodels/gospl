@@ -55,7 +55,6 @@ class FAMesh(object):
         self.rhs = self.hGlobal.duplicate()
         self.newH = self.hGlobal.duplicate()
         self.EbLocal.set(0.0)
-
         if self.iceOn:
             self.iceFAG = self.hGlobal.duplicate()
             self.iceFAL = self.hLocal.duplicate()
@@ -539,16 +538,22 @@ class FAMesh(object):
             The approach follows `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, where the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`A` and flow accumulation :math:`FA`.
         """
 
-        # Compute the sum of all upstream elevations
-        self._solve_KSP(True, self.fMati, self.newH, self.tmp)
-        # Remove the contribution from the local node elevation
-        self.dh.waxpy(-1., self.newH, self.tmp)
-        self.dm.globalToLocal(self.dh, self.tmpL)
+        # Get the local sediment flux
+        self.dh.waxpy(-1., self.newH, self.hOld)
+        self.dh.pointwiseMult(self.dh, self.areaGlobal)
+        self.dh.scale(1. / self.dt)
 
-        # Scale the upstream elevations using deposition ratios
-        self.tmpL.setArray(-self.tmpL.getArray() * self.fDep)
+        # Compute total sediment flux (local and incoming flux)
+        self._solve_KSP(True, self.fMati, self.dh, self.tmp)
+
+        # Get the incoming flux values
+        self.h.waxpy(-1., self.dh, self.tmp)
+        self.dm.globalToLocal(self.h, self.tmpL)
+
+        # Scale the upstream sediment flux using deposition ratios
+        self.tmpL.setArray(self.tmpL.getArray() * self.fDep * self.dt / self.larea)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        self.tmp.axpy(1.0, self.rhs)
+        self.tmp.axpy(1.0, self.hOld)
 
         return
 
@@ -575,7 +580,7 @@ class FAMesh(object):
         if self.iceOn:
             GA = self.iceFAL.getArray()
             GA[~self.iceIDs] = 0.
-            Kbi = self.Kice * GA
+            Kbi = self.dt * self.Kice * GA
             PA += GA
 
         # Initialise matrices...
@@ -640,6 +645,87 @@ class FAMesh(object):
 
         return eMat, PA
 
+    def _coupledEDSystem(self, eMat):
+        """
+        Setup matrix for the coupled linear system in which the SPL model takes into account sediment deposition.
+
+        :arg eMat: erosion matrix (from the simple SPL model)
+        """
+
+        # Define submatrices
+        qMat = self._matrix_build_diag(-self.fDep)
+        A01 = self._matrix_build_diag(-self.fDep * self.dt / self.larea)
+        A10 = self._matrix_build_diag(self.larea / self.dt)
+
+        # Assemble the matrix for the coupled system
+        mats = [[eMat + qMat, A01], [A10, self.fMati]]
+        sysMat = petsc4py.PETSc.Mat().createNest(mats=mats, comm=MPIcomm)
+        sysMat.assemblyBegin()
+        sysMat.assemblyEnd()
+
+        # Clean up
+        qMat.destroy()
+        A01.destroy()
+        A10.destroy()
+        eMat.destroy()
+
+        # Create nested vectors
+        self.tmpL.setArray(1. - self.fDep)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp.pointwiseMult(self.tmp, self.hOld)
+        self.tmp1.pointwiseMult(self.hOld, self.areaGlobal)
+        self.tmp1.scale(1. / self.dt)
+        rhs_vec = petsc4py.PETSc.Vec().createNest([self.tmp, self.tmp1], comm=MPIcomm)
+        rhs_vec.setUp()
+        hq_vec = rhs_vec.duplicate()
+
+        # Define solver and precondition conditions
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType(petsc4py.PETSc.KSP.Type.TFQMR)
+        ksp.setOperators(sysMat)
+        ksp.setTolerances(rtol=self.rtol)
+
+        pc = ksp.getPC()
+        pc.setType("fieldsplit")
+        nested_IS = sysMat.getNestISs()
+        pc.setFieldSplitIS(('h', nested_IS[0][0]), ('q', nested_IS[0][1]))
+
+        subksps = pc.getFieldSplitSubKSP()
+        subksps[0].setType("preonly")
+        subksps[0].getPC().setType("hypre")
+        subksps[1].setType("preonly")
+        subksps[1].getPC().setType("hypre")
+
+        ksp.solve(rhs_vec, hq_vec)
+        r = ksp.getConvergedReason()
+        if r < 0:
+            KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
+            if MPIrank == 0:
+                print(
+                    "LinearSolver failed to converge after iterations",
+                    ksp.getIterationNumber(),
+                    flush=True,
+                )
+                print("with reason: ", KSPReasons[r], flush=True)
+        else:
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "LinearSolver converge after %d iterations"
+                    % ksp.getIterationNumber(),
+                    flush=True,
+                )
+        ksp.destroy()
+
+        # Update the solution
+        self.newH = hq_vec.getSubVector(nested_IS[0][0])
+
+        # Clean up
+        sysMat.destroy()
+        hq_vec.destroy()
+        rhs_vec.destroy()
+
+        return
+
     def _getEroDepRate(self):
         r"""
         This function computes erosion deposition rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion/deposition is not going to be underestimated by small depressions which are likely to be filled (either by sediments or water) during a single time step.
@@ -692,50 +778,47 @@ class FAMesh(object):
         # Accounting for continental sediment deposition
         else:
             t1 = process_time()
-            tolerance = 1.e-3
-            equal = False
-            niter = 0
             # Dimensionless depositional coefficient
             self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
             self.fDep[self.seaID] = 0.
             self.fDep[self.fDep > 0.99] = 0.99
             if self.flatModel:
                 self.fDep[self.idBorders] = 0.
-            # Get the RHS vector from start time
-            self._solve_KSP(False, self.fMati, self.hOld, self.tmp)
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            self.tmpL.setArray(hOldArray + (self.tmpL.getArray() - hOldArray) * self.fDep)
-            self.dm.localToGlobal(self.tmpL, self.rhs)
-            # Define the initial guess as the elevations at the start of the step
-            self.hOld.copy(result=self.newH)
-            self.hOld.copy(result=self.tmp1)  # tmp1 is the old elevation values
-            # Update RHS (using newH and fMati)
-            self._getRHS()  # The rhs is stored in self.tmp
-            while not equal:
-                # Solve the LHS
-                self._solve_KSP(False, eMat, self.tmp, self.newH)
-                # Update RHS (using newH and fMati)
-                self._getRHS()  # The rhs is stored in self.tmp
-                # Get difference between newH and oldH
-                self.dh.waxpy(-1.0, self.newH, self.tmp1)
-                self.dh.abs()
-                maxdh = self.dh.max()[1]
-                if MPIrank == 0 and self.verbose:
-                    print(
-                        "  --- Diff. %0.04f m - iter %d"
-                        % (np.round(maxdh, 4), niter),
-                        flush=True
-                    )
-                equal = maxdh < tolerance
-                self.newH.copy(result=self.tmp1)
-                niter += 1
+            cplSystem = True
+            if cplSystem:
+                self._coupledEDSystem(eMat)
+            else:
+                tolerance = 1.e-3
+                equal = False
+                niter = 0
+                # Define the initial guess as the elevations at the start of the step
+                self.hOld.copy(result=self.tmp)
+                self.hOld.copy(result=self.tmp1)
+                while not equal:
+                    # Solve the LHS
+                    self._solve_KSP(False, eMat, self.tmp, self.newH)
+                    # Update RHS (using newH and fMati)
+                    self._getRHS()
+                    # Get difference between newH and oldH
+                    self.dh.waxpy(-1.0, self.newH, self.tmp1)
+                    self.dh.abs()
+                    maxdh = self.dh.max()[1]
+                    if MPIrank == 0:  # and self.verbose:
+                        print(
+                            "  --- Diff. %0.04f m - iter %d"
+                            % (np.round(maxdh, 4), niter),
+                            flush=True
+                        )
+                    equal = maxdh < tolerance
+                    self.newH.copy(result=self.tmp1)
+                    niter += 1
+                eMat.destroy()
             if MPIrank == 0 and self.verbose:
                 print(
                     "Solve SPL accounting for sediment deposition (%0.02f seconds)" % (process_time() - t1),
                     flush=True,
                 )
             self.tmp.waxpy(-1.0, self.hOld, self.newH)
-        eMat.destroy()
 
         # Update erosion rate (positive for incision)
         E = -self.tmp.getArray().copy()

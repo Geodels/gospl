@@ -362,13 +362,7 @@ class ReadYaml(object):
             except KeyError:
                 self.coeffd = 0.0
             try:
-                self.fDepa = splDict["fDa"]
-                if self.fDepa > 1.0:
-                    if MPIrank == 0:
-                        print(
-                            "The variable `fDa` has been rescaled to 1.", flush=True,
-                        )
-                    self.fDepa = 1.0
+                self.fDepa = splDict["G"]
             except KeyError:
                 self.fDepa = 0.0
             try:

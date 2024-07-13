@@ -212,10 +212,9 @@ class SEAMesh(object):
             dh[dh < 0] = 0.0
             Cd = np.multiply(self.Cd, dh / (dh + 5.))
             nlvec = fctcoeff(hl, Cd)
-            # Set borders nodes
-            if self.flatModel:
-                nlvec[self.idBorders] = 0.0
             f.setArray(hdot + nlvec[self.glIDs])
+
+        return
 
     def _evalJacobian(self, ts, t, x, xdot, a, J, P):
         """
@@ -231,10 +230,7 @@ class SEAMesh(object):
 
             # Coefficient derivatives
             Cp = np.multiply(self.Cd, 5. / (dh + 5.)**2)
-
             nlC = jacobiancoeff(hl, Cd, Cp)
-            if self.flatModel:
-                nlC[self.idBorders, :] = 0.0
 
             P.zeroEntries()
             for row in range(self.lpoints):
@@ -267,7 +263,6 @@ class SEAMesh(object):
         The nonlinear diffusion equation is ran for the coarser sediment first and for the finest ones afterwards. This mimicks the standard behaviour observed in stratigraphic architectures where the fine fraction are generally transported over longer distances.
 
         :arg dh: numpy array of incoming marine depositional thicknesses
-        :arg stype: sediment type (integer)
 
         :return: ndepo (updated deposition numpy arrays)
         """
@@ -342,11 +337,7 @@ class SEAMesh(object):
         self.dh.waxpy(-1.0, self.hGlobal, self.h)
         self.dm.globalToLocal(self.dh, self.tmpL)
         ndepo = self.tmpL.getArray().copy()
-
-        # if self.flatModel:
-        #     ndepo[self.idBorders] = 0.0
         ndepo[ndepo < 0.0] = 0.0
-
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
@@ -438,7 +429,7 @@ class SEAMesh(object):
         self.clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
         self.maxDepQs = (self.clinoH - hl) * self.larea / self.dt
 
-        # Get the volumetric marine sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
+        # Get the volumetric marine sediment rate (m3/yr) to distribute during the time step.
         self.vSedLocal.copy(result=self.QsL)
         sedFlux = self.QsL.getArray().copy()
         sedFlux[np.invert(self.sinkIDs)] = 0.0
