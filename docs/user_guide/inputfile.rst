@@ -25,7 +25,7 @@ Initial mesh definition and simulation declaration
             name: Global model from 20 Ma to present
 
             domain:
-                npdata: 'input8/elev20Ma'
+                npdata: ['inputs/mesh2','v','c','z']
                 flowdir: 5
                 flowexp: 0.5
                 bc:'0101'

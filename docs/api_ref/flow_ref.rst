@@ -26,14 +26,13 @@ Class FAMesh
    .. autosummary::
 
       ~FAMesh._buildFlowDirection
+      ~FAMesh._coupledEDSystem
       ~FAMesh._distributeDownstream
       ~FAMesh._eroMats
       ~FAMesh._getEroDepRate
-      ~FAMesh._iceFlow
       ~FAMesh._matrix_build
       ~FAMesh._matrix_build_diag
       ~FAMesh._solve_KSP
-      ~FAMesh._upstreamDeposition
 
 Public functions
 ---------------------
@@ -47,11 +46,10 @@ Private functions
 ---------------------
 
 .. automethod:: flow.flowplex.FAMesh._buildFlowDirection
+.. automethod:: flow.flowplex.FAMesh._coupledEDSystem
 .. automethod:: flow.flowplex.FAMesh._distributeDownstream
 .. automethod:: flow.flowplex.FAMesh._eroMats
 .. automethod:: flow.flowplex.FAMesh._getEroDepRate
-.. automethod:: flow.flowplex.FAMesh._iceFlow
 .. automethod:: flow.flowplex.FAMesh._matrix_build
 .. automethod:: flow.flowplex.FAMesh._matrix_build_diag
 .. automethod:: flow.flowplex.FAMesh._solve_KSP
-.. automethod:: flow.flowplex.FAMesh._upstreamDeposition

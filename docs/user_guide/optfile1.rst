@@ -116,3 +116,7 @@ goSPL implements the Linear Theory of Orographic Precipitation following `Smith 
         l. ``oro_precip_base``: non-orographic, uniform precipitation rate [mm/h]; default 7.
         m. ``oro_precip_min``: minimum precipitation [mm/h] when precipitation rate <= 0; default 0.01
         n. ``rainfall_frequency``: number of storm of 1 hour duration per day; default 1
+
+.. warning::
+
+    In case where **flexure** and **orographic rain** capabilities are defined in the same simulation, you will need to have the same grid resolution (``regdx``) for each definition.

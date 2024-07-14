@@ -25,6 +25,7 @@ Class GridProcess
    .. autosummary::
 
       ~GridProcess._buildRegGrid
+      ~GridProcess._regInterp
 
 Public functions
 ---------------------
@@ -37,3 +38,4 @@ Private functions
 ---------------------
 
 .. automethod:: tools.addprocess.GridProcess._buildRegGrid
+.. automethod:: tools.addprocess.GridProcess._regInterp

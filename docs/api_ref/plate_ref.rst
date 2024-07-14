@@ -2,46 +2,47 @@
 
 
 =================
-Class EarthPlate
+Class Tectonics
 =================
 
-.. autoclass:: mesher.earthplates.EarthPlate
+.. autoclass:: mesher.tectonics.Tectonics
 
    .. rubric:: Initialise
 
    .. autosummary::
 
-      ~EarthPlate.__init__
+      ~Tectonics.__init__
 
    .. rubric:: Public Methods
 
    .. autosummary::
 
-      ~EarthPlate.advectPlates
+      ~Tectonics.getTectonics
+      ~Tectonics.updatePaleoZ
 
    .. rubric:: Private Methods
 
    .. autosummary::
 
-      ~EarthPlate._advectStrata
-      ~EarthPlate._getPaleoInfo
-      ~EarthPlate._readAdvectionData
-      ~EarthPlate._stratPlates
-      ~EarthPlate._updatePaleoElev
-      ~EarthPlate._updateStrataVars
+      ~Tectonics._advectPlates
+      ~Tectonics._advectStrati
+      ~Tectonics._findPts2Reduce
+      ~Tectonics._readAdvectionData
+      ~Tectonics._updateStratInfo
+
 
 Public functions
 ---------------------
 
-.. automethod:: mesher.earthplates.EarthPlate.advectPlates
+.. automethod:: mesher.tectonics.Tectonics.getTectonics
+.. automethod:: mesher.tectonics.Tectonics.updatePaleoZ
 
 
 Private functions
 ---------------------
 
-.. automethod:: mesher.earthplates.EarthPlate._advectStrata
-.. automethod:: mesher.earthplates.EarthPlate._getPaleoInfo
-.. automethod:: mesher.earthplates.EarthPlate._readAdvectionData
-.. automethod:: mesher.earthplates.EarthPlate._stratPlates
-.. automethod:: mesher.earthplates.EarthPlate._updatePaleoElev
-.. automethod:: mesher.earthplates.EarthPlate._updateStrataVars
+.. automethod:: mesher.tectonics.Tectonics._advectPlates
+.. automethod:: mesher.tectonics.Tectonics._advectStrati
+.. automethod:: mesher.tectonics.Tectonics._findPts2Reduce
+.. automethod:: mesher.tectonics.Tectonics._readAdvectionData
+.. automethod:: mesher.tectonics.Tectonics._updateStratInfo

@@ -20,8 +20,7 @@ Stream Power Law parameters
                 K: 3.e-8
                 d: 0.42
                 m: 0.4
-                fDa: 10.
-                fDm: 40.
+                G: 1.
 
         This part of the input file define the parameters for the fluvial surface processes based on the *Stream Power Law* (SPL) and is composed of:
 
@@ -35,8 +34,8 @@ Stream Power Law parameters
         .. note::
             It is worth noting that the coefficient *n* in the SPL is fixed and take the value *1*.
 
-        d. ``fDa`` dimensionless deposition coefficient for continental domain when accounting for sedimentation rate in the SPL following the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_. The default value is 0.0 (purely detachment-limited model).
-        e. ``fDm`` dimensionless deposition coefficient for marine domain. The default value is 10.0.
+        d. ``G`` dimensionless deposition coefficient for continental domain when accounting for sedimentation rate in the SPL following the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_. The default value is 0.0 (purely detachment-limited model).
+        
 
 Hillslope and marine deposition parameters
 -------------------------------------------
@@ -53,14 +52,14 @@ Hillslope and marine deposition parameters
             diffusion:
                 hillslopeKa: 0.02
                 hillslopeKm: 0.2
-                smthDep: 20.0
+                nonlinKm: 100.0
                 clinSlp: 5.e-5
 
         Hillslope processes in goSPL is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
 
         a. ``hillslopeKa`` is the diffusion coefficient for the aerial domain,
         b. ``hillslopeKm`` is the diffusion coefficient for the marine domain,
-        c. ``smthDep`` is the transport coefficient of freshly deposited sediments entering the ocean from rivers,
+        c. ``nonlinKm`` is the transport coefficient of freshly deposited sediments entering the ocean from rivers (non-linear diffusion),
         d. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.       
 
 Sediment surface erodibility factor

@@ -115,10 +115,10 @@ API reference
     .. grid-item-card::
         :text-align: center
 
-        **Class Earth Plates**
+        **Class Tectonics**
         ^^^
 
-        Functions to evaluate horizontal interpolation when considering tectonic plate reconstruction.
+        Functions to evaluate vertical and horizontal interpolation when considering horizontal displacements.
 
         +++
 
@@ -180,22 +180,6 @@ API reference
     .. grid-item-card::
         :text-align: center
 
-        **Class Global Flexure**
-        ^^^
-
-        This class solves flexural isostasy at global scale.
-
-        +++
-
-        .. button-ref:: gflex_ref
-            :color: secondary
-            :click-parent:
-
-            See functions and source code.
-
-    .. grid-item-card::
-        :text-align: center
-
         **Class Output**
         ^^^
 
@@ -219,9 +203,8 @@ API reference
     flow_ref
     sed_ref
     sea_ref
-    stra_ref
     plate_ref
+    stra_ref
     in_ref
     grid_ref
-    gflex_ref
     out_ref

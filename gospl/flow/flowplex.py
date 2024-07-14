@@ -529,34 +529,6 @@ class FAMesh(object):
 
         return
 
-    def _getRHS(self):
-        """
-        This function builds the right hand side of the coupled linear systems when solving the stream power law model taking into account sediment deposition.
-
-        .. note::
-
-            The approach follows `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, where the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`A` and flow accumulation :math:`FA`.
-        """
-
-        # Get the local sediment flux
-        self.dh.waxpy(-1., self.newH, self.hOld)
-        self.dh.pointwiseMult(self.dh, self.areaGlobal)
-        self.dh.scale(1. / self.dt)
-
-        # Compute total sediment flux (local and incoming flux)
-        self._solve_KSP(True, self.fMati, self.dh, self.tmp)
-
-        # Get the incoming flux values
-        self.h.waxpy(-1., self.dh, self.tmp)
-        self.dm.globalToLocal(self.h, self.tmpL)
-
-        # Scale the upstream sediment flux using deposition ratios
-        self.tmpL.setArray(self.tmpL.getArray() * self.fDep * self.dt / self.larea)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self.tmp.axpy(1.0, self.hOld)
-
-        return
-
     def _eroMats(self, hOldArray):
         """
         Builds the erosion matrices used to solve implicitly the stream power equations for the river and ice processes.
@@ -648,6 +620,10 @@ class FAMesh(object):
     def _coupledEDSystem(self, eMat):
         """
         Setup matrix for the coupled linear system in which the SPL model takes into account sediment deposition.
+
+        .. note::
+
+            The approach follows `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, where the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`A` and flow accumulation :math:`FA`.
 
         :arg eMat: erosion matrix (from the simple SPL model)
         """
@@ -784,35 +760,7 @@ class FAMesh(object):
             self.fDep[self.fDep > 0.99] = 0.99
             if self.flatModel:
                 self.fDep[self.idBorders] = 0.
-            cplSystem = True
-            if cplSystem:
-                self._coupledEDSystem(eMat)
-            else:
-                tolerance = 1.e-3
-                equal = False
-                niter = 0
-                # Define the initial guess as the elevations at the start of the step
-                self.hOld.copy(result=self.tmp)
-                self.hOld.copy(result=self.tmp1)
-                while not equal:
-                    # Solve the LHS
-                    self._solve_KSP(False, eMat, self.tmp, self.newH)
-                    # Update RHS (using newH and fMati)
-                    self._getRHS()
-                    # Get difference between newH and oldH
-                    self.dh.waxpy(-1.0, self.newH, self.tmp1)
-                    self.dh.abs()
-                    maxdh = self.dh.max()[1]
-                    if MPIrank == 0:  # and self.verbose:
-                        print(
-                            "  --- Diff. %0.04f m - iter %d"
-                            % (np.round(maxdh, 4), niter),
-                            flush=True
-                        )
-                    equal = maxdh < tolerance
-                    self.newH.copy(result=self.tmp1)
-                    niter += 1
-                eMat.destroy()
+            self._coupledEDSystem(eMat)
             if MPIrank == 0 and self.verbose:
                 print(
                     "Solve SPL accounting for sediment deposition (%0.02f seconds)" % (process_time() - t1),
