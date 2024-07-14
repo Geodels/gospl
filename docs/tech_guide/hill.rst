@@ -9,7 +9,7 @@ Hillslope: soil creep
 
 Hillslope processes are known to strongly influence catchment morphology and drainage density and several formulations of hillslope transport laws have been proposed. Most of these formulations are based on a mass conservation equation and assume that a layer of soil available for transport is always present (*i.e.* precluding  case of bare exposed bedrock) and that dissolution and mass transport in solution can be neglected.
 
-Under such assumptions and via the Exner's law, the mass conservation equation widely applied in landscape modelling is of the form:
+Under such assumptions, the mass conservation equation widely applied in landscape modelling is of the form:
 
 .. math::
 
@@ -48,20 +48,16 @@ In goSPL, these parameters remain fixed  during a model run and therefore :math:
 Marine deposition
 --------------------
 
-In the marine realm, a nonlinear diffusion model is used for sediment-transport by rivers. When the dual lithology is activated, :mod:`gospl`  accounts for distinct transport coefficients for the two different grain sizes (`Rivenaes, 1992 <https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1365-2117.1992.tb00136.x>`_).
-
-Sediment transport is modelled through nonlinear diffusion equation. The rate of elevation change in the marine environment is governed by:
+In the marine realm, sediment transport is modelled through nonlinear diffusion equation. The rate of elevation change in the marine environment is governed by:
 
 
 .. math::
 
-  \mathrm{\frac{\partial \eta}{\partial t}} = \mathrm{\nabla \cdot \left( K_M(\eta) \nabla \eta \right)} + Q_{sr}
+  \mathrm{\frac{\partial \eta}{\partial t}} = \mathrm{\nabla \cdot \left( K_m(\eta) \nabla \eta \right)} + Q_{sr}
   
 
-where :math:`\mathrm{K_M}` is the marine sediment transport coefficient (m2/yr), and :math:`\mathrm{Q_{sr}}` is the sediment flux coming at the river mouth. As the model progresses over time so does the shoreline position due to both offshore sedimentation and prescribed eustatic sea-level variations.
+where :math:`\mathrm{K_m}` is the marine sediment transport coefficient (m2/yr), and :math:`\mathrm{Q_{sr}}` is the sediment flux coming at the river mouth. As the model progresses over time so does the shoreline position due to both offshore sedimentation and prescribed eustatic sea-level variations.
 
-As already mentioned, the distinct transport efficiency of different grain sizes is included in our algorithm for marine sediment transport and deposition by distinct transport coefficients, :math:`\mathrm{K_{M1}}` and :math:`\mathrm{K_{M2}}` for coarse and fine sediments, respectively. goSPL considers that these transport coefficients are uniform in space and in time. When using equation above, :math:`\mathrm{Q_{sr}}` is divided in two components :math:`\mathrm{Q_{sr1}}` and :math:`\mathrm{Q_{sr2}}` which are the fully uncompacted flux of coarse and fine coming from the continental domain of the model, available for transport and deposition.
+During a single time step, marine sediment transport is performed until all available sediment transported by rivers to the ocean have been diffused and the accumulations on these specific nodes remains below water depth or below a prescribed slope (i.e., clinoform slope) computed based on local water depth and distance to the nearest coastline.
 
-During a single time step, marine sediment transport is performed until all available sediment transported by rivers to the ocean have been diffused and the accumulations on these specific nodes remains below water depth or below a prescribed slope computed based on local water depth and distance to the nearest coastline.
-
-Like for inland deposition, the coarser sediments are deposited first, followed by the finer ones. It allows for finer sediments to be deposited further and reproduce the standard behaviour observed in stratigraphic architectures. The implicit finite volume approach already presented above is implemented and the solution for elevation changes are obtained in a similar fashion as for the solution of the other matrix systems using `PETSc <https://www.mcs.anl.gov/petsc/>`_ *Richardson solver* and *block Jacobi* preconditioning.
+The implicit finite volume approach is implemented using `PETSc <https://www.mcs.anl.gov/petsc/>`_ SNES functionality. The nonlinear system at each time step (``arkimex``) is solved iteratively with time stepping and the SNES solution is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) and the linear solver uses a ``richardson`` KSP with a ``bjacobi`` preconditioner.  (See PETSC documentation for more details about the solver and preconditoner options and settings). 

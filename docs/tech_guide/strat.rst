@@ -46,7 +46,7 @@ where :math:`\mathrm{\phi_0}` is the surface porosity of sediments, and :math:`\
 
 As shown in the figure above, porosity decreases for burial depth of the order of a few thousand meters (:math:`\mathrm{z_0}`), accordingly associated compaction increases substantially (`Sclater and Christie, 1980 <https://agupubs.onlinelibrary.wiley.com/doi/10.1029/JB085iB07p03711>`_). We can also see that the porosity and rate of compaction between fine and coarse sediments are significantly different. As a result, goSPL uses the proportion of coarse versus fine at all depths within the underlying stratigraphy column to properly estimate compaction and induced elevation changes.
 
-For a given stratigraphic layer :math:`\mathrm{i}`, the associated porosity fis obtained at the centre of the layer for a specific depth :math:`\mathrm{\bar{z}_i}` by:
+For a given stratigraphic layer :math:`\mathrm{i}`, the associated porosity is obtained at the centre of the layer for a specific depth :math:`\mathrm{\bar{z}_i}` by:
 
 .. math::
 

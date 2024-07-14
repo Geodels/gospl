@@ -198,24 +198,24 @@ The approach considers the local balance between erosion and deposition and is b
 
 .. math::
 
-   \mathrm{Q_s^{out}} = (1.0 - G \Omega / Q) \mathrm{Q_s^{in} + E \Omega}
+	\mathrm{\frac{\eta_i^{t+\Delta t}-\eta_i^t}{\Delta t}} =  \mathrm{-\kappa P^d_i \sqrt{Q_i} \frac{\eta_i^{t+\Delta t} - \eta_{rcv}^{t+\Delta t}}{\lambda_{i,rcv}}} + \mathrm{G' Q_{s_i} / \Omega_i}
 
-This equation is solved similarly to the one detailed above using the same matrix system where the weighted in sparse matrix are multiplied by :math:`G \Omega / Q` based on local cell areas and water fluxes.
+where :math:`\mathrm{\lambda_{i,rcv}}` is the length of the edges connecting the considered vertex to its receiver and :math:`\mathrm{\Omega_i}` is the area (voronoi) of the node :math:`i`. 
 
-.. note::
-  
-  As our previous technique, this implicit method is unconditionally stable ans allows to study the dynamics of fluvial systems including the transition from detachment-limited to transport-limited behavior.
+:math:`\mathrm{Q_{s_i}}` is the upstream incoming sediment flux in m3/yr and :math:`\mathrm{G'}` is equal to :math:`\mathrm{G \Omega_i / \bar{P}A}`.
 
-In turn, the deposition flux (:math:`Q_{d}`) at any point in the mesh is given by:
+The upstream incoming sediment flux is obtained from the total sediment flux :math:`\mathrm{Q_{t_i}}` where:
 
 .. math::
 
-   \mathrm{Q_d} = \Upsilon \mathrm{Q_s^{\star}}
+	\mathrm{Q_{t_i}^{t+\Delta t} - \sum_{ups} w_{i,j} Q_{t_u}^{t+\Delta t}}= \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
 
-where :math:`\Upsilon` is expressed as: 
+which gives:
 
 .. math::
 
-   \Upsilon = \frac{G \Omega / Q}{1.0 - G \Omega / Q} 
+	\mathrm{Q_{s_i}} = \mathrm{Q_{t_i}} - \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
 
-and local :math:`\mathrm{Q_s^{\star}}` equals :math:`\mathrm{Q_s^{out}} - E \Omega`.
+This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables. 
+
+The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used to solve the coupled system with sub KSPs set to ``preonly`` and preconditioner set to ``hypre``. (See PETSC documentation for more details about the solver and preconditoner options and settings).  

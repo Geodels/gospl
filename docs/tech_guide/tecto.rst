@@ -60,7 +60,7 @@ Flexural isostasy
 
 
 .. figure:: ../images/flex.png
-  :scale: 40 %
+  :scale: 50 %
   :align: center
 
   Flexural isostasy can be produced in response to a range of geological loads (from `Wickert, 2016 <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_).

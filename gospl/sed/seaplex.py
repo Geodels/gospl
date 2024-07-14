@@ -203,7 +203,9 @@ class SEAMesh(object):
 
     def _evalFunction(self, ts, t, x, xdot, f):
         """
-        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES method and is based on a Newton/GMRES method. Here we define the function for the nonlinear solve.
+        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
+        
+        Here we define the function for the nonlinear solve.
         """
 
         self.dm.globalToLocal(x, self.hl)
@@ -218,7 +220,9 @@ class SEAMesh(object):
 
     def _evalJacobian(self, ts, t, x, xdot, a, J, P):
         """
-        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES method and is based on a Newton/GMRES method. Here we define the Jacobian for the nonlinear solve.
+        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
+         
+        Here we define the Jacobian for the nonlinear solve.
         """
 
         self.dm.globalToLocal(x, self.hl)
@@ -260,7 +264,6 @@ class SEAMesh(object):
 
             PETSc SNES and time stepping TS approaches are used to solve the nonlinear equation above over the considered time step.
 
-        The nonlinear diffusion equation is ran for the coarser sediment first and for the finest ones afterwards. This mimicks the standard behaviour observed in stratigraphic architectures where the fine fraction are generally transported over longer distances.
 
         :arg dh: numpy array of incoming marine depositional thicknesses
 

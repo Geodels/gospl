@@ -618,12 +618,36 @@ class FAMesh(object):
         return eMat, PA
 
     def _coupledEDSystem(self, eMat):
-        """
+        r"""
         Setup matrix for the coupled linear system in which the SPL model takes into account sediment deposition.
 
         .. note::
 
             The approach follows `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, where the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`A` and flow accumulation :math:`FA`.
+
+        The approach considers the local balance between erosion and deposition and is based on sediment flux resulting from net upstream erosion.
+
+        .. math::
+
+            \mathrm{\frac{\eta_i^{t+\Delta t}-\eta_i^t}{\Delta t}} =  \mathrm{-\kappa P^d_i \sqrt{Q_i} \frac{\eta_i^{t+\Delta t} - \eta_{rcv}^{t+\Delta t}}{\lambda_{i,rcv}}} + \mathrm{G' Q_{s_i} / \Omega_i}
+
+        where :math:`\mathrm{\lambda_{i,rcv}}` is the length of the edges connecting the considered vertex to its receiver and :math:`\mathrm{\Omega_i}` is the area (voronoi) of the node :math:`i`.
+
+        :math:`\mathrm{Q_{s_i}}` is the upstream incoming sediment flux in m3/yr and :math:`\mathrm{G'}` is equal to :math:`\mathrm{G \Omega_i / \bar{P}A}`.
+
+        The upstream incoming sediment flux is obtained from the total sediment flux :math:`\mathrm{Q_{t_i}}` where:
+
+        .. math::
+
+            \mathrm{Q_{t_i}^{t+\Delta t} - \sum_{ups} w_{i,j} Q_{t_u}^{t+\Delta t}}= \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
+
+        which gives:
+
+        .. math::
+
+            \mathrm{Q_{s_i}} = \mathrm{Q_{t_i}} - \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
+
+        This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables.
 
         :arg eMat: erosion matrix (from the simple SPL model)
         """
@@ -724,13 +748,7 @@ class FAMesh(object):
 
         The erosion rate is solved by an implicit time integration method, the matrix system is based on the receiver distributions and is assembled from local Compressed Sparse Row (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers* (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
-        Once the erosion rate solution has been obtained, local sediment flux depends on upstream fluxes, local eroded flux and local deposition flux. We assume that local deposition depends on user-defined forced deposition value (:math:`fDep`), the local water flux and the cell area. Here again the sediment flux is determined implicitly and corresponding deposition flux are calculated subsequently once the local total flux is known.
-
-        .. math::
-
-          Qs_{in} = Qs_e + (1 - GA/FA) \sum_{j \in upstream} w_{j,i} Qs_{in_j}
-
-        where the incoming sediment flux adds the local erosion flux obtained from the stream power law equation and the upstream sediment flux minus the deposition flux. Following `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`A` and flow accumulation :math:`FA`.
+        An alternative method to the detachment-limited approach proposed above consists in accounting for the role played by sediment in modulating erosion and deposition rates. It follows the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, whereby the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`\mathrm{\Omega}` and water discharge :math:`\mathrm{Q}=\bar{P}A`.
         """
 
         t0 = process_time()
