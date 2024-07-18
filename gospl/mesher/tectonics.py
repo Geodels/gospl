@@ -1,3 +1,4 @@
+import os
 import sys
 import petsc4py
 import numpy as np
@@ -5,6 +6,9 @@ import numpy as np
 from mpi4py import MPI
 from scipy import spatial
 from time import process_time
+
+if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import setadvectioncoeff
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -96,6 +100,97 @@ class Tectonics(object):
                     self.paleoZ = mdata[key][self.locIDs]
 
             del mdata
+        return
+
+    def _varAdvector(self):
+        """
+        Perform the advection of elevation and erosion by solving the advection equation based on the finite volume space discretization and the semi-implicit discretization in time. The approach is based on a Inflow-Implicit/Outflow-Explicit scheme following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pd>`_.
+
+        .. note::
+
+            Its basic idea is that outflow from a cell is treated explicitly while inflow is treated implicitly.
+
+            Since the matrix of the system is determined by the inflow fluxes it is an M-matrix yielding favourable solvability and stability properties.
+
+        .. important::
+
+            The method allows large time steps without losing stability and not deteriorating precision.
+
+            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicates its second order accuracy for smooth solutions in general.
+
+        .. note::
+
+            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
+
+            Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
+        """
+
+        t0 = process_time()
+
+        vel = np.zeros((self.lpoints, 3))
+        vel[:, 0] = -0.08
+        # ids = np.where(self.lcoords[:, 0 ] > 50000)[0]
+        # vel[ids, 0] = 0.0
+        vel[:, 1] = -0.08
+
+        # Advection matrix construction
+        # hL = self.hLocal.getArray().copy()
+        lCoeffs, rCoeffs = setadvectioncoeff(self.lpoints, vel, self.dt)
+        if self.flatModel:
+            lCoeffs[self.idBorders, 1:] = 0.0
+            lCoeffs[self.idBorders, 0] = 1.0
+            rCoeffs[self.idBorders, 1:] = 0.0
+            rCoeffs[self.idBorders, 0] = 1.0
+
+        advMat_left = self._matrix_build_diag(lCoeffs[:, 0])
+        advMat_right = self._matrix_build_diag(rCoeffs[:, 0])
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+
+        for k in range(0, self.maxnb):
+            tmpMat = self._matrix_build()
+            indices = self.FVmesh_ngbID[:, k].copy()
+            data = lCoeffs[:, k + 1]
+            ids = np.nonzero(data == 0.0)
+            indices[ids] = ids
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(
+                indptr,
+                indices.astype(petsc4py.PETSc.IntType),
+                data,
+            )
+            tmpMat.assemblyEnd()
+            advMat_left += tmpMat
+            tmpMat.destroy()
+
+            tmpMat = self._matrix_build()
+            indices = self.FVmesh_ngbID[:, k].copy()
+            data = rCoeffs[:, k + 1]
+            ids = np.nonzero(data == 0.0)
+            indices[ids] = ids
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(
+                indptr,
+                indices.astype(petsc4py.PETSc.IntType),
+                data,
+            )
+            tmpMat.assemblyEnd()
+            advMat_right += tmpMat
+            tmpMat.destroy()
+
+        # Advect elevations
+        advMat_right.mult(self.hGlobal, self.tmp1)
+        self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+
+        # Update elevations
+        self.tmp.copy(result=self.hGlobal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Compute Advection Processes (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
         return
 
     def _readAdvectionData(self, hdisp, timer):

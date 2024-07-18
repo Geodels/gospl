@@ -204,7 +204,7 @@ class SEAMesh(object):
     def _evalFunction(self, ts, t, x, xdot, f):
         """
         The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
-        
+
         Here we define the function for the nonlinear solve.
         """
 
@@ -221,7 +221,7 @@ class SEAMesh(object):
     def _evalJacobian(self, ts, t, x, xdot, a, J, P):
         """
         The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
-         
+
         Here we define the Jacobian for the nonlinear solve.
         """
 

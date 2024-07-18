@@ -59,7 +59,6 @@ dependencies = [
     "ruamel.yaml",
     "mpi4py",
     "meshplex",
-    "gflex",
 ]
 
 [tool.setuptools]

@@ -17,6 +17,7 @@ module meshparams
   double precision, dimension(:,:), allocatable :: FVeLgt
   double precision, dimension(:,:), allocatable :: FVvDist
   double precision, dimension(:, :), allocatable :: lcoords
+  double precision, dimension(:, :, :), allocatable :: faceVec
 
   ! Queue node definition: index and elevation
   type node
@@ -286,7 +287,91 @@ end module meshparams
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine euclid( p1, p2, norm)
+subroutine spherical2lonlat(xyz, long, lat) 
+
+  double precision, intent(in) :: xyz(3)
+  double precision, intent(out) :: long
+  double precision, intent(out) :: lat
+
+  double precision :: r
+  double precision :: pi = 3.1415926535897932_8
+
+  r = sqrt(xyz(1)*xyz(1) + xyz(2)*xyz(2) + xyz(3)*xyz(3))
+  
+  lat = asin(xyz(3)/r)*(180.0_8/pi)
+
+  if(x>0)then
+    long = atan2(xyz(2),xyz(1))*(180.0_8/pi)
+  elseif (y>0)then
+    long = atan2(xyz(2),xyz(1))*(180.0_8/pi) + 180.0_8
+  else
+    long = atan2(xyz(2),xyz(1))*(180.0_8/pi) - 180.0_8
+  endif
+
+  lat = lat * pi / 180.0_8
+  long = long * pi / 180.0_8
+
+  return
+
+end subroutine spherical2lonlat
+
+subroutine great_circle_distance(long1,lat1,long2,lat2, d) 
+!*****************************************************************************
+! Computes the great circle distance on a spherical body, using the 
+! Vincenty algorithm.
+
+  implicit none
+
+  double precision, intent(out) :: d       !! great circle distance from 1 to 2 [km]
+  double precision, intent(in) :: long1    !! longitude of first site [rad]
+  double precision, intent(in) :: lat1     !! latitude of the first site [rad]
+  double precision, intent(in) :: long2    !! longitude of the second site [rad]
+  double precision, intent(in) :: lat2     !! latitude of the second site [rad]
+
+  double precision :: c1,s1,c2,s2,dlon,clon,slon,r
+
+  ! r = 6378137.0 
+  r = 6371220.0 ! Earth radius in meters
+  c1   = cos(lat1)
+  s1   = sin(lat1)
+  c2   = cos(lat2)
+  s2   = sin(lat2)
+  dlon = long1-long2
+  clon = cos(dlon)
+  slon = sin(dlon)
+  
+  d = r*atan2(sqrt((c2*slon)**2+(c1*s2-s1*c2*clon)**2), &
+      (s1*s2+c1*c2*clon))
+
+  return
+
+end subroutine great_circle_distance
+
+subroutine distance(p1, p2, norm)
+!*****************************************************************************
+! Computes the distance between 2 points along the 2 or 3 dimensions.
+  
+  implicit none
+
+  double precision, intent(in) :: p1(3)
+  double precision, intent(in) :: p2(3)
+  double precision, intent(out) :: norm
+  double precision :: vec(3), lon1, lon2, lat1, lat2
+
+  if(p2(3) == 0. .and. p1(3) == 0)then
+    vec = p2 - p1
+    norm = norm2(vec)
+  else
+    call spherical2lonlat(p1, lon1, lat1) 
+    call spherical2lonlat(p2, lon2, lat2)
+    call great_circle_distance(lon1, lat1,lon2, lat2, norm) 
+  endif 
+
+  return
+
+end subroutine distance
+  
+subroutine euclid(p1, p2, norm)
 !*****************************************************************************
 ! Computes the Euclidean vector norm between 2 points along the 3 dimensions
 ! based on fortran norm2 function.
@@ -388,7 +473,7 @@ end subroutine split
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
-!!         HILLSLOPE PROCESSES FUNCTIONS            !!
+!!   HILLSLOPE AND ADVECTION PROCESSES FUNCTIONS    !!
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -455,6 +540,141 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
     return
 
 end subroutine sethillslopecoeff
+
+subroutine setadvectioncoeff(nb, vel, dt, lcoeff, rcoeff)
+!*****************************************************************************
+! Define advection coefficients based on a finite volume spatial
+! discretisation using different discretisation scheme.
+! The approach is based on https://www.math.sk/mikula/mo-FVCA6.pdf
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    double precision, intent(in) :: dt
+    double precision, intent(in) :: vel(nb, 3)
+    double precision, intent(out) :: lcoeff(nb,9)
+    double precision, intent(out) :: rcoeff(nb,9)
+
+    ! double precision, intent(in) :: h(nb)
+    double precision :: h(nb)
+    integer :: k, p, mthd, n
+    double precision :: v(3), dotv, dotvmin, dotvplus
+    double precision :: ratio, r, denom, alpha, factor, psi, vk(3)
+    double precision :: fluxin, fluxout
+
+    lcoeff = 0.
+    rcoeff = 0.
+
+    ! The inflow implicit and outflow explicit approach is preferred for 2 main reasons: its application to bigger time steps and its non-dependence on the variables to advect in the matrix construction.
+    mthd = 2
+
+    if(mthd == 1)then
+      ! Upwind discretisation first-order this method is for explicit solution and tend to over diffuse the solution
+      do k = 1, nb
+        if(FVarea(k)>0)then
+          vk = vel(k, 1:3)
+          do p = 1, FVnNb(k)
+            if(FVvDist(k,p)>0.)then
+              n = FVnID(k,p)+1
+              v = 0.5 * (vk + vel(n, 1:3))
+              dotv = dot_product(v(1:3), faceVec(k,p,1:3))
+              dotvmin = min(dotv, 0.)
+              dotvplus = max(dotv, 0.)
+              lcoeff(k,1) = lcoeff(k,1) - dt * dotvplus * FVvDist(k,p) / FVarea(k)
+              lcoeff(k,p+1) = - dt * dotvmin * FVvDist(k,p) / FVarea(k)
+            endif
+          enddo
+        endif
+        lcoeff(k,1) = 1.0 + lcoeff(k,1)
+      enddo
+    elseif(mthd == 2)then
+      ! Inflow-Implicit/Outflow-Explicit Scheme for Solving Advection Equations
+      do k = 1, nb
+        if(FVarea(k)>0)then
+          vk = vel(k, 1:3)
+          do p = 1, FVnNb(k)
+            if(FVvDist(k,p)>0.)then
+              n = FVnID(k,p)+1
+
+              ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
+              v = 0.5 * (vk + vel(n, 1:3))
+              ! Defining the inward flux (inverse of the dot product btw face normal and velocity) 
+              dotv = -dot_product(v(1:3), faceVec(k,p,1:3))
+
+              ! Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
+              fluxin = 0.5 * dt * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
+              fluxout = 0.5 * dt * min(dotv, 0.) * FVvDist(k,p) / FVarea(k)
+              ! Left-hand side matrix coefficients (implicit solution)
+              lcoeff(k,1) = lcoeff(k,1) + fluxin 
+              lcoeff(k,p+1) = -fluxin 
+              ! Right-hand side matrix coefficients (explicit solution)
+              rcoeff(k,1) = rcoeff(k,1) - fluxout
+              rcoeff(k,p+1) = fluxout
+            endif
+          enddo
+        endif
+        lcoeff(k,1) = 1.0 + lcoeff(k,1)
+        rcoeff(k,1) = 1.0 + rcoeff(k,1)
+      enddo
+    else
+      ! Upwind discretisation higher order using SOU scheme with the r-ratio for face based on Cassuli and Zanolli (2005), here again this is an explicit solution that requires the values of the variables to advect for construction 
+      do k = 1, nb
+        vk = vel(k, 1:3)
+        if(FVarea(k)>0)then
+          ! Compute r-ratio for face based on Cassuli and Zanolli (2005)
+          ratio = 0.
+          denom = 0
+          do p = 1, FVnNb(k)
+            if(FVvDist(k,p)>0.)then
+              n = FVnID(k,p)+1
+              v = 0.5 * (vel(n, 1:3) + vk)
+              dotv = dot_product(v(1:3), faceVec(k,p,1:3))
+              if(dotv < 0)then ! We account for the flux entering the cell
+                alpha = -dotv*FVvDist(k,p) 
+                ratio = ratio +  alpha * (h(n) - h(k))
+                denom = denom + alpha
+              endif
+            endif
+          enddo
+          if(denom > 0)then
+            ratio = ratio / denom
+          endif
+          do p = 1, FVnNb(k)
+            if(FVvDist(k,p)>0.)then
+              n = FVnID(k,p)+1
+              v = 0.5 * (vel(n, 1:3) + vk)
+              dotv = dot_product(v(1:3), faceVec(k,p,1:3))
+              dotvmin = min(dotv, 0.) ! part going in
+              dotvplus = max(dotv, 0.) ! part going out
+              ! check downward face and compute Cassuli and Zanolli (2005) ratio
+              r = 0.0
+              if(dotv > 0 .and. (h(n) .ne. h(k)))then
+                r = ratio / (h(n) - h(k))
+              endif
+              ! No limiter
+              ! psi = 0.
+              ! SUPERBEE limiter
+              ! psi = max(0.0, min(1.0, 2.0*r))
+              ! psi = max(psi, min(2.0, r))
+              ! MINMOD limiter
+              ! psi = max(0.0, min(1.0, r))
+              ! SOU scheme
+              psi = r 
+              factor = dt * FVvDist(k,p) / FVarea(k)
+              lcoeff(k,1) = lcoeff(k,1) - dotvplus * factor * (1. - 0.5 * psi) 
+              lcoeff(k,p+1) = -factor * (dotvmin + dotvplus * 0.5 * psi)
+            endif
+          enddo
+        endif
+        lcoeff(k,1) = 1.0 + lcoeff(k,1)
+      enddo
+    endif
+
+    return
+
+end subroutine setadvectioncoeff
 
 subroutine fctcoeff(h, Kd, dcoeff, nb)
 !*****************************************************************************
@@ -1844,7 +2064,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   integer :: edgeNb(3), edges(3,2), cell_ids(nb, 8)
 
   double precision :: coords0(3), coordsID(3)
-  double precision :: midpoint(3), dist
+  double precision :: midpoint(3), dist, vnorm
 
 
   logical :: inside
@@ -1856,6 +2076,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   if(allocated(FVeLgt)) deallocate(FVeLgt)
   if(allocated(FVvDist)) deallocate(FVvDist)
   if(allocated(lcoords)) deallocate(lcoords)
+  if(allocated(facevec)) deallocate(facevec)
 
   allocate(FVarea(nb))
   allocate(FVnNb(nb))
@@ -1863,6 +2084,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   allocate(FVeLgt(nb,8))
   allocate(FVvDist(nb,8))
   allocate(lcoords(nb,3))
+  allocate(faceVec(nb,8,3))
 
   cell_ids = -1
   edge = -1
@@ -1943,7 +2165,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
         ngbID(k,l) = nid(1)
         coordsID = coords(nid(1)+1,1:3)
       endif
-      call euclid( coords0, coordsID, FVeLgt(k,l) )
+      call distance( coords0, coordsID, FVeLgt(k,l) )
       edgemax = max(edgemax, FVeLgt(k,l))
     enddo
 
@@ -1973,13 +2195,16 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
               endif
             enddo lp4
           endif
-          call euclid(midpoint(1:3), circumcenter(1:3, cell_ids(k,cid)+1),  dist)
+          call distance(midpoint(1:3), circumcenter(1:3, cell_ids(k,cid)+1),  dist)
           FVvDist(k,id) = FVvDist(k,id) + dist
+          ! This is an approximation of the tangent vector along the arc length 
+          ! when using a spherical mesh. This could be improved...
+          call euclid(coords0(1:3), midpoint(1:3),  vnorm)
+          faceVec(k,id,1:3) = (midpoint(1:3) - coords0(1:3)) / vnorm
         endif
       enddo
     enddo lp2
   enddo
-
 
   FVnID = ngbID
 
@@ -2576,7 +2801,6 @@ subroutine flexure(h,hp,nx,ny,xl,yl,rhos,rhoa,eet,ibc,newh)
   enddo
 
   ! compute inverse FFT of filtered weights to obtain deflection
-
   do i=1,nxflex
     call sinft (w(:,i),nyflex)
   enddo

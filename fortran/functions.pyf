@@ -12,6 +12,14 @@ python module _fortran
             double precision dimension(nb),intent(in),depend(nb) :: kd
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine sethillslopecoeff
+        
+        subroutine setadvectioncoeff(nb,vel,dt,lcoeff,rcoeff)
+            integer :: nb
+            double precision dimension(nb,3),intent(in),depend(nb) :: vel
+            double precision, intent(in) :: dt
+            double precision dimension(nb,9),intent(out),depend(nb) :: lcoeff
+            double precision dimension(nb,9),intent(out),depend(nb) :: rcoeff
+        end subroutine setadvectioncoeff
 
         subroutine jacobiancoeff(h,kd,kp,dcoeff,nb)
             double precision dimension(nb),intent(in) :: h
