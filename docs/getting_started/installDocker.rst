@@ -43,7 +43,7 @@ On top of the libraries required for goSPL, the following main ones are availabl
 - xarray, rioxarray, xarray-spatial
 - pygmt, cartopy, pygplates
 - xesmf, metpy
-- stripy, meshio, meshplex, triangle
+- stripy, triangle
 - vtk, hdf5, netCDF4
 
 

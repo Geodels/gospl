@@ -11,6 +11,7 @@ if "READTHEDOCS" not in os.environ:
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
+    from .mesher import VoroBuild as _VoroBuild
     from .tools import GridProcess as _GridProcess
     from .mesher import Tectonics as _Tectonics
     from .tools import WriteMesh as _WriteMesh
@@ -20,6 +21,10 @@ else:
     class _ReadYaml(object):
         def __init__(self, filename):
             print("Fake print statement for readthedocs", filename)
+
+    class _VoroBuild(object):
+        def __init__(self):
+            pass
 
     class _UnstMesh(object):
         def __init__(self):
@@ -64,6 +69,7 @@ class Model(
     _ReadYaml,
     _WriteMesh,
     _UnstMesh,
+    _VoroBuild,
     _GridProcess,
     _Tectonics,
     _FAMesh,
@@ -101,6 +107,9 @@ class Model(
 
         # Stratigraphy initialisation
         _STRAMesh.__init__(self)
+
+        # Define voronoi mesh
+        _VoroBuild.__init__(self)
 
         # Define unstructured mesh
         _UnstMesh.__init__(self)

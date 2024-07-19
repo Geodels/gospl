@@ -7,8 +7,12 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
+# from geomstats.geometry.hypersphere import Hypersphere
+
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import setadvectioncoeff
+    from gospl._fortran import adveciioe
+    from gospl._fortran import advecupwind
+    from gospl._fortran import fitedges
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -37,6 +41,9 @@ class Tectonics(object):
         self.tecNb = -1
         self.paleoZ = None
         self.minZ = None
+
+        # if not self.flatModel:
+        #     self.hypersphere = Hypersphere(2)
 
         return
 
@@ -104,7 +111,7 @@ class Tectonics(object):
 
     def _varAdvector(self):
         """
-        Perform the advection of elevation and erosion by solving the advection equation based on the finite volume space discretization and the semi-implicit discretization in time. The approach is based on a Inflow-Implicit/Outflow-Explicit scheme following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pd>`_.
+        Perform the advection of elevation and erosion by solving the advection equation based on the finite volume space discretization and the semi-implicit discretization in time. The approach is based on a Inflow-Implicit/Outflow-Explicit scheme following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pd>`_ or a `first-order upwind implicitly scheme <https://link.springer.com/article/10.1007/s13344-016-0039-1>`_ depending on the user configuration.
 
         .. note::
 
@@ -126,24 +133,31 @@ class Tectonics(object):
         """
 
         t0 = process_time()
+        iioe = True
 
-        vel = np.zeros((self.lpoints, 3))
-        vel[:, 0] = -0.08
+        nodeVel = np.zeros((self.lpoints, 3))
+        nodeVel[:, 0] = -0.05
         # ids = np.where(self.lcoords[:, 0 ] > 50000)[0]
-        # vel[ids, 0] = 0.0
-        vel[:, 1] = -0.08
-
+        # nodeVel[ids, 0] = 0.0
+        nodeVel[:, 1] = -0.05
+        
         # Advection matrix construction
-        # hL = self.hLocal.getArray().copy()
-        lCoeffs, rCoeffs = setadvectioncoeff(self.lpoints, vel, self.dt)
+        if iioe:
+            lCoeffs, rCoeffs = adveciioe(self.lpoints, nodeVel, self.dt)
+            if self.flatModel:
+                rCoeffs[self.idBorders, 1:] = 0.0
+                rCoeffs[self.idBorders, 0] = 1.0
+        else:
+            lCoeffs = advecupwind(self.lpoints, nodeVel, self.dt)
+
         if self.flatModel:
             lCoeffs[self.idBorders, 1:] = 0.0
             lCoeffs[self.idBorders, 0] = 1.0
-            rCoeffs[self.idBorders, 1:] = 0.0
-            rCoeffs[self.idBorders, 0] = 1.0
 
         advMat_left = self._matrix_build_diag(lCoeffs[:, 0])
-        advMat_right = self._matrix_build_diag(rCoeffs[:, 0])
+        if iioe:
+            advMat_right = self._matrix_build_diag(rCoeffs[:, 0])
+
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
 
         for k in range(0, self.maxnb):
@@ -161,29 +175,40 @@ class Tectonics(object):
             tmpMat.assemblyEnd()
             advMat_left += tmpMat
             tmpMat.destroy()
-
-            tmpMat = self._matrix_build()
-            indices = self.FVmesh_ngbID[:, k].copy()
-            data = rCoeffs[:, k + 1]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-            advMat_right += tmpMat
-            tmpMat.destroy()
+            if iioe:
+                tmpMat = self._matrix_build()
+                indices = self.FVmesh_ngbID[:, k].copy()
+                data = rCoeffs[:, k + 1]
+                ids = np.nonzero(data == 0.0)
+                indices[ids] = ids
+                tmpMat.assemblyBegin()
+                tmpMat.setValuesLocalCSR(
+                    indptr,
+                    indices.astype(petsc4py.PETSc.IntType),
+                    data,
+                )
+                tmpMat.assemblyEnd()
+                advMat_right += tmpMat
+                tmpMat.destroy()
 
         # Advect elevations
-        advMat_right.mult(self.hGlobal, self.tmp1)
-        self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+        if iioe:
+            # Inflow-Implicit/Outflow-Explicit Scheme
+            advMat_right.mult(self.hGlobal, self.tmp1)
+            self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+        else:
+            # Upwind scheme with potentially excessive diffusion solved implicitly
+            self._solve_KSP(True, advMat_left, self.hGlobal, self.tmp)
 
-        # Update elevations
+        # Update elevations 
         self.tmp.copy(result=self.hGlobal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        if self.flatModel:
+            hL = self.hLocal.getArray().copy()
+            hL[self.idBorders] = -1.e8
+            nhL = fitedges(hL)
+            self.hLocal.setArray(nhL)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
         if MPIrank == 0 and self.verbose:
             print(

@@ -22,6 +22,5 @@ dependencies:
   - mpi4py
   - cython
   - compilers
-  - meshplex
   - pip:
     - git+https://github.com/Geodels/gospl.git

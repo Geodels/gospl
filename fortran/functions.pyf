@@ -13,13 +13,20 @@ python module _fortran
             double precision dimension(nb,9),intent(out),depend(nb) :: dcoeff
         end subroutine sethillslopecoeff
         
-        subroutine setadvectioncoeff(nb,vel,dt,lcoeff,rcoeff)
+        subroutine advecupwind(nb,vel,fvel,dt,lcoeff)
+            integer :: nb
+            double precision dimension(nb,3),intent(in),depend(nb) :: vel
+            double precision, intent(in) :: dt
+            double precision dimension(nb,9),intent(out),depend(nb) :: lcoeff
+        end subroutine advecupwind
+
+        subroutine adveciioe(nb,vel,dt,lcoeff,rcoeff)
             integer :: nb
             double precision dimension(nb,3),intent(in),depend(nb) :: vel
             double precision, intent(in) :: dt
             double precision dimension(nb,9),intent(out),depend(nb) :: lcoeff
             double precision dimension(nb,9),intent(out),depend(nb) :: rcoeff
-        end subroutine setadvectioncoeff
+        end subroutine adveciioe
 
         subroutine jacobiancoeff(h,kd,kp,dcoeff,nb)
             double precision dimension(nb),intent(in) :: h
@@ -35,6 +42,12 @@ python module _fortran
             double precision dimension(nb),intent(out),depend(nb) :: dcoeff
             integer, optional,check(len(h)>=nb),depend(h) :: nb=len(h)
         end subroutine fctcoeff
+
+        subroutine fitedges(h,nh,nb)
+            double precision dimension(nb),intent(in) :: h
+            double precision dimension(nb),intent(out),depend(nb) :: nh
+            integer, optional,check(len(h)>=nb),depend(h) :: nb=len(h)
+        end subroutine fitedges
 
         subroutine scale_volume(ids,vscale,scale,nb,n)
             integer dimension(nb),intent(in) :: ids
@@ -71,14 +84,6 @@ python module _fortran
             double precision dimension(nb),intent(out),depend(nb) :: valmax
             integer, optional,check(len(dat)>=nb),depend(dat) :: nb=len(dat)
         end subroutine donorsmax
-
-        subroutine getbc(pb,elev,pts,nelev,nb)
-            integer intent(in) :: pb
-            double precision dimension(nb),intent(in) :: elev
-            integer dimension(pb),intent(in),depend(pb) :: pts
-            double precision dimension(pb),intent(out),depend(pb) :: nelev
-            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine getbc
 
         subroutine mfdrcvrs(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
@@ -265,7 +270,7 @@ python module _fortran
             integer, optional,check(len(pitnb)>=n),depend(pitnb) :: n=len(pitnb)
         end subroutine pits_cons
 
-        subroutine definetin(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,edgemax,n,nb,m)
+        subroutine definetin(coords,cells_nodes,cells_edges,edges_nodes,area,circumcenter,ngbid,narea,n,nb,m)
             double precision dimension(nb,3),intent(in) :: coords
             integer dimension(n,3),intent(in) :: cells_nodes
             integer dimension(n,3),intent(in),depend(n) :: cells_edges
@@ -273,7 +278,7 @@ python module _fortran
             double precision dimension(nb),intent(in),depend(nb) :: area
             double precision dimension(3,n),intent(in),depend(n) :: circumcenter
             integer dimension(nb,8),intent(out),depend(nb) :: ngbid
-            double precision intent(out) :: edgemax
+            double precision dimension(nb),intent(out),depend(nb) :: narea
             integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
             integer, optional,check(shape(coords,0)==nb),depend(coords) :: nb=shape(coords,0)
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
