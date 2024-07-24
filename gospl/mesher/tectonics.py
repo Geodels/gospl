@@ -1,4 +1,5 @@
 import os
+import gc
 import sys
 import petsc4py
 import numpy as np
@@ -11,8 +12,10 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import adveciioe
+    from gospl._fortran import adveciioe2
     from gospl._fortran import advecupwind
     from gospl._fortran import fitedges
+    from gospl._fortran import getrange
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -42,9 +45,6 @@ class Tectonics(object):
         self.paleoZ = None
         self.minZ = None
 
-        # if not self.flatModel:
-        #     self.hypersphere = Hypersphere(2)
-
         return
 
     def getTectonics(self):
@@ -73,7 +73,7 @@ class Tectonics(object):
 
             self.tecNb = nb
             if nb < len(self.tecdata.index) - 1:
-                timer = self.tecdata.iloc[nb + 1, 0] - self.tecdata.iloc[nb, 0]
+                timer = self.tecdata.iloc[nb, 1] - self.tecdata.iloc[nb, 0]
             else:
                 timer = self.tEnd - self.tecdata.iloc[nb, 0]
 
@@ -83,14 +83,18 @@ class Tectonics(object):
                 mdata = np.load(fname)
                 key = self.tecdata.iloc[nb, -1][1]
                 self.hdisp = mdata[key][self.locIDs, :]
-                self._readAdvectionData(mdata[key], timer)
-                self._advectPlates()
+                # In case of advection based on interpolation from plate position
+                if self.advscheme == 0:
+                    self._readAdvectionData(mdata[key], timer)
+                    self._advectPlates()
+            else:
+                self.hdisp = None
 
             # Vertical displacements
-            if self.tecdata.iloc[nb, 1] != "empty":
-                fname = self.tecdata.iloc[nb, 1][0] + ".npz"
+            if self.tecdata.iloc[nb, 2] != "empty":
+                fname = self.tecdata.iloc[nb, 2][0] + ".npz"
                 mdata = np.load(fname)
-                key = self.tecdata.iloc[nb, 1][1]
+                key = self.tecdata.iloc[nb, 2][1]
                 self.upsub = mdata[key][self.locIDs]
             else:
                 self.upsub = None
@@ -98,65 +102,40 @@ class Tectonics(object):
             # Paleo-elevation fitting
             self.minZ = None
             self.paleoZ = None
-            if self.tecdata.iloc[nb, 2] != "empty":
-                fname = self.tecdata.iloc[nb, 2][0] + ".npz"
+            if self.tecdata.iloc[nb, 3] != "empty":
+                fname = self.tecdata.iloc[nb, 3][0] + ".npz"
                 mdata = np.load(fname)
-                key = self.tecdata.iloc[nb, 2][1]
-                if len(self.tecdata.iloc[nb, 2]) == 3:
+                key = self.tecdata.iloc[nb, 3][1]
+                if len(self.tecdata.iloc[nb, 3]) == 3:
                     self.minZ = self.tecdata.iloc[nb, 2][2]
                     self.paleoZ = mdata[key][self.locIDs]
 
             del mdata
+
+        # Perform advection based on the flow-Implicit/Outflow-Explicit
+        # or a `first-order upwind implicitly scheme.
+        if self.hdisp is not None and self.advscheme > 0:
+            self._varAdvector()
+
         return
 
-    def _varAdvector(self):
+    def _buildAdvecMat(self, iioe, lCoeffs, rCoeffs=None):
         """
-        Perform the advection of elevation and erosion by solving the advection equation based on the finite volume space discretization and the semi-implicit discretization in time. The approach is based on a Inflow-Implicit/Outflow-Explicit scheme following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pd>`_ or a `first-order upwind implicitly scheme <https://link.springer.com/article/10.1007/s13344-016-0039-1>`_ depending on the user configuration.
-
-        .. note::
-
-            Its basic idea is that outflow from a cell is treated explicitly while inflow is treated implicitly.
-
-            Since the matrix of the system is determined by the inflow fluxes it is an M-matrix yielding favourable solvability and stability properties.
-
-        .. important::
-
-            The method allows large time steps without losing stability and not deteriorating precision.
-
-            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicates its second order accuracy for smooth solutions in general.
-
-        .. note::
-
-            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
-
-            Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
+        Create the advection matrix.
         """
-
-        t0 = process_time()
-        iioe = True
-
-        nodeVel = np.zeros((self.lpoints, 3))
-        nodeVel[:, 0] = -0.05
-        # ids = np.where(self.lcoords[:, 0 ] > 50000)[0]
-        # nodeVel[ids, 0] = 0.0
-        nodeVel[:, 1] = -0.05
-        
-        # Advection matrix construction
-        if iioe:
-            lCoeffs, rCoeffs = adveciioe(self.lpoints, nodeVel, self.dt)
-            if self.flatModel:
-                rCoeffs[self.idBorders, 1:] = 0.0
-                rCoeffs[self.idBorders, 0] = 1.0
-        else:
-            lCoeffs = advecupwind(self.lpoints, nodeVel, self.dt)
 
         if self.flatModel:
             lCoeffs[self.idBorders, 1:] = 0.0
             lCoeffs[self.idBorders, 0] = 1.0
+            if iioe:
+                rCoeffs[self.idBorders, 1:] = 0.0
+                rCoeffs[self.idBorders, 0] = 1.0
 
         advMat_left = self._matrix_build_diag(lCoeffs[:, 0])
         if iioe:
             advMat_right = self._matrix_build_diag(rCoeffs[:, 0])
+        else:
+            advMat_right = None
 
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
 
@@ -190,17 +169,85 @@ class Tectonics(object):
                 tmpMat.assemblyEnd()
                 advMat_right += tmpMat
                 tmpMat.destroy()
+        if iioe:
+            return advMat_left, advMat_right
+        else:
+            return advMat_left
+
+    def _varAdvector(self):
+        """
+        Perform the advection of elevation and erosion by solving the advection equation based on the finite volume space discretization and the semi-implicit discretization in time. The approach is based on a Inflow-Implicit/Outflow-Explicit scheme following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pdf>`_ or a `first-order upwind implicitly scheme <https://www.sciencedirect.com/science/article/pii/S0168927414001032>`_ depending on the user configuration.
+
+        .. note::
+
+            Its basic idea is that outflow from a cell is treated explicitly while inflow is treated implicitly.
+
+            Since the matrix of the system is determined by the inflow fluxes it is an M-matrix yielding favourable solvability and stability properties.
+
+        .. important::
+
+            The method allows large time steps without losing stability and not deteriorating precision.
+
+            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicates its second order accuracy for smooth solutions in general.
+
+        .. note::
+
+            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
+
+            Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
+        """
+
+        t0 = process_time()
+        iioe = True
+        if self.advscheme == 1:
+            iioe = False
+
+        # Get the velocity from the input file.
+        nodeVel = np.zeros((self.lpoints, 3))
+        if self.flatModel:
+            nodeVel[:, :2] = self.hdisp[:, :2]
+        else:
+            nodeVel = self.hdisp.copy()
+
+        # Advection matrix construction
+        if iioe:
+            if self.advscheme == 3:
+                # Minimum and maximum in a local neighborhood
+                hL = self.hLocal.getArray().copy()
+                hmin, hmax = getrange(self.lpoints, hL)
+            nbOut, lCoeffs, rCoeffs = adveciioe(self.lpoints, nodeVel, self.dt)
+            advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
+        else:
+            lCoeffs = advecupwind(self.lpoints, nodeVel, self.dt)
+            advMat_left = self._buildAdvecMat(iioe, lCoeffs)
 
         # Advect elevations
         if iioe:
-            # Inflow-Implicit/Outflow-Explicit Scheme
+            # Inflow-Implicit/Outflow-Explicit Scheme 1
             advMat_right.mult(self.hGlobal, self.tmp1)
             self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+            # Inflow-Implicit/Outflow-Explicit Scheme 2
+            if self.advscheme == 3:
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                newh = self.tmpL.getArray()
+                diffmax = newh - hmax
+                diffmax[diffmax < 0] = 0.
+                diffmin = newh - hmin
+                diffmin[diffmin > 0] = 0.
+                diff = np.abs(diffmax) + np.abs(diffmin)
+                self.tmpL.setArray(diff)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                excess = self.tmp.sum()
+                if excess > 0.:
+                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, nodeVel, self.dt, nbOut, hL, hmin, hmax)
+                    advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
+                    advMat_right.mult(self.hGlobal, self.tmp1)
+                    self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
         else:
             # Upwind scheme with potentially excessive diffusion solved implicitly
             self._solve_KSP(True, advMat_left, self.hGlobal, self.tmp)
 
-        # Update elevations 
+        # Update elevations
         self.tmp.copy(result=self.hGlobal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
         if self.flatModel:
@@ -210,11 +257,62 @@ class Tectonics(object):
             self.hLocal.setArray(nhL)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
+        # Advect erosion deposition
+        if iioe:
+            if self.advscheme == 3:
+                self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+                # Minimum and maximum in a local neighborhood
+                edL = self.cumEDLocal.getArray().copy()
+                edmin, edmax = getrange(self.lpoints, edL)
+            # Inflow-Implicit/Outflow-Explicit Scheme 1
+            advMat_right.mult(self.cumED, self.tmp1)
+            self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+            # Inflow-Implicit/Outflow-Explicit Scheme 2
+            if self.advscheme == 3:
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                newed = self.tmpL.getArray()
+                diffmax = newed - edmax
+                diffmax[diffmax < 0] = 0.
+                diffmin = newed - edmin
+                diffmin[diffmin > 0] = 0.
+                dh = np.abs(diffmax) + np.abs(diffmin)
+                self.tmpL.setArray(dh)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                excess = self.tmp.sum()
+                if excess > 0.:
+                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, nodeVel, self.dt, nbOut, edL, edmin, edmax)
+                    advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
+                    advMat_right.mult(self.cumED, self.tmp1)
+                    self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+        else:
+            # Upwind scheme with potentially excessive diffusion solved implicitly
+            self._solve_KSP(True, advMat_left, self.cumED, self.tmp)
+
+        # Update erosion deposition
+        self.tmp.copy(result=self.cumED)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        if self.flatModel:
+            edL = self.cumEDLocal.getArray().copy()
+            edL[self.idBorders] = -1.e8
+            nedL = fitedges(edL)
+            self.cumEDLocal.setArray(nedL)
+            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Advection Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
+
+        # Clean
+        if iioe:
+            advMat_right.destroy()
+            del rCoeffs
+
+        advMat_left.destroy()
+        del edL, nedL, hL, nhL, nodeVel, lCoeffs
+        # del edmin, edmax, hmin, hmax
+        gc.collect()
 
         return
 

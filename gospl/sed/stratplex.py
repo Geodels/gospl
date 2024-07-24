@@ -69,6 +69,8 @@ class STRAMesh(object):
             self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+            self.stratH[:, 0] = 1.0e6
+            self.phiS[:, 0] = self.phi0s
 
         return
 

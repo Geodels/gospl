@@ -832,18 +832,19 @@ class FAMesh(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
-
-        # Update erosion/deposition rates
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        add_rate = self.tmpL.getArray() / self.dt
-        self.tmpL.setArray(add_rate)
-        self.tmpL.copy(result=self.EbLocal)
+        self.tmp1.pointwiseMult(self.tmp, self.areaGlobal)
 
         # Update stratigraphic layers
         if self.stratNb > 0:
             self.erodeStrat()
             self.deposeStrat()
 
+        # Update erosion/deposition rates
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        add_rate = self.tmpL.getArray() / self.dt
+        self.EbLocal.setArray(add_rate)
+        # self.tmpL.copy(result=self.EbLocal)
+        
         if MPIrank == 0 and self.verbose:
             print(
                 "Get Erosion Deposition values (%0.02f seconds)" % (process_time() - t0),

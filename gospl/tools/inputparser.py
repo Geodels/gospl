@@ -208,6 +208,20 @@ class ReadYaml(object):
         except KeyError:
             self.fitMarine = False
 
+        try:
+            advscheme = domainDict["advect"]
+            self.advscheme = -1
+            if advscheme == 'iioe1':
+                self.advscheme = 2
+            if advscheme == 'iioe2':
+                self.advscheme = 3
+            elif advscheme == 'upwind':
+                self.advscheme = 1
+            elif advscheme == 'interp':
+                self.advscheme = 0
+        except KeyError:
+            self.advscheme = 1
+
         return
 
     def _readTime(self):
@@ -581,30 +595,30 @@ class ReadYaml(object):
             zMap = "empty"
 
         tmpTec = []
-        tmpTec.insert(0, {"start": tecStart, "tMap": tMap, "zMap": zMap, "hMap": hMap})
+        tmpTec.insert(0, {"start": tecStart, "end": tecEnd, "tMap": tMap, "zMap": zMap, "hMap": hMap})
 
         if k == 0:
-            tecdata = pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"])
+            tecdata = pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"])
         else:
             tecdata = pd.concat(
-                [tecdata, pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"])],
+                [tecdata, pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"])],
                 ignore_index=True,
             )
 
-        if self.tecStep is not None:
-            if tecEnd is not None:
-                tectime = tecStart + self.tecStep
-                while tectime < tecEnd:
-                    tmpTec = []
-                    tmpTec.insert(0, {"start": tectime, "tMap": tMap, "zMap": zMap, "hMap": hMap})
-                    tecdata = pd.concat(
-                        [
-                            tecdata,
-                            pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"]),
-                        ],
-                        ignore_index=True,
-                    )
-                    tectime = tectime + self.tecStep
+        # if self.tecStep is not None:
+        #     if tecEnd is not None:
+        #         tectime = tecStart + self.tecStep
+        #         while tectime < tecEnd:
+        #             tmpTec = []
+        #             tmpTec.insert(0, {"start": tectime, "end": , "tMap": tMap, "zMap": zMap, "hMap": hMap})
+        #             tecdata = pd.concat(
+        #                 [
+        #                     tecdata,
+        #                     pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"]),
+        #                 ],
+        #                 ignore_index=True,
+        #             )
+        #             tectime = tectime + self.tecStep
 
         return tecdata
 
@@ -666,6 +680,7 @@ class ReadYaml(object):
         tecdata = None
         try:
             tecDict = self.input["tectonics"]
+
             tecSort = sorted(tecDict, key=itemgetter("start"))
             for k in range(len(tecSort)):
                 tecdata = self._defineTectonics(k, tecSort, tecdata)
@@ -673,10 +688,10 @@ class ReadYaml(object):
             if tecdata["start"][0] > self.tStart:
                 tmpTec = []
                 tmpTec.insert(
-                    0, {"start": self.tStart, "tMap": "empty", "zMap": "empty", "hMap": "empty"}
+                    0, {"start": self.tStart, "end": tecdata["start"][0], "tMap": "empty", "zMap": "empty", "hMap": "empty"}
                 )
                 tecdata = pd.concat(
-                    [pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"]), tecdata],
+                    [pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"]), tecdata],
                     ignore_index=True,
                 )
             self.tecdata = tecdata[tecdata["start"] >= self.tStart]

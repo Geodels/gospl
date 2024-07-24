@@ -179,9 +179,6 @@ class Model(
                 return
 
             # Perform advection and tectonics
-            # _Tectonics._varAdvector(self)
-
-            # Perform plates advection and tectonics
             _Tectonics.getTectonics(self)
 
             if not self.fast:

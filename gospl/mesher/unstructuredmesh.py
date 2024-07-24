@@ -39,6 +39,10 @@ class UnstMesh(object):
 
     In addition to mesh defintions, the class declares several functions related to forcing conditions (*e.g.* paleo-precipitation maps, tectonic (vertical and horizontal) displacements, stratigraphic layers...). These functions are defined within the `UnstMesh` class as they rely heavely on the mesh structure.
 
+    .. important::
+
+        The grid (2D or spherical) requires locally-orthogonal Voronoi/Delaunay staggering, or an unstructured C-grid type numerical formulation as described in `Engwirda 2017 <https://arxiv.org/pdf/1611.08996>`_
+
     Finally a function to clean all PETSc variables is defined and called at the end of a simulation.
     """
 
@@ -114,10 +118,7 @@ class UnstMesh(object):
         # Centroidal Voronoi Tessellation and Spherical Centroidal Voronoi
         # Tessellation
         t0 = process_time()
-
         Tmesh = self.initVoronoi(self.lcoords, self.lcells)
-        larea = np.abs(self.control_volumes)
-        larea[np.isnan(larea)] = 1.0
 
         # Voronoi and simplices declaration
         self.create_edges()
@@ -137,14 +138,28 @@ class UnstMesh(object):
             cells_nodes,
             cells_edges,
             edges_nodes,
-            larea,
             cc.T,
         )
+        issues = np.zeros(1, dtype=int)
+        issues[0] = int(np.isnan(self.larea).any())
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, issues, op=MPI.MIN)
+        if MPIrank == 0 and issues > 0:
+            print(
+                "\n--------------\n"
+                "Warning:\n"
+                "Some issues have been encountered in the Finite Volume declaration.\n"
+                "This is likely due to your initial grid discretisation. Use some of\n"
+                "the meshing approaches proposed in the pre-processing workflow.\n"
+                "Your grid needs to be a Delaunay with optimal voronoi.\n"
+                "--------------\n",
+                flush=True
+            )
+        self.larea[np.isnan(self.larea)] = 1.0
         self.maxarea = np.zeros(1, dtype=np.float64)
         self.maxarea[0] = self.larea.max()
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MIN)
 
-        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc, larea
+        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
         gc.collect()
 
         if MPIrank == 0 and self.verbose:

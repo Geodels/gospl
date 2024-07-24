@@ -11,13 +11,13 @@ module meshparams
 
   implicit none
 
-  integer, dimension(:), allocatable :: FVnNb
-  integer, dimension(:,:), allocatable :: FVnID
-  double precision, dimension(:), allocatable :: FVarea
-  double precision, dimension(:,:), allocatable :: FVeLgt
-  double precision, dimension(:,:), allocatable :: FVvDist
-  double precision, dimension(:, :), allocatable :: lcoords
-  double precision, dimension(:, :, :), allocatable :: faceVec
+  integer, dimension(:), allocatable :: FVnNb           ! Number of vertex neighbors
+  integer, dimension(:,:), allocatable :: FVnID          ! Index of vertex neighbors
+  double precision, dimension(:), allocatable :: FVarea    ! Voronoi area
+  double precision, dimension(:,:), allocatable :: FVeLgt   ! Length btw vertex
+  double precision, dimension(:,:), allocatable :: FVvDist   ! Voronoi edge length
+  double precision, dimension(:, :), allocatable :: lcoords     ! Vertex coordinates
+  double precision, dimension(:, :, :), allocatable :: faceVec  ! Voronoi edge normal vector
   ! double precision, dimension(:, :, :), allocatable :: midFace
 
   ! Queue node definition: index and elevation
@@ -532,6 +532,45 @@ subroutine striarea( v1, v2, v3, area )
 
 end subroutine striarea
 
+subroutine gtriarea(p1, p2, p3, area)
+!*****************************************************************************
+! Heron's Formula for the area of the triangle
+
+  implicit none
+
+  double precision, intent(in) :: p1(3)
+  double precision, intent(in) :: p2(3)
+  double precision, intent(in) :: p3(3)
+  double precision, intent(out) :: area
+
+  double precision :: x1, x2, x3, y1, y2, y3
+  double precision :: l1, l2, l3, p
+
+  x1 = p1(1)
+  x2 = p2(1)
+  x3 = p3(1)
+  y1 = p1(2)
+  y2 = p2(2)
+  y3 = p3(2)
+  
+  if(x1 == x2 .and. y1 == y2)then
+    area = 0.0
+  elseif(x1 == x3 .and. y1 == y3)then
+    area = 0.0
+  elseif(x2 == x3 .and. y2 == y3)then
+    area = 0.0
+  else
+    l1 = sqrt((x1 - x2)**2 + (y1 - y2)**2)
+    l2 = sqrt((x2 - x3)**2 + (y2 - y3)**2)
+    l3 = sqrt((x3 - x1)**2 + (y3 - y1)**2)
+    p = (l1 + l2 + l3)/2
+    area = sqrt(p * (p - l1) * (p - l2) * (p - l3))
+  endif
+
+  return
+
+end subroutine gtriarea
+
 subroutine euclid(p1, p2, norm)
 !*****************************************************************************
 ! Computes the Euclidean vector norm between 2 points along the 3 dimensions
@@ -609,7 +648,7 @@ subroutine split(array, low, high, mid, indices)
       right = right - 1
     enddo
     do
-      if(left > 8) exit
+      if(left > 12) exit
       if(array(left) > pivot) exit
       left = left + 1
     enddo
@@ -674,7 +713,7 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
     integer :: nb
 
     double precision, intent(in) :: Kd(nb)
-    double precision, intent(out) :: dcoeff(nb,9)
+    double precision, intent(out) :: dcoeff(nb,13)
 
     integer :: k, p, n
     double precision :: s1, c, ck, cn, v
@@ -715,11 +754,11 @@ subroutine advecupwind(nb, vel, dt, lcoeff)
 
     double precision, intent(in) :: dt
     double precision, intent(in) :: vel(nb, 3)
-    double precision, intent(out) :: lcoeff(nb,9)
+    double precision, intent(out) :: lcoeff(nb,13)
 
-    integer :: k, p!, n
+    integer :: k, p, n
     double precision :: v(3), dotv
-    double precision :: fluxin, fluxout
+    ! double precision :: fluxin, fluxout, flux
 
     lcoeff = 0.
 
@@ -728,21 +767,24 @@ subroutine advecupwind(nb, vel, dt, lcoeff)
       if(FVarea(k)>0)then
         do p = 1, FVnNb(k)
           if(FVvDist(k,p)>0.)then
-            ! n = FVnID(k,p)+1
+            n = FVnID(k,p)+1
             ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
-            ! v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
+            v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
             ! We assume that the velocity field across the voronoi cell is equal to the velocity from the vertex
-            v = vel(k, 1:3)
+            ! v = vel(k, 1:3)
 
             ! Defining the outward flux (dot product btw face normal and velocity) 
             dotv = dot_product(v(1:3), faceVec(k,p,1:3))
-
-            fluxin = dt * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
-            fluxout = dt * min(dotv, 0.) * FVvDist(k,p) / FVarea(k)
-
+            
+            ! fluxin = dt * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
+            ! fluxout = dt * min(dotv, 0.) * FVvDist(k,p) / FVarea(k)
+            
             ! Matrix coefficients
-            lcoeff(k,1) = lcoeff(k,1) + fluxin 
-            lcoeff(k,p+1) = fluxout
+            ! lcoeff(k,1) = lcoeff(k,1) + fluxin 
+            ! lcoeff(k,p+1) = fluxout
+            lcoeff(k,1) = lcoeff(k,1) - 0.5 * dt * (dotv - abs(dotv)) * FVvDist(k,p) / FVarea(k)
+            lcoeff(k,p+1) = 0.5 * dt * (dotv - abs(dotv)) * FVvDist(k,p) / FVarea(k)
+
           endif
         enddo
       endif
@@ -753,7 +795,40 @@ subroutine advecupwind(nb, vel, dt, lcoeff)
 
 end subroutine advecupwind
 
-subroutine adveciioe(nb, vel, dt, lcoeff, rcoeff)
+subroutine getrange(nb, data, dmin, dmax)
+!*****************************************************************************
+! For a considered variable get its range based on its neighbors values.
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+    double precision, intent(in) :: data(nb)
+
+    double precision, intent(out) :: dmin(nb)
+    double precision, intent(out) :: dmax(nb)
+
+    integer :: k, p, n
+
+    dmin(1:nb) = data(1:nb)
+    dmax(1:nb) = data(1:nb)
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            n = FVnID(k,p)+1
+            dmin(k) = min(dmin(k),data(n))
+            dmax(k) = max(dmax(k),data(n))
+          endif
+        enddo
+      endif
+    enddo
+
+    return
+
+end subroutine getrange
+
+subroutine adveciioe(nb, vel, dt, nbout, lcoeff, rcoeff)
 !*****************************************************************************
 ! Define advection coefficients based on a finite volume spatial
 ! discretisation using the Inflow Implicit and Outflow Explicit scheme (I2EO).
@@ -766,15 +841,18 @@ subroutine adveciioe(nb, vel, dt, lcoeff, rcoeff)
 
   double precision, intent(in) :: dt
   double precision, intent(in) :: vel(nb, 3)
-  double precision, intent(out) :: lcoeff(nb,9)
-  double precision, intent(out) :: rcoeff(nb,9)
 
-  integer :: k, p!, n
+  integer, intent(out) :: nbout(nb)
+  double precision, intent(out) :: lcoeff(nb,13)
+  double precision, intent(out) :: rcoeff(nb,13)
+
+  integer :: k, p, n
   double precision :: v(3), dotv
   double precision :: fluxin, fluxout
 
   lcoeff = 0.
   rcoeff = 0.
+  nbout = 0.
   
   ! The inflow implicit and outflow explicit approach is preferred for 2 main reasons: its application to bigger time steps and its non-dependence on the variables to advect in the matrix construction.
 
@@ -783,14 +861,17 @@ subroutine adveciioe(nb, vel, dt, lcoeff, rcoeff)
     if(FVarea(k)>0)then
       do p = 1, FVnNb(k)
         if(FVvDist(k,p)>0.)then
-          ! n = FVnID(k,p)+1
+          n = FVnID(k,p)+1
           ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
-          ! v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
+          v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
           ! We assume that the velocity field across the voronoi cell is equal to the velocity from the vertex
-          v = vel(k, 1:3)
+          ! v = vel(k, 1:3)
 
           ! Defining the inward flux (inverse of the dot product btw face normal and velocity) 
           dotv = -dot_product(v(1:3), faceVec(k,p,1:3))
+
+          ! Number of nonzero outflows
+          if(dotv < 0.) nbout(k) = nbout(k) + 1
 
           ! Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
           fluxin = 0.5 * dt * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
@@ -803,6 +884,7 @@ subroutine adveciioe(nb, vel, dt, lcoeff, rcoeff)
           ! Right-hand side matrix coefficients (explicit solution)
           rcoeff(k,1) = rcoeff(k,1) - fluxout
           rcoeff(k,p+1) = fluxout
+          
         endif
       enddo
     endif
@@ -813,6 +895,111 @@ subroutine adveciioe(nb, vel, dt, lcoeff, rcoeff)
   return
 
 end subroutine adveciioe
+
+subroutine adveciioe2(nb, vel, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
+!*****************************************************************************
+! Define advection coefficients based on a finite volume spatial
+! discretisation using the Inflow Implicit and Outflow Explicit scheme (I2EO).
+! The approach is based on https://www.sciencedirect.com/science/article/pii/S0168927414001032
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+
+  double precision, intent(in) :: dt
+  double precision, intent(in) :: vel(nb, 3)
+  integer, intent(in) :: nbout(nb)
+  double precision, intent(in) :: var(nb)
+  double precision, intent(in) :: vmin(nb)
+  double precision, intent(in) :: vmax(nb)
+  double precision, intent(out) :: lcoeff(nb,13)
+  double precision, intent(out) :: rcoeff(nb,13)
+
+  integer :: k, p, n, q
+  double precision :: v(3), dotv
+  double precision :: thetain(nb,12), thetaout(nb,12)
+  double precision :: aout, fluxin, fluxout
+  double precision :: val
+
+  lcoeff = 0.
+  rcoeff = 0.
+
+  ! Weighting parameter for flux-corrected transport for the stabilized IIOE scheme
+  thetaout = 0.5
+  do k = 1, nb
+    if(FVarea(k)>0)then
+      do p = 1, FVnNb(k)
+        n = FVnID(k,p)+1
+        v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
+        dotv = -dot_product(v(1:3), faceVec(k,p,1:3))
+        aout = min(dotv, 0.) * FVvDist(k,p) 
+        if(aout*(var(n) - var(k))>0)then
+          val = FVarea(k) * (vmax(k) - var(k))
+          val = val / (aout * dt * nbout(k) * (var(n) - var(k)))
+          thetaout(k,p) = min(0.5, val)
+        elseif(aout*(var(n) - var(k))<0)then
+          val = FVarea(k) * (vmin(k) - var(k))
+          val = val / (dt * aout * nbout(k) * (var(n) - var(k)))
+          thetaout(k,p) = min(0.5, val)
+        else
+          thetaout(k,p) = 0.5
+        endif
+      enddo
+    endif
+  enddo
+
+  thetain = 0.5
+  do k = 1, nb
+    if(FVarea(k)>0)then
+      do p = 1, FVnNb(k)
+        n = FVnID(k,p)+1
+        inner: do q = 1, FVnNb(n)
+          if(k == FVnID(n,q)+1)then
+            thetain(k,p) = 1.0 - thetaout(n,q)
+            exit inner
+          endif
+        enddo inner
+      enddo
+    endif
+  enddo
+
+  ! Inflow-Implicit/Outflow-Explicit Scheme for Solving Advection Equations
+  do k = 1, nb
+    if(FVarea(k)>0)then
+      do p = 1, FVnNb(k)
+        if(FVvDist(k,p)>0.)then
+          n = FVnID(k,p)+1
+          ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
+          v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
+          ! We assume that the velocity field across the voronoi cell is equal to the velocity from the vertex
+          ! v = vel(k, 1:3)
+
+          ! Defining the inward flux (inverse of the dot product btw face normal and velocity) 
+          dotv = -dot_product(v(1:3), faceVec(k,p,1:3))
+
+          ! Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
+          fluxin = dt * thetain(k,p) * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
+          fluxout = dt * thetaout(k,p) * min(dotv, 0.) * FVvDist(k,p) / FVarea(k)
+
+          ! Left-hand side matrix coefficients (implicit solution)
+          lcoeff(k,1) = lcoeff(k,1) + fluxin
+          lcoeff(k,p+1) = -fluxin
+
+          ! Right-hand side matrix coefficients (explicit solution)
+          rcoeff(k,1) = rcoeff(k,1) - fluxout
+          rcoeff(k,p+1) = fluxout
+          
+        endif
+      enddo
+    endif
+    lcoeff(k,1) = 1.0 + lcoeff(k,1)
+    rcoeff(k,1) = 1.0 + rcoeff(k,1)
+  enddo
+
+  return
+
+end subroutine adveciioe2
 
 subroutine fctcoeff(h, Kd, dcoeff, nb)
 !*****************************************************************************
@@ -946,7 +1133,7 @@ subroutine jacobiancoeff(h, Kd, Kp, dcoeff, nb)
     double precision, intent(in) :: h(nb)
     double precision, intent(in) :: Kd(nb)
     double precision, intent(in) :: Kp(nb)
-    double precision, intent(out) :: dcoeff(nb,9)
+    double precision, intent(out) :: dcoeff(nb,13)
 
     integer :: k, p, n
     double precision :: s1, c, ck, cn, cpk, cpn, v
@@ -1162,8 +1349,8 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
   double precision, intent(out) :: wgt(nb,nRcv)
 
   integer :: k, n, p, kk
-  double precision :: slp(8),dst(8),val,slope(8)
-  integer :: id(8)
+  double precision :: slp(12),dst(12),val,slope(12)
+  integer :: id(12)
 
   rcv = -1
   dist = 0.
@@ -1253,13 +1440,13 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
   double precision,intent(in) :: sl
   double precision, intent(in) :: elev(nb)
 
-  integer, intent(out) :: rcv(nb,8)
-  double precision, intent(out) :: dist(nb,8)
-  double precision, intent(out) :: wgt(nb,8)
+  integer, intent(out) :: rcv(nb,12)
+  double precision, intent(out) :: dist(nb,12)
+  double precision, intent(out) :: wgt(nb,12)
 
   integer :: k, n, p, kk, ngbs
-  double precision :: fexp,slp(8),dst(8),val,slope(8)
-  integer :: id(8)
+  double precision :: fexp,slp(12),dst(12),val,slope(12)
+  integer :: id(12)
 
   rcv = -1
   dist = 0.
@@ -1270,7 +1457,7 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
       ngbs = nRcv
       fexp = exp
     else
-      ngbs = 8
+      ngbs = 12
       fexp = 0.01
     endif
     slp = 0.
@@ -1291,7 +1478,7 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
     enddo
 
     if(kk == 0)then
-      rcv(k,1:8) = k-1
+      rcv(k,1:12) = k-1
     elseif(kk <= ngbs)then
       val = 0.
       rcv(k,1:ngbs) = k-1
@@ -1974,7 +2161,7 @@ subroutine combine_edges(elev, labels, ins, outs, newgraph, graphnb, m, n)
   integer, intent(in) :: outs(m)
 
   integer,intent(out) :: graphnb
-  double precision,intent(out) :: newgraph(n*8,4)
+  double precision,intent(out) :: newgraph(n*12,4)
 
   integer :: i, c, p, nc, lb1, lb2
 
@@ -2218,7 +2405,7 @@ end subroutine sort_ids
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
-                      area, circumcenter, ngbID, narea, n, nb, m)
+                      circumcenter, ngbID, narea, n, nb, m)
 !*****************************************************************************
 ! Compute for a specific triangulation the characteristics of each node and
 ! associated voronoi for finite volume discretizations
@@ -2232,17 +2419,16 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   integer, intent(in) :: edges_nodes(m, 2)
 
   double precision, intent(in) :: coords(nb,3)
-  double precision, intent(in) :: area(nb)
   double precision, intent(in) :: circumcenter(3,n)
 
-  integer, intent(out) :: ngbID(nb, 8)
+  integer, intent(out) :: ngbID(nb, 12)
   double precision, intent(out) :: narea(nb)
-  ! double precision, intent(out) :: facemid(nb,8,3)
+  ! double precision, intent(out) :: facemid(nb,12,3)
 
   integer :: i, n1, n2, k, l, p, eid, cid
   integer :: e, id, nbngbs, ngbIDv
-  integer :: nid(2), nc(3), edge(nb, 8)
-  integer :: edgeNb(3), edges(3,2), cell_ids(nb, 8)
+  integer :: nid(2), nc(3), edge(nb, 12)
+  integer :: edgeNb(3), edges(3,2), cell_ids(nb, 12)
 
   double precision :: coords0(3), coordsID(3), cc(3), triarea
   double precision :: midpoint(3), dist, vnorm, radius
@@ -2261,12 +2447,12 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
 
   allocate(FVarea(nb))
   allocate(FVnNb(nb))
-  allocate(FVnID(nb,8))
-  allocate(FVeLgt(nb,8))
-  allocate(FVvDist(nb,8))
+  allocate(FVnID(nb,12))
+  allocate(FVeLgt(nb,12))
+  allocate(FVvDist(nb,12))
   allocate(lcoords(nb,3))
-  allocate(faceVec(nb,8,3))
-  ! allocate(midFace(nb,8,3))
+  allocate(faceVec(nb,12,3))
+  ! allocate(midFace(nb,12,3))
 
   cell_ids = -1
   edge = -1
@@ -2274,21 +2460,20 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   ngbID = -1
   FVeLgt = 0.
   FVvDist = 0.
+  FVarea = 0.
   ! midFace = -1.0
   ! facemid = -1.0
 
   lcoords = coords
   radius = 0.
   if(lcoords(1,3)>0) radius = norm2(lcoords(1,1:3))
-  FVarea = 0.0
-  if(radius == 0.0)  FVarea = area
 
   ! Find all cells surrounding a given vertice
   do i = 1, n
     nc = cells_nodes(i,1:3)+1
     do p = 1, 3
       inside = .False.
-      lp: do k = 1, 8
+      lp: do k = 1, 12
         if( cell_ids(nc(p),k) == i-1 )then
           exit lp
         elseif( cell_ids(nc(p),k) == -1 )then
@@ -2307,7 +2492,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
     n1 = edges_nodes(i,1)+1
     n2 = edges_nodes(i,2)+1
     inside = .False.
-    lp0: do k = 1, 8
+    lp0: do k = 1, 12
       if(edge(n1,k) == i-1)then
         exit lp0
       elseif(edge(n1,k) == -1)then
@@ -2320,7 +2505,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
       FVnNb(n1) = FVnNb(n1) + 1
     endif
     inside = .False.
-    lp1: do k = 1, 8
+    lp1: do k = 1, 12
       if(edge(n2,k) == i-1)then
         exit lp1
       elseif(edge(n2,k) == -1)then
@@ -2355,7 +2540,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
     enddo
 
     ! Get voronoi edge lengths
-    lp2: do cid = 1, 8
+    lp2: do cid = 1, 12
       if( cell_ids(k,cid) == -1 ) exit lp2
       edgeNb(1:3) = cells_edges( cell_ids(k,cid)+1,1:3 )
       do e = 1, 3
@@ -2387,15 +2572,21 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
             enddo lp4
           endif
           cc = circumcenter(1:3, cell_ids(k,cid)+1)
+          ! if(k == 28114)then
+          !   write(*,*)'circumcenter',cc
+          !   write(*,*)'midpt',midpoint(1:3)
+          ! endif
           call distance(midpoint(1:3), cc,  dist)
           FVvDist(k,id) = FVvDist(k,id) + dist
           ! Get the tangent vector either from euclidian or spherical formula
           if(radius == 0.0)then
             call euclid(coords0(1:3), midpoint(1:3),  vnorm)
             faceVec(k,id,1:3) = (midpoint(1:3) - coords0(1:3)) / vnorm
+            call gtriarea(coords0(1:3), midpoint(1:3), cc, triarea)
+            FVarea(k) = FVarea(k) + triarea
           else
             call slerpvec(coords0(1:3), midpoint(1:3), 0.9_8, faceVec(k,id,1:3))
-            call striarea( coords0(1:3), midpoint(1:3), cc, triarea )
+            call striarea(coords0(1:3), midpoint(1:3), cc, triarea)
             FVarea(k) = FVarea(k) + triarea * radius**2
           endif
           ! midFace(k,id,1:3) = midpoint(1:3) / norm2(midpoint(1:3))
@@ -2406,7 +2597,31 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
 
   FVnID = ngbID
   narea = FVarea
-  ! facemid = midFace
+
+  do k = 1, nb
+    if(isnan(FVarea(k))) FVarea(k) = 0.0
+  enddo
+  ! write(*,*) maxval(FVarea),minval(FVarea)
+  
+  ! k = 28114
+  ! write(*,*) 'coords', coords(k,1:2)
+  ! write(*,*) 'nb ngbh', FVnNb(k), 'area', FVarea(k)
+  ! do p = 1, FVnNb(k)
+  !   if(FVvDist(k,p)>0.)then
+  !     write(*,*) 'edge lgth', p, FVeLgt(k,p)
+  !     write(*,*) 'face lgth', p, FVvDist(k,p)
+  !     write(*,*) 'face normal', p, faceVec(k,p,1:2)
+  !   endif
+  ! enddo
+
+  ! do p = 1, FVnNb(k)
+  !   if(FVvDist(k,p)>0.)then
+  !     n = FVnID(k,p)+1
+  !     ! write(*,*) coords(n,1:2)
+  !   endif
+  ! enddo
+
+  return
 
 end subroutine definetin
 
@@ -2595,7 +2810,7 @@ subroutine filllabel(sl, elev, ngbid, fillz, labels, nb)
   integer :: nb
   double precision,intent(in) :: sl
   double precision,intent(in) :: elev(nb)
-  integer,intent(in) :: ngbid(nb, 8)
+  integer,intent(in) :: ngbid(nb, 12)
   double precision,intent(out) :: fillz(nb)
   ! Pit number and overspilling point ID
   integer,intent(out) :: labels(nb)

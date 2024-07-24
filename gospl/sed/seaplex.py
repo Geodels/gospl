@@ -144,11 +144,11 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions for filled + eps elevations
-        rcv, _, wght = mfdrcvrs(8, 1.0e-2, self.oceanFill, -1.0e6)
+        rcv, _, wght = mfdrcvrs(12, 1.0e-2, self.oceanFill, -1.0e6)
         sum_wght = np.sum(wght, axis=1)
         ids = (self.pitIDs > -1) & (self.flatOcean > -1) & (sum_wght == 0.0)
         ids = ids.nonzero()[0]
-        rcv[ids, :] = np.tile(ids, (8, 1)).T
+        rcv[ids, :] = np.tile(ids, (12, 1)).T
         rcv[ids, 0] = self.flatOcean[ids]
         wght[ids, :] = 0.0
         wght[ids, 0] = 1.0
@@ -164,7 +164,7 @@ class SEAMesh(object):
 
         # Set borders nodes
         if self.flatModel:
-            rcv[self.idBorders, :] = np.tile(self.idBorders, (8, 1)).T
+            rcv[self.idBorders, :] = np.tile(self.idBorders, (12, 1)).T
             wght[self.idBorders, :] = 0.0
 
         # Define downstream matrix based on filled + dir elevations
@@ -172,7 +172,7 @@ class SEAMesh(object):
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
-        for k in range(0, 8):
+        for k in range(0, 12):
 
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
