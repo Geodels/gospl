@@ -203,6 +203,17 @@ class ReadYaml(object):
         except KeyError:
             self.strataFile = None
 
+        self._extraDomain2()
+
+        return
+
+    def _extraDomain2(self):
+        """
+        Read domain additional information.
+        """
+
+        domainDict = self.input["domain"]
+
         try:
             self.fitMarine = domainDict["fitmarine"]
         except KeyError:

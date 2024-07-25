@@ -418,7 +418,7 @@ subroutine slerpvec(p1, p2, t, vec)
   double precision, intent(in) :: t
   double precision, intent(out) :: vec(3)
 
-  double precision :: v1(3), v2(3), dv(3), newpt(3), a
+  double precision :: v1(3), v2(3), newpt(3), a
 
   ! Set on the unit sphere
   v1 = p1/norm2(p1)
