@@ -237,10 +237,7 @@ class FAMesh(object):
             gc.collect()
 
         # Store flow accumulation matrix
-        if dep is None:
-            self.fMat = flowMat.transpose().copy()
-        else:
-            self.fDepMat = flowMat.transpose().copy()
+        self.fMat = flowMat.transpose().copy()
 
         flowMat.destroy()
 
@@ -843,8 +840,7 @@ class FAMesh(object):
         self.dm.globalToLocal(self.tmp, self.tmpL)
         add_rate = self.tmpL.getArray() / self.dt
         self.EbLocal.setArray(add_rate)
-        # self.tmpL.copy(result=self.EbLocal)
-        
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Get Erosion Deposition values (%0.02f seconds)" % (process_time() - t0),

@@ -12,7 +12,9 @@ module meshparams
   implicit none
 
   integer, dimension(:), allocatable :: FVnNb           ! Number of vertex neighbors
+  integer, dimension(:), allocatable :: FVgnNb           ! Number of global vertex neighbors
   integer, dimension(:,:), allocatable :: FVnID          ! Index of vertex neighbors
+  integer, dimension(:,:), allocatable :: FVgnID          ! Index of global vertex neighbors
   double precision, dimension(:), allocatable :: FVarea    ! Voronoi area
   double precision, dimension(:,:), allocatable :: FVeLgt   ! Length btw vertex
   double precision, dimension(:,:), allocatable :: FVvDist   ! Voronoi edge length
@@ -2404,6 +2406,167 @@ end subroutine sort_ids
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+subroutine globalngbhs(nt, cells, n)
+
+  use meshparams
+  implicit none
+
+  integer :: n
+  integer, intent(in) :: nt
+  integer, intent(in) :: cells(n, 3)
+
+  integer :: i, k, nb, n1, n2, n3
+  integer :: nc11, nc12, nc21, nc22, nc31, nc32
+  integer :: nc(3)
+
+  logical :: in11, in12, in21, in22, in31, in32
+
+  ! Define mesh parameters
+  if(allocated(FVgnID)) deallocate(FVgnID)
+  if(allocated(FVgnNb)) deallocate(FVgnNb)
+  allocate(FVgnID(nt,12))
+  allocate(FVgnNb(nt))
+
+  FVgnID = -1
+  FVgnNb = 0
+
+  ! Find all cells surrounding a given vertice
+  do i = 1, n
+    nc = cells(i,1:3)+1
+
+    n1 = nc(1)
+    nc11 = nc(2)
+    nc12 = nc(3)
+    n2 = nc(2)
+    nc21 = nc(1)
+    nc22 = nc(3)
+    n3 = nc(3)
+    nc31 = nc(1)
+    nc32 = nc(2)
+
+    in11 = .True.
+    in12 = .True.
+    in21 = .True.
+    in22 = .True.
+    in31 = .True.
+    in32 = .True.
+    do k = 1, 12
+      if(FVgnID(n1,k)==nc11) in11 = .False.
+      if(FVgnID(n1,k)==nc12) in12 = .False.
+      if(FVgnID(n2,k)==nc21) in21 = .False.
+      if(FVgnID(n2,k)==nc22) in22 = .False.
+      if(FVgnID(n3,k)==nc31) in31 = .False.
+      if(FVgnID(n3,k)==nc32) in32 = .False.
+    enddo
+
+    if(in11)then
+      nb = FVgnNb(n1) + 1
+      FVgnNb(n1) = nb
+      FVgnID(n1, nb) = nc11
+    endif
+
+    if(in12)then
+      nb = FVgnNb(n1) + 1
+      FVgnNb(n1) = nb
+      FVgnID(n1, nb) = nc12
+    endif
+
+    if(in21)then
+      nb = FVgnNb(n2) + 1
+      FVgnNb(n2) = nb
+      FVgnID(n2, nb) = nc21
+    endif
+
+    if(in22)then
+      nb = FVgnNb(n2) + 1
+      FVgnNb(n2) = nb
+      FVgnID(n2, nb) = nc22
+    endif
+
+    if(in31)then
+      nb = FVgnNb(n3) + 1
+      FVgnNb(n3) = nb
+      FVgnID(n3, nb) = nc31
+    endif
+
+    if(in32)then
+      nb = FVgnNb(n3) + 1
+      FVgnNb(n3) = nb
+      FVgnID(n3, nb) = nc32
+    endif
+  enddo
+
+  return
+
+end subroutine globalngbhs 
+
+
+subroutine epsfill(sl, elev, fillz, nb)
+!*****************************************************************************
+! Perform pit filling using a priority queue approach following Barnes (2015).
+! This function is done on a single processors.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision,intent(in) :: sl
+  double precision,intent(in) :: elev(nb)
+  double precision,intent(out) :: fillz(nb)
+
+  logical :: flag(nb)
+
+  integer :: i, k, c
+
+  type (node)  :: ptID
+  double precision :: h
+
+  fillz = elev
+
+  ! Push marine edges nodes to priority queue
+  flag = .False.
+  do i = 1, nb
+    if(fillz(i)<sl)then
+      flag(i) = .True.
+      lp: do k = 1, FVgnNb(i)
+        c = FVgnID(i,k)
+        if(c>0)then
+          if(fillz(c)>=sl)then
+            call priorityqueue%PQpush(fillz(i), i)
+            exit lp
+          endif
+        endif
+      enddo lp
+    endif
+  enddo
+
+  ! Perform pit filling using priority total queue
+  do while(priorityqueue%n>0)
+    ptID = priorityqueue%PQpop()
+    i = ptID%id
+    do k = 1, FVgnNb(i)
+      c = FVgnID(i,k)
+      if(c>0)then
+        if(.not.flag(c))then
+          flag(c) = .True.
+          h = nearest(fillz(i), 1.0)
+          ! Not a depression
+          if(fillz(c)>h)then
+            call priorityqueue%PQpush(fillz(c), c)
+          ! Find a depression
+          else
+            fillz(c) = h
+            call priorityqueue%PQpush(fillz(c), c)
+          endif
+        endif
+      endif
+    enddo
+  enddo
+
+  return
+
+end subroutine epsfill
+
 subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
                       circumcenter, ngbID, narea, n, nb, m)
 !*****************************************************************************
@@ -2572,10 +2735,6 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
             enddo lp4
           endif
           cc = circumcenter(1:3, cell_ids(k,cid)+1)
-          ! if(k == 28114)then
-          !   write(*,*)'circumcenter',cc
-          !   write(*,*)'midpt',midpoint(1:3)
-          ! endif
           call distance(midpoint(1:3), cc,  dist)
           FVvDist(k,id) = FVvDist(k,id) + dist
           ! Get the tangent vector either from euclidian or spherical formula
@@ -2601,25 +2760,6 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   do k = 1, nb
     if(isnan(FVarea(k))) FVarea(k) = 0.0
   enddo
-  ! write(*,*) maxval(FVarea),minval(FVarea)
-  
-  ! k = 28114
-  ! write(*,*) 'coords', coords(k,1:2)
-  ! write(*,*) 'nb ngbh', FVnNb(k), 'area', FVarea(k)
-  ! do p = 1, FVnNb(k)
-  !   if(FVvDist(k,p)>0.)then
-  !     write(*,*) 'edge lgth', p, FVeLgt(k,p)
-  !     write(*,*) 'face lgth', p, FVvDist(k,p)
-  !     write(*,*) 'face normal', p, faceVec(k,p,1:2)
-  !   endif
-  ! enddo
-
-  ! do p = 1, FVnNb(k)
-  !   if(FVvDist(k,p)>0.)then
-  !     n = FVnID(k,p)+1
-  !     ! write(*,*) coords(n,1:2)
-  !   endif
-  ! enddo
 
   return
 

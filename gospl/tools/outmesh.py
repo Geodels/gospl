@@ -33,7 +33,7 @@ class WriteMesh(object):
         """
 
         self.step = 0
-        self.stratStep = 0
+        self.stratStep = 1
         self.file = "gospl"
         if MPIrank == 0:
             self._createOutputDir()
@@ -47,7 +47,7 @@ class WriteMesh(object):
             self.step = self.rStep + 1
             if self.strat > 0:
                 n = int(self.tout / self.strat)
-                self.stratStep = self.rStep * n
+                self.stratStep = self.rStep * n + 1
             self.tNow = self.tStart + self.rStep * self.tout
             self.rStart = self.tStart + self.rStep * self.tout
             self.saveTime = self.tNow + self.tout
@@ -139,35 +139,34 @@ class WriteMesh(object):
             + str(MPIrank)
             + ".h5"
         )
-
         with h5py.File(h5file, "w") as f:
 
             # Write stratal layers elevations per layers
             f.create_dataset(
                 "stratZ",
-                shape=(self.lpoints, self.stratStep),
+                shape=(self.lpoints, self.stratStep + 1),
                 dtype="float32",
                 compression="gzip",
             )
-            f["stratZ"][:, : self.stratStep] = self.stratZ[:, : self.stratStep]
+            f["stratZ"][:, : self.stratStep + 1] = self.stratZ[:, : self.stratStep + 1]
 
             # Write stratal layers thicknesses per layers
             f.create_dataset(
                 "stratH",
-                shape=(self.lpoints, self.stratStep),
+                shape=(self.lpoints, self.stratStep + 1),
                 dtype="float64",
                 compression="gzip",
             )
-            f["stratH"][:, : self.stratStep] = self.stratH[:, : self.stratStep]
+            f["stratH"][:, : self.stratStep + 1] = self.stratH[:, : self.stratStep + 1]
 
             # Write porosity values for coarse sediments
             f.create_dataset(
                 "phiS",
-                shape=(self.lpoints, self.stratStep),
+                shape=(self.lpoints, self.stratStep + 1),
                 dtype="float64",
                 compression="gzip",
             )
-            f["phiS"][:, : self.stratStep] = self.phiS[:, : self.stratStep]
+            f["phiS"][:, : self.stratStep + 1] = self.phiS[:, : self.stratStep + 1]
 
         MPIcomm.Barrier()
 
@@ -418,11 +417,11 @@ class WriteMesh(object):
                 raise ValueError("Restart file is missing...")
 
             self.stratZ.fill(0.0)
-            self.stratZ[:, : self.stratStep - 1] = np.array(hf["/stratZ"])
+            self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
             self.stratH.fill(0.0)
-            self.stratH[:, : self.stratStep - 1] = np.array(hf["/stratH"])
+            self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
             self.phiS.fill(0.0)
-            self.phiS[:, : self.stratStep - 1] = np.array(hf["/phiS"])
+            self.phiS[:, : self.stratStep] = np.array(hf["/phiS"])
 
             hf.close()
 

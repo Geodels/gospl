@@ -290,6 +290,19 @@ python module _fortran
             integer, optional,check(len(pitnb)>=n),depend(pitnb) :: n=len(pitnb)
         end subroutine pits_cons
 
+        subroutine globalngbhs(nt, cells, n)
+            integer intent(in) :: nt
+            integer dimension(n,3),intent(in) :: cells
+            integer, optional,check(shape(cells,0)==n),depend(cells) :: n=shape(cells,0)
+        end subroutine globalngbhs
+
+        subroutine epsfill(sl,elev,fillz,nb)
+            double precision intent(in) :: sl
+            double precision dimension(nb),intent(in) :: elev
+            double precision dimension(nb),intent(out) :: fillz
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine epsfill
+
         subroutine definetin(coords,cells_nodes,cells_edges,edges_nodes,circumcenter,ngbid,narea,n,nb,m)
             double precision dimension(nb,3),intent(in) :: coords
             integer dimension(n,3),intent(in) :: cells_nodes

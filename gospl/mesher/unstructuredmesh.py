@@ -15,6 +15,7 @@ from time import process_time
 from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import globalngbhs
     from gospl._fortran import definetin
     from gospl._fortran import fitedges
 
@@ -275,6 +276,11 @@ class UnstMesh(object):
         self.mpoints = len(self.mCoords)
         gZ = loadData[self.infoElev]
         self.mCells = loadData[self.infoCells].astype(int)
+
+        # Get global mesh vertex neighbors
+        if MPIrank == 0:
+            globalngbhs(self.mpoints, self.mCells)
+
         self.vtkMesh = None
         self.flatModel = False
         if MPIrank == 0 and self.verbose:

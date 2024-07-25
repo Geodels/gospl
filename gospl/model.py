@@ -178,6 +178,11 @@ class Model(
             if self.tNow == self.tEnd:
                 return
 
+            # Create new stratal layer
+            if self.tNow >= self.saveStrat:
+                self.stratStep += 1
+                self.saveStrat += self.strat
+
             # Perform advection and tectonics
             _Tectonics.getTectonics(self)
 
@@ -213,11 +218,6 @@ class Model(
 
             # Advance time
             self.tNow += self.dt
-
-            # Create new stratal layer
-            if self.tNow >= self.saveStrat:
-                self.stratStep += 1
-                self.saveStrat += self.strat
 
             if MPIrank == 0:
                 print(

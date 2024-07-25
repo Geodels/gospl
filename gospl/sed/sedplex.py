@@ -221,6 +221,7 @@ class SEDMesh(object):
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
             self.deposeStrat()
