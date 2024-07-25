@@ -18,6 +18,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import globalngbhs
     from gospl._fortran import definetin
     from gospl._fortran import fitedges
+    from gospl._fortran import updatearea
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -120,6 +121,8 @@ class UnstMesh(object):
         # Tessellation
         t0 = process_time()
         Tmesh = self.initVoronoi(self.lcoords, self.lcells)
+        larea = np.abs(self.control_volumes)
+        larea[np.isnan(larea)] = 1.0
 
         # Voronoi and simplices declaration
         self.create_edges()
@@ -141,26 +144,31 @@ class UnstMesh(object):
             edges_nodes,
             cc.T,
         )
-        issues = np.zeros(1, dtype=int)
-        issues[0] = int(np.isnan(self.larea).any())
+        self.larea[np.isnan(self.larea)] = 1.0
+        issues = np.zeros(1)
+        issues[0] = np.max(np.abs(larea - self.larea))
+
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, issues, op=MPI.MIN)
-        if MPIrank == 0 and issues > 0:
+        if MPIrank == 0 and issues[0] > 1.e2:
             print(
                 "\n--------------\n"
                 "Warning:\n"
                 "Some issues have been encountered in the Finite Volume declaration.\n"
                 "This is likely due to your initial grid discretisation. Use some of\n"
                 "the meshing approaches proposed in the pre-processing workflow.\n"
-                "Your grid needs to be a Delaunay with optimal voronoi.\n"
+                "Your grid needs to be a Delaunay with optimal voronoi (C-grid).\n"
                 "--------------\n",
                 flush=True
             )
-        self.larea[np.isnan(self.larea)] = 1.0
+        if issues[0] > 1.e2:
+            self.larea = larea.copy()
+            updatearea(larea)
+
         self.maxarea = np.zeros(1, dtype=np.float64)
         self.maxarea[0] = self.larea.max()
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MIN)
 
-        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
+        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc, larea
         gc.collect()
 
         if MPIrank == 0 and self.verbose:

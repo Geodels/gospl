@@ -2500,7 +2500,6 @@ subroutine globalngbhs(nt, cells, n)
 
 end subroutine globalngbhs 
 
-
 subroutine epsfill(sl, elev, fillz, nb)
 !*****************************************************************************
 ! Perform pit filling using a priority queue approach following Barnes (2015).
@@ -2566,6 +2565,22 @@ subroutine epsfill(sl, elev, fillz, nb)
   return
 
 end subroutine epsfill
+
+subroutine updatearea(narea, nb)
+!*****************************************************************************
+! Update voronoi areas.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision, intent(in) :: narea(nb)
+
+  FVarea = narea
+
+  return
+
+end subroutine updatearea 
 
 subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
                       circumcenter, ngbID, narea, n, nb, m)

@@ -296,6 +296,11 @@ python module _fortran
             integer, optional,check(shape(cells,0)==n),depend(cells) :: n=shape(cells,0)
         end subroutine globalngbhs
 
+        subroutine updatearea(narea,nb)
+            double precision dimension(nb),intent(in) :: narea
+            integer, optional,check(len(narea)>=nb),depend(narea) :: nb=len(narea)
+        end subroutine updatearea
+
         subroutine epsfill(sl,elev,fillz,nb)
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev

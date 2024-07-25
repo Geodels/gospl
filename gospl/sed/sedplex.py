@@ -71,7 +71,7 @@ class SEDMesh(object):
         else:
             # Get erosion rate (m/yr) to volume
             self.Eb.copy(result=self.tmp)
-            
+
         # Get the volume of sediment transported in m3 per year
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed)

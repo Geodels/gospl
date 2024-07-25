@@ -210,7 +210,6 @@ class ReadYaml(object):
 
         try:
             advscheme = domainDict["advect"]
-            self.advscheme = -1
             if advscheme == 'iioe1':
                 self.advscheme = 2
             if advscheme == 'iioe2':
