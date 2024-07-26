@@ -147,9 +147,8 @@ class UnstMesh(object):
         self.larea[np.isnan(self.larea)] = 1.0
         issues = np.zeros(1)
         issues[0] = np.max(np.abs(larea - self.larea))
-
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, issues, op=MPI.MIN)
-        if MPIrank == 0 and issues[0] > 1.e2:
+        if MPIrank == 0 and issues[0] > 1.e2 and self.flatModel:
             print(
                 "\n--------------\n"
                 "Warning:\n"
@@ -160,7 +159,7 @@ class UnstMesh(object):
                 "--------------\n",
                 flush=True
             )
-        if issues[0] > 1.e2:
+        if issues[0] > 1.e2 and self.flatModel:
             self.larea = larea.copy()
             updatearea(larea)
 
