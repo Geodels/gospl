@@ -11,16 +11,19 @@ module meshparams
 
   implicit none
 
+  double precision :: radius
   integer, dimension(:), allocatable :: FVnNb           ! Number of vertex neighbors
   integer, dimension(:), allocatable :: FVgnNb           ! Number of global vertex neighbors
   integer, dimension(:,:), allocatable :: FVnID          ! Index of vertex neighbors
   integer, dimension(:,:), allocatable :: FVgnID          ! Index of global vertex neighbors
+  integer, dimension(:,:), allocatable :: FVnIDfNb         ! Index of vertex neighbors connected face nb  
   double precision, dimension(:), allocatable :: FVarea    ! Voronoi area
   double precision, dimension(:,:), allocatable :: FVeLgt   ! Length btw vertex
   double precision, dimension(:,:), allocatable :: FVvDist   ! Voronoi edge length
   double precision, dimension(:, :), allocatable :: lcoords     ! Vertex coordinates
   double precision, dimension(:, :, :), allocatable :: faceVec  ! Voronoi edge normal vector
-  ! double precision, dimension(:, :, :), allocatable :: midFace
+  double precision, dimension(:, :, :), allocatable :: midFace  ! Voronoi edge mid face coordinates
+  double precision, dimension(:, :), allocatable :: faceVel  ! Voronoi edge mid face velocity
 
   ! Queue node definition: index and elevation
   type node
@@ -318,18 +321,18 @@ subroutine spherical2lonlat(xyz, long, lat)
 
 end subroutine spherical2lonlat
 
-subroutine great_circle_distance(long1, lat1, long2, lat2, radius, d) 
+subroutine great_circle_distance(long1, lat1, long2, lat2, d) 
 !*****************************************************************************
 ! Computes the great circle distance on a spherical body, using the 
 ! Vincenty algorithm.
 
+  use meshparams
   implicit none
 
   double precision, intent(in) :: long1    !! longitude of first site [rad]
   double precision, intent(in) :: lat1     !! latitude of the first site [rad]
   double precision, intent(in) :: long2    !! longitude of the second site [rad]
   double precision, intent(in) :: lat2     !! latitude of the second site [rad]
-  double precision, intent(in) :: radius   !! radius sphere in meters
   double precision, intent(out) :: d       !! great circle distance from 1 to 2 [km]
 
   double precision :: c1,s1,c2,s2,dlon,clon,slon
@@ -353,27 +356,58 @@ subroutine distance(p1, p2, norm)
 !*****************************************************************************
 ! Computes the distance between 2 points along the 2 or 3 dimensions.
   
+  use meshparams
   implicit none
 
   double precision, intent(in) :: p1(3)
   double precision, intent(in) :: p2(3)
   double precision, intent(out) :: norm
 
-  double precision :: vec(3), lon1, lon2, lat1, lat2, radius
+  double precision :: vec(3), lon1, lon2, lat1, lat2, rad
 
   if(p2(3) == 0. .and. p1(3) == 0)then
     vec = p2 - p1
     norm = norm2(vec)
   else
-    radius = norm2(p1)
+    rad = norm2(p1)
     call spherical2lonlat(p1, lon1, lat1) 
     call spherical2lonlat(p2, lon2, lat2)
-    call great_circle_distance(lon1, lat1,lon2, lat2, radius, norm)
+    call great_circle_distance(lon1, lat1,lon2, lat2, norm)
   endif 
 
   return
 
 end subroutine distance
+
+subroutine projecttangentplane(p, v, pv)
+!*****************************************************************************
+! Project a vector v at point P onto the tangent plane of a sphere at P.
+! Parameters:
+!   p (array-like): The point on the sphere (x, y, z).
+!   v (array-like): The vector to be projected (vx, vy, vz).
+! Returns:
+!   pv array: The projected vector on the tangent plane.
+
+  implicit none
+
+  double precision, intent(in) :: p(3)
+  double precision, intent(in) :: v(3)
+  double precision, intent(out) :: pv(3)
+
+  double precision :: n(3), v_dot_n
+
+  ! Calculate the normal vector n at point p (normalized P)
+  n = p/norm2(p)
+    
+  ! Calculate the dot product of v and n
+  v_dot_n = dot_product(v, n)
+    
+  ! Calculate the projection of v onto the tangent plane
+  pv = v - v_dot_n * n
+    
+  return 
+
+end subroutine projecttangentplane
   
 subroutine slerpmidpt(p1, p2, mpt)
 !*****************************************************************************
@@ -403,6 +437,60 @@ subroutine slerpmidpt(p1, p2, mpt)
   return
 
 end subroutine slerpmidpt
+
+subroutine parallel_transport(pt1, pt2, v1, v2)
+!*****************************************************************************
+! Performs parallel transport along the unique minimizing geodesic connecting p1 and p2, 
+! if it exists, on the sphere.    
+! pt1: A vector (or column matrix) representing a point on the manifold.
+! pt2: A vector (or column matrix) representing a point on the manifold.
+! v1: A vector (or column matrix) tangent to p1. 
+! v2: A vector tangent to p2.
+! Follows: https://rdrr.io/cran/GeodRegr/src/R/others.R
+
+  implicit none
+
+  double precision, intent(in) :: pt1(3)
+  double precision, intent(in) :: pt2(3)
+  double precision, intent(in) :: v1(3)
+  double precision, intent(out) :: v2(3)
+
+  double precision :: p1(3), p2(3), w(3), invar(3), pv1(3), theta
+  double precision :: e1(3), e2(3), a, t, magp1, magp2, tang(3)
+
+  call projecttangentplane(pt1, v1, pv1)
+
+  ! Set on the unit sphere
+  magp1 = norm2(pt1)
+  magp2 = norm2(pt2)
+  p1 = pt1/magp1
+  p2 = pt2/magp2
+
+  ! Log map
+  a = max(min(dot_product(p1, p2), 1.0), -1.0)
+  theta = acos(a)
+  tang = p2 - a * p1
+  t = norm2(tang)
+  if(t == 0)then
+    w(1:3) = 0
+  else
+    w = theta * (tang / t)
+  endif
+
+  t = norm2(w)
+  if(t == 0)then
+    v2 = pv1
+  else
+    e1 = p1
+    e2 = w / t
+    a = dot_product(pv1, e2)
+    invar = pv1 - a * e2
+    v2 = a * (cos(t) * e2 - sin(t) * e1) + invar
+  endif
+
+  return
+
+end subroutine parallel_transport
 
 subroutine slerpvec(p1, p2, t, vec)
 !*****************************************************************************
@@ -743,7 +831,58 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
-subroutine advecupwind(nb, vel, dt, lcoeff)
+subroutine getfacevelocity(nb, vel)
+!*****************************************************************************
+! Update the face velocity of each vertex-based voronoi and compute the dot product
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+  double precision, intent(in) :: vel(nb, 3)
+
+  integer :: k, p, n
+  double precision :: v(3), v1(3), v2(3)
+
+  if(.not. allocated(faceVel)) allocate(faceVel(nb,12))
+  faceVel(:,:) = 0.0
+
+  if(radius == 0.0)then
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            n = FVnID(k,p)+1
+            ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation i.e. the voronoi mesh has its edges on the middle of the nodes edges)
+            v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
+            faceVel(k,p) = dot_product(v(1:3), faceVec(k,p,1:3))
+          endif
+        enddo
+      endif
+    enddo
+  else
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            ! Velocity at the face is based on parallel transport on the sphere from the vertex center to the middle of the voronoi edge.
+            call parallel_transport(lcoords(k, 1:3), midFace(k,p,1:3), vel(k, 1:3), v1(1:3))
+            n = FVnID(k,p)+1
+            call parallel_transport(lcoords(n, 1:3), midFace(k,p,1:3), vel(n, 1:3), v2(1:3))
+            v = 0.5 * (v1(1:3) + v2(1:3))
+            faceVel(k,p) = dot_product(v(1:3), faceVec(k,p,1:3))
+          endif
+        enddo
+      endif
+    enddo
+
+  endif
+
+  return
+
+end subroutine getfacevelocity
+
+subroutine advecupwind(nb, dt, lcoeff)
 !*****************************************************************************
 ! Define advection coefficients based on a finite volume spatial
 ! discretisation using first order upwind scheme solved implicitly.
@@ -755,12 +894,10 @@ subroutine advecupwind(nb, vel, dt, lcoeff)
     integer :: nb
 
     double precision, intent(in) :: dt
-    double precision, intent(in) :: vel(nb, 3)
     double precision, intent(out) :: lcoeff(nb,13)
 
-    integer :: k, p, n
-    double precision :: v(3), dotv
-    ! double precision :: fluxin, fluxout, flux
+    integer :: k, p
+    double precision :: dotv
 
     lcoeff = 0.
 
@@ -769,24 +906,10 @@ subroutine advecupwind(nb, vel, dt, lcoeff)
       if(FVarea(k)>0)then
         do p = 1, FVnNb(k)
           if(FVvDist(k,p)>0.)then
-            n = FVnID(k,p)+1
-            ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
-            v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
-            ! We assume that the velocity field across the voronoi cell is equal to the velocity from the vertex
-            ! v = vel(k, 1:3)
-
-            ! Defining the outward flux (dot product btw face normal and velocity) 
-            dotv = dot_product(v(1:3), faceVec(k,p,1:3))
-            
-            ! fluxin = dt * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
-            ! fluxout = dt * min(dotv, 0.) * FVvDist(k,p) / FVarea(k)
-            
+            dotv = faceVel(k,p)
             ! Matrix coefficients
-            ! lcoeff(k,1) = lcoeff(k,1) + fluxin 
-            ! lcoeff(k,p+1) = fluxout
             lcoeff(k,1) = lcoeff(k,1) - 0.5 * dt * (dotv - abs(dotv)) * FVvDist(k,p) / FVarea(k)
             lcoeff(k,p+1) = 0.5 * dt * (dotv - abs(dotv)) * FVvDist(k,p) / FVarea(k)
-
           endif
         enddo
       endif
@@ -830,7 +953,7 @@ subroutine getrange(nb, data, dmin, dmax)
 
 end subroutine getrange
 
-subroutine adveciioe(nb, vel, dt, nbout, lcoeff, rcoeff)
+subroutine adveciioe(nb, dt, nbout, lcoeff, rcoeff)
 !*****************************************************************************
 ! Define advection coefficients based on a finite volume spatial
 ! discretisation using the Inflow Implicit and Outflow Explicit scheme (I2EO).
@@ -842,15 +965,13 @@ subroutine adveciioe(nb, vel, dt, nbout, lcoeff, rcoeff)
   integer :: nb
 
   double precision, intent(in) :: dt
-  double precision, intent(in) :: vel(nb, 3)
 
   integer, intent(out) :: nbout(nb)
   double precision, intent(out) :: lcoeff(nb,13)
   double precision, intent(out) :: rcoeff(nb,13)
 
-  integer :: k, p, n
-  double precision :: v(3), dotv
-  double precision :: fluxin, fluxout
+  integer :: k, p
+  double precision :: dotv, fluxin, fluxout
 
   lcoeff = 0.
   rcoeff = 0.
@@ -863,15 +984,9 @@ subroutine adveciioe(nb, vel, dt, nbout, lcoeff, rcoeff)
     if(FVarea(k)>0)then
       do p = 1, FVnNb(k)
         if(FVvDist(k,p)>0.)then
-          n = FVnID(k,p)+1
-          ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
-          v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
-          ! We assume that the velocity field across the voronoi cell is equal to the velocity from the vertex
-          ! v = vel(k, 1:3)
-
           ! Defining the inward flux (inverse of the dot product btw face normal and velocity) 
-          dotv = -dot_product(v(1:3), faceVec(k,p,1:3))
-
+          dotv = -faceVel(k,p)
+          
           ! Number of nonzero outflows
           if(dotv < 0.) nbout(k) = nbout(k) + 1
 
@@ -898,7 +1013,7 @@ subroutine adveciioe(nb, vel, dt, nbout, lcoeff, rcoeff)
 
 end subroutine adveciioe
 
-subroutine adveciioe2(nb, vel, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
+subroutine adveciioe2(nb, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
 !*****************************************************************************
 ! Define advection coefficients based on a finite volume spatial
 ! discretisation using the Inflow Implicit and Outflow Explicit scheme (I2EO).
@@ -910,7 +1025,6 @@ subroutine adveciioe2(nb, vel, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
   integer :: nb
 
   double precision, intent(in) :: dt
-  double precision, intent(in) :: vel(nb, 3)
   integer, intent(in) :: nbout(nb)
   double precision, intent(in) :: var(nb)
   double precision, intent(in) :: vmin(nb)
@@ -919,10 +1033,9 @@ subroutine adveciioe2(nb, vel, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
   double precision, intent(out) :: rcoeff(nb,13)
 
   integer :: k, p, n, q
-  double precision :: v(3), dotv
   double precision :: thetain(nb,12), thetaout(nb,12)
   double precision :: aout, fluxin, fluxout
-  double precision :: val
+  double precision :: dotv, val
 
   lcoeff = 0.
   rcoeff = 0.
@@ -933,8 +1046,7 @@ subroutine adveciioe2(nb, vel, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
     if(FVarea(k)>0)then
       do p = 1, FVnNb(k)
         n = FVnID(k,p)+1
-        v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
-        dotv = -dot_product(v(1:3), faceVec(k,p,1:3))
+        dotv = -faceVel(k,p)
         aout = min(dotv, 0.) * FVvDist(k,p) 
         if(aout*(var(n) - var(k))>0)then
           val = FVarea(k) * (vmax(k) - var(k))
@@ -956,12 +1068,8 @@ subroutine adveciioe2(nb, vel, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
     if(FVarea(k)>0)then
       do p = 1, FVnNb(k)
         n = FVnID(k,p)+1
-        inner: do q = 1, FVnNb(n)
-          if(k == FVnID(n,q)+1)then
-            thetain(k,p) = 1.0 - thetaout(n,q)
-            exit inner
-          endif
-        enddo inner
+        q = FVnIDfNb(k,p)
+        thetain(k,p) = 1.0 - thetaout(n,q)
       enddo
     endif
   enddo
@@ -971,14 +1079,8 @@ subroutine adveciioe2(nb, vel, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
     if(FVarea(k)>0)then
       do p = 1, FVnNb(k)
         if(FVvDist(k,p)>0.)then
-          n = FVnID(k,p)+1
-          ! Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
-          v = 0.5 * (vel(k, 1:3) + vel(n, 1:3))
-          ! We assume that the velocity field across the voronoi cell is equal to the velocity from the vertex
-          ! v = vel(k, 1:3)
-
           ! Defining the inward flux (inverse of the dot product btw face normal and velocity) 
-          dotv = -dot_product(v(1:3), faceVec(k,p,1:3))
+          dotv = -faceVel(k,p)
 
           ! Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
           fluxin = dt * thetain(k,p) * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
@@ -2601,7 +2703,6 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
 
   integer, intent(out) :: ngbID(nb, 12)
   double precision, intent(out) :: narea(nb)
-  ! double precision, intent(out) :: facemid(nb,12,3)
 
   integer :: i, n1, n2, k, l, p, eid, cid
   integer :: e, id, nbngbs, ngbIDv
@@ -2609,7 +2710,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   integer :: edgeNb(3), edges(3,2), cell_ids(nb, 12)
 
   double precision :: coords0(3), coordsID(3), cc(3), triarea
-  double precision :: midpoint(3), dist, vnorm, radius
+  double precision :: midpoint(3), dist, vnorm
 
   logical :: inside
 
@@ -2621,7 +2722,8 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   if(allocated(FVvDist)) deallocate(FVvDist)
   if(allocated(lcoords)) deallocate(lcoords)
   if(allocated(faceVec)) deallocate(faceVec)
-  ! if(allocated(midFace)) deallocate(midFace)
+  if(allocated(FVnIDfNb)) deallocate(FVnIDfNb)
+  if(allocated(midFace)) deallocate(midFace)
 
   allocate(FVarea(nb))
   allocate(FVnNb(nb))
@@ -2630,7 +2732,7 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   allocate(FVvDist(nb,12))
   allocate(lcoords(nb,3))
   allocate(faceVec(nb,12,3))
-  ! allocate(midFace(nb,12,3))
+  allocate(FVnIDfNb(nb,12))
 
   cell_ids = -1
   edge = -1
@@ -2639,12 +2741,15 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   FVeLgt = 0.
   FVvDist = 0.
   FVarea = 0.
-  ! midFace = -1.0
-  ! facemid = -1.0
+  FVnIDfNb = -1
 
   lcoords = coords
   radius = 0.
   if(lcoords(1,3)>0) radius = norm2(lcoords(1,1:3))
+  if(radius > 0.)then
+    allocate(midFace(nb,12,3))
+    midFace = -1.0
+  endif
 
   ! Find all cells surrounding a given vertice
   do i = 1, n
@@ -2762,8 +2867,8 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
             call slerpvec(coords0(1:3), midpoint(1:3), 0.9_8, faceVec(k,id,1:3))
             call striarea(coords0(1:3), midpoint(1:3), cc, triarea)
             FVarea(k) = FVarea(k) + triarea * radius**2
+            midFace(k,id,1:3) = midpoint(1:3) / norm2(midpoint(1:3))
           endif
-          ! midFace(k,id,1:3) = midpoint(1:3) / norm2(midpoint(1:3))
         endif
       enddo
     enddo lp2
@@ -2774,6 +2879,17 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
 
   do k = 1, nb
     if(isnan(FVarea(k))) FVarea(k) = 0.0
+    if(FVarea(k)>0)then
+      do p = 1, FVnNb(k)
+        n = FVnID(k,p)+1
+        inner: do l = 1, FVnNb(n)
+          if(k == FVnID(n,l)+1)then
+            FVnIDfNb(k,p) = l
+            exit inner
+          endif
+        enddo inner
+      enddo
+    endif
   enddo
 
   return

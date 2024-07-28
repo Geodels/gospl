@@ -16,6 +16,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import advecupwind
     from gospl._fortran import fitedges
     from gospl._fortran import getrange
+    from gospl._fortran import getfacevelocity
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -87,6 +88,16 @@ class Tectonics(object):
                 if self.advscheme == 0:
                     self._readAdvectionData(mdata[key], timer)
                     self._advectPlates()
+                else:
+                    # Get the velocity from the input file.
+                    nodeVel = np.zeros((self.lpoints, 3))
+                    if self.flatModel:
+                        nodeVel[:, :2] = self.hdisp[:, :2]
+                    else:
+                        nodeVel = self.hdisp.copy()
+                    # Store velocity on voronoi edges and dot product based on
+                    # vecocity vector and face normals.
+                    getfacevelocity(self.lpoints, nodeVel)
             else:
                 self.hdisp = None
 
@@ -202,23 +213,16 @@ class Tectonics(object):
         if self.advscheme == 1:
             iioe = False
 
-        # Get the velocity from the input file.
-        nodeVel = np.zeros((self.lpoints, 3))
-        if self.flatModel:
-            nodeVel[:, :2] = self.hdisp[:, :2]
-        else:
-            nodeVel = self.hdisp.copy()
-
         # Advection matrix construction
         if iioe:
             if self.advscheme == 3:
                 # Minimum and maximum in a local neighborhood
                 hL = self.hLocal.getArray().copy()
                 hmin, hmax = getrange(self.lpoints, hL)
-            nbOut, lCoeffs, rCoeffs = adveciioe(self.lpoints, nodeVel, self.dt)
+            nbOut, lCoeffs, rCoeffs = adveciioe(self.lpoints, self.dt)
             advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
         else:
-            lCoeffs = advecupwind(self.lpoints, nodeVel, self.dt)
+            lCoeffs = advecupwind(self.lpoints, self.dt)
             advMat_left = self._buildAdvecMat(iioe, lCoeffs)
 
         # Advect elevations
@@ -239,7 +243,7 @@ class Tectonics(object):
                 self.dm.localToGlobal(self.tmpL, self.tmp)
                 excess = self.tmp.sum()
                 if excess > 0.:
-                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, nodeVel, self.dt, nbOut, hL, hmin, hmax)
+                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, hL, hmin, hmax)
                     advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
                     advMat_right.mult(self.hGlobal, self.tmp1)
                     self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
@@ -280,7 +284,7 @@ class Tectonics(object):
                 self.dm.localToGlobal(self.tmpL, self.tmp)
                 excess = self.tmp.sum()
                 if excess > 0.:
-                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, nodeVel, self.dt, nbOut, edL, edmin, edmax)
+                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, edL, edmin, edmax)
                     advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
                     advMat_right.mult(self.cumED, self.tmp1)
                     self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
@@ -310,7 +314,7 @@ class Tectonics(object):
             del rCoeffs
 
         advMat_left.destroy()
-        del edL, nedL, hL, nhL, nodeVel, lCoeffs
+        del edL, nedL, hL, nhL, lCoeffs
         # del edmin, edmax, hmin, hmax
         gc.collect()
 

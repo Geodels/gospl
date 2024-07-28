@@ -13,9 +13,20 @@ python module _fortran
             double precision dimension(nb,13),intent(out),depend(nb) :: dcoeff
         end subroutine sethillslopecoeff
         
-        subroutine advecupwind(nb,vel,dt,lcoeff)
+        subroutine getfacevelocity(nb,vel)
             integer :: nb
             double precision dimension(nb,3),intent(in),depend(nb) :: vel
+        end subroutine getfacevelocity
+
+        subroutine parallel_transport(pt1,pt2,v1,v2)
+            double precision dimension(3),intent(in) :: pt1
+            double precision dimension(3),intent(in) :: pt2
+            double precision dimension(3),intent(in) :: v1
+            double precision dimension(3),intent(out) :: v2
+        end subroutine parallel_transport
+
+        subroutine advecupwind(nb,dt,lcoeff)
+            integer :: nb
             double precision, intent(in) :: dt
             double precision dimension(nb,13),intent(out),depend(nb) :: lcoeff
         end subroutine advecupwind
@@ -27,18 +38,16 @@ python module _fortran
             double precision dimension(nb),intent(out),depend(nb) :: dmax
         end subroutine getrange
 
-        subroutine adveciioe(nb,vel,dt,nbout,lcoeff,rcoeff)
+        subroutine adveciioe(nb,dt,nbout,lcoeff,rcoeff)
             integer :: nb
-            double precision dimension(nb,3),intent(in),depend(nb) :: vel
             double precision, intent(in) :: dt
             integer dimension(nb),intent(out),depend(nb) :: nbout
             double precision dimension(nb,13),intent(out),depend(nb) :: lcoeff
             double precision dimension(nb,13),intent(out),depend(nb) :: rcoeff
         end subroutine adveciioe
 
-        subroutine adveciioe2(nb,vel,dt,nbout,var,vmin,vmax,lcoeff,rcoeff)
+        subroutine adveciioe2(nb,dt,nbout,var,vmin,vmax,lcoeff,rcoeff)
             integer :: nb
-            double precision dimension(nb,3),intent(in),depend(nb) :: vel
             double precision, intent(in) :: dt
             integer dimension(nb),intent(in),depend(nb) :: nbout
             double precision dimension(nb),intent(in),depend(nb) :: var
