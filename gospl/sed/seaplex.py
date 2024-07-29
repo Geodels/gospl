@@ -157,7 +157,7 @@ class SEAMesh(object):
 
         # Send elevation + eps globally
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
-        rcv, _, wght = mfdrcvrs(12, 1.0e-2, fillEPS[self.locIDs], -1.0e6)
+        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillEPS[self.locIDs], -1.0e6)
 
         # Set borders nodes
         if self.flatModel:

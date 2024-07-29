@@ -1454,6 +1454,7 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 
   integer :: k, n, p, kk
   double precision :: slp(12),dst(12),val,slope(12)
+  double precision :: e, fexp
   integer :: id(12)
 
   rcv = -1
@@ -1464,6 +1465,20 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
     if(elev(k)<=sl)then
       rcv(k,1:nRcv) = k-1
     else
+      ! Determination of flow-partition exponent using the maximum downslope gradient (Qin et al. 2007)
+      e = 0.
+      do p = 1, FVnNb(k)
+        n = FVnID(k,p)+1
+        if(n>0 .and. FVeLgt(k,p)>0.)then
+          val = (elev(k) - elev(n))/FVeLgt(k,p) 
+          e = max(val,e) 
+        endif
+      enddo
+      if(e>0)then
+        fexp = 8.9 * min(e,1.0) + exp
+      else
+        fexp = 1.0
+      endif
       slp = 0.
       id = 0
       val = 0.
@@ -1471,7 +1486,7 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
       do p = 1, FVnNb(k)
         n = FVnID(k,p)+1
         if(n>0 .and. FVeLgt(k,p)>0.)then
-          val = (elev(k) - elev(n))**exp/FVeLgt(k,p)
+          val = (elev(k) - elev(n))**fexp/FVeLgt(k,p)
           if(val>0.)then
             kk = kk + 1
             slp(kk) = val
@@ -3152,6 +3167,9 @@ end subroutine filllabel
 !!           FLEXURE PROCESSES FUNCTIONS            !!
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
 
 subroutine four1(data1,nn,isign)
 !*****************************************************************************

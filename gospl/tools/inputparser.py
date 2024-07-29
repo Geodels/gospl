@@ -124,10 +124,10 @@ class ReadYaml(object):
         except KeyError:
             self.flowDir = 8
 
-        try:
-            self.flowExp = domainDict["flowexp"]
-        except KeyError:
-            self.flowExp = 0.5
+        # try:
+        #     self.flowExp = domainDict["flowexp"]
+        # except KeyError:
+        self.flowExp = 1.1
 
         try:
             self.boundCond = domainDict["bc"]
