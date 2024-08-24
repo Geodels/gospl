@@ -142,7 +142,7 @@ html_favicon = "images/favicon.ico"
 
 
 html_sidebars = {
-    "index": "search-button-field",
+    "index": ["search-button-field"],
     "**": ["search-button-field", "sidebar-nav-bs"]
 }
 
