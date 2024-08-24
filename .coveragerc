@@ -1,5 +1,0 @@
-[run]
-source = gospl
-omit =
-    *tests*
-    gospl/tools/*
