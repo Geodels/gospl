@@ -1,9 +1,5 @@
 .. _model_ref:
 
-.. automodule:: gospl.model
-
-.. currentmodule:: gospl.model
-
 ==============
 Class Model
 ==============

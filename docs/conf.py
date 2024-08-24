@@ -61,7 +61,7 @@ author = "Tristan Salles"
 # release = version
 
 # The short X.Y version
-version = "1.1.2"
+version = "2024.09.01"
 # The full version, including alpha/beta/rc tags
 release = version
 
