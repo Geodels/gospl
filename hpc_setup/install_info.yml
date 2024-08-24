@@ -1,0 +1,96 @@
+# Connecting to GADI 
+
+# Login
+# ssh USERXXX@gadi.nci.org.au
+
+# Get the archived codes and testing examples for HPC
+# wget https://raw.githubusercontent.com/Geodels/goSPL-examples/main/hpc-setup/gospl_NCI.tar
+
+# To copy local data to project or home or scratch (q97 is the project name)
+# scp -r data.zip USERXXX@gadi-dm.nci.org.au:/g/data/q97/USERXXX
+# scp -r data.zip USERXXX@gadi-dm.nci.org.au:/home/XXX/USERXXX
+# scp -r data.zip USERXXX@gadi-dm.nci.org.au:/scratch/q97/USERXXX
+
+################################################################
+#       Installing the virtual environment on Gadi NCI.        #
+################################################################
+
+# Install goSPL environment libraries (doing this in my home directory)
+module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
+export PYTHONPATH=$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH # access to mpi4py lib
+
+# Virtual environment creation
+python3 -m venv --system-site-packages /home/XXX/USERXXX/envi_gospl
+source /home/XXX/USERXXX/envi_gospl/bin/activate
+
+# Required packages
+python3 -m pip cache purge
+python3 -m pip install pyarrow        # (17.0.0)
+python3 -m pip install  mpi4py        # (4.0.0)
+python3 -m pip install netCDF4        # (1.7.1)
+python3 -m pip install  h5py          # (3.11.0)
+python3 -m pip install vtk            # (9.3.1)
+python3 -m pip install xarray         # (2024.7.0)
+python3 -m pip install meshio         # (5.3.5)
+python3 -m pip install ruamel.yaml    # (0.18.6)
+python3 -m pip install numpy-indexed  # (0.3.7)
+python3 -m pip install rioxarray      # (0.17.0)
+python3 -m pip install gflex          # (1.2.0)
+python3 -m pip install meson_python   # (0.16.0)
+
+# Installing isoFlex (cd to isoFlex repo)
+python3 -m pip install --no-deps .
+
+# Installing goSPL (cd to goSPL repo)
+python3 -m pip install --no-deps .
+
+################################################################
+#   Using the provided tests, you can check that it worked.    #
+#   this is a quick test here, proper ones will be done        #
+#   with the PBS script below.                                 #
+################################################################
+
+module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7 
+export PYTHONPATH=$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH
+
+# Activate the virtual environment (if not already done)
+source /home/XXX/USERXXX/lem/bin/activate
+
+# Navigate to the corresponding directory to test goSPL
+mpirun -np 10 python3 runModel.py -i input-strati.yml -v
+
+# Stop virtual environment
+deactivate
+
+################################################################
+#          Example of PBS script to run goSPL tests.           #
+################################################################
+
+#!/bin/bash
+#PBS -l ncpus=48
+#PBS -l mem=60GB
+#PBS -l jobfs=10GB
+#PBS -q normal
+#PBS -P q97
+#PBS -l walltime=00:10:00
+#PBS -l storage=gdata/q97+scratch/q97
+#PBS -l wd
+#PBS -M tristan.salles@sydney.edu.au
+#PBS -m abe
+
+# Load required modules
+module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
+export PYTHONPATH=$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH 
+
+# Activate the virtual environment 
+# (obviously XXX/USERXXX will need to be changed to your home directory)
+source /home/XXX/USERXXX/envi_gospl/bin/activate
+
+# Simulation runs
+cd stratigraphy
+mpirun -np $PBS_NCPUS python3 runModel.py -i input-strati.yml -v
+
+cd ../global
+mpirun -np $PBS_NCPUS python3 runModel.py -i input-mardep.yml -v
+
+deactivate

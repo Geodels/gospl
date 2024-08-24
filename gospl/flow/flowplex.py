@@ -237,10 +237,7 @@ class FAMesh(object):
             gc.collect()
 
         # Store flow accumulation matrix
-        if dep is None:
-            self.fMat = flowMat.transpose().copy()
-        else:
-            self.fDepMat = flowMat.transpose().copy()
+        self.fMat = flowMat.transpose().copy()
 
         flowMat.destroy()
 
@@ -692,9 +689,9 @@ class FAMesh(object):
 
         subksps = pc.getFieldSplitSubKSP()
         subksps[0].setType("preonly")
-        subksps[0].getPC().setType("hypre")
+        subksps[0].getPC().setType("gasm")
         subksps[1].setType("preonly")
-        subksps[1].getPC().setType("hypre")
+        subksps[1].getPC().setType("gasm")
 
         ksp.solve(rhs_vec, hq_vec)
         r = ksp.getConvergedReason()
@@ -832,17 +829,17 @@ class FAMesh(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
-
-        # Update erosion/deposition rates
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        add_rate = self.tmpL.getArray() / self.dt
-        self.tmpL.setArray(add_rate)
-        self.tmpL.copy(result=self.EbLocal)
+        self.tmp1.pointwiseMult(self.tmp, self.areaGlobal)
 
         # Update stratigraphic layers
         if self.stratNb > 0:
             self.erodeStrat()
             self.deposeStrat()
+
+        # Update erosion/deposition rates
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        add_rate = self.tmpL.getArray() / self.dt
+        self.EbLocal.setArray(add_rate)
 
         if MPIrank == 0 and self.verbose:
             print(

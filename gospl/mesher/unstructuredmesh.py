@@ -4,7 +4,6 @@ import sys
 import vtk
 
 import warnings
-import meshplex
 import petsc4py
 import numpy as np
 import pandas as pd
@@ -16,8 +15,10 @@ from time import process_time
 from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import globalngbhs
     from gospl._fortran import definetin
-    from gospl._fortran import getbc
+    from gospl._fortran import fitedges
+    from gospl._fortran import updatearea
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -39,6 +40,10 @@ class UnstMesh(object):
             - the length of the Voronoi faces shared by each node with his neighbours.
 
     In addition to mesh defintions, the class declares several functions related to forcing conditions (*e.g.* paleo-precipitation maps, tectonic (vertical and horizontal) displacements, stratigraphic layers...). These functions are defined within the `UnstMesh` class as they rely heavely on the mesh structure.
+
+    .. important::
+
+        The grid (2D or spherical) requires locally-orthogonal Voronoi/Delaunay staggering, or an unstructured C-grid type numerical formulation as described in `Engwirda 2017 <https://arxiv.org/pdf/1611.08996>`_
 
     Finally a function to clean all PETSc variables is defined and called at the end of a simulation.
     """
@@ -102,8 +107,6 @@ class UnstMesh(object):
         .. important::
             The mesh structure is built locally on a single partition of the global mesh.
 
-        This function uses the `meshplex` `library <https://meshplex.readthedocs.io>`_ to compute from the list of coordinates and cells the volume of each voronoi and their respective characteristics.
-
         Once the voronoi definitions have been obtained a call to the fortran subroutine `definetin` is performed to order each node and the dual mesh components, it records:
 
         - all cells surrounding a given vertice,
@@ -113,42 +116,58 @@ class UnstMesh(object):
 
         """
 
-        # Create mesh structure with meshplex
+        # Create mesh structure and voronoi parameters used for
+        # Centroidal Voronoi Tessellation and Spherical Centroidal Voronoi
+        # Tessellation
         t0 = process_time()
-        Tmesh = meshplex.MeshTri(self.lcoords, self.lcells)
-        self.larea = np.abs(Tmesh.control_volumes)
-        self.larea[np.isnan(self.larea)] = 1.0
-        self.maxarea = np.zeros(1, dtype=np.float64)
-        self.maxarea[0] = self.larea.max()
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MIN)
+        Tmesh = self.initVoronoi(self.lcoords, self.lcells)
+        larea = np.abs(self.control_volumes)
+        larea[np.isnan(larea)] = 1.0
 
         # Voronoi and simplices declaration
-        Tmesh.create_edges()
-        cc = Tmesh.cell_circumcenters
-        if meshplex.__version__ >= "0.16.0":
-            edges_nodes = Tmesh.edges["points"]
-            cells_nodes = Tmesh.cells("points")
-            cells_edges = Tmesh.cells("edges")
-        elif meshplex.__version__ >= "0.14.0":
-            edges_nodes = Tmesh.edges["points"]
-            cells_nodes = Tmesh.cells["points"]
-            cells_edges = Tmesh.cells["edges"]
-        else:
-            edges_nodes = Tmesh.edges["nodes"]
-            cells_nodes = Tmesh.cells["nodes"]
-            cells_edges = Tmesh.cells["edges"]
+        self.create_edges()
+        cc = self.cell_circumcenters
+        if not self.flatModel:
+            # Ensure voronoi points are properly set on the sphere
+            radius = np.linalg.norm(self.lcoords[0])
+            cc = cc * (radius / np.linalg.norm(cc, axis=1)).reshape((len(cc), 1))
+
+        edges_nodes = self.edges["nodes"]
+        cells_nodes = self.cells["nodes"]
+        cells_edges = self.cells["edges"]
 
         # Finite volume discretisation
-        self.FVmesh_ngbID, self.edgeMax = definetin(
+        self.FVmesh_ngbID, self.larea = definetin(
             self.lcoords,
             cells_nodes,
             cells_edges,
             edges_nodes,
-            self.larea,
             cc.T,
         )
+        self.larea[np.isnan(self.larea)] = 1.0
+        issues = np.zeros(1)
+        issues[0] = np.max(np.abs(larea - self.larea))
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, issues, op=MPI.MIN)
+        if MPIrank == 0 and issues[0] > 1.e2 and self.flatModel:
+            print(
+                "\n--------------\n"
+                "Warning:\n"
+                "Some issues have been encountered in the Finite Volume declaration.\n"
+                "This is likely due to your initial grid discretisation. Use some of\n"
+                "the meshing approaches proposed in the pre-processing workflow.\n"
+                "Your grid needs to be a Delaunay with optimal voronoi (C-grid).\n"
+                "--------------\n",
+                flush=True
+            )
+        if issues[0] > 1.e2 and self.flatModel:
+            self.larea = larea.copy()
+            updatearea(larea)
 
-        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc
+        self.maxarea = np.zeros(1, dtype=np.float64)
+        self.maxarea[0] = self.larea.max()
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MIN)
+
+        del Tmesh, edges_nodes, cells_nodes, cells_edges, cc, larea
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
@@ -168,8 +187,6 @@ class UnstMesh(object):
         self.lLatLon = np.zeros((self.lpoints, 2))
         self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
         self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
-        self.lLatLon[:, 0] = np.mod(np.degrees(self.lLatLon[:, 0]) + 90, 180.0)
-        self.lLatLon[:, 1] = np.mod(np.degrees(self.lLatLon[:, 1]) + 180.0, 360.0)
 
         return
 
@@ -264,6 +281,11 @@ class UnstMesh(object):
         self.mpoints = len(self.mCoords)
         gZ = loadData[self.infoElev]
         self.mCells = loadData[self.infoCells].astype(int)
+
+        # Get global mesh vertex neighbors
+        if MPIrank == 0:
+            globalngbhs(self.mpoints, self.mCells)
+
         self.vtkMesh = None
         self.flatModel = False
         if MPIrank == 0 and self.verbose:
@@ -411,7 +433,7 @@ class UnstMesh(object):
                 flush=True,
             )
 
-        # Create mesh structure with meshplex
+        # Create mesh structure
         self._meshStructure()
 
         # Get local mesh borders not included in the shadow regions for parallel pit filling
@@ -437,6 +459,7 @@ class UnstMesh(object):
         self.bL = self.hLocal.duplicate()
         self.rainNb = -1
         self.flexNb = -1
+        self.teNb = -1
         self.sedfactNb = -1
 
         del tree, distances, tmp2
@@ -543,7 +566,9 @@ class UnstMesh(object):
         # Sea level
         if self.tNow == self.tStart:
             self.sealevel = self.seafunction(self.tNow)
+            self.oldsealevel = self.sealevel.copy()
         else:
+            self.oldsealevel = self.sealevel.copy()
             self.sealevel = self.seafunction(self.tNow + self.dt)
 
         # Climate information
@@ -569,13 +594,21 @@ class UnstMesh(object):
         if self.flatModel:
             tmp = self.hLocal.getArray().copy()
             if self.south == 0 and len(self.southPts) > 0:
-                tmp[self.southPts] = getbc(len(self.southPts), tmp, self.southPts)
+                # tmp[self.southPts] = getbc(len(self.southPts), tmp, self.southPts)
+                tmp[self.southPts] = -1.e8
+                tmp = fitedges(tmp)
             if self.north == 0 and len(self.northPts) > 0:
-                tmp[self.northPts] = getbc(len(self.northPts), tmp, self.northPts)
+                # tmp[self.northPts] = getbc(len(self.northPts), tmp, self.northPts)
+                tmp[self.northPts] = -1.e8
+                tmp = fitedges(tmp)
             if self.east == 0 and len(self.eastPts) > 0:
-                tmp[self.eastPts] = getbc(len(self.eastPts), tmp, self.eastPts)
+                # tmp[self.eastPts] = getbc(len(self.eastPts), tmp, self.eastPts)
+                tmp[self.eastPts] = -1.e8
+                tmp = fitedges(tmp)
             if self.west == 0 and len(self.westPts) > 0:
-                tmp[self.westPts] = getbc(len(self.westPts), tmp, self.westPts)
+                # tmp[self.westPts] = getbc(len(self.westPts), tmp, self.westPts)
+                tmp[self.westPts] = -1.e8
+                tmp = fitedges(tmp)
             self.hLocal.setArray(tmp)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
 

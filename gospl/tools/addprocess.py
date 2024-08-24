@@ -3,9 +3,11 @@ import gc
 import sys
 import petsc4py
 import numpy as np
+import pandas as pd
 
 from mpi4py import MPI
 from scipy import spatial
+from gflex.f2d import F2D
 from time import process_time
 
 petsc4py.init(sys.argv)
@@ -15,6 +17,14 @@ MPIcomm = MPI.COMM_WORLD
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import flexure
+    libisoglob = True
+    try:
+        import isoflex
+    except ModuleNotFoundError:
+        libisoglob = False
+        pass
+    if libisoglob:
+        from isoflex.model import Model as iflex
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -39,17 +49,25 @@ class GridProcess(object):
         self.flex = None
         self.xIndices = None
 
+        self.grav = 9.81
+
         if self.flexOn:
+            self.rho_water = 1030.0
             self.localFlex = np.zeros(self.lpoints)
-            self.boundflex = self.boundCond.replace('0', '2')
-            self.boundflex = self.boundflex.replace('1', '0')
-            self.boundflex = self.boundflex.replace('2', '1')
+            if self.flex_method == 'FFT':
+                self.boundflex = self.boundCond.replace('0', '2')
+                self.boundflex = self.boundflex.replace('1', '0')
+                self.boundflex = self.boundflex.replace('2', '1')
+            self.globalfData = None
+            self.globalfStep = 0
         if self.oroOn:
             self.oroEPS = np.finfo(float).eps
 
         if self.flexOn or self.oroOn:
+            # self.flex_ngbID, self.fmaxnb = stencil(self.lpoints)
+
             # Build regular grid for flexure or orographic precipitation calculation
-            if MPIrank == 0:
+            if MPIrank == 0 and self.flex_method != 'global':
                 self._buildRegGrid()
 
         return
@@ -122,7 +140,7 @@ class GridProcess(object):
         self.yFrac[mask] += 1.
 
         treeT = spatial.cKDTree(self.mCoords[:, :2], leafsize=10)
-        distances, self.regIDs = treeT.query(rPts, k=4)
+        distances, self.regIDs = treeT.query(rPts, k=self.rgrd_interp)
         # Inverse weighting distance...
         self.regWeights = np.divide(
             1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
@@ -133,6 +151,37 @@ class GridProcess(object):
 
         del treeT, distances, mask, rPts, newx, newy
         gc.collect()
+
+        return
+
+    def _updateTe(self):
+        """
+        Finds current elastic thickness map for the considered time interval.
+        """
+
+        nb = self.teNb
+        if nb < len(self.tedata) - 1:
+            if self.tedata.iloc[nb + 1, 0] <= self.tNow:
+                nb += 1
+
+        if nb > self.teNb or nb == -1:
+            if nb == -1:
+                nb = 0
+            self.teNb = nb
+            if self.flex_method != 'global' and self.tedata["tUni"][nb] == 0.:
+                loadData = np.load(self.tedata.iloc[nb, 2])
+                teVal = loadData[self.tedata.iloc[nb, 3]]
+                del loadData
+                self.flexTe = np.sum(self.regWeights * teVal[self.regIDs][:, :], axis=1) / self.regSumWeights
+                if len(self.regOnIDs) > 0:
+                    self.flexTe[self.regOnIDs] = teVal[self.regIDs[self.regOnIDs, 0]]
+                self.flexTe = self.flexTe.reshape(self.reg_ny, self.reg_nx)
+            if self.flex_method == 'global':
+                loadData = np.load(self.tedata.iloc[nb, 2])
+                self.flexTe = loadData[self.tedata.iloc[nb, 3]]
+                del loadData
+            else:
+                self.flexTe = self.tedata.iloc[nb, 1] * np.ones((self.reg_ny, self.reg_nx))
 
         return
 
@@ -149,66 +198,126 @@ class GridProcess(object):
         where :math:`D` is the flexural rigidity,  :math:`w` is vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material.
 
         .. warning ::
-            This function assumes a value of 1011 Pa for Young's modulus, 0.25 for Poisson's ratio and 9.81 m/s2 for g, the gravitational acceleration.
+            This function assumes a value of 10^11 Pa for Young's modulus, 0.25 for Poisson's ratio and 9.81 m/s2 for g, the gravitational acceleration.
         """
 
         t0 = process_time()
 
         # Get elevations from time of equilibrium and after erosion deposition
-        hlflex = self.hOldFlex.getArray().copy()
-        oldZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-        oldZ[self.locIDs] = hlflex
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, oldZ, op=MPI.MAX)
-
         hl = self.hLocal.getArray().copy()
-        newZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-        newZ[self.locIDs] = hl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, newZ, op=MPI.MAX)
+        dZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        dZ[self.locIDs] = hl - self.hOldFlex.getArray()
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dZ, op=MPI.MAX)
+        flexZ = None
 
-        if MPIrank == 0:
+        if self.flex_method == 'global' and libisoglob:
+            if self.globalfData is None:
+                self.globalfData = np.zeros((len(self.mCoords), 5))
+                self.globalfData[:, :3] = self.mCoords[:, :3]
+
+            if self.tedata is not None:
+                self._updateTe()
+                Te = self.flexTe.copy()
+            else:
+                Te = self.flex_eet * np.ones(len(self.mCoords))
+            self.globalfData[:, 3] = dZ
+            self.globalfData[:, 4] = Te
+
+            if self.globalfStep == 0:
+                self.fmodel = iflex(None, None, self.globalfData, None,
+                                    self.young, self.nu, self.flex_rhoa,
+                                    self.flex_rhos, 2, self.verbose)
+
+                self.fmodel.runFlex()
+                self.globalfStep = 1
+            else:
+                self.fmodel.updateFlex(self.globalfData[:, 3:])
+                self.fmodel.runFlex()
+
+            if MPIrank == 0:
+                flexZ = self.fmodel.simflex.copy()
+
+        if self.flex_method == 'global' and not libisoglob and MPIrank == 0:
+            flexZ = np.zeros(len(self.mCoords))
+
+        if MPIrank == 0 and self.flex_method != 'global':
             # Build regular grid for flexure calculation
             if self.xIndices is None:
                 self._buildRegGrid()
 
             # Interpolate values on the flexural regular grid
-            regOldZ = np.sum(self.regWeights * oldZ[self.regIDs][:, :], axis=1) / self.regSumWeights
+            regDiff = np.sum(self.regWeights * dZ[self.regIDs][:, :], axis=1) / self.regSumWeights
             if len(self.regOnIDs) > 0:
-                regOldZ[self.regOnIDs] = oldZ[self.regIDs[self.regOnIDs, 0]]
-            regOldZ = regOldZ.reshape(self.reg_ny, self.reg_nx)
+                regDiff[self.regOnIDs] = dZ[self.regIDs[self.regOnIDs, 0]]
+            regDiff = regDiff.reshape(self.reg_ny, self.reg_nx)
 
-            regNewZ = np.sum(self.regWeights * newZ[self.regIDs][:, :], axis=1) / self.regSumWeights
-            if len(self.regOnIDs) > 0:
-                regNewZ[self.regOnIDs] = newZ[self.regIDs[self.regOnIDs, 0]]
-            regNewZ = regNewZ.reshape(self.reg_ny, self.reg_nx)
+            if self.flex_method == 'FFT':
+                nFlex = flexure(regDiff, self.reg_ny, self.reg_nx, self.reg_yl, self.reg_xl,
+                                self.young, self.nu, self.flex_rhos, self.flex_rhoa,
+                                self.flex_eet, int(self.boundflex))
 
-            newh = flexure(regNewZ, regOldZ, self.reg_ny, self.reg_nx,
-                           self.reg_yl, self.reg_xl, self.flex_rhos,
-                           self.flex_rhoa, self.flex_eet, int(self.boundflex))
-            rflexTec = newh - regNewZ
+                # Interpolate back to goSPL mesh
+                flexZ = self._regInterp(nFlex)
 
-            # Interpolate back to goSPL mesh
-            flexTec = self._regInterp(rflexTec)
-        else:
-            flexTec = None
+            elif self.flex_method == 'FD':
+                flex = F2D()
+                flex.Quiet = True
+
+                flex.Method = "FD"
+                flex.PlateSolutionType = "vWC1994"
+                flex.Solver = "direct"
+
+                # gFlex parameters
+                flex.g = 9.81
+                flex.E = self.young
+                flex.nu = self.nu
+                flex.rho_m = self.flex_rhoa
+                flex.rho_fill = 0.
+
+                # Assign elastic thickness grid
+                if self.tedata is not None:
+                    self._updateTe()
+                    flex.Te = self.flexTe.copy()
+                else:
+                    flex.Te = self.flex_eet * np.ones(regDiff.shape)
+
+                # Compute loads
+                flex.qs = self.flex_rhos * flex.g * regDiff
+                flex.dx = self.reg_dx
+                flex.dy = self.reg_dx
+
+                # Boundary conditions
+                flex.BC_E = self.flex_bcE
+                flex.BC_W = self.flex_bcW
+                flex.BC_S = self.flex_bcN
+                flex.BC_N = self.flex_bcS
+
+                # Run gFlex
+                flex.initialize()
+                flex.run()
+                flex.finalize()
+
+                # Interpolate back to goSPL mesh
+                flexZ = self._regInterp(flex.w)
 
         # Send flexural response globally
-        flex = MPI.COMM_WORLD.bcast(flexTec, root=0)
+        flexZ = MPI.COMM_WORLD.bcast(flexZ, root=0)
+        tmpFlex = flexZ[self.locIDs]
+        if self.flex_method != 'global':
+            # Local flexural isostasy
+            if self.south == 1:
+                tmpFlex[self.southPts] = 0.
+            if self.east == 1:
+                tmpFlex[self.eastPts] = 0.
+            if self.north == 1:
+                tmpFlex[self.northPts] = 0.
+            if self.west == 1:
+                tmpFlex[self.westPts] = 0.
 
-        # Local flexural isostasy
-        tmpFlex = flex[self.locIDs]
-        if self.south == 1:
-            tmpFlex[self.southPts] = 0.
-        if self.east == 1:
-            tmpFlex[self.eastPts] = 0.
-        if self.north == 1:
-            tmpFlex[self.northPts] = 0.
-        if self.west == 1:
-            tmpFlex[self.westPts] = 0.
         self.localFlex += tmpFlex
-        tmp = self.hLocal.getArray().copy()
 
         # Update elevation
-        self.hLocal.setArray(tmp + tmpFlex)
+        self.hLocal.setArray(hl + tmpFlex)
         self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
         if MPIrank == 0 and self.verbose:

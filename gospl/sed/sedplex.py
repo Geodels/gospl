@@ -63,24 +63,20 @@ class SEDMesh(object):
         """
         t0 = process_time()
 
-        # Multi-lithology case
+        # Stratigraphic layers exist
         if self.stratNb > 0:
             # Get erosion rate (m/yr) to volume
             self.tmpL.setArray(self.thCoarse)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-            # Get the volume of sediment transported in m3 per year
-            self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
-            # Update local vector
-            self.dm.globalToLocal(self.vSed, self.vSedLocal)
         else:
             # Get erosion rate (m/yr) to volume
             self.Eb.copy(result=self.tmp)
-            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-            # Get the volume of sediment transported in m3 per year
-            self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
-            # Update local vector
-            self.dm.globalToLocal(self.vSed, self.vSedLocal)
+
+        # Get the volume of sediment transported in m3 per year
+        self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+        self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
+        # Update local vector
+        self.dm.globalToLocal(self.vSed, self.vSedLocal)
 
         if MPIrank == 0 and self.verbose:
             print(

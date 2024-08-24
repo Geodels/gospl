@@ -63,8 +63,9 @@ class ReadYaml(object):
         self._readRain()
         self._readCompaction()
         self._readIce()
-        self._readFlex()
         self._readOrography()
+        self._readFlex()
+        self._readTeMap()
         self._readOut()
 
         self.radius = 6378137.0
@@ -77,6 +78,15 @@ class ReadYaml(object):
             self.saveStrat = self.tEnd + self.tout
 
         # In case of restarting simulation
+        self._restartUpdate()
+
+        return
+
+    def _restartUpdate(self):
+        """
+        Update some forcing parameters in case of a restart.
+        """
+
         if self.rStep > 0:
             rNow = self.tStart + self.rStep * self.tout
 
@@ -91,6 +101,18 @@ class ReadYaml(object):
                 self.raindata = self.raindata[self.raindata["start"] >= rNow]
                 self.raindata.reset_index(drop=True, inplace=True)
                 self.rainNb = len(self.raindata)
+
+            if self.tedata is not None:
+                for k in range(len(self.tedata)):
+                    if self.tedata["start"][k] < rNow and k < len(self.tedata) - 1:
+                        self.tedata.loc[k, ["start"]] = rNow - self.tout
+                    elif (
+                        self.tedata["start"][k] < rNow and k == len(self.tedata) - 1
+                    ):
+                        self.tedata.loc[k, ["start"]] = rNow
+                self.tedata = self.tedata[self.tedata["start"] >= rNow]
+                self.tedata.reset_index(drop=True, inplace=True)
+                self.teNb = len(self.tedata)
 
             if self.sedfacdata is not None:
                 for k in range(len(self.sedfacdata)):
@@ -124,10 +146,10 @@ class ReadYaml(object):
         except KeyError:
             self.flowDir = 8
 
-        try:
-            self.flowExp = domainDict["flowexp"]
-        except KeyError:
-            self.flowExp = 0.5
+        # try:
+        #     self.flowExp = domainDict["flowexp"]
+        # except KeyError:
+        self.flowExp = 1.1
 
         try:
             self.boundCond = domainDict["bc"]
@@ -203,10 +225,34 @@ class ReadYaml(object):
         except KeyError:
             self.strataFile = None
 
+        self._extraDomain2()
+
+        return
+
+    def _extraDomain2(self):
+        """
+        Read domain additional information.
+        """
+
+        domainDict = self.input["domain"]
+
         try:
             self.fitMarine = domainDict["fitmarine"]
         except KeyError:
             self.fitMarine = False
+
+        try:
+            advscheme = domainDict["advect"]
+            if advscheme == 'iioe1':
+                self.advscheme = 2
+            if advscheme == 'iioe2':
+                self.advscheme = 3
+            elif advscheme == 'upwind':
+                self.advscheme = 1
+            elif advscheme == 'interp':
+                self.advscheme = 0
+        except KeyError:
+            self.advscheme = 1
 
         return
 
@@ -435,10 +481,14 @@ class ReadYaml(object):
                 self.clinSlp = hillDict["clinSlp"]
             except KeyError:
                 self.clinSlp = 1.0e-6
-
+            try:
+                self.tsStep = hillDict["tsSteps"]
+            except KeyError:
+                self.tsStep = 2000
         except KeyError:
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
+            self.tsStep = 2000
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
 
@@ -581,30 +631,30 @@ class ReadYaml(object):
             zMap = "empty"
 
         tmpTec = []
-        tmpTec.insert(0, {"start": tecStart, "tMap": tMap, "zMap": zMap, "hMap": hMap})
+        tmpTec.insert(0, {"start": tecStart, "end": tecEnd, "tMap": tMap, "zMap": zMap, "hMap": hMap})
 
         if k == 0:
-            tecdata = pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"])
+            tecdata = pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"])
         else:
             tecdata = pd.concat(
-                [tecdata, pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"])],
+                [tecdata, pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"])],
                 ignore_index=True,
             )
 
-        if self.tecStep is not None:
-            if tecEnd is not None:
-                tectime = tecStart + self.tecStep
-                while tectime < tecEnd:
-                    tmpTec = []
-                    tmpTec.insert(0, {"start": tectime, "tMap": tMap, "zMap": zMap, "hMap": hMap})
-                    tecdata = pd.concat(
-                        [
-                            tecdata,
-                            pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"]),
-                        ],
-                        ignore_index=True,
-                    )
-                    tectime = tectime + self.tecStep
+        # if self.tecStep is not None:
+        #     if tecEnd is not None:
+        #         tectime = tecStart + self.tecStep
+        #         while tectime < tecEnd:
+        #             tmpTec = []
+        #             tmpTec.insert(0, {"start": tectime, "end": , "tMap": tMap, "zMap": zMap, "hMap": hMap})
+        #             tecdata = pd.concat(
+        #                 [
+        #                     tecdata,
+        #                     pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"]),
+        #                 ],
+        #                 ignore_index=True,
+        #             )
+        #             tectime = tectime + self.tecStep
 
         return tecdata
 
@@ -666,6 +716,7 @@ class ReadYaml(object):
         tecdata = None
         try:
             tecDict = self.input["tectonics"]
+
             tecSort = sorted(tecDict, key=itemgetter("start"))
             for k in range(len(tecSort)):
                 tecdata = self._defineTectonics(k, tecSort, tecdata)
@@ -673,10 +724,10 @@ class ReadYaml(object):
             if tecdata["start"][0] > self.tStart:
                 tmpTec = []
                 tmpTec.insert(
-                    0, {"start": self.tStart, "tMap": "empty", "zMap": "empty", "hMap": "empty"}
+                    0, {"start": self.tStart, "end": tecdata["start"][0], "tMap": "empty", "zMap": "empty", "hMap": "empty"}
                 )
                 tecdata = pd.concat(
-                    [pd.DataFrame(tmpTec, columns=["start", "tMap", "zMap", "hMap"]), tecdata],
+                    [pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"]), tecdata],
                     ignore_index=True,
                 )
             self.tecdata = tecdata[tecdata["start"] >= self.tStart]
@@ -843,6 +894,158 @@ class ReadYaml(object):
         except KeyError:
             self.sedfactNb = 0
             self.sedfacdata = None
+
+        return
+
+    def _getTe(self, k, tStart, tMap, tUniform, tedata):
+        """
+        Define elastic map.
+
+        :arg k: elastic map event number
+        :arg teStart: elastic map event start time
+        :arg teMap: elastic map file event
+        :arg teUniform: elastic map uniform thickness value event
+        :arg tedata: pandas dataframe storing each elastic map event
+        :return: appended tedata
+        """
+
+        if tMap is None and tUniform is None:
+            print(
+                "For each elastic map a thickness value (uniform) or a elastic \
+                grid (map) is required.",
+                flush=True,
+            )
+            raise ValueError(
+                "Elastic event {} has no thickness value (uniform) or a elastic \
+                map (map).".format(
+                    k
+                )
+            )
+
+        tmpTe = []
+        if tMap is None:
+            tmpTe.insert(
+                0,
+                {"start": tStart, "tUni": tUniform, "tMap": None, "tKey": None},
+            )
+        else:
+            tmpTe.insert(
+                0,
+                {
+                    "start": tStart,
+                    "tUni": 0.,
+                    "tMap": tMap[0] + ".npz",
+                    "tKey": tMap[1],
+                },
+            )
+
+        if k == 0:
+            tedata = pd.DataFrame(tmpTe, columns=["start", "tUni", "tMap", "tKey"])
+        else:
+            tedata = pd.concat(
+                [
+                    tedata,
+                    pd.DataFrame(tmpTe, columns=["start", "tUni", "tMap", "tKey"]),
+                ],
+                ignore_index=True,
+            )
+
+        return tedata
+
+    def _readTeMap(self):
+        """
+        Parse elastic map forcing conditions.
+        """
+
+        tedata = None
+        try:
+            teDict = self.input["temap"]
+            teSort = sorted(teDict, key=itemgetter("start"))
+            for k in range(len(teSort)):
+                rStart = None
+                rUniform = None
+                rMap = None
+                try:
+                    rStart = teSort[k]["start"]
+                except Exception:
+                    print(
+                        "For each climate event a start time is required.", flush=True
+                    )
+                    raise ValueError(
+                        "Climate event {} has no parameter start".format(k)
+                    )
+                try:
+                    rUniform = teSort[k]["uniform"]
+                except Exception:
+                    pass
+                try:
+                    rMap = teSort[k]["map"]
+                except Exception:
+                    pass
+
+                if rMap is not None:
+                    if self.meshFile != rMap[0] + ".npz":
+                        try:
+                            with open(rMap[0] + ".npz") as rainfile:
+                                rainfile.close()
+
+                        except IOError:
+                            print(
+                                "Unable to open elastic file: {}.npz".format(rMap[0]),
+                                flush=True,
+                            )
+                            raise IOError(
+                                "The elastic file {} is not found for elastic event {}.".format(
+                                    rMap[0] + ".npz", k
+                                )
+                            )
+                        mdata = np.load(rMap[0] + ".npz")
+                        teSet = mdata.files
+                    else:
+                        mdata = np.load(self.meshFile)
+                        teSet = mdata.files
+                    try:
+                        rainKey = mdata[rMap[1]]
+                        if rainKey is not None:
+                            pass
+                    except KeyError:
+                        print(
+                            "Field name {} is missing from elastic file {}.npz".format(
+                                rMap[1], rMap[0]
+                            ),
+                            flush=True,
+                        )
+                        print(
+                            "The following fields are available: {}".format(teSet),
+                            flush=True,
+                        )
+                        print("Check your elastic file fields definition...", flush=True)
+                        raise KeyError(
+                            "Field name for elastic is not defined correctly or does not exist!"
+                        )
+
+                tedata = self._getTe(k, rStart, rMap, rUniform, tedata)
+
+            if tedata["start"][0] > self.tStart:
+                tmpT = []
+                tmpT.insert(
+                    0, {"start": self.tStart, "tUni": 0.0, "tMap": None, "tKey": None}
+                )
+                tedata = pd.concat(
+                    [
+                        pd.DataFrame(
+                            tmpT, columns=["start", "tUni", "tMap", "tKey"]
+                        ),
+                        tedata,
+                    ],
+                    ignore_index=True,
+                )
+            self.tedata = tedata.copy()
+            self.tedata.reset_index(drop=True, inplace=True)
+            self.teNb = len(self.tedata)
+
+        except KeyError:
+            self.tedata = None
 
         return
 
@@ -1029,13 +1232,31 @@ class ReadYaml(object):
             flexDict = self.input["flexure"]
             self.flexOn = True
             try:
+                self.flex_method = flexDict["method"]
+            except KeyError:
+                self.flex_method = 'FD'
+
+            if self.flex_method != 'global' and self.flex_method != 'FD' and self.flex_method != 'FFT':
+                print(
+                    "Method {} is not in the list of possible methods".format(
+                        self.flex_method), flush=True,
+                )
+                raise ValueError(
+                    "Method name for flexure is not recognised choices are FD, FFT or global."
+                )
+            try:
                 self.reg_dx = flexDict["regdx"]
             except KeyError:
-                raise ValueError("Flexure definition: regular grid spacing is required.")
+                self.reg_dx = 1000.0
+                # raise ValueError("Flexure definition: regular grid spacing is required.")
+            try:
+                self.rgrd_interp = flexDict["ninterp"]
+            except KeyError:
+                self.rgrd_interp = 4
             try:
                 self.flex_rhoa = flexDict["rhoa"]
             except KeyError:
-                self.flex_rhoa = 3250.0
+                self.flex_rhoa = 3300.0
             try:
                 self.flex_eet = flexDict["thick"]
             except KeyError:
@@ -1043,7 +1264,46 @@ class ReadYaml(object):
             try:
                 self.flex_rhos = flexDict["rhoc"]
             except KeyError:
-                self.flex_rhos = 2400.0
+                self.flex_rhos = 2300.0
+            try:
+                self.young = flexDict["young"]
+            except KeyError:
+                self.young = 65e9
+
+        except KeyError:
+            self.flexOn = False
+
+        self._extraFlex()
+
+        return
+
+    def _extraFlex(self):
+        """
+        Read flexure additional information.
+        """
+
+        try:
+            flexDict = self.input["flexure"]
+            try:
+                self.nu = flexDict["nu"]
+            except KeyError:
+                self.nu = 0.25
+            try:
+                self.flex_bcN = flexDict["bcN"]
+            except KeyError:
+                self.flex_bcN = "0Slope0Shear"
+            try:
+                self.flex_bcS = flexDict["bcS"]
+            except KeyError:
+                self.flex_bcS = "0Slope0Shear"
+            try:
+                self.flex_bcE = flexDict["bcE"]
+            except KeyError:
+                self.flex_bcE = "0Slope0Shear"
+            try:
+                self.flex_bcW = flexDict["bcW"]
+            except KeyError:
+                self.flex_bcW = "0Slope0Shear"
         except KeyError:
             self.flexOn = False
 
@@ -1089,6 +1349,7 @@ class ReadYaml(object):
             except KeyError:
                 self.oro_hw = 3400.0
 
+            self.rgrd_interp = 4
             self._extraOrography(oroDict)
 
         except KeyError:

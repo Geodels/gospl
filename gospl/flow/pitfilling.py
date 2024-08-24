@@ -516,9 +516,7 @@ class PITFill(object):
         self.flatDirs[id] = -1
         # Only compute the water volume for incoming water fluxes above sea level
         if sed:
-            self.oceanFill = self.lFill.copy()
             self.lFill[id] = hl[id]
-            self.flatOcean = self.flatDirs.copy()
             self.flatDirs[id] = -1
         else:
             h[h < self.sealevel] = self.sealevel

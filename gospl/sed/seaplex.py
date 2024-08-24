@@ -17,6 +17,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdrcvrs
     from gospl._fortran import jacobiancoeff
     from gospl._fortran import fctcoeff
+    from gospl._fortran import epsfill
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -41,6 +42,10 @@ class SEAMesh(object):
 
         self.coastDist = None
 
+        self.dlim = False
+        self.Dlimit = 5.
+        self.dexp = 0.05
+        self.minDiff = 1.e-4
         self.mat = self.dm.createMatrix()
         self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
 
@@ -144,27 +149,23 @@ class SEAMesh(object):
         """
 
         # Define multiple flow directions for filled + eps elevations
-        rcv, _, wght = mfdrcvrs(8, 1.0e-2, self.oceanFill, -1.0e6)
-        sum_wght = np.sum(wght, axis=1)
-        ids = (self.pitIDs > -1) & (self.flatOcean > -1) & (sum_wght == 0.0)
-        ids = ids.nonzero()[0]
-        rcv[ids, :] = np.tile(ids, (8, 1)).T
-        rcv[ids, 0] = self.flatOcean[ids]
-        wght[ids, :] = 0.0
-        wght[ids, 0] = 1.0
+        hl = self.hLocal.getArray().copy()
+        fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        fillz[self.locIDs] = hl
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
+        if MPIrank == 0:
+            minh = np.min(fillz) + 0.1
+            if not self.flatModel:
+                minh = min(minh, -3.e3)
+            fillz = epsfill(minh, fillz)
 
-        # Get local nodes with no receivers as boolean array
-        sum_weight = np.sum(wght, axis=1)
-        msink = sum_weight == 0.0
-
-        # We don't consider borders as sinks
-        msink[self.idBorders] = False
-        msink = msink.astype(int) * self.inIDs
-        self.msink = msink == 1
+        # Send elevation + eps globally
+        fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
+        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillEPS[self.locIDs], -1.0e6)
 
         # Set borders nodes
         if self.flatModel:
-            rcv[self.idBorders, :] = np.tile(self.idBorders, (8, 1)).T
+            rcv[self.idBorders, :] = np.tile(self.idBorders, (12, 1)).T
             wght[self.idBorders, :] = 0.0
 
         # Define downstream matrix based on filled + dir elevations
@@ -172,7 +173,7 @@ class SEAMesh(object):
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
-        for k in range(0, 8):
+        for k in range(0, 12):
 
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
@@ -204,49 +205,86 @@ class SEAMesh(object):
     def _evalFunction(self, ts, t, x, xdot, f):
         """
         The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
-        
+
         Here we define the function for the nonlinear solve.
+        Evaluate the residual function on a DMPlex for an implicit time-stepping method.
+
+        Parameters:
+        -----------
+        ts : PETSc.TS: The time-stepper object.
+        t : float: The current time.
+        x : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
+        xdot : PETSc.Vec: The time derivative approximation (h^{n+1} - h^n) / dt.
+        f : PETSc.Vec: The residual vector to be filled.
         """
 
         self.dm.globalToLocal(x, self.hl)
         with self.hl as hl, self.hLocal as zb, xdot as hdot:
             dh = hl - zb
-            dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, dh / (dh + 5.))
+            dh[dh < 0.1] = 0.0
+            if self.dlim:
+                Cd = self.minDiff + np.multiply(self.Cd, dh / (dh + self.Dlimit))
+            else:
+                Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
             nlvec = fctcoeff(hl, Cd)
             f.setArray(hdot + nlvec[self.glIDs])
 
         return
 
-    def _evalJacobian(self, ts, t, x, xdot, a, J, P):
+    def _evalJacobian(self, ts, t, x, xdot, a, A, B):
         """
         The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
-         
+
         Here we define the Jacobian for the nonlinear solve.
+
+        Evaluate the Jacobian matrix J and the preconditioner matrix P on a DMPlex.
+
+        Parameters:
+        -----------
+        ts : PETSc.TS: The time-stepper object.
+        t : float: The current time.
+        x : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
+        xdot : PETSc.Vec: The time derivative approximation (h^{n+1} - h^n) / dt.
+        a : float:  The shift factor for implicit methods.
+        A : PETSc.Mat: The Jacobian matrix to be filled.
+        B : PETSc.Mat: The preconditioner matrix to be filled.
+
         """
 
         self.dm.globalToLocal(x, self.hl)
 
         with self.hl as hl, self.hLocal as zb:
             dh = hl - zb
-            dh[dh < 0] = 0.0
-            Cd = np.multiply(self.Cd, dh / (dh + 5.))
+            dh[dh < 0.1] = 0.0
+            if self.dlim:
+                Cd = self.minDiff + np.multiply(self.Cd, dh / (dh + self.Dlimit))
+            else:
+                Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
 
             # Coefficient derivatives
-            Cp = np.multiply(self.Cd, 5. / (dh + 5.)**2)
+            if self.dlim:
+                Cp = np.multiply(self.Cd, self.Dlimit / (dh + self.Dlimit)**2)
+            else:
+                Cp = np.multiply(self.Cd, self.dexp * np.exp(-self.dexp * dh))
             nlC = jacobiancoeff(hl, Cd, Cp)
 
-            P.zeroEntries()
             for row in range(self.lpoints):
-                P.setValuesLocal(row, row, a + nlC[row, 0])
+                B.setValuesLocal(row, row, a + nlC[row, 0])
                 cols = self.FVmesh_ngbID[row, :]
-                P.setValuesLocal(row, cols, nlC[row, 1:])
-            P.assemble()
+                B.setValuesLocal(row, cols, nlC[row, 1:])
+            B.assemble()
 
-            if J != P:
-                J.assemble()
+            if A != B:
+                A.assemble()
 
-        return petsc4py.PETSc.Mat.Structure.SAME_NONZERO_PATTERN
+        return True
+
+    def _evalSolution(self, t, x):
+
+        assert t == 0.0, "only for t=0.0"
+        x.setArray(self.h.getArray())
+
+        return
 
     def _diffuseOcean(self, dh):
         r"""
@@ -272,6 +310,9 @@ class SEAMesh(object):
 
         t0 = process_time()
 
+        x = self.tmp1.duplicate()
+        f = self.tmp1.duplicate()
+
         # Get diffusion coefficients based on sediment type
         sedK = np.zeros(self.lpoints)
         sedK[self.seaID] = self.nlK
@@ -284,41 +325,39 @@ class SEAMesh(object):
 
         # Time stepping definition
         ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
-        # ARKIMEX: implicit nonlinear time stepping
-        ts.setType("arkimex")
+        # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
+        ts.setType("rosw")
+
         ts.setIFunction(self._evalFunction, self.tmp1)
         ts.setIJacobian(self._evalJacobian, self.mat)
 
         ts.setTime(0.0)
-        ts.setTimeStep(self.dt / 100.0)
+        ts.setTimeStep(self.dt / 1000.0)
         ts.setMaxTime(self.dt)
-        ts.setMaxSteps(50)
+        ts.setMaxSteps(self.tsStep)
         ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
-        # Allow an unlimited number of failures (step will be rejected and retried)
-        ts.setMaxSNESFailures(-1)
-        ts.setTolerances(rtol=1.0e-2)
+        # ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.INTERPOLATE)
 
-        # SNES nonlinear solver definition
+        # Allow an unlimited number of failures
+        ts.setMaxSNESFailures(-1)  # (step will be rejected and retried)
+
+        # SNES nonlinear solver
         snes = ts.getSNES()
-        # Newton linear search
-        snes.setType("ngmres")
-        # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
-        snes.setTolerances(rtol=1.0e-2, max_it=50)
+        snes.setTolerances(max_it=10)   # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
 
-        # KSP linear solver definition
+        # KSP linear solver
         ksp = snes.getKSP()
-        ksp.setType("richardson")
-        # Preconditioner for linear solution
+        ksp.setType("preonly")
         pc = ksp.getPC()
-        pc.setType("bjacobi")
-        ksp.setTolerances(rtol=1.0e-2, max_it=50)
-        ksp.setFromOptions()
-        snes.setFromOptions()
+        pc.setType("gasm")
+
         ts.setFromOptions()
+        tstart = ts.getTime()
+        self._evalSolution(tstart, x)
 
         # Solve nonlinear equation
-        ts.solve(self.h)
-
+        ts.solve(x)
+        # te = ts.getTime()
         if MPIrank == 0 and self.verbose:
             print(
                 "Nonlinear diffusion solution (%0.02f seconds)" % (process_time() - t0),
@@ -337,10 +376,10 @@ class SEAMesh(object):
         ts.destroy()
 
         # Get diffused sediment thicknesses
+        x.copy(result=self.h)
         self.dh.waxpy(-1.0, self.hGlobal, self.h)
         self.dm.globalToLocal(self.dh, self.tmpL)
         ndepo = self.tmpL.getArray().copy()
-        ndepo[ndepo < 0.0] = 0.0
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
@@ -353,15 +392,15 @@ class SEAMesh(object):
 
         :arg sedflux: incoming marine sediment volumes
 
-        :return: seddep (the deposied thickness of the distributed sediments)
+        :return: seddep (the deposied volume of the distributed sediments)
         """
 
-        marVol = self.maxDepQs * self.dt
-        sinkVol = sedflux * self.dt
-        vol = marVol.copy()
+        marVol = self.maxDepQs.copy()
+        sinkVol = sedflux.copy()
         self.tmpL.setArray(sinkVol)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         vdep = np.zeros(self.lpoints, dtype=float)
+
         step = 0
         while self.tmp.sum() > 1.0:
 
@@ -371,14 +410,14 @@ class SEAMesh(object):
 
             # In case there is too much sediment coming in
             sinkVol = self.tmpL.getArray().copy()
-            excess = sinkVol >= vol
-            sinkVol[excess] -= vol[excess]
-            vdep[excess] = marVol[excess]
-            vol[excess] = 0.0
+            excess = sinkVol >= marVol
+            sinkVol[excess] -= marVol[excess]
+            vdep[excess] += marVol[excess]
+            marVol[excess] = 0.0
 
             # In case there is some room to deposit sediments
             noexcess = np.invert(excess)
-            vol[noexcess] -= sinkVol[noexcess]
+            marVol[noexcess] -= sinkVol[noexcess]
             vdep[noexcess] += sinkVol[noexcess]
             vdep[self.idBorders] = 0.0
             sinkVol[noexcess] = 0.0
@@ -390,18 +429,17 @@ class SEAMesh(object):
 
             sumExcess = self.tmp.sum()
             if MPIrank == 0 and self.verbose:
-                if step % 50 == 0:
+                if step % 100 == 0:
                     print(
-                        "  --- Marine excess (sum) %0.01f m | iter %d"
-                        % (sumExcess, step),
+                        "  --- Marine excess (sum in km3) %0.05f | iter %d"
+                        % (sumExcess * 10.e-9, step),
                         flush=True
                     )
 
             step += 1
-
         self.dMat.destroy()
 
-        return vdep / self.larea
+        return vdep
 
     def seaChange(self):
         """
@@ -419,9 +457,8 @@ class SEAMesh(object):
         self.sinkIDs = self.lFill <= self.sealevel
 
         # Define coastal distance for marine points
+        hl = self.hLocal.getArray().copy()
         if self.clinSlp > 0.0:
-            self.dm.globalToLocal(self.hGlobal, self.hLocal)
-            hl = self.hLocal.getArray().copy()
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore")
                 self._distanceCoasts(hl)
@@ -430,18 +467,25 @@ class SEAMesh(object):
         else:
             self.clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)
         self.clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
-        self.maxDepQs = (self.clinoH - hl) * self.larea / self.dt
+        self.clinoH[self.clinoH < hl] = hl[self.clinoH < hl]
+        self.maxDepQs = (self.clinoH - hl) * self.larea
 
-        # Get the volumetric marine sediment rate (m3/yr) to distribute during the time step.
+        # Get the volumetric marine sediment (m3) to distribute during the time step.
         self.vSedLocal.copy(result=self.QsL)
-        sedFlux = self.QsL.getArray().copy()
+        sedFlux = self.QsL.getArray().copy() * self.dt
         sedFlux[np.invert(self.sinkIDs)] = 0.0
         sedFlux[sedFlux < 0] = 0.0
 
         # Downstream direction matrix for ocean distribution
         self._matOcean()
         marDep = self._distOcean(sedFlux)
-        self._diffuseOcean(marDep)
+        dh = np.divide(marDep, self.larea, out=np.zeros_like(self.larea), where=self.larea != 0)
+        dh[dh < 1.e-3] = 0.
+        self.tmpL.setArray(dh)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        dh = self.tmpL.getArray().copy()
+        self._diffuseOcean(dh)
 
         # Update cumulative erosion and deposition as well as elevation
         self.cumED.axpy(1.0, self.tmp)

@@ -30,8 +30,9 @@ The goSPL image contains all the dependencies and configuration files required t
 
 Different flavors could be pulled using a tag and recommended ones are:
 
-1. The ``gosplcontainer`` tag points to the github ``v2023`` branch.
-2. The ``gosplmaster`` tag points to the github master branch and uses the latest
+1. The ``gospl:2024.09.01`` tag points to the ``2024.09.01`` goSPL branch,
+2. The ``gosplcontainer`` tag points to the github ``v2023`` goSPL branch,
+3. The ``gosplmaster`` tag points to the github master branch and uses the latest
    release.
 
 .. note::
@@ -43,7 +44,7 @@ On top of the libraries required for goSPL, the following main ones are availabl
 - xarray, rioxarray, xarray-spatial
 - pygmt, cartopy, pygplates
 - xesmf, metpy
-- stripy, meshio, meshplex, triangle
+- stripy, triangle
 - vtk, hdf5, netCDF4
 
 
@@ -54,9 +55,9 @@ Pulling the image
 ^^^^^^^^^^^^^^^^^
 
 Once you have installed Docker on your system, you can ``pull`` the
-`goSPL official image <https://hub.docker.com/r/geodels/gospl>`_ as follow::
+`goSPL official image <https://hub.docker.com/u/geodels>`_ as follow::
 
-  docker pull geodels/gosplmaster
+  docker pull geodels/gospl:2024.09.01
 
 
 You can list all the images available on your system as follow::
@@ -66,7 +67,7 @@ You can list all the images available on your system as follow::
 
 An image can be deleted as follow::
 
-  docker rmi geodels/gosplmaster
+  docker rmi geodels/gospl:2024.09.01
 
 
 Starting the container from a terminal
@@ -75,11 +76,11 @@ Starting the container from a terminal
 You can then start a docker container (an instance of
 an image)::
 
-  docker run -it -p 8888:8888 -d -v localDIR:/notebooks/geodels/gosplmaster:latest
+  docker run -it -p 8888:8888 -d -v localDIR:/notebooks
 
 where ``localDIR`` is the directory that contains the Jupyter Notebooks for your simulation.
 
-Once Docker is running, you could open the Jupyter notebooks on a web browser at the following address: `http://localhost:8888 <http://localhost:8888>`_. This should open in your ``localDIR`` directory.
+Once Docker is running, you could open the Jupyter notebooks on a web browser at the following address: `http://localhost:8888 <http://localhost:8888>`_. Going into the `/notebooks` folder you will access your ``localDIR`` directory.
 
 You can list the containers currently existing on your machine by running::
 
@@ -92,12 +93,12 @@ running containers.
 
 Docker containers can be stop (so that they do not use CPU or RAM resource)::
 
-  docker stop geodels/gosplmaster:latest
+  docker stop geodels/gospl:2024.09.01
 
 
 They can also be deleted::
 
-  docker rm geodels/gosplmaster:latest
+  docker rm geodels/gospl:2024.09.01
 
 
 .. important::

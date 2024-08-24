@@ -1,0 +1,21 @@
+#!/bin/bash
+#PBS -l ncpus=48
+#PBS -l mem=60GB
+#PBS -l jobfs=10GB
+#PBS -q normal
+#PBS -P q97
+#PBS -l walltime=00:10:00
+#PBS -l storage=gdata/q97+scratch/q97
+#PBS -l wd
+
+# Load required modules
+module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
+export PYTHONPATH=$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH 
+
+# Activate the virtual environment
+source /home/XXX/USERXXX/envi_gospl/bin/activate
+
+# Simulation run
+mpirun -np $PBS_NCPUS python3 runModel.py -i input-file-name.yml
+
+deactivate

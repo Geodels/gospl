@@ -58,7 +58,6 @@ dependencies = [
     "vtk",
     "ruamel.yaml",
     "mpi4py",
-    "meshplex",
     "gflex",
 ]
 

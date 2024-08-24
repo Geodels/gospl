@@ -304,7 +304,6 @@ MOCK_MODULES = [
     "pandas",
     "scipy",
     "petsc4py",
-    "meshplex",
     "scipy.interpolate",
     "vtk",
     "vtk.util",

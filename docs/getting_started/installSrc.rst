@@ -98,28 +98,10 @@ h5py                      2.10.0             Interface to the HDF5 binary data f
 pandas                    1.1.2              Data analysis and manipulation tool
 ruamel.yaml               0.16.12            Parsing YAML to Python objects
 meshio                    4.2.2              I/O for mesh files.
-meshplex                  0.13.4             Fast tools for simplex meshes
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       9.0.3              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
-xarray                    0.15.0             Labelled multi-dimensional arrays 
-pyproj                    2.5.0              Interface to PROJ (coordinate transformations)
-gflex                     1.1.0              Methods to solve elastic plate flexure
 ========================= ================== =============================================================
-
-
-Meshplex work-around
-----------------------
-
-
-In case where you are asked to download a licensed version of Meshplex, you might want to try the following alternatives:
-
-1. Use the version available from conda (conda install meshplex) this is version ``v0.15.14`` which is open-source and should work well.
-2. Download an older repository of Meshplex such as the one from `Geodels <https://github.com/Geodels/meshplex>`_ ``v0.8.0`` or from `here <https://github.com/kinnala/meshplex>`_ ``v0.13.3`` or `here <https://github.com/cottrell/meshplex>`_ ``v0.17.0`` 
-
-If you use option 2 and once the folder is downloaded, you can install the code by running in a terminal:: 
-      
-      python3 -m pip install . 
 
 
 goSPL installation
