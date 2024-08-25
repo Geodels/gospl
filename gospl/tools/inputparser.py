@@ -964,10 +964,10 @@ class ReadYaml(object):
                     rStart = teSort[k]["start"]
                 except Exception:
                     print(
-                        "For each climate event a start time is required.", flush=True
+                        "For each elastic map event a start time is required.", flush=True
                     )
                     raise ValueError(
-                        "Climate event {} has no parameter start".format(k)
+                        "Elastic event {} has no parameter start".format(k)
                     )
                 try:
                     rUniform = teSort[k]["uniform"]
