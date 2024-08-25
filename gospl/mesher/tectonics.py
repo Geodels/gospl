@@ -200,11 +200,11 @@ class Tectonics(object):
 
             The method allows large time steps without losing stability and not deteriorating precision.
 
-            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicates its second order accuracy for smooth solutions in general.
+            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicate its second order accuracy for smooth solutions in general.
 
         .. note::
 
-            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
+            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)).
 
             Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
         """
