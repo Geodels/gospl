@@ -7,7 +7,6 @@ import pandas as pd
 
 from mpi4py import MPI
 from scipy import spatial
-from gflex.f2d import F2D
 from time import process_time
 
 petsc4py.init(sys.argv)
@@ -16,6 +15,7 @@ MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
 if "READTHEDOCS" not in os.environ:
+    from gflex.f2d import F2D
     from gospl._fortran import flexure
     libisoglob = True
     try:
@@ -38,6 +38,12 @@ class GridProcess(object):
 
     1. **Flexural isostasy**: it allows to compute isostatic deflections of Earth's lithosphere with uniform or non-uniform flexural rigidity. Evolving surface loads are defined from erosion/deposition values associated to modelled surface processes.
     2. **Orographic rain**: it accounts for change in rainfall patterns associated to change in topography. The orographic precipitation function is based on `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_ linear model.
+
+    For global simulation, the library `isoFlex <https://github.com/Geodels/isoFlex>`_ provides a  wrapper around `gFlex <https://github.com/awickert/gFlex>`_ to estimate global-scale flexural isostasy based on tiles distribution and projection in parallel. 
+
+    .. note::
+        Better implementation would likely provide better performance than the one proposed here for computing flexural isostasy...
+
     """
 
     def __init__(self):
@@ -196,9 +202,6 @@ class GridProcess(object):
           D (d^4 w / d^4 x ) + \Delta \rho g w = q
 
         where :math:`D` is the flexural rigidity,  :math:`w` is vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material.
-
-        .. warning ::
-            This function assumes a value of 10^11 Pa for Young's modulus, 0.25 for Poisson's ratio and 9.81 m/s2 for g, the gravitational acceleration.
         """
 
         t0 = process_time()

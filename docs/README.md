@@ -2,7 +2,7 @@
 
 Building the documentation locally
 
-### Local installation
+## Local installation
 
 ```
 pip3 install -r requirements.txt

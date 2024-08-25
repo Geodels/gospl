@@ -811,7 +811,8 @@ class FAMesh(object):
         """
         Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediment in modulating erosion and deposition rate.
 
-        It calls the private function `_getEroDepRate <https://gospl.readthedocs.io/en/latest/api.html#flow.flowplex.FAMesh._getEroDepRate>`_ described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
+        It calls the private function `_getEroDepRate` described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
+
         """
 
         t0 = process_time()

@@ -26,6 +26,8 @@ Class GridProcess
 
       ~GridProcess._buildRegGrid
       ~GridProcess._regInterp
+      ~GridProcess._updateTe
+      
 
 Public functions
 ---------------------
@@ -39,3 +41,4 @@ Private functions
 
 .. automethod:: tools.addprocess.GridProcess._buildRegGrid
 .. automethod:: tools.addprocess.GridProcess._regInterp
+.. automethod:: tools.addprocess.GridProcess._updateTe
