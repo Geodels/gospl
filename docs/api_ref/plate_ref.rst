@@ -29,7 +29,7 @@ Class Tectonics
       ~Tectonics._findPts2Reduce
       ~Tectonics._readAdvectionData
       ~Tectonics._updateStratInfo
-
+      ~Tectonics._varAdvector
 
 Public functions
 ---------------------
@@ -46,3 +46,4 @@ Private functions
 .. automethod:: mesher.tectonics.Tectonics._findPts2Reduce
 .. automethod:: mesher.tectonics.Tectonics._readAdvectionData
 .. automethod:: mesher.tectonics.Tectonics._updateStratInfo
+.. automethod:: mesher.tectonics.Tectonics._varAdvector

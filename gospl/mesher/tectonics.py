@@ -27,13 +27,11 @@ MPIcomm = MPI.COMM_WORLD
 class Tectonics(object):
 
     """
-    This class defines how spherical mesh surface is changing given a plate reconstruction model.
-
-    The horizontal displacement over time is done through a series of input files that defines the neighboring nodes that will be used for interpolation.
+    This class defines how 2D and spherical mesh surface is changing given a set of horizontal and vertical rates.
 
     .. note::
 
-        The interpolation is based on nearest neighbour search based on the tree built from the spherical mesh and is weighted by distance. This is an efficient approach but it might not be the most accurate one.
+        Three advection approaches are proposed, a standard upwind scheme, a Inflow-Implicit/Outflow-Explicit scheme and a semi-lagrangian approach based on nearest neighbour search based on the tree built from the spherical mesh and is weighted by distance.
     """
 
     def __init__(self):
