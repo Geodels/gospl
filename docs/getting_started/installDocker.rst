@@ -89,7 +89,7 @@ Starting the container from a terminal
 
 You can then start a docker container (an instance of an image)::
 
-  docker run -it -p 8888:8888 -d -v localDIR:/notebooks
+  docker run -it geodels/gospl:latest -p 8888:8888 -d -v localDIR:/notebooks
 
 where ``localDIR`` is the directory that contains the Jupyter Notebooks for your simulation or the examples provided in this `repository <https://github.com/Geodels/goSPL-examples>`_.
 
