@@ -24,7 +24,6 @@ import sphinx_rtd_theme
 
 from intersphinx_registry import get_intersphinx_mapping
 from numpydoc.docscrape_sphinx import SphinxDocString
-from intersphinx_registry import get_intersphinx_mapping
 
 from mock import Mock as MagicMock
 
@@ -368,8 +367,8 @@ def linkcode_resolve(domain, info):
 
         fn = inspect.getsourcefile(obj)
         filepath = os.path.dirname(__file__)
-        relpath = "/".join(filepath.split("/")[:-1]) + "/gospl"
-        fn = os.path.relpath(fn, start=relpath)
+        relativepath = "/".join(filepath.split("/")[:-1]) + "/gospl"
+        fn = os.path.relpath(fn, start=relativepath)
         source, lineno = inspect.getsourcelines(obj)
 
         return fn, lineno, lineno + len(source) - 1

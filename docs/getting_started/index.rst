@@ -8,7 +8,7 @@ Getting started
 Python version support
 ----------------------
 
-goSPL supports versions :mod:`3.3` to :mod:`3.12` of Python.
+goSPL supports versions :mod:`3.9` to :mod:`3.12` of Python.
 
 Installation instructions
 -------------------------
@@ -20,6 +20,23 @@ Instructions for installing it via Anaconda or from source are also provided.
 
 .. grid:: 1 1 2 2
     :gutter: 2 3 4 4
+
+    .. grid-item-card::
+        :img-top: ../_static/docker.svg
+        :text-align: center
+
+        **Docker image**
+        ^^^
+
+        Virtualisation with `Docker container <https://hub.docker.com/r/geodels/gospl>`_ provides a simple approach for running goSPL simulation.
+
+        +++
+
+        .. button-ref:: installDocker
+            :color: secondary
+            :click-parent:
+
+            Install via Docker
 
     .. grid-item-card::
         :img-top: ../_static/anaconda.svg
@@ -38,39 +55,6 @@ Instructions for installing it via Anaconda or from source are also provided.
 
             Install via Conda
 
-    .. grid-item-card::
-        :img-top: ../_static/docker.svg
-        :text-align: center
-
-        **Docker image**
-        ^^^
-
-        Lightweight virtualisation with `Docker container <https://hub.docker.com/r/geodels/gospl>`_ provides a simple approach for running goSPL simulation.
-
-        +++
-
-        .. button-ref:: installDocker
-            :color: secondary
-            :click-parent:
-
-            Install via Docker
-
-    .. grid-item-card::
-        :img-top: ../_static/pypi.svg
-        :text-align: center
-
-        **PyPI Linux wheel**
-        ^^^
-
-        For Linux user we provide a step-by-step guide on how to install goSPL and its dependencies using PyPI.
-
-        +++
-
-        .. button-ref:: installPypi
-            :color: secondary
-            :click-parent:
-
-            Install via PyPI
 
     .. grid-item-card::
         :img-top: ../_static/python.svg
@@ -89,12 +73,28 @@ Instructions for installing it via Anaconda or from source are also provided.
 
             Learn more
 
+    .. grid-item-card::
+        :img-top: ../_static/hpc.svg
+        :text-align: center
+
+        **Install on HPC**
+        ^^^
+
+        goSPL installation on High Performance computers. 
+
+        +++
+
+        .. button-ref:: installHPC
+            :color: secondary
+            :click-parent:
+
+            Learn more
 
 .. toctree::
     :maxdepth: 2
     :hidden:
 
-    installConda
     installDocker
-    installPypi
+    installConda
     installSrc
+    installHPC

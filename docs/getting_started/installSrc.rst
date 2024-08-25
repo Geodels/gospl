@@ -101,6 +101,7 @@ meshio                    4.2.2              I/O for mesh files.
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       9.0.3              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
+gflex                     1.1.0              Compute flexural isostasy
 ========================= ================== =============================================================
 
 
@@ -115,3 +116,10 @@ It can then be installed locally on your system using::
 
       pip install --no-build-isolation -e .
 
+In addition, the latest version of goSPL requires the `isoFlex` library that can be installed from `GitHub <https://github.com/Geodels/isoFlex>`_::
+
+      git clone github.com/Geodels/isoFlex.git
+
+It can then be installed locally on your system using::
+
+      pip install --no-build-isolation -e .

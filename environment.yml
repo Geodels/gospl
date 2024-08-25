@@ -19,7 +19,11 @@ dependencies:
   - ruamel.yaml
   - gflex
   - mpi4py
+  - xarray
+  - rioxarray
+  - pyproj
   - cython
   - compilers
   - pip:
+    - git+https://github.com/Geodels/isoFlex.git
     - git+https://github.com/Geodels/gospl.git
