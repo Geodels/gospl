@@ -87,6 +87,7 @@ extensions = [
     'sphinx_design',
     'myst_nb',
     'jupyterlite_sphinx',
+    'sphinx.ext.viewcode',
 ]
 bibtex_bibfiles = ["refs.bib"]
 
@@ -208,6 +209,8 @@ html_use_modindex = True
 html_domain_indices = False
 html_copy_source = False
 html_file_suffix = '.html'
+
+html_show_sourcelink = True
 
 # Output file base name for HTML help builder.
 htmlhelp_basename = "gospl"
