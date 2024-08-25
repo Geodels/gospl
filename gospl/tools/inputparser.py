@@ -237,11 +237,6 @@ class ReadYaml(object):
         domainDict = self.input["domain"]
 
         try:
-            self.fitMarine = domainDict["fitmarine"]
-        except KeyError:
-            self.fitMarine = False
-
-        try:
             advscheme = domainDict["advect"]
             if advscheme == 'iioe1':
                 self.advscheme = 2
@@ -342,22 +337,22 @@ class ReadYaml(object):
                 flush=True,
             )
 
-        try:
-            self.tecStep = timeDict["tec"]
-        except KeyError:
-            self.tecStep = self.tout
+        # try:
+        #     self.tecStep = timeDict["tec"]
+        # except KeyError:
+        #     self.tecStep = self.tout
 
         try:
             self.strat = timeDict["strat"]
         except KeyError:
             self.strat = 0
 
-        if self.tout < self.tecStep:
-            self.tecStep = self.tout
-            print(
-                "Output time interval and tectonic forcing time step have been adjusted to match each others.",
-                flush=True,
-            )
+        # if self.tout < self.tecStep:
+        #     self.tecStep = self.tout
+        #     print(
+        #         "Output time interval and tectonic forcing time step have been adjusted to match each others.",
+        #         flush=True,
+        #     )
 
         if self.tout < self.strat:
             self.strat = self.tout
@@ -367,13 +362,13 @@ class ReadYaml(object):
                 flush=True,
             )
 
-        if self.tecStep > 0:
-            if self.tout % self.tecStep != 0:
-                print(
-                    "When declaring tectonic time interval, the value should be divisible by the output time interval.",
-                    flush=True,
-                )
-                raise ValueError("Tectonic time interval definition is wrong!")
+        # if self.tecStep > 0:
+        #     if self.tout % self.tecStep != 0:
+        #         print(
+        #             "When declaring tectonic time interval, the value should be divisible by the output time interval.",
+        #             flush=True,
+        #         )
+        #         raise ValueError("Tectonic time interval definition is wrong!")
 
         if self.strat > 0:
             if self.tout % self.strat != 0:

@@ -17,26 +17,25 @@ This user guide explains the different parameters available in goSPL input file.
 
     For a full overview of goSPL capabilities, head to the `API reference <https://gospl.readthedocs.io/en/latest/api_ref/index.html>`_. 
 
-    For additional examples, you might be interested in the following set of examples available from the `Stellar-SFM project <https://geodels.github.io/stellar-sfm/welcome.html>`_.
-
-    .. warning::
-
-        `Stellar-SFM project <https://geodels.github.io/stellar-sfm/welcome.html>`_ is based on a previous version of goSPL and some of the new features will not be available. There might also be some of the oldest features that might not be fully functional with the newest version. If you are interested in reproducing the examples from this Stellar-SFM project, you could use the branch `v2023 <https://github.com/Geodels/gospl/tree/v2023>`_ from goSPL. 
-
 
 Input file
 ---------------------
 
-The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. The following processes are considered:
+.. grid:: 1
+    :padding: 2
 
-- **river incision** and **deposition** using stream power law,
-- continental **deposition** in depressions,
-- **marine deposition** at river mouth,
-- **hillslope processes** in both marine and inland areas,
-- **sediment compaction** as stratigraphic layers geometry and properties change, 
-- spatially and temporally varying **tectonics** (horizontal and vertical displacements).
-- spatially and temporally varying **precipitation** grids as well as **orographic** rain and sea-level fluctuations, 
-- possibility to account for **flexural** isostasy driven by changes in surface loading.
+    .. grid-item-card::  
+        
+        The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. The following processes are considered:
+
+        - **river incision** and **deposition** using stream power law,
+        - continental **deposition** in depressions,
+        - **marine deposition** at river mouth,
+        - **hillslope processes** in both marine and inland areas,
+        - **sediment compaction** as stratigraphic layers geometry and properties change, 
+        - spatially and temporally varying **tectonics** (horizontal and vertical displacements).
+        - spatially and temporally varying **precipitation** grids as well as **orographic** rain and sea-level fluctuations, 
+        - possibility to account for **flexural** isostasy driven by changes in surface loading.
 
 
 Required parameters

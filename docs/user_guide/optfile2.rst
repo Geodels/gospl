@@ -15,7 +15,7 @@ Tectonic forcing parameters
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             tectonics:
                 - start: -20000000.
@@ -26,16 +26,24 @@ Tectonic forcing parameters
                   upsub: ['data/uplift18Ma','t']
                   hdisp: ['data/hdisp18Ma', 'hxyz']
 
-        It defines the tectonic forcing conditions from a sequence of events defined by a starting and ending time (``start`` and ``end``) and either a vertical rate only forcing (*e.g.* uplift and/or subsidence defined with ``upsub``) or a fully 3D displacement rate ``hdisp``. **These displacement rates are set in metres per year**.
+        It defines the tectonic forcing conditions from a sequence of events defined by a starting and ending time (``start`` and ``end``) and either a vertical rate only forcing (*e.g.* uplift and/or subsidence defined with ``upsub``) or a fully 3D displacement rate ``hdisp``. **These displacement rates are set in metres per year**. 
+
+        .. important::
+
+          For horizontal advection the user needs to define the ``advect`` key in the ``domain`` `section <https://gospl.readthedocs.io/en/latest/user_guide/inputfile.html#initial-mesh-definition-and-simulation-declaration>`_ of the input file. The advection scheme could either be ``upwind``, ``iioe1``, ``iioe2`` or ``interp``  (go to the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ in the documentation for more information). 
 
 
 .. important::
 
-  Here again, these forcing files are defined as numpy zip array (**.npz**). These files use specific keys to identify the tectonic forcing that are specified by the user in the input file. For vertical only condition, the displacements (in m/yr) is a 1D vector with values on each node of the grid. For the horizontal condition, the key is a 3D array containing the displacement rates along the x, y and z axis (in m/yr). 
+  Here again, these forcing files are defined as numpy zip array (**.npz**). These files use specific keys to identify the tectonic forcing that are specified by the user in the input file. For vertical only condition, the displacements (in m/yr) is a **1D vector** with values on each node of the grid. For the horizontal condition, the key is a **3D array** containing the displacement rates along the x, y and z axis (in m/yr). When the horizontal advection is for 2D grids, the provided displacements also need to be in 3D but with the third dimension set to 0.0.
 
 .. note::
 
   There is no requirement to impose continuous tectonics forcing and you might chose to have periods without displacement by making discontinuous events using the ``start`` and ``end`` keys. 
+
+.. note::
+
+  When applying horizontal displacement using the ``interp`` scheme (mainly used in global simulation to represent plate movements), the horizontal movements are performed at the end of the period (i.e., at the specified ``end`` time). In the other cases, the horizontal displacement is done at every timestep (specified by ``dt``).
 
 
 .. Plate forcing parameters
@@ -86,10 +94,11 @@ Tectonic forcing parameters
 Flexural isostasy definition
 -----------------------------------
 
-This function computes the flexural isostasy equilibrium based on topographic change. It is a simple routine that accounts for flexural isostatic rebound associated with erosional loading/unloading.
+This function computes the flexural isostasy equilibrium based on topographic change. It accounts for flexural isostatic rebound associated with erosional loading/unloading.
 
-.. warning::
-    This function assumes a value of 1011 Pa for Young's modulus, 0.25 for Poisson's ratio and 9.81 m/s2 for g, the gravitational acceleration.
+.. important::
+
+  It is computed on a regular grid (in X,Y in 2D or lon/lat for global simulation) and is limited in terms of parallelisation.
 
 .. grid:: 1
     :padding: 3
@@ -98,24 +107,68 @@ This function computes the flexural isostasy equilibrium based on topographic ch
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             flexure: 
-                regdx: 200.
-                thick: 20.e3
-                rhoc: 2800.0
-                rhoa: 3150.0
+              method: 'FD'
+              regdx: 1000.
+              ninterp: 4
+              thick: 30.e3
+              rhoc: 2300.0
+              rhoa: 3300.0
+              young: 65e9
+              nu: 0.25
+              bcN: "Mirror"
+              bcE: "0Slope0Shear"
+              bcS: "Mirror"
+              bcW: "0Slope0Shear"
 
-        Used to consider flexural isostasy in 2D simulation (*i.e.* not global scale) where:
+        Used to consider flexural isostasy (*i.e.* not global scale) where:
 
-        a. ``regdx``: the resolution of the regular grid used to perform the flexural isostasy calculation,
-        b. ``thick`` effective elastic plate thickness in m,
-        c. ``rhoc`` crust density in kg/m3,
-        d. ``rhoa`` asthenospheric density in kg/m3.
+        a. ``method``: the approach used is either 'FD' in 2D or 'global' for global model.  
+        b. ``regdx``: the resolution of the regular grid used to perform the flexural isostasy calculation,
+        c. ``ninterp``: the number of points used to perform the interpolation between goSPL unstructured mesh and the regular grid (not used for the 'global' ``method``) 
+        d. ``thick`` effective elastic plate thickness in m,
+        e. ``rhoc`` crust density in kg/m3,
+        f. ``rhoa`` asthenospheric density in kg/m3.
+        g. ``young``  Young's Modulus in Pa.
+        h. ``nu`` Poisson ratio.
+        i. ``bcN``, ``bcE``, ``bcS``, ``bcW`` North, East, South and West boundary conditions.
+
+        .. note::
+  
+          For non-global simulation, the user needs to specify the boundary conditions for the flexural isostasy calculation. Similar conditions to `gFlex <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_ are possible:
+            
+            - `0Displacement0Slope` 0-displacement-0-slope boundary condition
+
+            - `0Moment0Shear`: Broken plate boundary condition second and third derivatives of vertical displacement are 0. This is like the end of a diving board.
+            - `0Slope0Shear`: First and third derivatives of vertical displacement are zero. While this does not lend itsellf so easily to physical meaning, it is helpful to aid in efforts to make boundary condition effects disappear (i.e. to emulate the NoOutsideLoads cases)
+            - `Mirror`: Load and elastic thickness structures reflected at boundary.
+            - `Periodic``: Wrap-around boundary condition: must be applied to both North and South and/or both East and West. This causes, for example, the edge of the eastern and western limits of the domain to act like they are next to each other in an infinite loop.
 
 .. warning::
 
     In case where **flexure** and **orographic rain** capabilities are defined in the same simulation, you will need to have the same grid resolution (``regdx``) for each definition.
+
+
+In addition, it is possible to define variable lithospheric elastic thicknesses by using the ``temap`` key below where specific maps could be added through time during the run.
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::  
+        
+        **Declaration example**:
+
+        .. code:: yaml
+
+            temap:
+              - start: 250.e6
+                map: ['input/temap1', 'te']
+              - start: 251.e6
+                map: ['input/temap2', 'te']
+
+Here again, the elastic maps files are provided as numpy zip array (**.npz**).
 
 .. Global flexural isostasy declaration
 .. -------------------------------------

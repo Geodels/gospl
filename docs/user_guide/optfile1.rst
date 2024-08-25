@@ -19,7 +19,7 @@ Sea-level (eustatic) forcing
                 
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yamk
 
             sea:
                 position: 0.
@@ -45,11 +45,11 @@ Climatic (rainfall) forcing conditions
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             climate:
                 - start: 1000.
-                  map: ['rain20Ma','r']
+                  map: ['rain_map','r']
                 - start: 20000.
                   uniform: 1.
 
@@ -63,6 +63,10 @@ Climatic (rainfall) forcing conditions
 
 Orographic precipitation definition
 ------------------------------------
+
+.. warning::
+
+    The orographic precipitation is only available for 2D grids and will not be working for global models.
 
 goSPL implements the Linear Theory of Orographic Precipitation following `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_.
 
@@ -82,7 +86,7 @@ goSPL implements the Linear Theory of Orographic Precipitation following `Smith 
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             orography:
                 regdx: 200.
@@ -103,6 +107,11 @@ goSPL implements the Linear Theory of Orographic Precipitation following `Smith 
         This part of the input file define the parameters for the orographic rain:
 
         a. ``regdx``: the resolution of the regular grid used to perform the orographic rain calculation.
+
+        .. important::
+
+            If both orographic rain and flexure are turned-on then the ``regdx`` values will have to be the same. 
+
         b. ``latitude``: average latitude used to compute the Coriolis factors [degrees btw -90 and 90]; default 0
         c. ``wind_speed``: wind speed in m/s; default 10
         d. ``wind_dir``: wind direction [0: north, 270: west]; default 0
@@ -119,4 +128,4 @@ goSPL implements the Linear Theory of Orographic Precipitation following `Smith 
 
 .. warning::
 
-    In case where **flexure** and **orographic rain** capabilities are defined in the same simulation, you will need to have the same grid resolution (``regdx``) for each definition.
+    In case you missed it above: when **flexure** and **orographic rain** capabilities are defined in the same simulation, you will need to have the same grid resolution (``regdx``) for each definition.

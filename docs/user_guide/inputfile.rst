@@ -7,7 +7,7 @@ Required input file parameters
 .. note::
 
   Input files for  goSPL are based on `YAML`_ syntax.
-  The YAML structure is shown through indentation (one or more spaces) and sequence items are denoted by a dash. At the moment the following component are available:
+  The YAML structure is shown through indentation (one or more spaces) and sequence items are denoted by a dash.
 
 
 Initial mesh definition and simulation declaration
@@ -20,33 +20,33 @@ Initial mesh definition and simulation declaration
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
-            name: Global model from 20 Ma to present
+            name: Description of your simulation run
 
             domain:
-                npdata: ['inputs/mesh2','v','c','z']
+                npdata: ['input/mesh','v','c','z']
                 flowdir: 5
-                flowexp: 0.5
                 bc:'0101'
                 fast: False
                 seadepo: True
-                nperodep: 'strat8/erodep20Ma'
-                npstrata: 'strat8/sed20Ma'
+                nperodep: 'input/erodep20Ma'
+                npstrata: 'input/sed20Ma'
+                advect: 'iioe2'
 
         The following parameters are **required**:
 
         a. the initial spherical or 2D surface mesh ``npdata`` (**.npz** file). This file contains the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells.
         b. the flow direction method to be used ``flowdir`` that takes an integer value between 1 (for SFD) and 6 (for MFD)
-        c. the exponent (``flowexp``) used in the flow direction approach. Default value is set to 0.42.
-        d. boundary conditions (``bc``) when not running a global model. Each integer corresponds to an edge defined in the following order: south, east, north, and west. The integer is set to either 0 for open or to 1 for fixed boundaries.
-
+        
         In addition the following optional parameters could be set:
 
-        e. the ``fast`` key allows you to run a model without applying any surface processes on top. This is used to check your input files prior to run your simulation with all options. By default it is set to *False*.
-        f. ``seadepo`` performing marine deposition or not. By default it is set to *False*.
-        g. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file (**.npz** format with the erosion deposition defined with the key ``ed``) containing for each vertex of the mesh the cumulative erosion deposition values in metres. 
-        h. to start a simulation using an initial stratigraphic layer use the ``npstrata`` key (**.npz** file) and specify a file containing for each vertex of the mesh the stratigraphic layer thickness ``strataH``, the elevation at time of deposition ``strataZ``, and the porosities of the sediment ``phiS``. 
+        c. boundary conditions (``bc``) when not running a global model. Each integer corresponds to an edge defined in the following order: south, east, north, and west. The integer is set to either 0 for open or to 1 for fixed boundaries.
+        d. the ``fast`` key allows you to run a model without applying any surface processes on top. This is used to check your input files prior to run your simulation with all options. By default it is set to *False*.
+        e. ``seadepo`` performing marine deposition or not. By default it is set to *False*.
+        f. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file (**.npz** format with the erosion deposition defined with the key ``ed``) containing for each vertex of the mesh the cumulative erosion deposition values in metres. 
+        g. to start a simulation using an initial stratigraphic layer use the ``npstrata`` key (**.npz** file) and specify a file containing for each vertex of the mesh the stratigraphic layer thickness ``strataH``, the elevation at time of deposition ``strataZ``, and the porosities of the sediment ``phiS``. 
+        h. ``advect`` define the advection scheme used when applying horizontal displacements. Choices are ``upwind``, ``iioe1``, ``iioe2`` and ``interp``  (go to the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ in the documentation for more information). 
 
 .. warning::
 
@@ -68,7 +68,7 @@ Setting model temporal evolution
 
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             time:
                 start: -20000000.
@@ -76,7 +76,6 @@ Setting model temporal evolution
                 dt: 250000.
                 tout: 1000000.
                 rstep: 25
-                tec: 1000000.
                 strat: 500000.
 
         ``time`` is also a required component of every input file. The following parameters are needed:
@@ -89,13 +88,12 @@ Setting model temporal evolution
         The following parameters are **optional**:
 
         e. to restart a simulation use the ``rstep`` key and specify the time step number.
-        f. ``tec`` is only relevant for specific cases when using a plates reconstruction model. This tectonic timestep interval is used to update the tectonic meshes and to perform the required horizontal displacements. For standard tectonic conditions (vertical movements), the calculation is performed every ``dt``.
-        g. ``strat`` is the stratigraphic timestep interval used to update the stratigraphic record.
+        f. ``strat`` is the stratigraphic timestep interval used to update the stratigraphic record.
 
 
 .. important::
 
-  In cases where the specify ``dt``, ``strat`` and ``tec`` parameters are greater than ``tout``, they will automatically be rescaled to match with the output interval. The ``tec`` parameter should be set to the temporal time step used in your reconstruction (usually 1 Ma). This time step is used to perform the horizontal displacements. The vertical displacements are updated for each time step. When turned-on the stratal records will be output at the same time as the output ones, but the file will potentially contain multiple stratigraphic layers per output if ``tout`` is a multiple of ``strat``.
+  In cases where the specify ``dt`` and ``strat`` parameters are greater than ``tout``, they will automatically be rescaled to match with the output interval. When turned-on the stratal records will be output at the same time as the output ones, but the file will potentially contain multiple stratigraphic layers per output if ``tout`` is a multiple of ``strat``.
 
 Output folder definition
 -------------------------
@@ -107,7 +105,7 @@ Output folder definition
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             output:
                 dir: 'forward'

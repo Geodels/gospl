@@ -14,7 +14,7 @@ Stream Power Law parameters
                 
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             spl:
                 K: 3.e-8
@@ -47,15 +47,15 @@ Hillslope and marine deposition parameters
                 
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             diffusion:
                 hillslopeKa: 0.02
                 hillslopeKm: 0.2
-                nonlinKm: 100.0
+                nonlinKm: 500.0
                 clinSlp: 5.e-5
 
-        Hillslope processes in goSPL is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The following parameters can be tuned based on your model resolution:
+        Hillslope processes in goSPL is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The marine deposition of freshly deposited sediments by rivers is obtained using a non-linear diffusion and the following parameters can be tuned based on your model resolution:
 
         a. ``hillslopeKa`` is the diffusion coefficient for the aerial domain,
         b. ``hillslopeKm`` is the diffusion coefficient for the marine domain,
@@ -73,13 +73,13 @@ Sediment surface erodibility factor
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             sedfactor:
                 - start: 200000.
                   uniform: 3
                 - start: 400000.
-                  map: ['facErosion4k','fsed']
+                  map: ['facEro','fsed']
 
         One could choose to impose variable erodibility factors through space and time to reflect different surficial rock composition. For example, those maps could be set to represent different rock erodibility index as proposed in `Mossdorf et al. (2018) <https://www.sciencedirect.com/science/article/abs/pii/S0143622817306859>`_. The factor are then used in front of the erodibility coefficient (``K`` in the SPL).
 
@@ -98,7 +98,7 @@ Compaction & porosity variables definition
         
         **Declaration example**:
 
-        .. code:: python
+        .. code:: yaml
 
             compaction:
                 phis: 0.49
@@ -109,3 +109,6 @@ Compaction & porosity variables definition
         a. porosity at the surface ``phis``, default value is set to 0.49,       
         b. e-folding depth ``z0s`` (in metres), default value is set to 3700.       
 
+        .. note::
+    
+            See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/strat.html>`_ for more information.
