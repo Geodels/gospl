@@ -14,7 +14,7 @@ sphinxcontrib.bibtex
 numpydoc>=1.1.0
 myst-parser>=0.12.10
 myst_nb
-numpydoc
+numpydoc==1.8.0
 sphinx_design
 jupyterlite_sphinx
 intersphinx_registry
