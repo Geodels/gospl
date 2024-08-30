@@ -3417,7 +3417,7 @@ subroutine addw(w,nxflex,nyflex,iflexmin,iflexmax,jflexmin,jflexmax,cbc)
 
 end subroutine addw
 
-subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,newh)
+subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,g,newh)
 !*****************************************************************************
 ! Routine to compute the flexural response of erosion from Fastscape
 ! in input:
@@ -3440,12 +3440,12 @@ subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,newh)
 
   integer, intent(in) :: nx,ny,ibc
   double precision, intent(in), dimension(nx,ny) :: dh
-  double precision, intent(in) :: xl,yl,rhoa,eet,rhos,young,nu
+  double precision, intent(in) :: xl,yl,rhoa,eet,rhos,young,nu,g
   double precision, intent(out), dimension(nx,ny) :: newh
 
   integer nxflex,nyflex,i,j,ii,jj
   double precision, dimension(:,:), allocatable :: w
-  double precision hx,hy,dflex,d,xk,pihx,pihy,g,fi,fj,tij,dx,dy,r,s,h1,h2,h3,h4
+  double precision hx,hy,dflex,d,xk,pihx,pihy,fi,fj,tij,dx,dy,r,s,h1,h2,h3,h4
   double precision ddxf,ddyf,xloc,yloc,dw,xflexloc,yflexloc
   integer iflexmin,iflexmax,jflexmin,jflexmax
   character cbc*4
@@ -3489,7 +3489,7 @@ subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,newh)
   hy=ddyf*(nyflex-1)
   dflex=young/12.d0/(1.d0-nu**2)
   d=dflex*eet**3
-  g=9.81d0
+  ! g=9.81d0
   xk=rhoa*g
   pihx=3.141592654d0/hx
   pihy=3.141592654d0/hx

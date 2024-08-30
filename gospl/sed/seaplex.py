@@ -193,6 +193,7 @@ class SEAMesh(object):
 
         if self.memclear:
             del data, indptr, nodes
+            del hl, fillz, fillEPS, rcv, wght
             gc.collect()
 
         # Store flow direction matrix
@@ -383,6 +384,10 @@ class SEAMesh(object):
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
+        if self.memclear:
+            del ndepo, sedK
+            gc.collect()
+
         return
 
     def _distOcean(self, sedflux):
@@ -438,6 +443,10 @@ class SEAMesh(object):
 
             step += 1
         self.dMat.destroy()
+
+        if self.memclear:
+            del marVol, sinkVol
+            gc.collect()
 
         return vdep
 
@@ -509,5 +518,9 @@ class SEAMesh(object):
                 % (process_time() - t0),
                 flush=True,
             )
+
+        if self.memclear:
+            del marDep, dh, add_rate, hl, sedFlux
+            gc.collect()
 
         return

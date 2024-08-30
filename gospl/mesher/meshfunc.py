@@ -67,6 +67,11 @@ class VoroBuild(object):
         # nothing to do here
 
         return
+    
+    def __del__(self):
+        # nothing to do here
+
+        return
 
     def initVoronoi(self, nodes, cells, sort_cells=False):
         """Initialization.

@@ -366,10 +366,10 @@ python module _fortran
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine filllabel
 
-        subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,newh)
+        subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,g,ibc,newh)
             integer intent(in) :: nx,ny,ibc
             double precision dimension(nx,ny),intent(in),depend(nx,ny) :: dh
-            double precision,intent(in) :: young,nu,rhos,xl,yl,rhoa,eet
+            double precision,intent(in) :: young,nu,rhos,xl,yl,rhoa,eet,g
             double precision dimension(nx,ny),intent(out),depend(nx,ny) :: newh
         end subroutine flexure
 

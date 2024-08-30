@@ -68,8 +68,6 @@ class ReadYaml(object):
         self._readTeMap()
         self._readOut()
 
-        self.radius = 6378137.0
-        self.gravity = 9.81
         self.tNow = self.tStart
         self.saveTime = self.tNow
         if self.strat > 0:
@@ -248,6 +246,16 @@ class ReadYaml(object):
                 self.advscheme = 0
         except KeyError:
             self.advscheme = 1
+
+        try:
+            self.radius = domainDict["radius"]
+        except KeyError:
+            self.radius = 6378137.0
+
+        try:
+            self.gravity = domainDict["gravity"]
+        except KeyError:
+            self.gravity = 9.81
 
         return
 

@@ -55,8 +55,6 @@ class GridProcess(object):
         self.flex = None
         self.xIndices = None
 
-        self.grav = 9.81
-
         if self.flexOn:
             self.rho_water = 1030.0
             self.localFlex = np.zeros(self.lpoints)
@@ -257,7 +255,7 @@ class GridProcess(object):
             if self.flex_method == 'FFT':
                 nFlex = flexure(regDiff, self.reg_ny, self.reg_nx, self.reg_yl, self.reg_xl,
                                 self.young, self.nu, self.flex_rhos, self.flex_rhoa,
-                                self.flex_eet, int(self.boundflex))
+                                self.flex_eet, self.gravity, int(self.boundflex))
 
                 # Interpolate back to goSPL mesh
                 flexZ = self._regInterp(nFlex)
@@ -271,7 +269,7 @@ class GridProcess(object):
                 flex.Solver = "direct"
 
                 # gFlex parameters
-                flex.g = 9.81
+                flex.g = self.gravity
                 flex.E = self.young
                 flex.nu = self.nu
                 flex.rho_m = self.flex_rhoa

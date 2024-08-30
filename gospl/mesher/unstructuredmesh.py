@@ -280,12 +280,12 @@ class UnstMesh(object):
         self.mCoords = loadData[self.infoCoords]
         self.mpoints = len(self.mCoords)
         gZ = loadData[self.infoElev]
-        self.mCells = loadData[self.infoCells].astype(int)
+        mCells = loadData[self.infoCells].astype(int)
 
         # Get global mesh vertex neighbors
         if MPIrank == 0:
-            globalngbhs(self.mpoints, self.mCells)
-
+            globalngbhs(self.mpoints, mCells)
+        mCells = None
         self.vtkMesh = None
         self.flatModel = False
         if MPIrank == 0 and self.verbose:

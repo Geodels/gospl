@@ -288,7 +288,7 @@ class SEDMesh(object):
         self.EbLocal.axpy(1.0, self.tmpL)
 
         if self.memclear:
-            del h, add_rate
+            del add_rate
             gc.collect()
 
         return
