@@ -13,7 +13,7 @@ nbsphinx>=0.7.1
 sphinxcontrib.bibtex
 numpydoc>=1.1.0
 myst-parser>=0.12.10
-myst_nb
+myst_nb==1.1.1
 numpydoc
 sphinx_design
 jupyterlite_sphinx
