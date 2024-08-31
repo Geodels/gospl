@@ -63,8 +63,6 @@ class GridProcess(object):
                 self.boundflex = self.boundflex.replace('1', '0')
                 self.boundflex = self.boundflex.replace('2', '1')
             self.globalfData = None
-            self.globalfStep = 0
-            self.simfStep = 0
         if self.oroOn:
             self.oroEPS = np.finfo(float).eps
 
@@ -214,48 +212,47 @@ class GridProcess(object):
             flexZ = self._regInterp(nFlex)
 
         elif self.flex_method == 'FD':
-            if self.simfStep == 0:
-                self.simflex = F2D()
-                self.simflex.Quiet = True
+            simflex = F2D()
+            simflex.Quiet = True
 
-                self.simflex.Method = "FD"
-                self.simflex.PlateSolutionType = "vWC1994"
-                self.simflex.Solver = "direct"
+            simflex.Method = "FD"
+            simflex.PlateSolutionType = "vWC1994"
+            simflex.Solver = "direct"
 
-                # gFlex parameters
-                self.simflex.g = self.gravity
-                self.simflex.E = self.young
-                self.simflex.nu = self.nu
-                self.simflex.rho_m = self.flex_rhoa
-                self.simflex.rho_fill = 0.
-                self.simflex.dx = self.reg_dx
-                self.simflex.dy = self.reg_dx
+            # gFlex parameters
+            simflex.g = self.gravity
+            simflex.E = self.young
+            simflex.nu = self.nu
+            simflex.rho_m = self.flex_rhoa
+            simflex.rho_fill = 0.
+            simflex.dx = self.reg_dx
+            simflex.dy = self.reg_dx
 
-                # Boundary conditions
-                self.simflex.BC_E = self.flex_bcE
-                self.simflex.BC_W = self.flex_bcW
-                self.simflex.BC_S = self.flex_bcN
-                self.simflex.BC_N = self.flex_bcS
-
-                self.simfStep = 1
+            # Boundary conditions
+            simflex.BC_E = self.flex_bcE
+            simflex.BC_W = self.flex_bcW
+            simflex.BC_S = self.flex_bcN
+            simflex.BC_N = self.flex_bcS
 
             # Assign elastic thickness grid
             if self.tedata is not None:
                 self._updateTe()
-                self.simflex.Te = self.flexTe.copy()
+                simflex.Te = self.flexTe.copy()
             else:
-                self.simflex.Te = self.flex_eet * np.ones(regDiff.shape)
+                simflex.Te = self.flex_eet * np.ones(regDiff.shape)
 
             # Compute loads
-            self.simflex.qs = self.flex_rhos * self.gravity * regDiff
+            simflex.qs = self.flex_rhos * self.gravity * regDiff
 
             # Run gFlex
-            self.simflex.initialize()
-            self.simflex.run()
-            self.simflex.finalize()
+            simflex.initialize()
+            simflex.run()
+            simflex.finalize()
 
             # Interpolate back to goSPL mesh
-            flexZ = self._regInterp(self.simflex.w)
+            flexZ = self._regInterp(simflex.w)
+            del simflex
+            gc.collect()
 
         return flexZ
 
@@ -294,7 +291,6 @@ class GridProcess(object):
             self.globalfData[:, 3] = dZ
             self.globalfData[:, 4] = Te
 
-            # if self.globalfStep == 0:
             fmodel = iflex(None, None, self.globalfData, None,
                            self.young, self.nu, self.flex_rhoa,
                            self.flex_rhos, self.gravity,
@@ -304,10 +300,6 @@ class GridProcess(object):
                 flexZ = fmodel.simflex.copy()
             del fmodel
             gc.collect()
-            # self.globalfStep = 1
-            # else:
-            # self.fmodel.updateFlex(self.globalfData[:, 3:])
-            # self.fmodel.runFlex()
 
         if self.flex_method == 'global' and not libisoglob and MPIrank == 0:
             flexZ = np.zeros(len(self.mCoords))
