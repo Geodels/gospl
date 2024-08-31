@@ -169,12 +169,11 @@ class SEAMesh(object):
             wght[self.idBorders, :] = 0.0
 
         # Define downstream matrix based on filled + dir elevations
-        dMat = self.zMat.copy()
+        self.dMat = self.zMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
         for k in range(0, 12):
-
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
             data = wght[:, k].copy()
@@ -186,9 +185,8 @@ class SEAMesh(object):
                 data,
             )
             tmpMat.assemblyEnd()
-
             # Add the weights from each direction
-            dMat += tmpMat
+            self.dMat.axpy(1.0, tmpMat)
             tmpMat.destroy()
 
         if self.memclear:
@@ -197,9 +195,7 @@ class SEAMesh(object):
             gc.collect()
 
         # Store flow direction matrix
-        self.dMat = dMat.transpose().copy()
-
-        dMat.destroy()
+        self.dMat.transpose()
 
         return
 
@@ -374,6 +370,11 @@ class SEAMesh(object):
                     ts.getKSPIterations(),
                 )
             )
+
+        # Clean solver
+        pc.destroy()
+        ksp.destroy()
+        snes.destroy()
         ts.destroy()
 
         # Get diffused sediment thicknesses
@@ -384,6 +385,8 @@ class SEAMesh(object):
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
+        x.destroy()
+        f.destroy()
         if self.memclear:
             del ndepo, sedK
             gc.collect()

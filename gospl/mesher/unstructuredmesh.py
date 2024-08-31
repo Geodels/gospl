@@ -745,8 +745,6 @@ class UnstMesh(object):
             self.iceFAL.destroy()
 
         self.iMat.destroy()
-        if not self.fast:
-            self.fMat.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
         self.dm.destroy()

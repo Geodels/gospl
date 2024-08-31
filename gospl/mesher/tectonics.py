@@ -164,7 +164,7 @@ class Tectonics(object):
                 data,
             )
             tmpMat.assemblyEnd()
-            advMat_left += tmpMat
+            advMat_left.axpy(1.0, tmpMat)
             tmpMat.destroy()
             if iioe:
                 tmpMat = self._matrix_build()
@@ -179,12 +179,36 @@ class Tectonics(object):
                     data,
                 )
                 tmpMat.assemblyEnd()
-                advMat_right += tmpMat
+                advMat_right.axpy(1.0, tmpMat)
                 tmpMat.destroy()
         if iioe:
             return advMat_left, advMat_right
         else:
             return advMat_left
+
+    def _advectorIIOE2(self, vL, newv, vmin, vmax, nbOut):
+        """
+        Perform the advection for the Inflow-Implicit/Outflow-Explicit Scheme 2.
+        """
+
+        diffmax = newv - vmax
+        diffmax[diffmax < 0] = 0.
+        diffmin = newv - vmin
+        diffmin[diffmin > 0] = 0.
+        diff = np.abs(diffmax) + np.abs(diffmin)
+        self.tmpL.setArray(diff)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        excess = self.tmp.sum()
+
+        if excess > 0.:
+            lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, vL, vmin, vmax)
+            advMat_left2, advMat_right2 = self._buildAdvecMat(True, lCoeffs, rCoeffs)
+            advMat_right2.mult(self.hGlobal, self.tmp1)
+            self._solve_KSP(True, advMat_left2, self.tmp1, self.tmp)
+            advMat_left2.destroy()
+            advMat_right2.destroy()
+
+        return
 
     def _varAdvector(self):
         """
@@ -235,19 +259,7 @@ class Tectonics(object):
             if self.advscheme == 3:
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 newh = self.tmpL.getArray()
-                diffmax = newh - hmax
-                diffmax[diffmax < 0] = 0.
-                diffmin = newh - hmin
-                diffmin[diffmin > 0] = 0.
-                diff = np.abs(diffmax) + np.abs(diffmin)
-                self.tmpL.setArray(diff)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                excess = self.tmp.sum()
-                if excess > 0.:
-                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, hL, hmin, hmax)
-                    advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
-                    advMat_right.mult(self.hGlobal, self.tmp1)
-                    self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+                self._advectorIIOE2(hL, newh, hmin, hmax, nbOut)
         else:
             # Upwind scheme with potentially excessive diffusion solved implicitly
             self._solve_KSP(True, advMat_left, self.hGlobal, self.tmp)
@@ -276,19 +288,7 @@ class Tectonics(object):
             if self.advscheme == 3:
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 newed = self.tmpL.getArray()
-                diffmax = newed - edmax
-                diffmax[diffmax < 0] = 0.
-                diffmin = newed - edmin
-                diffmin[diffmin > 0] = 0.
-                dh = np.abs(diffmax) + np.abs(diffmin)
-                self.tmpL.setArray(dh)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                excess = self.tmp.sum()
-                if excess > 0.:
-                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, edL, edmin, edmax)
-                    advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
-                    advMat_right.mult(self.cumED, self.tmp1)
-                    self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+                self._advectorIIOE2(edL, newed, edmin, edmax, nbOut)
         else:
             # Upwind scheme with potentially excessive diffusion solved implicitly
             self._solve_KSP(True, advMat_left, self.cumED, self.tmp)
@@ -318,19 +318,7 @@ class Tectonics(object):
                 if self.advscheme == 3:
                     self.dm.globalToLocal(self.tmp, self.tmpL)
                     newfi = self.tmpL.getArray()
-                    diffmax = newfi - fimax
-                    diffmax[diffmax < 0] = 0.
-                    diffmin = newfi - fimin
-                    diffmin[diffmin > 0] = 0.
-                    dh = np.abs(diffmax) + np.abs(diffmin)
-                    self.tmpL.setArray(dh)
-                    self.dm.localToGlobal(self.tmpL, self.tmp)
-                    excess = self.tmp.sum()
-                    if excess > 0.:
-                        lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, self.localFlex, fimin, fimax)
-                        advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
-                        advMat_right.mult(self.tmp, self.tmp1)
-                        self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+                    self._advectorIIOE2(self.localFlex, newfi, fimin, fimax, nbOut)
             else:
                 self.tmpL.setArray(self.localFlex)
                 self.dm.localToGlobal(self.tmpL, self.fiso)

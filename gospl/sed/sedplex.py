@@ -75,9 +75,10 @@ class SEDMesh(object):
         # Get the volume of sediment transported in m3 per year
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
+        self.fMati.destroy()
+
         # Update local vector
         self.dm.globalToLocal(self.vSed, self.vSedLocal)
-
         if MPIrank == 0 and self.verbose:
             print(
                 "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
@@ -145,6 +146,7 @@ class SEDMesh(object):
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
+            self.fMat.destroy()
 
         return excess
 
@@ -166,6 +168,7 @@ class SEDMesh(object):
 
         step = 0
         excess = True
+        self.fMat.destroy()
         while excess:
             t1 = process_time()
             excess = self._moveDownstream(vSed, step)
@@ -253,6 +256,7 @@ class SEDMesh(object):
         # Distribute inland sediments
         self.sedFilled = hl.copy()
         self._distributeSediment(hl)
+
         self._updateSinks(hl)
 
         return
@@ -342,7 +346,7 @@ class SEDMesh(object):
                 data,
             )
             tmpMat.assemblyEnd()
-            diffMat += tmpMat
+            diffMat.axpy(1.0, tmpMat)
             tmpMat.destroy()
 
         # Get elevation values for considered time step

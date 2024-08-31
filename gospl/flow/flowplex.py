@@ -148,9 +148,11 @@ class FAMesh(object):
                 )
                 print("with reason: ", KSPReasons[r], flush=True)
             vector2.set(0.0)
+            pc.destroy()
             ksp.destroy()
             # raise RuntimeError("LinearSolver failed to converge!")
         else:
+            pc.destroy()
             ksp.destroy()
 
         return vector2
@@ -184,9 +186,11 @@ class FAMesh(object):
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
+            pc.destroy()
             ksp.destroy()
             vector2 = self._solve_KSP2(matrix, vector1, vector2)
         else:
+            pc.destroy()
             ksp.destroy()
 
         return vector2
@@ -207,7 +211,7 @@ class FAMesh(object):
         :arg dep: deposition flux coefficient in case where the sediment transport/deposition term is considered.
         """
 
-        flowMat = self.iMat.copy()
+        self.fMat = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
         if dep is None:
@@ -215,8 +219,8 @@ class FAMesh(object):
         else:
             wght = np.multiply(self.wghtVal, dep.reshape((len(dep), 1)))
         rcv = self.rcvID
-        for k in range(0, flowdir):
 
+        for k in range(0, flowdir):
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
             data = -wght[:, k].copy()
@@ -229,7 +233,7 @@ class FAMesh(object):
             )
             tmpMat.assemblyEnd()
             # Add the weights from each direction
-            flowMat += tmpMat
+            self.fMat.axpy(1.0, tmpMat)
             tmpMat.destroy()
 
         if self.memclear:
@@ -237,9 +241,7 @@ class FAMesh(object):
             gc.collect()
 
         # Store flow accumulation matrix
-        self.fMat = flowMat.transpose().copy()
-
-        flowMat.destroy()
+        self.fMat.transpose()
 
         return
 
@@ -364,8 +366,10 @@ class FAMesh(object):
         # In case there is still remaining water flux to distribute downstream
         if (eV > 1.0e-3).any():
             if step == 100:
+                self.fMat.destroy()
                 self._buildFlowDirection(self.lFill)
             else:
+                self.fMat.destroy()
                 self._buildFlowDirection(self.waterFilled)
             self.tmpL.setArray(nFA / self.dt)
             self.dm.localToGlobal(self.tmpL, self.tmp)
@@ -449,7 +453,6 @@ class FAMesh(object):
         if (pitVol > 0.0).any():
             if self.iceOn:
                 iFA = self.iceFAL.getArray().copy() * self.dt
-                # excess, pitVol, iFA = self._distributeDownstream(pitVol, iFA, hl, 100, ice=True)
                 excess = True
                 step = 0
                 while excess:
@@ -583,8 +586,10 @@ class FAMesh(object):
                 data,
             )
             tmpMat.assemblyEnd()
-            eMat += tmpMat
-            eMat -= self._matrix_build_diag(data)
+            eMat.axpy(1.0, tmpMat)
+            tmpMat.destroy()
+            tmpMat = self._matrix_build_diag(data)
+            eMat.axpy(-1.0, tmpMat)
             tmpMat.destroy()
 
             if self.iceOn:
@@ -604,8 +609,10 @@ class FAMesh(object):
                     data,
                 )
                 tmpMat.assemblyEnd()
-                eMat += tmpMat
-                eMat -= self._matrix_build_diag(data)
+                eMat.axpy(1.0, tmpMat)
+                tmpMat.destroy()
+                tmpMat = self._matrix_build_diag(data)
+                eMat.axpy(-1.0, tmpMat)
                 tmpMat.destroy()
 
         if self.memclear:
@@ -650,21 +657,26 @@ class FAMesh(object):
         """
 
         # Define submatrices
-        qMat = self._matrix_build_diag(-self.fDep)
+        A00 = self._matrix_build_diag(-self.fDep)
         A01 = self._matrix_build_diag(-self.fDep * self.dt / self.larea)
         A10 = self._matrix_build_diag(self.larea / self.dt)
 
         # Assemble the matrix for the coupled system
-        mats = [[eMat + qMat, A01], [A10, self.fMati]]
+        A00.axpy(1.0, eMat)
+        mats = [[A00, A01], [A10, self.fMati]]
         sysMat = petsc4py.PETSc.Mat().createNest(mats=mats, comm=MPIcomm)
         sysMat.assemblyBegin()
         sysMat.assemblyEnd()
 
         # Clean up
-        qMat.destroy()
+        A00.destroy()
         A01.destroy()
         A10.destroy()
         eMat.destroy()
+        mats[0][0].destroy()
+        mats[0][1].destroy()
+        mats[1][0].destroy()
+        mats[1][1].destroy()
 
         # Create nested vectors
         self.tmpL.setArray(1. - self.fDep)
@@ -711,12 +723,19 @@ class FAMesh(object):
                     % ksp.getIterationNumber(),
                     flush=True,
                 )
-        ksp.destroy()
 
         # Update the solution
         self.newH = hq_vec.getSubVector(nested_IS[0][0])
 
         # Clean up
+        subksps[0].destroy()
+        subksps[1].destroy()
+        nested_IS[0][0].destroy()
+        nested_IS[1][0].destroy()
+        nested_IS[0][1].destroy()
+        nested_IS[1][1].destroy()
+        pc.destroy()
+        ksp.destroy()
         sysMat.destroy()
         hq_vec.destroy()
         rhs_vec.destroy()
@@ -755,12 +774,13 @@ class FAMesh(object):
         if self.flexOn:
             self.hLocal.copy(result=self.hOldFlex)
         eMat, PA = self._eroMats(hOldArray)
-
+        
         # Solve SPL erosion implicitly for fluvial and glacial erosion
         if self.fDepa == 0:
             t1 = process_time()
             self._solve_KSP(True, eMat, self.hOld, self.stepED)
             self.tmp.waxpy(-1.0, self.hOld, self.stepED)
+            eMat.destroy()
             if MPIrank == 0 and self.verbose:
                 print(
                     "Solve SPL erosion (%0.02f seconds)" % (process_time() - t1),
@@ -776,6 +796,7 @@ class FAMesh(object):
             if self.flatModel:
                 self.fDep[self.idBorders] = 0.
             self._coupledEDSystem(eMat)
+            eMat.destroy()
             if MPIrank == 0 and self.verbose:
                 print(
                     "Solve SPL accounting for sediment deposition (%0.02f seconds)" % (process_time() - t1),
@@ -841,6 +862,10 @@ class FAMesh(object):
         self.dm.globalToLocal(self.tmp, self.tmpL)
         add_rate = self.tmpL.getArray() / self.dt
         self.EbLocal.setArray(add_rate)
+
+        # Destroy flow matrices
+        self.fMati.destroy()
+        self.fMat.destroy()
 
         if MPIrank == 0 and self.verbose:
             print(
