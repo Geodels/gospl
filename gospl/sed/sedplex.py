@@ -276,7 +276,7 @@ class SEDMesh(object):
         # Compute Hillslope Diffusion Law
         h = self.hLocal.getArray().copy()
         self.seaID = np.where(h <= self.sealevel)[0]
-        self._hillSlope()
+        self._hillSlope(smooth=0)
 
         # Update layer elevation
         if self.stratNb > 0:
@@ -309,19 +309,23 @@ class SEDMesh(object):
         .. note::
             The hillslope processes in `gospl` are considered to be happening at the same rate for coarse and fine sediment sizes.
 
-        :arg smooth: integer specifying if the diffusion equation is used for marine deposits (1) and ice flow (2).
+        :arg smooth: integer specifying if the diffusion equation is used for ice flow (1) and marine deposits (2).
         """
 
-        if not smooth:
+        if smooth == 0:
             if self.Cda == 0.0 and self.Cdm == 0.0:
                 return
 
         t0 = process_time()
-
         # Diffusion matrix construction
         if smooth == 1:
             Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
             Cd[~self.iceIDs] = 0.0
+        elif smooth == 2:
+            # Hard-coded coefficients here, used to generate a smooth surface
+            # for computing marine flow directions...
+            Cd = np.full(self.lpoints, 1.e5, dtype=np.float64)
+            Cd[self.seaID] = 5.e6
         else:
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
             Cd[self.seaID] = self.Cdm
@@ -350,7 +354,7 @@ class SEDMesh(object):
             tmpMat.destroy()
 
         # Get elevation values for considered time step
-        if smooth > 0:
+        if smooth == 1:
             if self.tmp1.max()[1] > 0:
                 self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
             else:
@@ -358,11 +362,15 @@ class SEDMesh(object):
             diffMat.destroy()
             self.dm.globalToLocal(self.tmp, self.tmpL)
             return self.tmpL.getArray().copy()
+        elif smooth == 2:
+            self._solve_KSP(True, diffMat, self.hGlobal, self.tmp)
+            diffMat.destroy()
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            return self.tmpL.getArray().copy()
         else:
             self.hGlobal.copy(result=self.hOld)
             self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
             diffMat.destroy()
-
             # Update cumulative erosion/deposition and elevation
             self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
             self.cumED.axpy(1.0, self.tmp)

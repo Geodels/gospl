@@ -488,10 +488,20 @@ class ReadYaml(object):
                 self.tsStep = hillDict["tsSteps"]
             except KeyError:
                 self.tsStep = 2000
+            try:
+                self.Gmar = hillDict["Gmar"]
+            except KeyError:
+                self.Gmar = 0.0
+            try:
+                self.offshore = hillDict["offshore"]
+            except KeyError:
+                self.offshore = 100.e5
         except KeyError:
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
+            self.Gmar = 0.
             self.tsStep = 2000
+            self.offshore = 100.e5
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
 

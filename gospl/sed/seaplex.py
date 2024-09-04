@@ -12,6 +12,7 @@ from time import process_time
 from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import mfdreceivers
     from gospl._fortran import donorslist
     from gospl._fortran import donorsmax
     from gospl._fortran import mfdrcvrs
@@ -150,18 +151,27 @@ class SEAMesh(object):
 
         # Define multiple flow directions for filled + eps elevations
         hl = self.hLocal.getArray().copy()
+        if not self.flatModel:
+            # Only consider filleps in the first kms offshore
+            hsmth = self._hillSlope(smooth=2)
+            hsmth[self.coastDist > self.offshore] = -1.e6
+        else:
+            hsmth = hl.copy()
+
         fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-        fillz[self.locIDs] = hl
+        fillz[self.locIDs] = hsmth
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
         if MPIrank == 0:
             minh = np.min(fillz) + 0.1
             if not self.flatModel:
-                minh = min(minh, -3.e3)
+                minh = min(minh, self.oFill)
             fillz = epsfill(minh, fillz)
-
         # Send elevation + eps globally
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
-        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillEPS[self.locIDs], -1.0e6)
+        fillz = fillEPS[self.locIDs]
+        if not self.flatModel:
+            fillz[self.coastDist > self.offshore] = hl[self.coastDist > self.offshore]
+        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillz, -1.0e6)
 
         # Set borders nodes
         if self.flatModel:
@@ -169,7 +179,9 @@ class SEAMesh(object):
             wght[self.idBorders, :] = 0.0
 
         # Define downstream matrix based on filled + dir elevations
-        self.dMat = self.zMat.copy()
+        self.dMat1 = self.zMat.copy()
+        if not self.flatModel and self.Gmar > 0.:
+            self.dMat2 = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
@@ -186,7 +198,9 @@ class SEAMesh(object):
             )
             tmpMat.assemblyEnd()
             # Add the weights from each direction
-            self.dMat.axpy(1.0, tmpMat)
+            self.dMat1.axpy(1.0, tmpMat)
+            if not self.flatModel and self.Gmar > 0.:
+                self.dMat2.axpy(-1.0, tmpMat)
             tmpMat.destroy()
 
         if self.memclear:
@@ -195,7 +209,9 @@ class SEAMesh(object):
             gc.collect()
 
         # Store flow direction matrix
-        self.dMat.transpose()
+        self.dMat1.transpose()
+        if not self.flatModel and self.Gmar > 0.:
+            self.dMat2.transpose()
 
         return
 
@@ -333,7 +349,6 @@ class SEAMesh(object):
         ts.setMaxTime(self.dt)
         ts.setMaxSteps(self.tsStep)
         ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
-        # ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.INTERPOLATE)
 
         # Allow an unlimited number of failures
         ts.setMaxSNESFailures(-1)  # (step will be rejected and retried)
@@ -393,6 +408,137 @@ class SEAMesh(object):
 
         return
 
+    def _depMarineSystem(self, sedflux):
+        r"""
+        Setup matrix for the marine sediment deposition.
+
+        The upstream incoming sediment flux is obtained from the total river sediment flux :math:`\mathrm{Q_{t_i}}` where:
+
+        .. math::
+
+            \mathrm{Q_{t_i}^{t+\Delta t} - \sum_{ups} w_{i,j} Q_{t_u}^{t+\Delta t}}= \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
+
+        which gives:
+
+        .. math::
+
+            \mathrm{Q_{s_i}} = \mathrm{Q_{t_i}} - \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
+
+        And the evolution of marine elevation is based on incoming sediment flux resulting.
+
+        .. math::
+
+            \mathrm{\frac{\eta_i^{t+\Delta t}-\eta_i^t}{\Delta t}} = \mathrm{G{_m} Q_{s_i} / \Omega_i}
+
+        This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables.
+
+        :arg sedflux: incoming marine sediment volumes
+
+        :return: volDep (the deposited volume of the distributed sediments)
+        """
+
+        hl = self.hLocal.getArray()
+        fDepm = np.full(self.lpoints, self.Gmar)
+        fDepm[fDepm > 0.99] = 0.99
+        fDepm[hl > self.sealevel] = 0.
+
+        # Define submatrices
+        A00 = self._matrix_build_diag(-fDepm)
+        A00.axpy(1.0, self.iMat)
+        A01 = self._matrix_build_diag(-fDepm * self.dt / self.larea)
+        A10 = self._matrix_build_diag(self.larea / self.dt)
+
+        # Assemble the matrix for the coupled system
+        mats = [[A00, A01], [A10, self.dMat2]]
+        sysMat = petsc4py.PETSc.Mat().createNest(mats=mats, comm=MPIcomm)
+        sysMat.assemblyBegin()
+        sysMat.assemblyEnd()
+
+        # Clean up
+        A00.destroy()
+        A01.destroy()
+        A10.destroy()
+        self.dMat2.destroy()
+        mats[0][0].destroy()
+        mats[0][1].destroy()
+        mats[1][0].destroy()
+        mats[1][1].destroy()
+
+        # Create nested vectors
+        self.tmpL.setArray(1. - fDepm)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp.pointwiseMult(self.tmp, self.hGlobal)
+
+        self.tmpL.setArray(sedflux / self.dt)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self.h.pointwiseMult(self.hGlobal, self.areaGlobal)
+        self.h.scale(1. / self.dt)
+        self.tmp1.axpy(1., self.h)
+
+        rhs_vec = petsc4py.PETSc.Vec().createNest([self.tmp, self.tmp1], comm=MPIcomm)
+        rhs_vec.setUp()
+        hq_vec = rhs_vec.duplicate()
+
+        # Define solver and precondition conditions
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType(petsc4py.PETSc.KSP.Type.TFQMR)
+        ksp.setOperators(sysMat)
+        ksp.setTolerances(rtol=self.rtol)
+
+        pc = ksp.getPC()
+        pc.setType("fieldsplit")
+        nested_IS = sysMat.getNestISs()
+        pc.setFieldSplitIS(('h', nested_IS[0][0]), ('q', nested_IS[0][1]))
+
+        subksps = pc.getFieldSplitSubKSP()
+        subksps[0].setType("preonly")
+        subksps[0].getPC().setType("asm")
+        subksps[1].setType("preonly")
+        subksps[1].getPC().setType("bjacobi")
+
+        ksp.solve(rhs_vec, hq_vec)
+        r = ksp.getConvergedReason()
+        if r < 0:
+            KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
+            if MPIrank == 0:
+                print(
+                    "Linear solver for marine deposition failed to converge after iterations",
+                    ksp.getIterationNumber(),
+                    flush=True,
+                )
+                print("with reason: ", KSPReasons[r], flush=True)
+        else:
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Linear solver for marine deposition converge after %d iterations"
+                    % ksp.getIterationNumber(),
+                    flush=True,
+                )
+
+        # Update the solution
+        self.newH = hq_vec.getSubVector(nested_IS[0][0])
+
+        # Clean up
+        subksps[0].destroy()
+        subksps[1].destroy()
+        nested_IS[0][0].destroy()
+        nested_IS[1][0].destroy()
+        nested_IS[0][1].destroy()
+        nested_IS[1][1].destroy()
+        pc.destroy()
+        ksp.destroy()
+        sysMat.destroy()
+        hq_vec.destroy()
+        rhs_vec.destroy()
+
+        # Get the marine deposition volume
+        self.tmp.waxpy(-1.0, self.hGlobal, self.newH)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        volDep = self.tmpL.getArray().copy() * self.larea
+        volDep[volDep < 0] = 0.
+
+        return volDep
+
     def _distOcean(self, sedflux):
         """
         Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute
@@ -400,7 +546,7 @@ class SEAMesh(object):
 
         :arg sedflux: incoming marine sediment volumes
 
-        :return: seddep (the deposied volume of the distributed sediments)
+        :return: vdep (the deposited volume of the distributed sediments)
         """
 
         marVol = self.maxDepQs.copy()
@@ -413,7 +559,7 @@ class SEAMesh(object):
         while self.tmp.sum() > 1.0:
 
             # Move to downstream nodes
-            self.dMat.mult(self.tmp, self.tmp1)
+            self.dMat1.mult(self.tmp, self.tmp1)
             self.dm.globalToLocal(self.tmp1, self.tmpL)
 
             # In case there is too much sediment coming in
@@ -445,7 +591,6 @@ class SEAMesh(object):
                     )
 
             step += 1
-        self.dMat.destroy()
 
         if self.memclear:
             del marVol, sinkVol
@@ -491,6 +636,12 @@ class SEAMesh(object):
         # Downstream direction matrix for ocean distribution
         self._matOcean()
         marDep = self._distOcean(sedFlux)
+        if not self.flatModel and self.Gmar > 0.:
+            vdep = self._depMarineSystem(marDep)
+            marDep = self._distOcean(vdep)
+        self.dMat1.destroy()
+
+        # Diffuse downstream
         dh = np.divide(marDep, self.larea, out=np.zeros_like(self.larea), where=self.larea != 0)
         dh[dh < 1.e-3] = 0.
         self.tmpL.setArray(dh)
