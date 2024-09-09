@@ -527,6 +527,7 @@ class FAMesh(object):
                 "Compute Flow Accumulation (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
+        petsc4py.PETSc.garbage_cleanup()
 
         return
 
@@ -615,6 +616,7 @@ class FAMesh(object):
         if self.memclear:
             del dh, limiter, wght, data
             gc.collect()
+        petsc4py.PETSc.garbage_cleanup()
 
         return eMat, PA
 
@@ -724,6 +726,7 @@ class FAMesh(object):
         sysMat.destroy()
         hq_vec.destroy()
         rhs_vec.destroy()
+        petsc4py.PETSc.garbage_cleanup()
 
         return
 
