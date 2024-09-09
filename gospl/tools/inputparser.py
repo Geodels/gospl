@@ -419,7 +419,7 @@ class ReadYaml(object):
             except KeyError:
                 self.spl_m = 0.5
             try:
-                self.spl_m = splDict["n"]
+                self.spl_n = splDict["n"]
             except KeyError:
                 self.spl_n = 1.0
         except KeyError:
