@@ -12,6 +12,7 @@ from time import process_time
 from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import mfdreceivers
     from gospl._fortran import donorslist
     from gospl._fortran import donorsmax
     from gospl._fortran import mfdrcvrs
@@ -150,18 +151,27 @@ class SEAMesh(object):
 
         # Define multiple flow directions for filled + eps elevations
         hl = self.hLocal.getArray().copy()
+        if not self.flatModel:
+            # Only consider filleps in the first kms offshore
+            hsmth = self._hillSlope(smooth=2)
+            hsmth[self.coastDist > self.offshore] = -1.e6
+        else:
+            hsmth = hl.copy()
+
         fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
-        fillz[self.locIDs] = hl
+        fillz[self.locIDs] = hsmth
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
         if MPIrank == 0:
             minh = np.min(fillz) + 0.1
             if not self.flatModel:
-                minh = min(minh, -3.e3)
+                minh = min(minh, self.oFill)
             fillz = epsfill(minh, fillz)
-
         # Send elevation + eps globally
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
-        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillEPS[self.locIDs], -1.0e6)
+        fillz = fillEPS[self.locIDs]
+        if not self.flatModel:
+            fillz[self.coastDist > self.offshore] = hl[self.coastDist > self.offshore]
+        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillz, -1.0e6)
 
         # Set borders nodes
         if self.flatModel:
@@ -169,12 +179,13 @@ class SEAMesh(object):
             wght[self.idBorders, :] = 0.0
 
         # Define downstream matrix based on filled + dir elevations
-        dMat = self.zMat.copy()
+        self.dMat1 = self.zMat.copy()
+        if not self.flatModel and self.Gmar > 0.:
+            self.dMat2 = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
         for k in range(0, 12):
-
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
             data = wght[:, k].copy()
@@ -186,19 +197,21 @@ class SEAMesh(object):
                 data,
             )
             tmpMat.assemblyEnd()
-
             # Add the weights from each direction
-            dMat += tmpMat
+            self.dMat1.axpy(1.0, tmpMat)
+            if not self.flatModel and self.Gmar > 0.:
+                self.dMat2.axpy(-1.0, tmpMat)
             tmpMat.destroy()
 
         if self.memclear:
             del data, indptr, nodes
+            del hl, fillz, fillEPS, rcv, wght
             gc.collect()
 
         # Store flow direction matrix
-        self.dMat = dMat.transpose().copy()
-
-        dMat.destroy()
+        self.dMat1.transpose()
+        if not self.flatModel and self.Gmar > 0.:
+            self.dMat2.transpose()
 
         return
 
@@ -336,7 +349,6 @@ class SEAMesh(object):
         ts.setMaxTime(self.dt)
         ts.setMaxSteps(self.tsStep)
         ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
-        # ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.INTERPOLATE)
 
         # Allow an unlimited number of failures
         ts.setMaxSNESFailures(-1)  # (step will be rejected and retried)
@@ -373,6 +385,11 @@ class SEAMesh(object):
                     ts.getKSPIterations(),
                 )
             )
+
+        # Clean solver
+        pc.destroy()
+        ksp.destroy()
+        snes.destroy()
         ts.destroy()
 
         # Get diffused sediment thicknesses
@@ -531,7 +548,7 @@ class SEAMesh(object):
 
         :arg sedflux: incoming marine sediment volumes
 
-        :return: seddep (the deposied volume of the distributed sediments)
+        :return: vdep (the deposited volume of the distributed sediments)
         """
 
         marVol = self.maxDepQs.copy()
@@ -544,7 +561,7 @@ class SEAMesh(object):
         while self.tmp.sum() > 1.0:
 
             # Move to downstream nodes
-            self.dMat.mult(self.tmp, self.tmp1)
+            self.dMat1.mult(self.tmp, self.tmp1)
             self.dm.globalToLocal(self.tmp1, self.tmpL)
 
             # In case there is too much sediment coming in
@@ -576,7 +593,10 @@ class SEAMesh(object):
                     )
 
             step += 1
-        self.dMat.destroy()
+
+        if self.memclear:
+            del marVol, sinkVol
+            gc.collect()
 
         return vdep
 
@@ -618,6 +638,12 @@ class SEAMesh(object):
         # Downstream direction matrix for ocean distribution
         self._matOcean()
         marDep = self._distOcean(sedFlux)
+        if not self.flatModel and self.Gmar > 0.:
+            vdep = self._depMarineSystem(marDep)
+            marDep = self._distOcean(vdep)
+        self.dMat1.destroy()
+
+        # Diffuse downstream
         dh = np.divide(marDep, self.larea, out=np.zeros_like(self.larea), where=self.larea != 0)
         dh[dh < 1.e-3] = 0.
         self.tmpL.setArray(dh)
@@ -648,5 +674,9 @@ class SEAMesh(object):
                 % (process_time() - t0),
                 flush=True,
             )
+
+        if self.memclear:
+            del marDep, dh, add_rate, hl, sedFlux
+            gc.collect()
 
         return

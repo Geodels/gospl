@@ -31,6 +31,8 @@ class NLSPL(object):
         self.snes_atol = 1.e-6
         self.snes_max_it = 500
 
+        self.setJacobian = True
+
         return
 
     def form_residual(self, snes, h, F):
@@ -113,7 +115,6 @@ class NLSPL(object):
         self.Kbr[self.seaID] = 0.0
 
         snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-
         snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
                            max_it=self.snes_max_it)
 
@@ -125,9 +126,10 @@ class NLSPL(object):
         snes.setFunction(self.form_residual, f)
 
         # Setting the Jacobian function
-        J = self.dm.createMatrix()
-        J.setOption(J.Option.NEW_NONZERO_LOCATIONS, True)
-        snes.setJacobian(self.form_jacobian, J)
+        if self.setJacobian:
+            J = self.dm.createMatrix()
+            J.setOption(J.Option.NEW_NONZERO_LOCATIONS, True)
+            snes.setJacobian(self.form_jacobian, J)
 
         # SNES solvers
         snes.setType('nrichardson')
@@ -150,7 +152,8 @@ class NLSPL(object):
         self.tmp.waxpy(-1.0, self.hOld, x)
         f.destroy()
         x.destroy()
-        J.destroy()
+        if self.setJacobian:
+            J.destroy()
 
         petsc4py.PETSc.garbage_cleanup()
 
