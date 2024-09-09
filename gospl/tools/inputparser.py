@@ -68,8 +68,6 @@ class ReadYaml(object):
         self._readTeMap()
         self._readOut()
 
-        self.radius = 6378137.0
-        self.gravity = 9.81
         self.tNow = self.tStart
         self.saveTime = self.tNow
         if self.strat > 0:
@@ -248,6 +246,16 @@ class ReadYaml(object):
                 self.advscheme = 0
         except KeyError:
             self.advscheme = 1
+
+        try:
+            self.radius = domainDict["radius"]
+        except KeyError:
+            self.radius = 6378137.0
+
+        try:
+            self.gravity = domainDict["gravity"]
+        except KeyError:
+            self.gravity = 9.81
 
         return
 
@@ -485,10 +493,20 @@ class ReadYaml(object):
                 self.tsStep = hillDict["tsSteps"]
             except KeyError:
                 self.tsStep = 2000
+            try:
+                self.Gmar = hillDict["Gmar"]
+            except KeyError:
+                self.Gmar = 0.0
+            try:
+                self.offshore = hillDict["offshore"]
+            except KeyError:
+                self.offshore = 100.e5
         except KeyError:
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
+            self.Gmar = 0.
             self.tsStep = 2000
+            self.offshore = 100.e5
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
 
@@ -969,10 +987,10 @@ class ReadYaml(object):
                     rStart = teSort[k]["start"]
                 except Exception:
                     print(
-                        "For each climate event a start time is required.", flush=True
+                        "For each elastic map event a start time is required.", flush=True
                     )
                     raise ValueError(
-                        "Climate event {} has no parameter start".format(k)
+                        "Elastic event {} has no parameter start".format(k)
                     )
                 try:
                     rUniform = teSort[k]["uniform"]

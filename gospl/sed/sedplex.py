@@ -75,9 +75,10 @@ class SEDMesh(object):
         # Get the volume of sediment transported in m3 per year
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
+        self.fMati.destroy()
+
         # Update local vector
         self.dm.globalToLocal(self.vSed, self.vSedLocal)
-
         if MPIrank == 0 and self.verbose:
             print(
                 "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
@@ -146,6 +147,7 @@ class SEDMesh(object):
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
+            self.fMat.destroy()
 
         return excess
 
@@ -167,6 +169,7 @@ class SEDMesh(object):
 
         step = 0
         excess = True
+        self.fMat.destroy()
         while excess:
             t1 = process_time()
             excess = self._moveDownstream(vSed, step)
@@ -254,6 +257,7 @@ class SEDMesh(object):
         # Distribute inland sediments
         self.sedFilled = hl.copy()
         self._distributeSediment(hl)
+
         self._updateSinks(hl)
 
         return
@@ -273,7 +277,7 @@ class SEDMesh(object):
         # Compute Hillslope Diffusion Law
         h = self.hLocal.getArray().copy()
         self.seaID = np.where(h <= self.sealevel)[0]
-        self._hillSlope()
+        self._hillSlope(smooth=0)
 
         # Update layer elevation
         if self.stratNb > 0:
@@ -289,7 +293,7 @@ class SEDMesh(object):
         self.EbLocal.axpy(1.0, self.tmpL)
 
         if self.memclear:
-            del h, add_rate
+            del add_rate
             gc.collect()
 
         return
@@ -306,19 +310,23 @@ class SEDMesh(object):
         .. note::
             The hillslope processes in `gospl` are considered to be happening at the same rate for coarse and fine sediment sizes.
 
-        :arg smooth: integer specifying if the diffusion equation is used for marine deposits (1) and ice flow (2).
+        :arg smooth: integer specifying if the diffusion equation is used for ice flow (1) and marine deposits (2).
         """
 
-        if not smooth:
+        if smooth == 0:
             if self.Cda == 0.0 and self.Cdm == 0.0:
                 return
 
         t0 = process_time()
-
         # Diffusion matrix construction
         if smooth == 1:
             Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
             Cd[~self.iceIDs] = 0.0
+        elif smooth == 2:
+            # Hard-coded coefficients here, used to generate a smooth surface
+            # for computing marine flow directions...
+            Cd = np.full(self.lpoints, 1.e5, dtype=np.float64)
+            Cd[self.seaID] = 5.e6
         else:
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
             Cd[self.seaID] = self.Cdm
@@ -343,11 +351,11 @@ class SEDMesh(object):
                 data,
             )
             tmpMat.assemblyEnd()
-            diffMat += tmpMat
+            diffMat.axpy(1.0, tmpMat)
             tmpMat.destroy()
 
         # Get elevation values for considered time step
-        if smooth > 0:
+        if smooth == 1:
             if self.tmp1.max()[1] > 0:
                 self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
             else:
@@ -355,11 +363,15 @@ class SEDMesh(object):
             diffMat.destroy()
             self.dm.globalToLocal(self.tmp, self.tmpL)
             return self.tmpL.getArray().copy()
+        elif smooth == 2:
+            self._solve_KSP(True, diffMat, self.hGlobal, self.tmp)
+            diffMat.destroy()
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            return self.tmpL.getArray().copy()
         else:
             self.hGlobal.copy(result=self.hOld)
             self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
             diffMat.destroy()
-
             # Update cumulative erosion/deposition and elevation
             self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
             self.cumED.axpy(1.0, self.tmp)

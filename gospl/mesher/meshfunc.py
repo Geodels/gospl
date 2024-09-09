@@ -68,6 +68,11 @@ class VoroBuild(object):
 
         return
 
+    def __del__(self):
+        # nothing to do here
+
+        return
+
     def initVoronoi(self, nodes, cells, sort_cells=False):
         """Initialization.
         """
@@ -239,7 +244,7 @@ class VoroBuild(object):
 
         self.subdomains[subdomain] = {"vertices": is_inside}
         return
-    
+
     def update_values(self):
         if self.half_edge_coords is not None:
             # Constructing the temporary arrays

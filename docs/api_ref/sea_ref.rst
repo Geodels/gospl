@@ -23,6 +23,7 @@ Class SEAMesh
 
    .. autosummary::
 
+      ~SEAMesh._depMarineSystem
       ~SEAMesh._diffuseOcean
       ~SEAMesh._distanceCoasts
       ~SEAMesh._distOcean
@@ -40,6 +41,7 @@ Public functions
 Private functions
 ---------------------
 
+.. automethod:: sed.seaplex.SEAMesh._depMarineSystem
 .. automethod:: sed.seaplex.SEAMesh._diffuseOcean
 .. automethod:: sed.seaplex.SEAMesh._distanceCoasts
 .. automethod:: sed.seaplex.SEAMesh._distOcean

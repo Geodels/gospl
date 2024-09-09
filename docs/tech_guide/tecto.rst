@@ -102,7 +102,7 @@ When running goSPL in 2D, it is possible to compute the flexural isostasy equili
 
   The approach is performed in serial and therefore can be relatively slow depending on the simulation size.
 
-It takes an initial (at time :math:`t`) and final topography (at time :math:`D + \Delta t`) (*i.e.* before and after erosion/deposition) and returns a corrected final topography that includes the effect of erosional/depositional unloading/loading. 
+It takes an initial (at time :math:`t`) and final topography (at time :math:`t + \Delta t`) (*i.e.* before and after erosion/deposition) and returns a corrected final topography that includes the effect of erosional/depositional unloading/loading. 
 
 The approach solves the bi-harmonic equation governing the bending/flexure of a thin elastic plate floating on an inviscid fluid (the asthenosphere).
 
