@@ -1404,6 +1404,82 @@ subroutine donorsmax(dat, donors, valmax, nb)
 
 end subroutine donorsmax
 
+subroutine local_spl(nRcv, elev, rcv, dist, wgt, slp, nb)
+!*****************************************************************************
+! Compute local slope based on weights and receivers values and ids.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+
+  integer, intent(in) :: nRcv
+
+  integer, intent(in) :: rcv(nb,nRcv)
+  double precision, intent(in) :: dist(nb,nRcv)
+  double precision, intent(in) :: wgt(nb,nRcv)
+  double precision, intent(in) :: elev(nb)
+
+  double precision, intent(out) :: slp(nb)
+
+  integer :: k, p, kk
+
+  slp = 0.
+
+  do k = 1, nb
+    do p = 1, nRcv
+      if(wgt(k,p)>0)then
+        kk = rcv(k,p)+1
+        if(elev(k) > elev(kk))then
+          slp(k) = slp(k) + wgt(k,p)*(elev(k) - elev(kk))/dist(k,p)
+        endif
+      endif
+    enddo
+  enddo
+
+end subroutine local_spl
+
+subroutine local_spl_coeff(nRcv, elev, rcv, dist, wgt, slp, coeffs, nb)
+!*****************************************************************************
+! Compute local slope based on weights and receivers values and ids as well as
+! Jacobian coefficients.
+
+  use meshparams
+  implicit none
+
+  integer :: nb
+
+  integer, intent(in) :: nRcv
+
+  integer, intent(in) :: rcv(nb,nRcv)
+  double precision, intent(in) :: dist(nb,nRcv)
+  double precision, intent(in) :: wgt(nb,nRcv)
+  double precision, intent(in) :: elev(nb)
+
+  double precision, intent(out) :: slp(nb)
+  double precision, intent(out) :: coeffs(nb, nRcv+1)
+  
+
+  integer :: k, p, kk
+
+  slp = 0.
+  coeffs = 0.
+
+  do k = 1, nb
+    do p = 1, nRcv
+      if(wgt(k,p)>0)then  
+        kk = rcv(k,p)+1
+        if(elev(k) > elev(kk))then
+          slp(k) = slp(k) + wgt(k,p)*(elev(k) - elev(kk))/dist(k,p)
+          coeffs(k,p+1) = -wgt(k,p)/dist(k,p)
+          coeffs(k,1) = coeffs(k,1) + wgt(k,p)/dist(k,p)
+        endif
+        endif
+    enddo
+  enddo
+
+end subroutine local_spl_coeff
+
 subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction algorithm.

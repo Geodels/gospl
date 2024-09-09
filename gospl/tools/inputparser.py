@@ -410,11 +410,16 @@ class ReadYaml(object):
                 self.spl_m = splDict["m"]
             except KeyError:
                 self.spl_m = 0.5
+            try:
+                self.spl_m = splDict["n"]
+            except KeyError:
+                self.spl_n = 1.0
         except KeyError:
             self.K = 1.0e-12
             self.coeffd = 0.0
             self.fDepa = 0.0
             self.spl_m = 0.5
+            self.spl_n = 1.0
 
         return
 

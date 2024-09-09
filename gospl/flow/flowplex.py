@@ -152,6 +152,7 @@ class FAMesh(object):
             # raise RuntimeError("LinearSolver failed to converge!")
         else:
             ksp.destroy()
+        petsc4py.PETSc.garbage_cleanup()
 
         return vector2
 
@@ -188,6 +189,7 @@ class FAMesh(object):
             vector2 = self._solve_KSP2(matrix, vector1, vector2)
         else:
             ksp.destroy()
+        petsc4py.PETSc.garbage_cleanup()
 
         return vector2
 
@@ -240,6 +242,8 @@ class FAMesh(object):
         self.fMat = flowMat.transpose().copy()
 
         flowMat.destroy()
+        self.fMat.transpose()
+        petsc4py.PETSc.garbage_cleanup()
 
         return
 
@@ -751,7 +755,6 @@ class FAMesh(object):
         t0 = process_time()
         # Build the SPL erosion arrays
         hOldArray = self.hLocal.getArray().copy()
-        self.oldH = hOldArray.copy()
         if self.flexOn:
             self.hLocal.copy(result=self.hOldFlex)
         eMat, PA = self._eroMats(hOldArray)

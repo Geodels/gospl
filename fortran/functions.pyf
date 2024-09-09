@@ -125,6 +125,27 @@ python module _fortran
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine mfdrcvrs
 
+        subroutine local_spl(nrcv,elev,rcv,dist,wgt,slp,nb)
+            integer intent(in) :: nrcv
+            double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcv
+            double precision dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: dist
+            double precision dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: wgt
+            double precision dimension(nb),intent(out),depend(nb) :: slp
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine local_spl
+
+        subroutine local_spl_coeff(nrcv,elev,rcv,dist,wgt,slp,coeffs,nb)
+            integer intent(in) :: nrcv
+            double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcv
+            double precision dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: dist
+            double precision dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: wgt
+            double precision dimension(nb),intent(out),depend(nb) :: slp
+            double precision dimension(nb,nrcv+1),intent(out),depend(nb,nrcv) :: coeffs
+            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
+        end subroutine local_spl_coeff
+
         subroutine mfdreceivers(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
             double precision intent(in) :: exp

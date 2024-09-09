@@ -752,6 +752,7 @@ class UnstMesh(object):
         self.dm.destroy()
         self.zMat.destroy()
         self.mat.destroy()
+        petsc4py.PETSc.garbage_cleanup()
 
         del self.lcoords, self.lcells, self.inIDs
 

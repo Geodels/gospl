@@ -83,6 +83,7 @@ class SEDMesh(object):
                 "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
+        petsc4py.PETSc.garbage_cleanup()
 
         return
 
@@ -378,5 +379,6 @@ class SEDMesh(object):
                 "Compute Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
+        petsc4py.PETSc.garbage_cleanup()
 
         return

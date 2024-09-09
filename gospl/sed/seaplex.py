@@ -383,7 +383,146 @@ class SEAMesh(object):
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
+        x.destroy()
+        f.destroy()
+        if self.memclear:
+            del ndepo, sedK
+            gc.collect()
+        petsc4py.PETSc.garbage_cleanup()
+
         return
+
+    def _depMarineSystem(self, sedflux):
+        r"""
+        Setup matrix for the marine sediment deposition.
+
+        The upstream incoming sediment flux is obtained from the total river sediment flux :math:`\mathrm{Q_{t_i}}` where:
+
+        .. math::
+
+            \mathrm{Q_{t_i}^{t+\Delta t} - \sum_{ups} w_{i,j} Q_{t_u}^{t+\Delta t}}= \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
+
+        which gives:
+
+        .. math::
+
+            \mathrm{Q_{s_i}} = \mathrm{Q_{t_i}} - \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
+
+        And the evolution of marine elevation is based on incoming sediment flux resulting.
+
+        .. math::
+
+            \mathrm{\frac{\eta_i^{t+\Delta t}-\eta_i^t}{\Delta t}} = \mathrm{G{_m} Q_{s_i} / \Omega_i}
+
+        This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables.
+
+        :arg sedflux: incoming marine sediment volumes
+
+        :return: volDep (the deposited volume of the distributed sediments)
+        """
+
+        hl = self.hLocal.getArray()
+        fDepm = np.full(self.lpoints, self.Gmar)
+        fDepm[fDepm > 0.99] = 0.99
+        fDepm[hl > self.sealevel] = 0.
+
+        # Define submatrices
+        A00 = self._matrix_build_diag(-fDepm)
+        A00.axpy(1.0, self.iMat)
+        A01 = self._matrix_build_diag(-fDepm * self.dt / self.larea)
+        A10 = self._matrix_build_diag(self.larea / self.dt)
+
+        # Assemble the matrix for the coupled system
+        mats = [[A00, A01], [A10, self.dMat2]]
+        sysMat = petsc4py.PETSc.Mat().createNest(mats=mats, comm=MPIcomm)
+        sysMat.assemblyBegin()
+        sysMat.assemblyEnd()
+
+        # Clean up
+        A00.destroy()
+        A01.destroy()
+        A10.destroy()
+        self.dMat2.destroy()
+        mats[0][0].destroy()
+        mats[0][1].destroy()
+        mats[1][0].destroy()
+        mats[1][1].destroy()
+
+        # Create nested vectors
+        self.tmpL.setArray(1. - fDepm)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp.pointwiseMult(self.tmp, self.hGlobal)
+
+        self.tmpL.setArray(sedflux / self.dt)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self.h.pointwiseMult(self.hGlobal, self.areaGlobal)
+        self.h.scale(1. / self.dt)
+        self.tmp1.axpy(1., self.h)
+
+        rhs_vec = petsc4py.PETSc.Vec().createNest([self.tmp, self.tmp1], comm=MPIcomm)
+        rhs_vec.setUp()
+        hq_vec = rhs_vec.duplicate()
+
+        # Define solver and precondition conditions
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType(petsc4py.PETSc.KSP.Type.TFQMR)
+        ksp.setOperators(sysMat)
+        ksp.setTolerances(rtol=self.rtol)
+
+        pc = ksp.getPC()
+        pc.setType("fieldsplit")
+        nested_IS = sysMat.getNestISs()
+        pc.setFieldSplitIS(('h', nested_IS[0][0]), ('q', nested_IS[0][1]))
+
+        subksps = pc.getFieldSplitSubKSP()
+        subksps[0].setType("preonly")
+        subksps[0].getPC().setType("asm")
+        subksps[1].setType("preonly")
+        subksps[1].getPC().setType("bjacobi")
+
+        ksp.solve(rhs_vec, hq_vec)
+        r = ksp.getConvergedReason()
+        if r < 0:
+            KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
+            if MPIrank == 0:
+                print(
+                    "Linear solver for marine deposition failed to converge after iterations",
+                    ksp.getIterationNumber(),
+                    flush=True,
+                )
+                print("with reason: ", KSPReasons[r], flush=True)
+        else:
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Linear solver for marine deposition converge after %d iterations"
+                    % ksp.getIterationNumber(),
+                    flush=True,
+                )
+
+        # Update the solution
+        self.newH = hq_vec.getSubVector(nested_IS[0][0])
+
+        # Clean up
+        subksps[0].destroy()
+        subksps[1].destroy()
+        nested_IS[0][0].destroy()
+        nested_IS[1][0].destroy()
+        nested_IS[0][1].destroy()
+        nested_IS[1][1].destroy()
+        pc.destroy()
+        ksp.destroy()
+        sysMat.destroy()
+        hq_vec.destroy()
+        rhs_vec.destroy()
+
+        # Get the marine deposition volume
+        self.tmp.waxpy(-1.0, self.hGlobal, self.newH)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        volDep = self.tmpL.getArray().copy() * self.larea
+        volDep[volDep < 0] = 0.
+        petsc4py.PETSc.garbage_cleanup()
+
+        return volDep
 
     def _distOcean(self, sedflux):
         """
