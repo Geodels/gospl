@@ -814,6 +814,47 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
+subroutine hillslp_nl(nb, elev, kd, exp, val)
+!*****************************************************************************
+! Define hillslope coefficients based on a finite volume spatial
+! discretisation as proposed in Tucker et al. (2001).
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    double precision, intent(in) :: elev(nb)
+    double precision, intent(in) :: kd(nb)
+    double precision, intent(in) :: exp
+
+    double precision, intent(out) :: val(nb)
+
+    integer :: k, p, n
+    double precision :: dk, c, ck, cn, v, dz
+
+    val = 0.
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        ck = kd(k)
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            n = FVnID(k,p)+1
+            cn = kd(n)
+            c = 0.5*(ck+cn)/FVarea(k)
+            v = c*FVvDist(k,p)/FVeLgt(k,p)
+            dz = elev(n) - elev(k)
+            dk = abs(dz/FVeLgt(k,p))
+            val(k) = val(k) + v*dz*exp*(dk**(exp-1.))
+          endif
+        enddo
+      endif
+    enddo
+
+    return
+
+end subroutine hillslp_nl
+
 subroutine getfacevelocity(nb, vel)
 !*****************************************************************************
 ! Update the face velocity of each vertex-based voronoi and compute the dot product

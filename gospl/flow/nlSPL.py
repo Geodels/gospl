@@ -85,7 +85,7 @@ class nlSPL(object):
 
         return
 
-    def monitor(self, snes, its, norm):
+    def _monitor(self, snes, its, norm):
 
         if MPIrank == 0 and its % 50 == 0:
             print(f"  ---  Non-linear SPL solver iteration {its}, Residual norm: {norm}", flush=True)
@@ -164,7 +164,7 @@ class nlSPL(object):
 
         # Set a monitor to see residual values
         if self.verbose:
-            snes.setMonitor(self.monitor)
+            snes.setMonitor(self._monitor)
 
         f = self.hGlobal.duplicate()
         snes.setFunction(self.form_residual_ed, f)

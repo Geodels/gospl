@@ -11,6 +11,7 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import setmaxnb
     from gospl._fortran import sethillslopecoeff
+    from gospl._fortran import hillslp_nl
     from gospl._fortran import scale_volume
 
 petsc4py.init(sys.argv)
@@ -277,7 +278,10 @@ class SEDMesh(object):
         # Compute Hillslope Diffusion Law
         h = self.hLocal.getArray().copy()
         self.seaID = np.where(h <= self.sealevel)[0]
-        self._hillSlope(smooth=0)
+        if self.K_nl == 1.0:
+            self._hillSlope(smooth=0)
+        else:
+            self._hillSlopeNL()
 
         # Update layer elevation
         if self.stratNb > 0:
@@ -389,6 +393,96 @@ class SEDMesh(object):
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+        petsc4py.PETSc.garbage_cleanup()
+
+        return
+
+    def _dmonitor(self, snes, its, norm):
+
+        if MPIrank == 0 and its % 5 == 0:
+            print(f"  ---  Non-linear hillslope solver iteration {its}, Residual norm: {norm}", flush=True)
+
+    def form_residual_hillslope(self, snes, h, F):
+
+        # Current state
+        self.dm.globalToLocal(h, self.hl)
+        h_array = self.hl.getArray()
+
+        # Compute slope
+        val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_nl)
+        if self.flatModel:
+            val[self.idBorders] = 0.
+
+        # Residuals
+        res = h_array - self.hOldArray - self.dt * val
+
+        # Residual vector
+        F.setArray(res[self.glIDs])
+
+        return
+    
+    def _hillSlopeNL(self):
+        r"""
+        This function computes hillslope using a non-linear diffusion law 
+        """
+
+        t0 = process_time()
+
+        self.hGlobal.copy(result=self.hOld)
+        self.Cd_nl = np.full(self.lpoints, self.Cda, dtype=np.float64)
+        self.Cd_nl[self.seaID] = self.Cdm
+        self.hOldArray = self.hLocal.getArray().copy()
+        
+        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+        snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
+                           max_it=self.snes_maxit)
+        
+        # Set a monitor to see residual values
+        if self.verbose:
+            snes.setMonitor(self._dmonitor)
+
+        f = self.hGlobal.duplicate()
+        snes.setFunction(self.form_residual_hillslope, f)
+
+        # SNES solvers
+        snes.setType('ngmres')
+        ksp = snes.getKSP()
+        ksp.setType("cg")
+        pc = ksp.getPC()
+        pc.setType("hypre")
+        petsc_options = petsc4py.PETSc.Options()
+        petsc_options['pc_hypre_type'] = 'boomeramg'
+        ksp.getPC().setFromOptions()
+        ksp.setTolerances(rtol=1.0e-6)
+
+        b, x = None, f.duplicate()
+        self.hGlobal.copy(result=x)
+        snes.solve(b, x)
+
+        # Clean solver
+        pc.destroy()
+        ksp.destroy()
+        snes.destroy()
+
+        x.copy(result=self.hGlobal)
+        f.destroy()
+        x.destroy()
+
+        # Update cumulative erosion/deposition and elevation
+        self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
+        self.cumED.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        if self.stratNb > 0:
+            self.erodeStrat()
+            self.deposeStrat()
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Compute Non-Linear Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
         petsc4py.PETSc.garbage_cleanup()

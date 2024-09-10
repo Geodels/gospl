@@ -460,6 +460,10 @@ class ReadYaml(object):
                     "Hillslope: Cd coefficient for marine environment not found."
                 )
             try:
+                self.K_nl = hillDict["hillslopenl"]
+            except KeyError:
+                self.K_nl = 1.0
+            try:
                 self.oFill = hillDict["oFill"]
             except KeyError:
                 self.oFill = -6000.0
@@ -467,6 +471,7 @@ class ReadYaml(object):
         except KeyError:
             self.Cda = 0.0
             self.Cdm = 0.0
+            self.K_nl = 1.0
             self.oFill = -6000.0
 
         self._extraHillslope()
