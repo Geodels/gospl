@@ -35,6 +35,37 @@ class nlSPL(object):
 
         return
 
+    def form_residual_ed(self, snes, h, F):
+
+        # Current state
+        self.dm.globalToLocal(h, self.hl)
+        h_array = self.hl.getArray()
+
+        # Compute slope
+        S = local_spl(self.flowDir, h_array, self.rcvIDi,
+                      self.distRcvi, self.wghtVali)
+        S[S < 0.] = 0.
+
+        # Compute upstream sediment flux
+        self.tmp.waxpy(-1.0, h, self.hOld)
+        self.tmp1.pointwiseMult(self.tmp, self.areaGlobal)
+        self.tmp1.scale(1. / self.dt)
+        self._solve_KSP(True, self.fMati, self.tmp1, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        Qt = self.tmpL.getArray()
+        Qt[Qt < 0.] = 0.
+
+        # Residuals based on the equation: 
+        # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0
+        res = (h_array - self.hOldArray) * (1.0 - self.fDep)  
+        res += self.Kbr * S**self.spl_n
+        res -= self.fDep * self.dt * Qt / self.larea
+
+        # Residual vector
+        F.setArray(res[self.glIDs])
+
+        return
+
     def form_residual(self, snes, h, F):
 
         # Current state
@@ -56,7 +87,7 @@ class nlSPL(object):
 
     def monitor(self, snes, its, norm):
 
-        if MPIrank == 0 and its % 10 == 0:
+        if MPIrank == 0 and its % 50 == 0:
             print(f"  ---  Non-linear SPL solver iteration {its}, Residual norm: {norm}", flush=True)
 
     def form_jacobian(self, snes, h, J, P):
@@ -86,6 +117,87 @@ class nlSPL(object):
 
         return True
 
+    def _solveNL_ed(self):
+        r"""
+        It calls the following *private functions*:
+
+        - form_residual
+        - form_jacobian
+
+        .. note::
+
+            PETSc SNES approach is used to solve the nonlinear equation above over the considered time step.
+        """
+
+        self.oldH = self.hGlobal.getArray()
+        self.hOldArray = self.hLocal.getArray().copy()
+
+        # Upstream-averaged mean annual precipitation rate based on drainage area
+        PA = self.FAL.getArray()
+
+        # Define erosion limiter to prevent formation of flat
+        dh = []
+        for k in range(0, self.flowDir):
+            dh.append(self.hOldArray - self.hOldArray[self.rcvIDi[:, k]])
+        dh = np.array(dh).max(0)
+        elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
+                             where=dh != 0)
+
+        # Incorporate the effect of local mean annual precipitation rate on erodibility
+        if self.sedfacVal is not None:
+            self.Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
+        else:
+            self.Kbr = self.K * (self.rainVal ** self.coeffd)
+        self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
+        self.Kbr[self.seaID] = 0.0
+
+        # Dimensionless depositional coefficient
+        self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+        self.fDep[self.seaID] = 0.
+        self.fDep[self.fDep > 0.99] = 0.99
+        if self.flatModel:
+            self.fDep[self.idBorders] = 0.
+
+        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+        snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
+                           max_it=self.snes_maxit)
+
+        # Set a monitor to see residual values
+        if self.verbose:
+            snes.setMonitor(self.monitor)
+
+        f = self.hGlobal.duplicate()
+        snes.setFunction(self.form_residual_ed, f)
+
+        # SNES solvers
+        snes.setType('ngmres')
+        ksp = snes.getKSP()
+        ksp.setType("cg")
+        pc = ksp.getPC()
+        pc.setType("hypre")
+        petsc_options = petsc4py.PETSc.Options()
+        petsc_options['pc_hypre_type'] = 'boomeramg'
+        ksp.getPC().setFromOptions()
+        ksp.setTolerances(rtol=1.0e-6)
+
+        b, x = None, f.duplicate()
+        self.hGlobal.copy(result=x)
+        snes.solve(b, x)
+
+        # Clean solver
+        pc.destroy()
+        ksp.destroy()
+        snes.destroy()
+
+        # Get eroded sediment thicknesses
+        self.tmp.waxpy(-1.0, self.hOld, x)
+        f.destroy()
+        x.destroy()
+
+        petsc4py.PETSc.garbage_cleanup()
+
+        return
+    
     def _solveNL(self):
         r"""
         It calls the following *private functions*:
@@ -106,12 +218,20 @@ class nlSPL(object):
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
 
+        # Define erosion limiter to prevent formation of flat
+        dh = []
+        for k in range(0, self.flowDir):
+            dh.append(self.hOldArray - self.hOldArray[self.rcvIDi[:, k]])
+        dh = np.array(dh).max(0)
+        elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
+                             where=dh != 0)
+
         # Incorporate the effect of local mean annual precipitation rate on erodibility
         if self.sedfacVal is not None:
             self.Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
         else:
             self.Kbr = self.K * (self.rainVal ** self.coeffd)
-        self.Kbr *= self.dt * (PA ** self.spl_m)
+        self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
 
         snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
@@ -136,6 +256,9 @@ class nlSPL(object):
         ksp.setType("gmres")
         pc = ksp.getPC()
         pc.setType("hypre")  # hypre or gamg
+        petsc_options = petsc4py.PETSc.Options()
+        petsc_options['pc_hypre_type'] = 'boomeramg'
+        ksp.getPC().setFromOptions()
         ksp.setTolerances(rtol=1.0e-6)
 
         b, x = None, f.duplicate()
@@ -174,7 +297,10 @@ class nlSPL(object):
         if self.flexOn:
             self.hLocal.copy(result=self.hOldFlex)
 
-        self._solveNL()
+        if self.fDepa == 0:
+            self._solveNL()
+        else:
+            self._solveNL_ed()
 
         # Update erosion rate (positive for incision)
         E = -self.tmp.getArray().copy()
