@@ -5,7 +5,8 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from .flow import FAMesh as _FAMesh
-    from .flow import NLSPL as _NLSPL
+    from .flow import SPL as _SPL
+    from .flow import nlSPL as _nlSPL
     from .flow import PITFill as _PITFill
     from .sed import SEDMesh as _SEDMesh
     from .sed import SEAMesh as _SEAMesh
@@ -43,7 +44,11 @@ else:
         def __init__(self):
             pass
 
-    class _NLSPL(object):
+    class _SPL(object):
+        def __init__(self):
+            pass
+
+    class _nlSPL(object):
         def __init__(self):
             pass
 
@@ -78,7 +83,8 @@ class Model(
     _GridProcess,
     _Tectonics,
     _FAMesh,
-    _NLSPL,
+    _SPL,
+    _nlSPL,
     _PITFill,
     _SEDMesh,
     _SEAMesh,
@@ -126,8 +132,11 @@ class Model(
         # River flow initialisation
         _FAMesh.__init__(self, *args, **kwargs)
 
+        # SPL initialisation
+        _SPL.__init__(self, *args, **kwargs)
+
         # Non-linear SPL initialisation
-        _NLSPL.__init__(self, *args, **kwargs)
+        _nlSPL.__init__(self, *args, **kwargs)
 
         # Pit filling initialisation
         _PITFill.__init__(self, *args, **kwargs)
@@ -201,9 +210,9 @@ class Model(
 
                 # Perform River Incision
                 if self.spl_n == 1.0:
-                    _FAMesh.erodepSPL(self)
+                    _SPL.erodepSPL(self)
                 else:
-                    _NLSPL.erodepSPLNL(self)
+                    _nlSPL.erodepSPLnl(self)
 
                 if not self.nodep:
                     # Downstream sediment deposition inland

@@ -17,21 +17,21 @@ MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 
-class NLSPL(object):
+class nlSPL(object):
     """
-    This class calculates
+    The class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
+
+    If the user has turned-on the sedimentation capability, this class solves implicitly the **stream power formulation** accounting for a sediment transport/deposition term (`Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_).
     """
 
     def __init__(self, *args, **kwargs):
         """
-        The initialisation of `NLSPL` class consists in the declaration of PETSc vectors and matrices.
+        The initialisation of `nlSPL` class consists in the declaration of PETSc vectors and matrices.
         """
 
         self.snes_rtol = 1.0e-6
         self.snes_atol = 1.e-6
-        self.snes_max_it = 500
-
-        self.setJacobian = True
+        self.snes_maxit = 500
 
         return
 
@@ -116,7 +116,7 @@ class NLSPL(object):
 
         snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
         snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                           max_it=self.snes_max_it)
+                           max_it=self.snes_maxit)
 
         # Set a monitor to see residual values
         if self.verbose:
@@ -126,10 +126,9 @@ class NLSPL(object):
         snes.setFunction(self.form_residual, f)
 
         # Setting the Jacobian function
-        if self.setJacobian:
-            J = self.dm.createMatrix()
-            J.setOption(J.Option.NEW_NONZERO_LOCATIONS, True)
-            snes.setJacobian(self.form_jacobian, J)
+        J = self.dm.createMatrix()
+        J.setOption(J.Option.NEW_NONZERO_LOCATIONS, True)
+        snes.setJacobian(self.form_jacobian, J)
 
         # SNES solvers
         snes.setType('nrichardson')
@@ -152,8 +151,7 @@ class NLSPL(object):
         self.tmp.waxpy(-1.0, self.hOld, x)
         f.destroy()
         x.destroy()
-        if self.setJacobian:
-            J.destroy()
+        J.destroy()
 
         petsc4py.PETSc.garbage_cleanup()
 
@@ -198,7 +196,7 @@ class NLSPL(object):
 
         return
 
-    def erodepSPLNL(self):
+    def erodepSPLnl(self):
         """
         Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediment in modulating erosion and deposition rate.
 
