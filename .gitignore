@@ -19,3 +19,4 @@ output
 .eggs
 MANIFEST
 .ipynb_checkpoints
+fortran/meshparams.mod

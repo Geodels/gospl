@@ -301,6 +301,15 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["flexIso"][:, 0] = self.localFlex
+            if self.cptSoil:
+                f.create_dataset(
+                    "soilH",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["soilH"][:, 0] = self.Lsoil.getArray().copy()
+
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
@@ -400,6 +409,11 @@ class WriteMesh(object):
 
         if self.flexOn:
             self.localFlex = np.array(hf["/flexIso"])[:, 0]
+
+        if self.cptSoil:
+            self.Lsoil.setArray(np.array(hf["/soilH"])[:, 0])
+            self.dm.localToGlobal(self.Lsoil, self.Gsoil)
+
         hf.close()
 
         if self.stratNb > 0 and self.stratStep > 0:
@@ -542,6 +556,16 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/flexIso</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+            if self.cptSoil:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="soilH">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/soilH</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

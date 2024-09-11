@@ -12,9 +12,6 @@ from time import process_time
 from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import mfdreceivers
-    from gospl._fortran import donorslist
-    from gospl._fortran import donorsmax
     from gospl._fortran import mfdrcvrs
     from gospl._fortran import jacobiancoeff
     from gospl._fortran import fctcoeff
@@ -317,8 +314,6 @@ class SEAMesh(object):
 
 
         :arg dh: numpy array of incoming marine depositional thicknesses
-
-        :return: ndepo (updated deposition numpy arrays)
         """
 
         t0 = process_time()
@@ -327,11 +322,8 @@ class SEAMesh(object):
         f = self.tmp1.duplicate()
 
         # Get diffusion coefficients based on sediment type
-        sedK = np.zeros(self.lpoints)
-        sedK[self.seaID] = self.nlK
-
-        # Matrix coefficients
-        self.Cd = np.full(self.lpoints, sedK, dtype=np.float64)
+        self.Cd = np.zeros(self.lpoints)
+        self.Cd[self.seaID] = self.nlK
         self.hl.setArray(dh)
         self.hl.axpy(1.0, self.hLocal)
         self.dm.localToGlobal(self.hl, self.h)
@@ -383,7 +375,8 @@ class SEAMesh(object):
                     ts.getSNESFailures(),
                     ts.getSNESIterations(),
                     ts.getKSPIterations(),
-                )
+                ),
+                flush=True,
             )
 
         # Clean solver
@@ -403,7 +396,7 @@ class SEAMesh(object):
         x.destroy()
         f.destroy()
         if self.memclear:
-            del ndepo, sedK
+            del ndepo
             gc.collect()
         petsc4py.PETSc.garbage_cleanup()
 
@@ -657,6 +650,10 @@ class SEAMesh(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        # Update soil thickness
+        if self.cptSoil:
+            self.updateSoilThickness()
 
         # Update erosion/deposition rates
         self.dm.globalToLocal(self.tmp, self.tmpL)

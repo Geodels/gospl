@@ -814,7 +814,7 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
-subroutine hillslp_nl(nb, elev, kd, exp, val)
+subroutine hillslp_nl(nb, elev, kd, exp, n, val)
 !*****************************************************************************
 ! Define hillslope coefficients based on a finite volume spatial
 ! discretisation as proposed in Tucker et al. (2001).
@@ -827,11 +827,12 @@ subroutine hillslp_nl(nb, elev, kd, exp, val)
     double precision, intent(in) :: elev(nb)
     double precision, intent(in) :: kd(nb)
     double precision, intent(in) :: exp
+    integer, intent(in) :: n
 
     double precision, intent(out) :: val(nb)
 
-    integer :: k, p, n
-    double precision :: dk, c, ck, cn, v, dz
+    integer :: k, p, i, j
+    double precision :: s, c, ck, cn, v, dz, su, f
 
     val = 0.
     do k = 1, nb
@@ -839,13 +840,22 @@ subroutine hillslp_nl(nb, elev, kd, exp, val)
         ck = kd(k)
         do p = 1, FVnNb(k)
           if(FVvDist(k,p)>0.)then
-            n = FVnID(k,p)+1
-            cn = kd(n)
+            i = FVnID(k,p)+1
+            cn = kd(i)
             c = 0.5*(ck+cn)/FVarea(k)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
-            dz = elev(n) - elev(k)
-            dk = abs(dz/FVeLgt(k,p))
-            val(k) = val(k) + v*dz*exp*(dk**(exp-1.))
+            dz = elev(i) - elev(k)
+            s = abs(dz/FVeLgt(k,p))
+            if(n .eq. 0)then
+              val(k) = val(k) + v*dz*exp*(s**(exp-1.))
+            else
+              su = 1.
+              f = s/exp
+              do j = 1, nb-1
+                su = su + f**(2*j)
+              enddo
+              val(k) = val(k) + v*dz*s*su
+            endif
           endif
         enddo
       endif

@@ -227,6 +227,10 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
+        # Update soil thickness
+        if self.cptSoil:
+            self.updateSoilThickness()
+
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
             self.deposeStrat()
@@ -275,10 +279,15 @@ class SEDMesh(object):
         in which :math:`\kappa_{D}` is the diffusion coefficient and can be defined with different values for the marine and land environments (set with `hillslopeKa` and `hillslopeKm` in the YAML input file). It encapsulates, in a simple formulation, processes operating on superficial sedimentary layers. Main controls on variations of :math:`\kappa_{D}` include substrate, lithology, soil depth, climate and biological activity.
         """
 
-        # Compute Hillslope Diffusion Law
         h = self.hLocal.getArray().copy()
         self.seaID = np.where(h <= self.sealevel)[0]
-        if self.K_nl == 1.0:
+
+        # Specify the hillslope diffusion law to use
+        if self.cptSoil:
+            self.diffuseSoil()
+            return
+        
+        if self.K_nl == 1.0 and self.K_nb == 0:
             self._hillSlope(smooth=0)
         else:
             self._hillSlopeNL()
@@ -404,14 +413,18 @@ class SEDMesh(object):
         if MPIrank == 0 and its % 5 == 0:
             print(f"  ---  Non-linear hillslope solver iteration {its}, Residual norm: {norm}", flush=True)
 
-    def form_residual_hillslope(self, snes, h, F):
+    def _form_residual_hillslope(self, snes, h, F):
 
         # Current state
         self.dm.globalToLocal(h, self.hl)
         h_array = self.hl.getArray()
 
         # Compute slope
-        val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_nl)
+        if self.K_nb == 0:
+            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_nl, 0)
+        else:
+            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_sc, self.K_nb)
+
         if self.flatModel:
             val[self.idBorders] = 0.
 
@@ -434,7 +447,7 @@ class SEDMesh(object):
         self.Cd_nl = np.full(self.lpoints, self.Cda, dtype=np.float64)
         self.Cd_nl[self.seaID] = self.Cdm
         self.hOldArray = self.hLocal.getArray().copy()
-        
+
         snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
         snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
                            max_it=self.snes_maxit)
@@ -444,7 +457,7 @@ class SEDMesh(object):
             snes.setMonitor(self._dmonitor)
 
         f = self.hGlobal.duplicate()
-        snes.setFunction(self.form_residual_hillslope, f)
+        snes.setFunction(self._form_residual_hillslope, f)
 
         # SNES solvers
         snes.setType('ngmres')

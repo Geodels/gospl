@@ -464,6 +464,14 @@ class ReadYaml(object):
             except KeyError:
                 self.K_nl = 1.0
             try:
+                self.K_sc = hillDict["hillslopeSc"]
+            except KeyError:
+                self.K_sc = 0.0
+            try:
+                self.K_nb = int(hillDict["hillslopeNb"])
+            except KeyError:
+                self.K_nb = 0
+            try:
                 self.oFill = hillDict["oFill"]
             except KeyError:
                 self.oFill = -6000.0
@@ -472,6 +480,8 @@ class ReadYaml(object):
             self.Cda = 0.0
             self.Cdm = 0.0
             self.K_nl = 1.0
+            self.K_sc = 0.0
+            self.K_nb = 0
             self.oFill = -6000.0
 
         self._extraHillslope()

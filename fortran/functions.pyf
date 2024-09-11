@@ -13,11 +13,12 @@ python module _fortran
             double precision dimension(nb,13),intent(out),depend(nb) :: dcoeff
         end subroutine sethillslopecoeff
 
-        subroutine hillslp_nl(nb,elev,kd,exp,val)
+        subroutine hillslp_nl(nb,elev,kd,exp,n,val)
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: elev
             double precision dimension(nb),intent(in),depend(nb) :: kd
             double precision intent(in) :: exp
+            integer intent(in) :: n
             double precision dimension(nb),intent(out),depend(nb) :: val
         end subroutine hillslp_nl
         

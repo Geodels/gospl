@@ -5,9 +5,10 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from .flow import FAMesh as _FAMesh
-    from .flow import SPL as _SPL
-    from .flow import nlSPL as _nlSPL
     from .flow import PITFill as _PITFill
+    from .eroder import SPL as _SPL
+    from .eroder import nlSPL as _nlSPL
+    from .eroder import soilSPL as _soilSPL
     from .sed import SEDMesh as _SEDMesh
     from .sed import SEAMesh as _SEAMesh
     from .sed import STRAMesh as _STRAMesh
@@ -52,6 +53,10 @@ else:
         def __init__(self):
             pass
 
+    class _soilSPL(object):
+        def __init__(self):
+            pass
+
     class _PITFill(object):
         def __init__(self):
             pass
@@ -85,6 +90,7 @@ class Model(
     _FAMesh,
     _SPL,
     _nlSPL,
+    _soilSPL,
     _PITFill,
     _SEDMesh,
     _SEAMesh,
@@ -137,6 +143,9 @@ class Model(
 
         # Non-linear SPL initialisation
         _nlSPL.__init__(self, *args, **kwargs)
+
+        # Non-linear SPL with soil generation initialisation
+        _soilSPL.__init__(self, *args, **kwargs)
 
         # Pit filling initialisation
         _PITFill.__init__(self, *args, **kwargs)
@@ -209,7 +218,9 @@ class Model(
                 _FAMesh.flowAccumulation(self)
 
                 # Perform River Incision
-                if self.spl_n == 1.0:
+                if self.cptSoil:
+                    _soilSPL.erodepSPLsoil(self)
+                elif self.spl_n == 1.0:
                     _SPL.erodepSPL(self)
                 else:
                     _nlSPL.erodepSPLnl(self)
