@@ -30,12 +30,12 @@ Class SPL
 Public functions
 ---------------------
 
-.. automethod:: eroder.SPL.SLP.erodepSPL
+.. automethod:: eroder.SPL.SPL.erodepSPL
 
 
 Private functions
 ---------------------
 
-.. automethod:: eroder.SPL.SLP._coupledEDSystem
-.. automethod:: eroder.SPL.SLP._eroMats
-.. automethod:: eroder.SPL.SLP._getEroDepRate
+.. automethod:: eroder.SPL.SPL._coupledEDSystem
+.. automethod:: eroder.SPL.SPL._eroMats
+.. automethod:: eroder.SPL.SPL._getEroDepRate

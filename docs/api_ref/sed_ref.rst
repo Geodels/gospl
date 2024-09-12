@@ -17,7 +17,6 @@ Class SEDMesh
 
    .. autosummary::
 
-      ~SEDMesh.getSedFlux
       ~SEDMesh.sedChange
 
    .. rubric:: Private Methods
@@ -25,13 +24,13 @@ Class SEDMesh
    .. autosummary::
 
       ~SEDMesh._distributeSediment
+      ~SEDMesh._getSedFlux
       ~SEDMesh._moveDownstream
       ~SEDMesh._updateSinks
 
 Public functions
 ---------------------
 
-.. automethod:: sed.sedplex.SEDMesh.getSedFlux
 .. automethod:: sed.sedplex.SEDMesh.sedChange
 
 
@@ -39,5 +38,6 @@ Private functions
 ---------------------
 
 .. automethod:: sed.sedplex.SEDMesh._distributeSediment
+.. automethod:: sed.sedplex.SEDMesh._getSedFlux
 .. automethod:: sed.sedplex.SEDMesh._moveDownstream
 .. automethod:: sed.sedplex.SEDMesh._updateSinks

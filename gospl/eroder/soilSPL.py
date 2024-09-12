@@ -400,7 +400,7 @@ class soilSPL(object):
         For river-transported sediments reaching the marine realm, this function computes the related marine deposition diffusion. It is based on a non-linear diffusion approach.
 
         .. math::
-          \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d (1.0 - exp^{h_s/H_0} \nabla h \right)
+          \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d \times (1.0 - exp^{h_s/H_0} \nabla h \right)
 
         It calls the following *private functions*:
 

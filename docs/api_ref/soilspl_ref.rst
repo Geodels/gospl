@@ -29,11 +29,8 @@ Class soilSPL
       ~soilSPL._evalJacobianSoil
       ~soilSPL._evalSolutionSoil
       ~soilSPL._form_residual_soil
-      ~soilSPL._form_residual_ed
-      ~soilSPL._form_jacobian
       ~soilSPL._getEroDepRateSoil
       ~soilSPL._solveSoil
-      ~soilSPL._solveNL_ed
 
 Public functions
 ---------------------
@@ -50,8 +47,5 @@ Private functions
 .. automethod:: eroder.soilSPL.soilSPL._evalJacobianSoil
 .. automethod:: eroder.soilSPL.soilSPL._evalSolutionSoil
 .. automethod:: eroder.soilSPL.soilSPL._form_residual_soil
-.. automethod:: eroder.soilSPL.soilSPL._form_residual_ed
-.. automethod:: eroder.soilSPL.soilSPL._form_jacobian
 .. automethod:: eroder.soilSPL.soilSPL._getEroDepRateSoil
-.. automethod:: eroder.soilSPL.soilSPL._solveSoil_solveSoil
-.. automethod:: eroder.soilSPL.soilSPL._solveNL_ed
+.. automethod:: eroder.soilSPL.soilSPL._solveSoil

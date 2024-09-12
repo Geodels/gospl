@@ -5,7 +5,7 @@
 Class nlSPL
 ==============
 
-.. autoclass:: eroder.nlSPL.SPL
+.. autoclass:: eroder.nlSPL.nlSPL
 
    .. rubric:: Initialise
 
