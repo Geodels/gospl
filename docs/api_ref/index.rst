@@ -9,9 +9,9 @@ API reference
     
     This section provides an overview of goSPL main objects, functions and methods.
 
-.. grid:: 1
-    :padding: 5
-    :gutter: 4
+.. grid:: 1 1 2 2
+    :padding: 3
+    :gutter: 2 3 4 4
 
     .. grid-item-card::
         :text-align: center
@@ -69,11 +69,59 @@ API reference
         **Class Flow**
         ^^^
 
-        Flow accumulation computation for global unstructured mesh.
+        Flow accumulation computation for unstructured mesh.
 
         +++
 
         .. button-ref:: flow_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class SPL**
+        ^^^
+
+        Stream power law linear slope-dependency.
+
+        +++
+
+        .. button-ref:: spl_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class SPL (non-linear)**
+        ^^^
+
+        Stream power law non-linear slope-dependency.
+
+        +++
+
+        .. button-ref:: nlspl_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Class SPL with soil**
+        ^^^
+
+        Stream power law accounting for soil production.
+
+        +++
+
+        .. button-ref:: soilspl_ref
             :color: secondary
             :click-parent:
 
@@ -217,6 +265,9 @@ API reference
     mesh_ref
     pit_ref
     flow_ref
+    spl_ref
+    nlspl_ref
+    soilspl_ref
     sed_ref
     sea_ref
     hill_ref
