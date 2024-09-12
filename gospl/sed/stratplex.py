@@ -18,7 +18,10 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class STRAMesh(object):
     """
-    This class encapsulates all the functions related to underlying stratigraphic information. Sediment compaction in stratigraphic layers geometry and properties change are also considered.
+    This class encapsulates all the functions related to underlying stratigraphic information. 
+    
+    .. note::
+        Sediment compaction in stratigraphic layers geometry and properties change are also considered.
 
     """
 
@@ -35,7 +38,7 @@ class STRAMesh(object):
 
     def readStratLayers(self):
         """
-        When stratigraphic layers are turned on, this function reads any initial stratigraphic layers provided by within the YAML input file (key: `npstrata`).
+        When stratigraphic layers are turned on, this function reads any initial stratigraphic layers provided in the input file (key: `npstrata`).
 
         The following variables will be read from the file:
 
@@ -100,7 +103,7 @@ class STRAMesh(object):
         """
         This function removes eroded sediment thicknesses from the stratigraphic pile. The function takes into account the porosity values of considered lithologies in each eroded stratigraphic layers.
 
-        It follows the following assumptions:
+        It follows the assumptions:
 
         - Eroded thicknesses from stream power law and hillslope diffusion are considered to encompass both the solid and void phase.
         - Only the solid phase will be moved dowstream by surface processes.
@@ -208,11 +211,11 @@ class STRAMesh(object):
 
     def getCompaction(self):
         """
-        This function computes the changes in sedimentary layers porosity and thicknesses due to compaction.
+        This function computes the change in sedimentary layers porosities and thicknesses due to compaction.
 
         .. note::
 
-            We assume simple depth-porosiy relationships for each sediment type available in each layers.
+            We assume a simple depth-porosiy relationship.
         """
 
         t0 = process_time()

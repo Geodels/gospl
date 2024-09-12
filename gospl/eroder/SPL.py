@@ -20,12 +20,15 @@ class SPL(object):
     """
     The class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
 
+    .. note::
+        This class assumes that the stream power law is defined such that it varies linearly with slope (*i.e.*, ``n`` exponent set to 1.). In such case, a linear expression is used and is most simpler to compute than for the non-linear case.
+
     If the user has turned-on the sedimentation capability, this class solves implicitly the **stream power formulation** accounting for a sediment transport/deposition term (`Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_).
     """
 
     def __init__(self, *args, **kwargs):
         """
-        The initialisation of `SPL` class consists in the declaration of PETSc vectors and matrices.
+        The initialisation of `SPL` class consists in the declaration of PETSc vectors.
         """
 
         # Petsc vectors
@@ -35,7 +38,6 @@ class SPL(object):
         self.Eb = self.hGlobal.duplicate()
         self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
-        self.rhs = self.hGlobal.duplicate()
         self.newH = self.hGlobal.duplicate()
         self.EbLocal.set(0.0)
 
@@ -47,7 +49,7 @@ class SPL(object):
 
         :arg hOldArray: local elevation array from previous time step
 
-        :return: eMat, PA where the first is a sparse PETSc matrices related to river and glacial erosion and PA is the accumulation rate.
+        :return: eMat, PA where the first is a sparse PETSc matrices related to river and glacial erosion and PA is the flow/ice accumulation rate.
         """
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
@@ -165,7 +167,7 @@ class SPL(object):
 
         This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables.
 
-        :arg eMat: erosion matrix (from the simple SPL model)
+        :arg eMat: erosion matrix (from the purely-erosive SPL model)
         """
 
         # Define submatrices
@@ -272,11 +274,11 @@ class SPL(object):
 
         .. important::
 
-            In goSPL, the coefficient `n` is fixed and the only variables that the user can tune are the coefficients `m`, `d` and the erodibility :math:`\kappa`.
+            Here, the coefficient `n` is fixed and the equation is tuned based on `m`, `d` and the erodibility :math:`\kappa`.
 
         The erosion rate is solved by an implicit time integration method, the matrix system is based on the receiver distributions and is assembled from local Compressed Sparse Row (**CSR**) matrices into a global PETSc matrix. The PETSc *scalable linear equations solvers* (**KSP**) is used with both an iterative method and a preconditioner and erosion rate solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
-        An alternative method to the detachment-limited approach proposed above consists in accounting for the role played by sediment in modulating erosion and deposition rates. It follows the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, whereby the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`\mathrm{\Omega}` and water discharge :math:`\mathrm{Q}=\bar{P}A`.
+        An alternative method to the purely detachment-limited approach proposed above consists in accounting for the role played by sediment in modulating erosion and deposition rates. It follows the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, whereby the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`\mathrm{\Omega}` and water discharge :math:`\mathrm{Q}=\bar{P}A`.
         """
 
         t0 = process_time()

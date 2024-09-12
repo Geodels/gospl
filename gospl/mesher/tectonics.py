@@ -8,8 +8,6 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
-# from geomstats.geometry.hypersphere import Hypersphere
-
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import adveciioe
     from gospl._fortran import adveciioe2
@@ -27,16 +25,16 @@ MPIcomm = MPI.COMM_WORLD
 class Tectonics(object):
 
     """
-    This class defines how 2D and spherical mesh surface is changing given a set of horizontal and vertical rates.
+    This class defines how 2D and spherical mesh surfaces are changing given a set of horizontal and vertical rates.
 
     .. note::
 
-        Three advection approaches are proposed, a standard upwind scheme, a Inflow-Implicit/Outflow-Explicit scheme and a semi-lagrangian approach based on nearest neighbour search based on the tree built from the spherical mesh and is weighted by distance.
+        Three advection approaches are proposed, a standard upwind scheme, an Inflow-Implicit/Outflow-Explicit scheme and a semi-lagrangian approach based on nearest neighbour search based on a kdTree-search where interpolation is weighted by distance.
     """
 
     def __init__(self):
         """
-        The initialisation of the `EarthPlate` class.
+        The initialisation of the `Tectonics` class.
         """
 
         self.hdisp = None
@@ -44,6 +42,7 @@ class Tectonics(object):
         self.paleoZ = None
         self.minZ = None
         self.plateStep = False
+
         self.fiso = self.hGlobal.duplicate()
 
         return
@@ -51,8 +50,6 @@ class Tectonics(object):
     def getTectonics(self):
         """
         Finds the current tectonic regimes (horizontal and vertical) for the considered time interval.
-
-        For horizontal displacements, the mesh variables will have to be first advected over the grid and then reinterpolated on the initial mesh coordinates.
 
         .. note::
             The approach here does not allow for mesh refinement in zones of convergence and thus can be limiting.
@@ -212,25 +209,27 @@ class Tectonics(object):
 
     def _varAdvector(self):
         """
-        Perform the advection of elevation and erosion by solving the advection equation based on the finite volume space discretization and the semi-implicit discretization in time. The approach is based on a Inflow-Implicit/Outflow-Explicit scheme following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pdf>`_ or a `first-order upwind implicitly scheme <https://www.sciencedirect.com/science/article/pii/S0168927414001032>`_ depending on the user configuration.
+        Perform the advection of elevation, erosion (and flexure and soil production if defined) by solving the advection equation based on the finite volume space discretization and a semi-implicit temporal discretization. 
+        
+        The approach relies on an Inflow-Implicit/Outflow-Explicit scheme following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pdf>`_ or a `first-order upwind implicitly scheme <https://www.sciencedirect.com/science/article/pii/S0168927414001032>`_ depending on the user configuration.
 
         .. note::
 
-            Its basic idea is that outflow from a cell is treated explicitly while inflow is treated implicitly.
+           Here, the outflow from a cell is treated explicitly while inflow is treated implicitly.
 
-            Since the matrix of the system is determined by the inflow fluxes it is an M-matrix yielding favourable solvability and stability properties.
+            Since the matrix of the system is determined by the inflow fluxes it is a M-matrix yielding favourable solvability and stability properties.
 
         .. important::
 
-            The method allows large time steps without losing stability and not deteriorating precision.
+            The method allows for large time steps without losing too much stability and precision.
 
-            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicate its second order accuracy for smooth solutions in general.
+            It is formally second order accurate in space and time for 1D advection problems with variable velocity. In addition, numerical experiments indicate its second order accuracy for smooth solutions in general.
 
         .. note::
 
-            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)).
+            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges intersecting the middle of the nodes edges)).
 
-            Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
+            Similarly, we consider that the advected variables at the face are defined by linear interpolation from each connected vertex.
         """
 
         t0 = process_time()
@@ -330,6 +329,37 @@ class Tectonics(object):
             self.dm.globalToLocal(self.fiso, self.tmpL)
             self.localFlex = self.tmpL.getArray().copy()
 
+        # Advect soil thickness
+        if self.cptSoil:
+            if iioe:
+                if self.advscheme == 3:
+                    self.Lsoil.copy(result=self.tmpL)
+                    # Minimum and maximum in a local neighborhood
+                    lsoil = self.Lsoil.getArray().copy()
+                    somin, somax = getrange(self.lpoints, lsoil)
+                # Inflow-Implicit/Outflow-Explicit Scheme 1
+                advMat_right.mult(self.Gsoil, self.tmp1)
+                self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+                # Inflow-Implicit/Outflow-Explicit Scheme 2
+                if self.advscheme == 3:
+                    self.dm.globalToLocal(self.tmp, self.tmpL)
+                    newsoil = self.tmpL.getArray()
+                    self._advectorIIOE2(lsoil, newsoil, somin, somax, nbOut)
+            else:
+                # Upwind scheme with potentially excessive diffusion solved implicitly
+                self._solve_KSP(True, advMat_left, self.Gsoil, self.tmp)
+
+            # Update soil thickness after advection
+            self.tmp.copy(result=self.Gsoil)
+            self.dm.globalToLocal(self.Gsoil, self.Lsoil)
+
+            # Limit soil thickness
+            lsoil = self.Lsoil.getArray().copy()
+            lsoil[lsoil < 0.] = 0.
+            lsoil[lsoil > self.soil_transition] = self.soil_transition
+            self.Lsoil.setArray(lsoil)
+            self.dm.localToGlobal(self.Lsoil, self.Gsoil)
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Advection Processes (%0.02f seconds)" % (process_time() - t0),
@@ -343,14 +373,13 @@ class Tectonics(object):
 
         advMat_left.destroy()
         del edL, nedL, hL, nhL, lCoeffs
-        # del edmin, edmax, hmin, hmax
         gc.collect()
 
         return
 
     def _readAdvectionData(self, hdisp, timer):
         """
-        From a tectonic input file reads the horizontal displacements information, containing the displacement rates along each axis.
+        From a tectonic input file, this function reads the horizontal displacements information, containing the displacement rates along each axis.
 
         .. note::
             A cKDTree is built with the advected coordinates and used to interpolate the mesh variables on the initial local mesh position.
@@ -394,7 +423,7 @@ class Tectonics(object):
 
         .. important::
 
-            The interpolated values are the elevation, flexural response and cumulative erosion deposition and the interpolation is done on the spherical mesh on a single provessor. In case the stratigraphic information is also recorded then this is also interpolated.
+            The interpolated values are the elevation,  cumulative erosion deposition, flexural response and soil production. The interpolation is done on the spherical mesh on a single processor. In case the stratigraphic information is also recorded then this is also interpolated.
         """
 
         # Send local elevation globally
@@ -416,9 +445,16 @@ class Tectonics(object):
             gFI[self.locIDs] = self.localFlex
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gFI, op=MPI.MAX)
 
+        # Send local soil thickness globally
+        if self.cptSoil:
+            lsoil = self.Lsoil.getArray().copy()
+            gSL = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
+            gSL[self.locIDs] = lsoil
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gSL, op=MPI.MAX)
+
         if MPIrank == 0 and self.verbose:
             print(
-                "Transfer local elevation, erosion deposition and flexural information globally (%0.02f seconds)"
+                "Transfer local elevation, erosion deposition, soil and flexural information globally (%0.02f seconds)"
                 % (process_time() - t0),
                 flush=True,
             )
@@ -433,12 +469,17 @@ class Tectonics(object):
         if self.flexOn:
             tmp = np.sum(self.tec_weights * gFI[self.tec_IDs], axis=1)
             nfi = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
+        if self.cptSoil:
+            tmp = np.sum(self.tec_weights * gSL[self.tec_IDs], axis=1)
+            nsoil = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
 
         if len(self.tec_onIDs) > 0:
             nelev[self.tec_onIDs] = gZ[self.tec_IDs[self.tec_onIDs, 0]]
             nerodep[self.tec_onIDs] = gED[self.tec_IDs[self.tec_onIDs, 0]]
             if self.flexOn:
                 nfi[self.tec_onIDs] = gFI[self.tec_IDs[self.tec_onIDs, 0]]
+            if self.cptSoil:
+                nsoil[self.tec_onIDs] = gSL[self.tec_IDs[self.tec_onIDs, 0]]
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -455,6 +496,12 @@ class Tectonics(object):
 
         if self.flexOn:
             self.localFlex = nfi[self.locIDs].copy()
+
+        if self.cptSoil:
+            nsoil[nsoil < 0.] = 0.
+            nsoil[nsoil > self.soil_transition] = self.soil_transition
+            self.Gsoil.setArray(nsoil[self.glbIDs])
+            self.dm.globalToLocal(self.Gsoil, self.Lsoil)
 
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:

@@ -10,6 +10,7 @@ if "READTHEDOCS" not in os.environ:
     from .eroder import nlSPL as _nlSPL
     from .eroder import soilSPL as _soilSPL
     from .sed import SEDMesh as _SEDMesh
+    from .sed import hillSLP as _hillSLP
     from .sed import SEAMesh as _SEAMesh
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
@@ -65,6 +66,10 @@ else:
         def __init__(self):
             pass
 
+    class _hillSLP(object):
+        def __init__(self):
+            pass
+
     class _SEAMesh(object):
         def __init__(self):
             pass
@@ -93,11 +98,12 @@ class Model(
     _soilSPL,
     _PITFill,
     _SEDMesh,
+    _hillSLP,
     _SEAMesh,
     _STRAMesh,
 ):
     """
-    Instantiates model object and performs surface processes evolution.
+    Instantiates model's objects and initialise classes.
 
     This object contains methods for the following operations:
 
@@ -150,22 +156,25 @@ class Model(
         # Pit filling initialisation
         _PITFill.__init__(self, *args, **kwargs)
 
-        # Sediment initialisation
+        # Continental sediment transfer initialisation
         _SEDMesh.__init__(self, *args, **kwargs)
 
-        # Sediment initialisation
+        # Hillslope processes (linear and non-linear) initialisation
+        _hillSLP.__init__(self, *args, **kwargs)
+
+        # Marine sediment transport and deposition initialisation
         _SEAMesh.__init__(self, *args, **kwargs)
 
-        # Define grid processes
+        # Define additional grid processes (flexure, orographic rain)
         _GridProcess.__init__(self)
 
-        # Get external forces
+        # Get external forces driving landscape dynamics over time (tectonic, rainfall...)
         _UnstMesh.applyForces(self)
 
-        # Initialise tectonics forcings
+        # Initialise horizontal tectonics forcings (multiple advection techniques)
         _Tectonics.__init__(self)
 
-        # Check if simulations just restarted
+        # Check if simulation just restarted
         if self.rStep > 0:
             _WriteMesh.readData(self)
 
@@ -190,7 +199,7 @@ class Model(
 
          - computes flow accumulation based on imposed precipitation field
          - performs land surface evolution from river erosion, transport and deposition
-         - executes creep processes and marine depostion (linear hillslope diffusion)
+         - executes creep processes and marine depostion (linear and non-linear diffusion)
          - records stratigraphic layers evolution and associated porosity variations
          - applies user-defined tectonics forcing (horizontal and vertical displacements)
 
@@ -217,30 +226,33 @@ class Model(
                 # Compute flow accumulation
                 _FAMesh.flowAccumulation(self)
 
-                # Perform River Incision
+                # Perform River Incision/Deposition based on Stream Power Law (different flavors)
                 if self.cptSoil:
+                    # Non-linear coupled to soil production
                     _soilSPL.erodepSPLsoil(self)
                 elif self.spl_n == 1.0:
+                    # Linear slope dependencies
                     _SPL.erodepSPL(self)
                 else:
+                    # Non-linear slope dependencies
                     _nlSPL.erodepSPLnl(self)
 
                 if not self.nodep:
-                    # Downstream sediment deposition inland
+                    # Downstream sediment deposition over the continents
                     _FAMesh.flowAccumulation(self)
                     _SEDMesh.sedChange(self)
                     if self.seaDepo:
-                        # Downstream sediment deposition in sea
+                        # Downstream sediment deposition in marine environments
                         _SEAMesh.seaChange(self)
 
-                # Hillslope diffusion
-                _SEDMesh.getHillslope(self)
+                # Hillslope diffusion (linear and non-linear)
+                _hillSLP.getHillslope(self)
 
             if self.tNow >= self.saveStrat:
                 # Stratigraphic layer porosity and thicknesses under compaction
                 _STRAMesh.getCompaction(self)
 
-            # Apply flexural isostasy
+            # Apply flexural isostasy (local and global)
             if self.flexOn:
                 _GridProcess.applyFlexure(self)
 

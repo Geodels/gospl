@@ -34,23 +34,33 @@ class soilSPL(object):
         self.soil_atol = 1.e-6
         self.soil_maxit = 500
 
-        self.cptSoil = True
-        self.P0 = 50. * 1.e-6 # soil production maximum rate (50 m/Myr)
-        self.h_star = 1.0 # roughness length_scale
-        self.H0 = 0.7 # soil transport decay depth for diffusion
-        self.Hs = 0.5 # soil production decay depth
-        self.Sperc = 0.0001 # soil / bedrock transition limit ratio factor of production
-        self.Ksoil = 2 * self.K # erodibility coefficient for soil
+        # self.cptSoil = True
+        # self.Ksoil = 2 * self.K # erodibility coefficient for soil
+        # self.P0 = 50. * 1.e-6 # soil production maximum rate (50 m/Myr)
+        # self.Hs = 0.5 # soil production decay depth
+        # self.h_star = 1.0 # roughness length_scale
+        # self.H0 = 0.7 # soil transport decay depth for diffusion
+        # self.Sperc = 0.0001 # soil / bedrock transition limit ratio factor of production
 
-        self.soil_transition = -np.log(self.Sperc) * self.Hs
+        if self.Sperc > 0:
+            self.soil_transition = -np.log(self.Sperc) * self.Hs
+        else:
+            self.soil_transition = 100.0
         self.Gsoil = self.hGlobal.duplicate()
         self.Lsoil = self.hLocal.duplicate()
         self.lHbed = self.hLocal.duplicate()
         self.gHbed = self.hGlobal.duplicate()
 
-        # Let's create an uniform soil thickness distribution of 2.0 m
-        self.Gsoil.set(2)
-        self.Lsoil.set(2)
+        # Allocate initial soil thicknesses
+        if self.soilFile is not None:
+            loadData = np.load(self.soilFile)
+            soilH = loadData[self.soilData]
+            self.Lsoil.setArray(soilH[self.locIDs])
+            self.dm.localToGlobal(self.Lsoil, self.Gsoil)
+        else:
+            # Create an uniform soil thickness distribution
+            self.Gsoil.set(self.cstSoilH)
+            self.Lsoil.set(self.cstSoilH)
 
         return
 
@@ -77,7 +87,6 @@ class soilSPL(object):
         # Compute soil thickness
         hSoil = self.soilH + h_array - self.hOldArray
         hSoil[hSoil < 0.] = 0.
-        # hSoil = np.ones(self.lpoints)
 
         # Residuals based on the equation: 
         # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0

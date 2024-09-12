@@ -10,8 +10,6 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import setmaxnb
-    from gospl._fortran import sethillslopecoeff
-    from gospl._fortran import hillslp_nl
     from gospl._fortran import scale_volume
 
 petsc4py.init(sys.argv)
@@ -21,14 +19,7 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class SEDMesh(object):
     """
-    This class encapsulates all the functions related to sediment transport, production and deposition in the continental domain. The following processes are considered:
-
-    - inland river deposition in depressions and enclosed sea
-    - hillslope processes in both marine and inland areas
-
-    .. note::
-        All these functions are run in parallel using the underlying PETSc library.
-
+    This class encapsulates all the functions related to sediment transport and deposition in the continental domain.
     """
 
     def __init__(self, *args, **kwargs):
@@ -37,7 +28,6 @@ class SEDMesh(object):
         """
 
         # Petsc vectors
-        self.rhs = self.hGlobal.duplicate()
         self.tmp = self.hGlobal.duplicate()
         self.tmpL = self.hLocal.duplicate()
         self.tmp1 = self.hGlobal.duplicate()
@@ -56,7 +46,7 @@ class SEDMesh(object):
 
         return
 
-    def getSedFlux(self):
+    def _getSedFlux(self):
         """
         This function computes sediment flux in cubic metres per year from incoming rivers. Like for the computation of the flow discharge and erosion rates, the sediment flux is solved by an implicit time integration method, the matrix system is the one obtained from the receiver distributions over the unfilled elevation mesh for the flow discharge (`fMat`).
 
@@ -73,7 +63,7 @@ class SEDMesh(object):
             # Get erosion rate (m/yr) to volume
             self.Eb.copy(result=self.tmp)
 
-        # Get the volume of sediment transported in m3 per year
+        # Get the volume of sediment transported in m3/yr
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
         self.fMati.destroy()
@@ -100,7 +90,7 @@ class SEDMesh(object):
         :arg vSed: excess sediment volume array
         :arg step: downstream distribution step
 
-        :return: excess (boolean set to True is excess sediment fluxes remain to be distributed)
+        :return: excess (boolean set to True if excess sediment fluxes remain to be distributed)
         """
         excess = False
 
@@ -201,7 +191,7 @@ class SEDMesh(object):
 
     def _updateSinks(self, hl):
         """
-        This function updates depressions elevations based on incoming sediment volumes. The function runs until all inland sediments have reached either a sink which is not completely filled or the open ocean.
+        This function updates depressions elevations based on incoming sediment volumes. It runs until all inland sediments have reached either a sink which is not completely filled or the open ocean.
 
         :arg hl: local elevation prior deposition
         """
@@ -243,15 +233,16 @@ class SEDMesh(object):
 
     def sedChange(self):
         """
-        This function is the main entry point to perform both continental and marine river-induced deposition. It calls the private function:
+        This function is the main entry point to perform continental river-induced deposition. It calls the private functions:
 
+        - _getSedFlux
         - _distributeSediment
         - _updateSinks
 
         """
 
         # Find Continental Sediment Fluxes
-        self.getSedFlux()
+        self._getSedFlux()
 
         # Compute depressions information as elevations changed due to erosion
         self.fillElevation(sed=True)
@@ -264,240 +255,5 @@ class SEDMesh(object):
         self._distributeSediment(hl)
 
         self._updateSinks(hl)
-
-        return
-
-    def getHillslope(self):
-        r"""
-        This function computes hillslope processes. The code assumes that gravity is the main driver for transport and states that the flux of sediment is proportional to the gradient of topography.
-
-        As a result, we use a linear diffusion law commonly referred to as **soil creep**:
-
-        .. math::
-          \frac{\partial z}{\partial t}= \kappa_{D} \nabla^2 z
-
-        in which :math:`\kappa_{D}` is the diffusion coefficient and can be defined with different values for the marine and land environments (set with `hillslopeKa` and `hillslopeKm` in the YAML input file). It encapsulates, in a simple formulation, processes operating on superficial sedimentary layers. Main controls on variations of :math:`\kappa_{D}` include substrate, lithology, soil depth, climate and biological activity.
-        """
-
-        h = self.hLocal.getArray().copy()
-        self.seaID = np.where(h <= self.sealevel)[0]
-
-        # Specify the hillslope diffusion law to use
-        if self.cptSoil:
-            self.diffuseSoil()
-            return
-        
-        if self.K_nl == 1.0 and self.K_nb == 0:
-            self._hillSlope(smooth=0)
-        else:
-            self._hillSlopeNL()
-
-        # Update layer elevation
-        if self.stratNb > 0:
-            self.elevStrat()
-        if self.memclear:
-            del h
-            gc.collect()
-
-        # Update erosion/deposition rates
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        add_rate = self.tmpL.getArray() / self.dt
-        self.tmpL.setArray(add_rate)
-        self.EbLocal.axpy(1.0, self.tmpL)
-
-        if self.memclear:
-            del add_rate
-            gc.collect()
-
-        return
-
-    def _hillSlope(self, smooth=0):
-        r"""
-        This function computes hillslope using a linear diffusion law commonly referred to as **soil creep**:
-
-        .. math::
-          \frac{\partial z}{\partial t}= \kappa_{D} \nabla^2 z
-
-        in which :math:`\kappa_{D}` is the diffusion coefficient and can be defined with different values for the marine and land environments (set with `hillslopeKa` and `hillslopeKm` in the YAML input file).
-
-        .. note::
-            The hillslope processes in `gospl` are considered to be happening at the same rate for coarse and fine sediment sizes.
-
-        :arg smooth: integer specifying if the diffusion equation is used for ice flow (1) and marine deposits (2).
-        """
-
-        if smooth == 0:
-            if self.Cda == 0.0 and self.Cdm == 0.0:
-                return
-
-        t0 = process_time()
-        # Diffusion matrix construction
-        if smooth == 1:
-            Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
-            Cd[~self.iceIDs] = 0.0
-        elif smooth == 2:
-            # Hard-coded coefficients here, used to generate a smooth surface
-            # for computing marine flow directions...
-            Cd = np.full(self.lpoints, 1.e5, dtype=np.float64)
-            Cd[self.seaID] = 5.e6
-        else:
-            Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
-            Cd[self.seaID] = self.Cdm
-        diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
-        if self.flatModel:
-            diffCoeffs[self.idBorders, 1:] = 0.0
-            diffCoeffs[self.idBorders, 0] = 1.0
-
-        diffMat = self._matrix_build_diag(diffCoeffs[:, 0])
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-
-        for k in range(0, self.maxnb):
-            tmpMat = self._matrix_build()
-            indices = self.FVmesh_ngbID[:, k].copy()
-            data = diffCoeffs[:, k + 1]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-            diffMat.axpy(1.0, tmpMat)
-            tmpMat.destroy()
-
-        # Get elevation values for considered time step
-        if smooth == 1:
-            if self.tmp1.max()[1] > 0:
-                self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
-            else:
-                self.tmp1.copy(result=self.tmp)
-            diffMat.destroy()
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            return self.tmpL.getArray().copy()
-        elif smooth == 2:
-            self._solve_KSP(True, diffMat, self.hGlobal, self.tmp)
-            diffMat.destroy()
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            return self.tmpL.getArray().copy()
-        else:
-            self.hGlobal.copy(result=self.hOld)
-            self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
-            diffMat.destroy()
-            # Update cumulative erosion/deposition and elevation
-            self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
-            self.cumED.axpy(1.0, self.tmp)
-            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-            self.dm.globalToLocal(self.hGlobal, self.hLocal)
-
-            if self.memclear:
-                del ids, indices, indptr, diffCoeffs, Cd
-                gc.collect()
-
-            if self.stratNb > 0:
-                self.erodeStrat()
-                self.deposeStrat()
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Compute Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-        petsc4py.PETSc.garbage_cleanup()
-
-        return
-
-    def _dmonitor(self, snes, its, norm):
-
-        if MPIrank == 0 and its % 5 == 0:
-            print(f"  ---  Non-linear hillslope solver iteration {its}, Residual norm: {norm}", flush=True)
-
-    def _form_residual_hillslope(self, snes, h, F):
-
-        # Current state
-        self.dm.globalToLocal(h, self.hl)
-        h_array = self.hl.getArray()
-
-        # Compute slope
-        if self.K_nb == 0:
-            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_nl, 0)
-        else:
-            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_sc, self.K_nb)
-
-        if self.flatModel:
-            val[self.idBorders] = 0.
-
-        # Residuals
-        res = h_array - self.hOldArray - self.dt * val
-
-        # Residual vector
-        F.setArray(res[self.glIDs])
-
-        return
-    
-    def _hillSlopeNL(self):
-        r"""
-        This function computes hillslope using a non-linear diffusion law 
-        """
-
-        t0 = process_time()
-
-        self.hGlobal.copy(result=self.hOld)
-        self.Cd_nl = np.full(self.lpoints, self.Cda, dtype=np.float64)
-        self.Cd_nl[self.seaID] = self.Cdm
-        self.hOldArray = self.hLocal.getArray().copy()
-
-        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-        snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                           max_it=self.snes_maxit)
-        
-        # Set a monitor to see residual values
-        if self.verbose:
-            snes.setMonitor(self._dmonitor)
-
-        f = self.hGlobal.duplicate()
-        snes.setFunction(self._form_residual_hillslope, f)
-
-        # SNES solvers
-        snes.setType('ngmres')
-        ksp = snes.getKSP()
-        ksp.setType("cg")
-        pc = ksp.getPC()
-        pc.setType("hypre")
-        petsc_options = petsc4py.PETSc.Options()
-        petsc_options['pc_hypre_type'] = 'boomeramg'
-        ksp.getPC().setFromOptions()
-        ksp.setTolerances(rtol=1.0e-6)
-
-        b, x = None, f.duplicate()
-        self.hGlobal.copy(result=x)
-        snes.solve(b, x)
-
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
-
-        x.copy(result=self.hGlobal)
-        f.destroy()
-        x.destroy()
-
-        # Update cumulative erosion/deposition and elevation
-        self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
-        self.cumED.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-
-        if self.stratNb > 0:
-            self.erodeStrat()
-            self.deposeStrat()
-
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Compute Non-Linear Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-        petsc4py.PETSc.garbage_cleanup()
 
         return

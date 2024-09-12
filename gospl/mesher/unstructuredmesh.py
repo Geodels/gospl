@@ -28,18 +28,18 @@ MPIcomm = MPI.COMM_WORLD
 
 class UnstMesh(object):
     """
-    This class defines the spherical mesh characteristics and builds a PETSc DMPlex that encapsulates this unstructured mesh, with interfaces for both topology and geometry. The PETSc DMPlex is used for parallel redistribution for load balancing.
+    This class defines the 2D or spherical mesh characteristics and builds a PETSc DMPlex that encapsulates this unstructured mesh, with interfaces for both topology and geometry. The PETSc DMPlex is used for parallel redistribution and for load balancing.
 
     .. note::
 
         goSPL is built around a **Finite-Volume** method (FVM) for representing and evaluating  partial differential equations. It requires the definition of several mesh variables such as:
 
             - the number of neighbours surrounding every node,
-            - the cell area defined using  Voronoi area,
+            - the cell area defined using Voronoi area,
             - the length of the edge connecting every nodes, and
             - the length of the Voronoi faces shared by each node with his neighbours.
 
-    In addition to mesh defintions, the class declares several functions related to forcing conditions (*e.g.* paleo-precipitation maps, tectonic (vertical and horizontal) displacements, stratigraphic layers...). These functions are defined within the `UnstMesh` class as they rely heavely on the mesh structure.
+    In addition to mesh defintions, the class declares several functions related to forcing conditions (*e.g.* paleo-precipitation maps, tectonic (vertical and horizontal) displacements, stratigraphic layers...). These functions are defined within the `UnstMesh` class as they rely heavily on the mesh structure.
 
     .. important::
 
@@ -59,7 +59,7 @@ class UnstMesh(object):
         self.memclear = False
         self.southPts = None
 
-        # Let us define the mesh variables and build PETSc DMPLEX.
+        # Define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
 
         return
@@ -70,7 +70,7 @@ class UnstMesh(object):
 
         .. note::
 
-            As far as I am aware, PETSc DMPlex requires to be initialised on one processor before load balancing.
+            PETSc DMPlex requires to be initialised on one processor before load balancing.
 
         :arg dim: topological dimension of the mesh
         :arg cells: vertices of each cell
@@ -98,11 +98,12 @@ class UnstMesh(object):
                 np.zeros(coord_shape, dtype=np.float64),
                 comm=petsc4py.PETSc.COMM_WORLD,
             )
+
         return
 
     def _meshStructure(self):
         """
-        Defines the mesh structure and the associated voronoi parameter used in the Finite Volume method.
+        Defines the mesh structure and the associated voronoi parameters used in the Finite Volume method.
 
         .. important::
             The mesh structure is built locally on a single partition of the global mesh.
@@ -113,7 +114,6 @@ class UnstMesh(object):
         - all edges connected to a given vertice,
         - the triangulation edge lengths,
         - the voronoi edge lengths.
-
         """
 
         # Create mesh structure and voronoi parameters used for
@@ -177,24 +177,14 @@ class UnstMesh(object):
 
         return
 
-    def _xyz2lonlat(self):
-        """
-        Converts local x,y,z representation of cartesian coordinates from the spherical triangulation to latitude, longitude in degrees.
-
-        The latitudinal and longitudinal extend are between [0,180] and [0,360] respectively. Lon/lat coordinates are used when forcing the simulation with paleo-topoography maps.
-        """
-
-        self.lLatLon = np.zeros((self.lpoints, 2))
-        self.lLatLon[:, 0] = np.arcsin(self.lcoords[:, 2] / self.radius)
-        self.lLatLon[:, 1] = np.arctan2(self.lcoords[:, 1], self.lcoords[:, 0])
-
-        return
-
     def _generateVTKmesh(self, points, cells):
         """
         A global VTK mesh is generated to compute the distance between mesh vertices and coastlines position.
 
-        The distance to the coastline for every marine vertices is used to define a maximum shelf slope during deposition. The coastline contours are efficiently obtained from VTK contouring function. This function is performed on a VTK mesh which is built in this function.
+        .. note::
+            The distance to the coastline for every marine vertices is used to define a maximum shelf slope during deposition. 
+            
+            The coastline contours are efficiently obtained from VTK contouring function.
         """
 
         self.vtkMesh = vtk.vtkUnstructuredGrid()
@@ -257,7 +247,7 @@ class UnstMesh(object):
 
     def _buildMesh(self):
         """
-        This function is at the core of the `UnstMesh` class. It encapsulates both spherical mesh construction (triangulation and voronoi representation for the Finite Volume discretisation), PETSc DMPlex distribution and several PETSc vectors allocation.
+        This function is at the core of the `UnstMesh` class. It encapsulates both mesh construction (triangulation and voronoi representation for the Finite Volume discretisation), PETSc DMPlex distribution and several PETSc vectors allocation.
 
         The function relies on several private functions from the class:
 
@@ -265,13 +255,11 @@ class UnstMesh(object):
         - _meshfrom_cell_list
         - _meshStructure
         - _readErosionDeposition
-        - _xyz2lonlat
         - readStratLayers
 
         .. note::
 
-            It is worth mentionning that partitioning and field distribution from global to local PETSc DMPlex takes a lot of time for large mesh and there might be some quicker way in PETSc to perform this step that I am unaware of...
-
+            It is worth mentionning that partitioning and field distribution from global to local PETSc DMPlex takes a lot of time for large mesh.
         """
 
         # Read mesh attributes from file
@@ -466,9 +454,6 @@ class UnstMesh(object):
         del l2g, offproc, gZ, out, ptscells
         gc.collect()
 
-        # Map longitude/latitude coordinates
-        # self._xyz2lonlat()
-
         # Build stratigraphic data if any
         if self.stratNb > 0:
             self.readStratLayers()
@@ -477,7 +462,7 @@ class UnstMesh(object):
 
     def _set_DMPlex_boundary_points(self, label):
         """
-        In case of a flat mesh (non global), this function finds the points that join the edges that have been marked as "boundary" faces in the DAG then sets them as boundaries.
+        In case of a 2D mesh, this function finds the points that join the edges that have been marked as "boundary" faces in the directed acyclic graph (DAG) then sets them as boundaries.
         """
 
         self.dm.createLabel(label)
@@ -505,7 +490,7 @@ class UnstMesh(object):
 
     def _get_boundary(self, label="boundary"):
         """
-        In case of a flat mesh (non global), this function finds the nodes on the boundary from the DM.
+        In case of a 2D mesh, this function finds the nodes on the boundary from the DM.
         """
 
         label = "boundary"
@@ -533,9 +518,9 @@ class UnstMesh(object):
 
     def _readErosionDeposition(self):
         """
-        Reads existing cumulative erosion depostion from a previous experiment if any as defined in the YAML input file following the  `nperodep` key.
+        Reads existing cumulative erosion depostion from a previous experiment as defined in the YAML input file following the `nperodep` key.
 
-        This functionality can be used when restarting from a previous simulation in which the spherical mesh has been modified either to account for horizontal advection or to refine/coarsen a specific region during a given time period.
+        This functionality can be used when restarting from a previous simulation in which the mesh has been modified either to account for horizontal advection or to refine/coarsen a specific region during a given time period.
         """
 
         # Build PETSc vectors
@@ -676,7 +661,7 @@ class UnstMesh(object):
 
         .. note::
 
-            It is worth noting that the erodibility factor is an indice representing different lithological classes (see Moosdorf et al., 2018).
+            It is worth noting that the erodibility factor is an indice representing different lithological classes (see `Moosdorf et al., 2018 <https://www.sciencedirect.com/science/article/pii/S0143622817306859>`_).
 
         """
 
@@ -729,7 +714,6 @@ class UnstMesh(object):
         self.hOld.destroy()
         self.hOldLocal.destroy()
         self.Qs.destroy()
-        self.rhs.destroy()
         self.newH.destroy()
         self.tmpL.destroy()
         self.tmp.destroy()

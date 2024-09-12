@@ -22,7 +22,7 @@ class WriteMesh(object):
 
     .. note::
 
-        The model outputs are all located in an output folder (`dir` key in the inputfile documentation) and consist of a time series file named `gospl.xdmf` and 2 other folders (`h5` and `xmf`).
+        The model outputs are all located in an user-defined output folder (`dir` key in the inputfile documentation) and consist of a time series file named `gospl.xdmf` and 2 other folders (`h5` and `xmf`).
 
     The `XDMF` file is the main entry point for visualising the output and should be sufficient for most users. This file can easely be opened within `Paraview <https://www.paraview.org/download/>`_.
     """
@@ -127,7 +127,7 @@ class WriteMesh(object):
 
         .. important::
 
-            It is worth mentioning that the stratigraphic architecture is only outputed as HDF5 files and does not record the XMF and XDMF files. A set of post-processing scripts are then required to extract the informations and visualise the stratigraphic records of any specific simulations.
+            It is worth mentioning that the stratigraphic architecture is only outputed as HDF5 files and does not record the XMF and XDMF files. A set of post-processing scripts are then required to extract the information and visualise the stratigraphic records at any specific time step.
         """
 
         t = process_time()
@@ -190,6 +190,7 @@ class WriteMesh(object):
         - flow accumulation `FA`.
         - flow accumulation `fillFA` considering pit filling.
         - river sediment load `sedLoad`.
+        - soil thickness `soilH` if soil production is considered.
         - uplift subsidence values if vertical tectonic forcing is considered `uplift`.
         - flexural isostasy rebound `flexIso` if flexure is considered.
         - precipitation maps based on forcing conditions `rain` (could also correspond to the orographic rain if the functionality is turned on).
@@ -372,6 +373,7 @@ class WriteMesh(object):
         - flow accumulation `fillFA` considering pit filling.
         - river sediment load `sedLoad`.
         - flexural isostasy induced tectonics `flexIso`.
+        - soil thickness `soilH`.
 
         .. note::
 
@@ -446,7 +448,6 @@ class WriteMesh(object):
         Saves mesh local information stored in the HDF5 to XmF file. The XMF files are XML schema explaining how to read `gospl` data files.
 
         The XmF file is written by a single processor (rank 0) and contains each partition HDF5 files in blocks. The variables described for the HDF5 file (function `_outputMesh` above) are all accessible from this file.
-
         """
 
         xmf_file = self.outputDir + "/xmf/" + self.file + str(self.step) + ".xmf"

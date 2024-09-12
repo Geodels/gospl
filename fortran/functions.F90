@@ -816,7 +816,7 @@ end subroutine sethillslopecoeff
 
 subroutine hillslp_nl(nb, elev, kd, exp, n, val)
 !*****************************************************************************
-! Define hillslope coefficients based on a finite volume spatial
+! Define non-linear hillslope coefficients based on a finite volume spatial
 ! discretisation as proposed in Tucker et al. (2001).
 
     use meshparams
@@ -3597,7 +3597,6 @@ subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,g,newh)
   if (cbc(4:4).eq.'') cbc(4:4)='0'
 
   ! allocate memory
-
   nxflex=1
   do while (nxflex.lt.nx)
     nxflex=nxflex*2
@@ -3612,7 +3611,6 @@ subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,g,newh)
   allocate (w(nxflex,nyflex))
 
   ! compute relevant geometrical, flexural and spectral parameters
-
   iflexmin=nxflex/2-nxflex/8
   iflexmax=nxflex/2+nxflex/8
   jflexmin=nyflex/2-nyflex/8
@@ -3626,14 +3624,12 @@ subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,g,newh)
   hy=ddyf*(nyflex-1)
   dflex=young/12.d0/(1.d0-nu**2)
   d=dflex*eet**3
-  ! g=9.81d0
   xk=rhoa*g
   pihx=3.141592654d0/hx
   pihy=3.141592654d0/hx
 
   ! compute weigths corresponding to the increase in topography by interpolation
   ! from the nx,ny grid to the nflex, nflex grid, using a bilinear interpolation scheme
-
   w=0.d0
   jj=jflexmin
   yflexloc=0.d0
@@ -3670,7 +3666,6 @@ subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,g,newh)
   call addw(w,nxflex,nyflex,iflexmin,iflexmax,jflexmin,jflexmax,cbc)
 
   ! compute FFT of weights
-
   do j=1,nyflex
     call sinft(w(:,j),nxflex)
   enddo
@@ -3682,7 +3677,6 @@ subroutine flexure(dh,nx,ny,xl,yl,young,nu,rhos,rhoa,eet,ibc,g,newh)
   enddo
 
   ! apply filter to FFT of weights to simulated flexure (see Nunn and Aires, 1988)
-
   w=w*4./hx/hy
 
   do j=1,nyflex

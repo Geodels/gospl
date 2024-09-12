@@ -39,9 +39,9 @@ class PITFill(object):
 
     .. note::
 
-        Unlike previous algorithms, `Barnes (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_ approach guarantees a fixed number of memory access and communication events per processors. As mentionned in his paper based on comparison testing, it runs generally faster while using fewer resources than previous methods.
+        Unlike previous algorithms, `Barnes (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_ approach guarantees a fixed number of memory access and communication events per processors.
 
-    The approach proposed here is more general than the one in the initial paper. First, it handles both regular and irregular meshes, allowing for complex distributed meshes to be used as long as a clear definition of inter-mesh connectivities is available. Secondly, to prevent iteration over unnecessary vertices (such as marine regions), it is possible to define a minimal elevation (i.e. sea-level position) above which the algorithm is performed. Finally, it creates directions over flat regions allowing for downstream flows in cases where the entire volume of a depression is filled.
+    The approach proposed in goSPL handles irregular meshes, allowing for complex distributed meshes to be used as long as a clear definition of inter-mesh connectivities is available. It also creates directions over flat regions allowing for downstream flows in cases where the entire volume of a depression is filled.
 
     For inter-mesh connections and message passing, the approach relies on PETSc DMPlex functions.
 
@@ -50,7 +50,6 @@ class PITFill(object):
     - the elevation of the filled surface,
     - the information for each depression (e.g., a unique global ID, its spillover local points and related processor),
     - the description of each depression (total volume and maximum filled depth).
-
     """
 
     def __init__(self, *args, **kwargs):
@@ -73,12 +72,12 @@ class PITFill(object):
 
     def _buildPitDataframe(self, label1, label2):
         """
-        Definition of a Pandas data frame used to find a unique pit ID between processors.
+        Definition of a Pandas Dataframe used to find unique pit ID across processors.
 
-        :arg label1: depression ID in a given processors
+        :arg label1: depression ID in a given processor
         :arg label2: same depression ID in a neighbouring mesh
 
-        :return: df (sorted dataframe of pit ID between processors)
+        :return: df (sorted Dataframe of pit ID between processors)
         """
 
         data = {
@@ -92,10 +91,9 @@ class PITFill(object):
 
     def _sortingPits(self, df):
         """
-        Sorts depressions number before combining them to ensure no depression index is
-        changed in an unsorted way.
+        Sorts depressions number before combining them to ensure no depression index is changed in an unsorted way.
 
-        :arg df: pandas dataframe containing depression numbers which have to be combined.
+        :arg df: Pandas Dataframe containing depression numbers which have to be combined.
 
         :return: df sorted pandas dataframe containing depression numbers.
         """
@@ -107,7 +105,7 @@ class PITFill(object):
 
     def _offsetGlobal(self, lgth):
         """
-        Computes the offset between processors to ensure a unique number for considered indices.
+        Computes the offset between processors to ensure unique number for considered indices.
 
         :arg lgth: local length of the data to distribute
 
@@ -124,9 +122,9 @@ class PITFill(object):
         """
         Combine local meshes by joining their edges based on local spillover graphs.
 
-        :arg mgraph: numpy array containing local mesh edges information
+        :arg mgraph: Numpy Array containing local mesh edges information
 
-        :arg ggraph: numpy array containing filled elevation values based on other processors values
+        :arg ggraph: Numpy Array containing filled elevation values based on other processors values
         """
 
         # Get bidirectional edges connections
@@ -296,7 +294,7 @@ class PITFill(object):
         - volume of each depression
         - maximum filled depth
 
-        :arg hl: numpy array of unfilled surface elevation
+        :arg hl: Numpy Array of unfilled surface elevation
         :arg nbpits: number of depression in the global mesh
         """
 
@@ -447,9 +445,9 @@ class PITFill(object):
 
     def _pitInformation(self, hl, level, sed=False):
         """
-        This function extracts depression informations available to all processors. It stores the following things:
+        This function extracts depression information available to all processors. It stores the following:
 
-        - the information for each depression (e.g., a unique global ID, its spillover local points and related processor),
+        - the information for each depression (*e.g.*, unique global ID, its spillover local points and related processor),
         - the description of each depression (total volume and maximum filled depth).
 
         :arg hl: local elevation.
@@ -458,7 +456,7 @@ class PITFill(object):
 
         t0 = process_time()
 
-        # Combine pits locally to get an unique local ID per depression
+        # Combine pits locally to get a unique local ID per depression
         if sed:
             pitIDs = label_pits(level, self.lFill)
         else:
@@ -495,7 +493,7 @@ class PITFill(object):
             )
         t0 = process_time()
 
-        # Get depression informations:
+        # Get depression information
         self.pitInfo = np.zeros((pitnbs, 2), dtype=int)
         self.pitInfo[:, 0] = spillIDs
         self.pitInfo[:, 1] = rank

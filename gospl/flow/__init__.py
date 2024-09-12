@@ -1,5 +1,5 @@
 """
-Flow accumulation computation for global unstructured mesh and parallel pit filling.
+Flow accumulation computation and pit filling algorithm.
 """
 from .flowplex import FAMesh
 from .pitfilling import PITFill

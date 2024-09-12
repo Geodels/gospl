@@ -18,11 +18,11 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class FAMesh(object):
     """
-    This class calculates **drainage area** in an implicit, iterative manner using PETSc solvers. It accounts  for multiple flow direction paths (SFD to MFD) based on user input declaration.
+    This class calculates **drainage area** in an implicit, iterative manner using PETSc solvers. It accounts for multiple flow direction paths (SFD to MFD) based on user input declaration.
 
     .. note::
 
-        The class follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ where the iterative nature of the computational algorithms used to solve the linear system creates the possibility of accelerating the solution by providing an initial guess.
+        The class follows the parallel approach described in `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_.
     """
 
     def __init__(self, *args, **kwargs):
@@ -54,7 +54,7 @@ class FAMesh(object):
 
         .. note::
 
-            To achieve good performance during matrix assembly, the function preallocates the matrix storage by setting the array nnz.
+            To achieve good performance during matrix assembly, the function preallocates the matrix storage.
 
         :arg nnz: array containing the number of nonzeros in the various rows
 
@@ -110,9 +110,9 @@ class FAMesh(object):
 
             This function is used if the KSP convergence failed using the PETSc Richardson solver with block Jacobian preconditioning.
 
-        :arg matrix: PETSc sparse matrix used by the KSP solver composed of diagonal terms set to unity (identity matrix) and off-diagonal terms (weights between 0 and 1). The weights are calculated based on the number of downslope neighbours (based on the chosen number of flow direction directions) and are proportional to the slope.
-        :arg vector1: PETSc vector corresponding to the local volume of water available for runoff during a given time step (*e.g.* voronoi area times local precipitation rate)
-        :arg vector2: PETSc vector corresponding to the unknown flow discharge values
+        :arg matrix: PETSc sparse matrix used by the KSP solver composed of diagonal terms set to unity (identity matrix) and off-diagonal terms (weights between 0 and 1). The weights are calculated based on the number of downslope neighbours (*i.e.*, user-defined number of flow directions) and are proportional to the slope.
+        :arg vector1: PETSc vector corresponding to the local volume of water available for runoff during a given time step (*e.g.* voronoi area times local precipitation rate).
+        :arg vector2: PETSc vector corresponding to the unknown flow discharge values.
 
         :return: vector2 PETSc vector of the new flow discharge values
         """
@@ -137,7 +137,6 @@ class FAMesh(object):
             vector2.set(0.0)
             pc.destroy()
             ksp.destroy()
-            # raise RuntimeError("LinearSolver failed to converge!")
         else:
             pc.destroy()
             ksp.destroy()
@@ -155,10 +154,10 @@ class FAMesh(object):
 
         Using such iterative method allows for an initial guess to be provided. When this initial guess is close to the solution, the number of iterations required for convergence dramatically decreases. Here the flow discharge solution from previous time step can be passed as an initial `guess` to the solver as discharge often exhibits little change between successive time intervals.
 
-        :arg guess: Boolean specifying if the iterative KSP solver initial guess is nonzero (when provided it corresponds to the previous flow discharge values)
+        :arg guess: Boolean specifying if the iterative KSP solver initial guess is nonzero (when provided it corresponds to the previous flow discharge values).
         :arg matrix: PETSc sparse matrix used by the KSP solver composed of diagonal terms set to unity (identity matrix) and off-diagonal terms (weights between 0 and 1). The weights are calculated based on the number of downslope neighbours (based on the chosen number of flow direction directions) and are proportional to the slope.
-        :arg vector1: PETSc vector corresponding to the local volume of water available for runoff during a given time step (*e.g.* voronoi area times local precipitation rate)
-        :arg vector2: PETSc vector corresponding to the unknown flow discharge values
+        :arg vector1: PETSc vector corresponding to the local volume of water available for runoff during a given time step (*e.g.* voronoi area times local precipitation rate).
+        :arg vector2: PETSc vector corresponding to the unknown flow discharge values.
 
         :return: vector2 PETSc vector of the new flow discharge values
         """
@@ -194,7 +193,7 @@ class FAMesh(object):
 
             When setting up the flow matrix in PETSc, we preallocate the non-zero entries of the matrix before starting filling in the values. Using PETSc sparse matrix storage scheme has the advantage that matrix-vector multiplication is extremely fast.
 
-        The  matrix coefficients consist of weights (comprised between 0 and 1) calculated based on the number of downslope neighbours and proportional to the slope.
+        The matrix coefficients consist of weights (comprised between 0 and 1) and calculated based on the number of downslope neighbours and proportional to the slope.
 
         :arg flow: boolean to compute matrix for either downstream water or sediment transport
         :arg dep: deposition flux coefficient in case where the sediment transport/deposition term is considered.
@@ -243,7 +242,7 @@ class FAMesh(object):
         - the distances to the receivers based on mesh resolution.
         - the associated weights calculated based on the number of receivers and proportional to the slope.
 
-        :arg h: elevation numpy array
+        :arg h: elevation in the form of a Numpy Array
         :arg down: boolean to indicate whether the filled elevation needs to be considered or not.
         """
 
@@ -388,7 +387,7 @@ class FAMesh(object):
 
         .. note::
 
-            Flow accumulation (`FA`) calculations are a core component of landscape evolution models as they are often used as proxy to estimate flow discharge, sediment load, river width, bedrock erosion, and sediment deposition. Until recently, conventional `FA` algorithms were serial and limited to small spatial problems.
+            Flow accumulation (`FA`) calculations are a core component of landscape evolution models as they are often used as proxy to estimate flow discharge, sediment load, river width, bedrock erosion, and sediment deposition. Until recently, 
 
         goSPL model computes the flow discharge from `FA` and the net precipitation rate using a **parallel implicit drainage area (IDA) method** proposed by `Richardson et al., 2014 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2013WR014326>`_ but adapted to unstructured grids.
 
@@ -518,3 +517,4 @@ class FAMesh(object):
             )
 
         return
+

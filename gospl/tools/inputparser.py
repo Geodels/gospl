@@ -57,6 +57,7 @@ class ReadYaml(object):
         self._readTime()
         self._readSPL()
         self._readHillslope()
+        self._readSoilInfo()
         self._readSealevel()
         self._readTectonics()
         self._readErofactor()
@@ -345,22 +346,10 @@ class ReadYaml(object):
                 flush=True,
             )
 
-        # try:
-        #     self.tecStep = timeDict["tec"]
-        # except KeyError:
-        #     self.tecStep = self.tout
-
         try:
             self.strat = timeDict["strat"]
         except KeyError:
             self.strat = 0
-
-        # if self.tout < self.tecStep:
-        #     self.tecStep = self.tout
-        #     print(
-        #         "Output time interval and tectonic forcing time step have been adjusted to match each others.",
-        #         flush=True,
-        #     )
 
         if self.tout < self.strat:
             self.strat = self.tout
@@ -369,14 +358,6 @@ class ReadYaml(object):
                  have been adjusted to match each others.",
                 flush=True,
             )
-
-        # if self.tecStep > 0:
-        #     if self.tout % self.tecStep != 0:
-        #         print(
-        #             "When declaring tectonic time interval, the value should be divisible by the output time interval.",
-        #             flush=True,
-        #         )
-        #         raise ValueError("Tectonic time interval definition is wrong!")
 
         if self.strat > 0:
             if self.tout % self.strat != 0:
@@ -527,6 +508,84 @@ class ReadYaml(object):
 
         return
 
+    def _readSoilInfo(self):
+        """
+        Read soil information parameters.
+        """
+
+        try:
+            soilDict = self.input["soil"]
+            self.cptSoil = True
+            try:
+                self.Ksoil = soilDict["soilK"]
+            except KeyError:
+                print(
+                    "When declaring soil production, the erodibility soilK is required.",
+                    flush=True,
+                )
+                raise ValueError(
+                    "Soil: Erodibility coefficient for soil not found."
+                )
+            try:
+                self.P0 = soilDict["maxProd"]
+            except KeyError:
+                # soil production maximum rate (50 m/Myr)
+                self.P0 = 50.e-6
+            try:
+                self.Hs = soilDict["depthProd"]
+            except KeyError:
+                # soil production decay depth
+                self.Hs = 0.0
+            try:
+                self.h_star = int(soilDict["roughnessL"])
+            except KeyError:
+                # roughness length_scale
+                self.h_star = 1.0
+            try:
+                self.H0 = soilDict["decayDepth"]
+            except KeyError:
+                # soil transport decay depth for diffusion
+                self.H0 = 0.7
+            try:
+                self.Sperc = soilDict["bedrockConv"]
+            except KeyError:
+                # soil / bedrock transition limit ratio factor of production
+                self.Sperc = 0.0001
+            try:
+                self.cstSoilH = soilDict["uniform"]
+            except KeyError:
+                # initial soil thickness
+                self.cstSoilH = 1.0
+            try:
+                soilfile = soilDict["map"]
+            except KeyError:
+                soilfile = None
+                self.soilFile = None
+
+            if soilfile is not None:
+                self.soilFile =  soilfile[0] + ".npz"
+                self.soilData =  soilfile[1]
+                try:
+                    with open(self.soilFile) as sinfo:
+                        sinfo.close()
+                except IOError:
+                    print("Unable to open numpy dataset: {}".format(self.soilFile), flush=True)
+                    raise IOError("The numpy dataset is not found...")
+
+        except KeyError:
+            self.cptSoil = False
+            self.Ksoil = 0.0
+            self.P0 = 0.0
+            self.Hs = 0.0
+            self.h_star = 1.0
+            self.H0 = 1.0
+            self.Sperc = 0.0
+            self.cstSoilH = 0.0
+            self.soilFile = None
+            self.soilData = None
+
+        return
+
     def _readSealevel(self):
         """
         Define sealevel evolution.
@@ -673,21 +732,6 @@ class ReadYaml(object):
                 [tecdata, pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"])],
                 ignore_index=True,
             )
-
-        # if self.tecStep is not None:
-        #     if tecEnd is not None:
-        #         tectime = tecStart + self.tecStep
-        #         while tectime < tecEnd:
-        #             tmpTec = []
-        #             tmpTec.insert(0, {"start": tectime, "end": , "tMap": tMap, "zMap": zMap, "hMap": hMap})
-        #             tecdata = pd.concat(
-        #                 [
-        #                     tecdata,
-        #                     pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"]),
-        #                 ],
-        #                 ignore_index=True,
-        #             )
-        #             tectime = tectime + self.tecStep
 
         return tecdata
 

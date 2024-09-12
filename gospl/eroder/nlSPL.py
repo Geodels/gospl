@@ -19,14 +19,13 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class nlSPL(object):
     """
-    The class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
-
-    If the user has turned-on the sedimentation capability, this class solves implicitly the **stream power formulation** accounting for a sediment transport/deposition term (`Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_).
+    The class computes river incision expressed using a **stream power formulation** function of river discharge and slope with non-linear slope dependency.
+    If the user has turned-on the sedimentation capability, this class also solves implicitly the **stream power formulation** accounting for a sediment transport/deposition term (`Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_).
     """
 
     def __init__(self, *args, **kwargs):
         """
-        The initialisation of `nlSPL` class consists in the declaration of PETSc vectors and matrices.
+        Initialisation of `nlSPL` class.
         """
 
         self.snes_rtol = 1.0e-6
@@ -35,7 +34,44 @@ class nlSPL(object):
 
         return
 
-    def form_residual_ed(self, snes, h, F):
+    def _form_residual(self, snes, h, F):
+        """
+        The nonlinear system (SNES) at each time step is solved iteratively by assessing the residual of the detachment-limited SPL equation.
+
+        Parameters:
+        -----------
+        snes : PETSc.SNES: The snes object.
+        h : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
+        F : PETSc.Vec: The residual vector to be filled.
+        """
+
+        # Current state
+        self.dm.globalToLocal(h, self.hl)
+        h_array = self.hl.getArray()
+
+        # Compute slope
+        S = local_spl(self.flowDir, h_array, self.rcvIDi,
+                      self.distRcvi, self.wghtVali)
+        S[S < 0] = 0.
+
+        # Residuals based on the equation: h(t+dt) - h(t) + dt * K * A^m * S^n = 0
+        res = h_array - self.hOldArray + self.Kbr * S**self.spl_n
+
+        # Residual vector
+        F.setArray(res[self.glIDs])
+
+        return
+    
+    def _form_residual_ed(self, snes, h, F):
+        """
+        The nonlinear system (SNES) at each time step is solved iteratively by assessing the residual of the SPL equation accounting for erosion and deposition (transport-limited).
+
+        Parameters:
+        -----------
+        snes : PETSc.SNES: The snes object.
+        h : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
+        F : PETSc.Vec: The residual vector to be filled.
+        """
 
         # Current state
         self.dm.globalToLocal(h, self.hl)
@@ -66,31 +102,25 @@ class nlSPL(object):
 
         return
 
-    def form_residual(self, snes, h, F):
-
-        # Current state
-        self.dm.globalToLocal(h, self.hl)
-        h_array = self.hl.getArray()
-
-        # Compute slope
-        S = local_spl(self.flowDir, h_array, self.rcvIDi,
-                      self.distRcvi, self.wghtVali)
-        S[S < 0] = 0.
-
-        # Residuals based on the equation: h(t+dt) - h(t) + dt * K * A^m * S^n = 0
-        res = h_array - self.hOldArray + self.Kbr * S**self.spl_n
-
-        # Residual vector
-        F.setArray(res[self.glIDs])
-
-        return
-
     def _monitor(self, snes, its, norm):
+        """
+        Non-linear SPL solver convergence evaluation.
+        """
 
         if MPIrank == 0 and its % 50 == 0:
             print(f"  ---  Non-linear SPL solver iteration {its}, Residual norm: {norm}", flush=True)
 
-    def form_jacobian(self, snes, h, J, P):
+    def _form_jacobian(self, snes, h, J, P):
+        """
+        For the detachment-limited case, the Jacobian is calculated and provided to the nonlinear system (SNES).
+
+        Parameters:
+        -----------
+        snes : PETSc.SNES: The snes object.
+        h : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
+        J : PETSc.Mat: The Jacobian matrix to be filled.
+        P : PETSc.Mat: The preconditioner matrix to be filled.
+        """
 
         # Current state
         self.dm.globalToLocal(h, self.hl)
@@ -118,15 +148,14 @@ class nlSPL(object):
         return True
 
     def _solveNL_ed(self):
-        r"""
-        It calls the following *private functions*:
+        """
+        Solves the non-linear stream power law for the transport limited case. This calls the following *private function*:
 
-        - form_residual
-        - form_jacobian
+        - _form_residual_ed
 
         .. note::
 
-            PETSc SNES approach is used to solve the nonlinear equation above over the considered time step.
+            PETSc SNES approach is used to solve the nonlinear equation above over the considered time step. In this implementation of the SNES, we do not form the Jacobian and PETSc calculates it based on the residual function. A Nonlinear Generalized Minimum Residual method is used ``ngmres``, a Preconditioned Conjugate Gradient ``cg`` method is defined for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
         """
 
         self.oldH = self.hGlobal.getArray()
@@ -167,7 +196,7 @@ class nlSPL(object):
             snes.setMonitor(self._monitor)
 
         f = self.hGlobal.duplicate()
-        snes.setFunction(self.form_residual_ed, f)
+        snes.setFunction(self._form_residual_ed, f)
 
         # SNES solvers
         snes.setType('ngmres')
@@ -199,17 +228,15 @@ class nlSPL(object):
         return
     
     def _solveNL(self):
-        r"""
-        It calls the following *private functions*:
+        """
+        Solves the non-linear stream power law for the detachment limited case. This calls the following *private functions*:
 
-        - _evalFunction
-        - _evalJacobian
+        - _form_residual
+        - _form_jacobian
 
         .. note::
 
-            PETSc SNES and time stepping TS approaches are used to solve the nonlinear equation above over the considered time step.
-
-        :return: ndepo (updated deposition numpy arrays)
+            PETSc SNES approach is used to solve the nonlinear equation above over the considered time step. In this implementation of the SNES, we provide the Jacobian. A Nonlinear Generalized Minimum Residual method is used ``nrichardson``, a Generalized Minimum Residual method is used ``gmres`` for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
         """
 
         self.oldH = self.hGlobal.getArray()
@@ -240,15 +267,15 @@ class nlSPL(object):
 
         # Set a monitor to see residual values
         if self.verbose:
-            snes.setMonitor(self.monitor)
+            snes.setMonitor(self._monitor)
 
         f = self.hGlobal.duplicate()
-        snes.setFunction(self.form_residual, f)
+        snes.setFunction(self._form_residual, f)
 
         # Setting the Jacobian function
         J = self.dm.createMatrix()
         J.setOption(J.Option.NEW_NONZERO_LOCATIONS, True)
-        snes.setJacobian(self.form_jacobian, J)
+        snes.setJacobian(self._form_jacobian, J)
 
         # SNES solvers
         snes.setType('nrichardson')
@@ -289,6 +316,18 @@ class nlSPL(object):
         .. math::
 
           E = − \kappa P^d (PA)^m S^n
+
+        :math:`\kappa` is a dimensional coefficient describing the erodibility of the channel bed as a function of rock strength, bed roughness and climate, :math:`d`, :math:`m` and :math:`n` are dimensionless positive constants.
+
+        A similar approach is used to compute ice induced erosion where the ice flow accumulation is defined based on downstream nodes and is smoothed to better represent the erosion induced by glaciers. The ice-induced erosion uses the stream power law equation with a eordibility coefficient which is user defined. Under glacier terminus point, melted glacier flow is added to river flow accumulation likewise is the glacier-induced transported sediment flux.
+
+        Default formulation assumes :math:`d = 0`, :math:`m = 0.5` and :math:`n = 1`. The precipitation exponent :math:`d` allows for representation of climate-dependent chemical weathering of river bed across non-uniform rainfall.
+
+        .. important::
+
+            Here, the coefficient `n` can be fixed by the user to value different than 1.0 and the equation is also dependent on `m`, `d` and the erodibility :math:`\kappa`.
+
+        In addition, an alternative method to the purely detachment-limited approach consists in accounting for the role played by sediment in modulating erosion and deposition rates. It follows the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, whereby the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`\mathrm{\Omega}` and water discharge :math:`\mathrm{Q}=\bar{P}A`.
         """
 
         t0 = process_time()
@@ -324,10 +363,9 @@ class nlSPL(object):
 
     def erodepSPLnl(self):
         """
-        Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediment in modulating erosion and deposition rate.
+        Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediments in modulating erosion and deposition rate and considering **non-linear slope dependency**.
 
-        It calls the private function `_getEroDepRate` described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
-
+        It calls the private function `_getEroDepRateNL` described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
         """
 
         t0 = process_time()

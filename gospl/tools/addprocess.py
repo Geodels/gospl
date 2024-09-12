@@ -67,8 +67,6 @@ class GridProcess(object):
             self.oroEPS = np.finfo(float).eps
 
         if self.flexOn or self.oroOn:
-            # self.flex_ngbID, self.fmaxnb = stencil(self.lpoints)
-
             # Build regular grid for flexure or orographic precipitation calculation
             if MPIrank == 0 and self.flex_method != 'global':
                 self._buildRegGrid()
@@ -96,12 +94,12 @@ class GridProcess(object):
         """
         Builds the regular grid based on nodes coordinates and instantiates two interpolation objects.
 
-        The first one uses  `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_ to interpolate values from the unstructured mesh onto the regular grid based on an inverse weighting distance approach.
+        1. The first one uses  `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_ to interpolate values from the unstructured mesh onto the regular grid based on an inverse weighting distance approach.
 
-        The second performs a bilinear interpolation from the regular grid to unstructured 2D mesh.
+        2. The second performs a bilinear interpolation from the regular grid to unstructured 2D mesh.
 
         .. note::
-            Here that the KDTree is not kept in memory, instead we store the interpolation information, namely the indices of the neighbouring nodes, and the weights of each node in the neighborhood (based on the distance).
+            Here the KDTree is not kept in memory, instead we store the interpolation information, namely the indices of the neighbouring nodes, and the weights of each node in the neighborhood (based on the distance). This implies that the initial distribution of the mesh coordinates remains fixed over the simulation time window.
         """
 
         # Build regular grid for flexure and orographic precipitation calculation
@@ -336,7 +334,7 @@ class GridProcess(object):
 
     def cptOrography(self):
         """
-         Linear Theory of Orographic Precipitation following Smith & Barstad (2004).
+        Linear Theory of Orographic Precipitation following ` <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_.
 
         The model includes airflow dynamics, condensed water advection, and downslope evaporation. It consists of two vertically-integrated steady-state advection equations describing: (i) the cloud water density and (ii) the hydrometeor density. Solving these equations using Fourier transform techniques, derives a single formula relating terrain and precipitation.
 

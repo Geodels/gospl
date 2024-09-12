@@ -13,8 +13,6 @@ from vtk.util import numpy_support  # type: ignore
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdrcvrs
-    from gospl._fortran import jacobiancoeff
-    from gospl._fortran import fctcoeff
     from gospl._fortran import epsfill
 
 petsc4py.init(sys.argv)
@@ -28,29 +26,16 @@ class SEAMesh(object):
     This class encapsulates all the functions related to sediment transport and deposition in the marine environment for **river delivered sediments**.
 
     .. note::
-        All of these functions are run in parallel using the underlying PETSc library.
-
-    For an overview of solution to nonlinear ODE and PDE problems, one might found the online book from `Langtangen (2016) <http://hplgit.github.io/num-methods-for-PDEs/doc/pub/nonlin/pdf/nonlin-4print-A4-2up.pdf>`_ relevant.
+        For an overview of solution to nonlinear ODE and PDE problems, one might find the online book from `Langtangen (2016) <http://hplgit.github.io/num-methods-for-PDEs/doc/pub/nonlin/pdf/nonlin-4print-A4-2up.pdf>`_ relevant.
     """
 
     def __init__(self, *args, **kwargs):
         """
-        The initialisation of `SEAMesh` class consists in the declaration of several PETSc vectors.
+        Initialisation of the `SEAMesh` class.
         """
 
         self.coastDist = None
-
-        self.dlim = False
-        self.Dlimit = 5.
-        self.dexp = 0.05
-        self.minDiff = 1.e-4
-        self.mat = self.dm.createMatrix()
-        self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
-
         self.zMat = self._matrix_build_diag(np.zeros(self.lpoints))
-        self.dh = self.hGlobal.duplicate()
-        self.h = self.hGlobal.duplicate()
-        self.hl = self.hLocal.duplicate()
 
         return
 
@@ -88,7 +73,7 @@ class SEAMesh(object):
 
     def _distanceCoasts(self, data, k_neighbors=1):
         """
-        This function computes for every marine vertices the distance to the closest coastline. It calls the private functions:
+        This function computes for every marine vertices the distance to the closest coastline. It calls the private function:
 
         - _globalCoastsTree
 
@@ -96,7 +81,7 @@ class SEAMesh(object):
 
             The calculation takes advantage of the `vtkContourFilter` function from VTK library which is performed on the **global** VTK mesh. Once the coastlines have been extracted, the distances are obtained by querying a kd-tree (initialised with the coastal nodes) for marine vertices contained within each partition.
 
-        :arg data: local elevation numpy array
+        :arg data: local elevation Numpy Array
         :arg k_neighbors: number of nodes to use when querying the kd-tree
         """
 
@@ -137,7 +122,7 @@ class SEAMesh(object):
 
     def _matOcean(self):
         """
-        This function builds from neighbouring slopes the downstream directions in the marine environment. It calls a fortran subroutine that locally computes for each vertice:
+        This function builds from neighbouring slopes the downstream directions in the marine environment. It calls a Fortran subroutine that locally computes for each vertice:
 
         - the indices of receivers (downstream) nodes depending on the desired number of flow directions (SFD to MFD).
         - the distances to the receivers based on mesh resolution.
@@ -155,6 +140,7 @@ class SEAMesh(object):
         else:
             hsmth = hl.copy()
 
+        # The filled + eps is done on the global grid!
         fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
         fillz[self.locIDs] = hsmth
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
@@ -163,7 +149,7 @@ class SEAMesh(object):
             if not self.flatModel:
                 minh = min(minh, self.oFill)
             fillz = epsfill(minh, fillz)
-        # Send elevation + eps globally
+        # Send elevation + eps to other processors
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
         fillz = fillEPS[self.locIDs]
         if not self.flatModel:
@@ -212,196 +198,6 @@ class SEAMesh(object):
 
         return
 
-    def _evalFunction(self, ts, t, x, xdot, f):
-        """
-        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
-
-        Here we define the function for the nonlinear solve.
-        Evaluate the residual function on a DMPlex for an implicit time-stepping method.
-
-        Parameters:
-        -----------
-        ts : PETSc.TS: The time-stepper object.
-        t : float: The current time.
-        x : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
-        xdot : PETSc.Vec: The time derivative approximation (h^{n+1} - h^n) / dt.
-        f : PETSc.Vec: The residual vector to be filled.
-        """
-
-        self.dm.globalToLocal(x, self.hl)
-        with self.hl as hl, self.hLocal as zb, xdot as hdot:
-            dh = hl - zb
-            dh[dh < 0.1] = 0.0
-            if self.dlim:
-                Cd = self.minDiff + np.multiply(self.Cd, dh / (dh + self.Dlimit))
-            else:
-                Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
-            nlvec = fctcoeff(hl, Cd)
-            f.setArray(hdot + nlvec[self.glIDs])
-
-        return
-
-    def _evalJacobian(self, ts, t, x, xdot, a, A, B):
-        """
-        The nonlinear system at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on a Nonlinear Generalized Minimum Residual method (``NGMRES``) .
-
-        Here we define the Jacobian for the nonlinear solve.
-
-        Evaluate the Jacobian matrix J and the preconditioner matrix P on a DMPlex.
-
-        Parameters:
-        -----------
-        ts : PETSc.TS: The time-stepper object.
-        t : float: The current time.
-        x : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
-        xdot : PETSc.Vec: The time derivative approximation (h^{n+1} - h^n) / dt.
-        a : float:  The shift factor for implicit methods.
-        A : PETSc.Mat: The Jacobian matrix to be filled.
-        B : PETSc.Mat: The preconditioner matrix to be filled.
-
-        """
-
-        self.dm.globalToLocal(x, self.hl)
-
-        with self.hl as hl, self.hLocal as zb:
-            dh = hl - zb
-            dh[dh < 0.1] = 0.0
-            if self.dlim:
-                Cd = self.minDiff + np.multiply(self.Cd, dh / (dh + self.Dlimit))
-            else:
-                Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
-
-            # Coefficient derivatives
-            if self.dlim:
-                Cp = np.multiply(self.Cd, self.Dlimit / (dh + self.Dlimit)**2)
-            else:
-                Cp = np.multiply(self.Cd, self.dexp * np.exp(-self.dexp * dh))
-            nlC = jacobiancoeff(hl, Cd, Cp)
-
-            for row in range(self.lpoints):
-                B.setValuesLocal(row, row, a + nlC[row, 0])
-                cols = self.FVmesh_ngbID[row, :]
-                B.setValuesLocal(row, cols, nlC[row, 1:])
-            B.assemble()
-
-            if A != B:
-                A.assemble()
-
-        return True
-
-    def _evalSolution(self, t, x):
-
-        assert t == 0.0, "only for t=0.0"
-        x.setArray(self.h.getArray())
-
-        return
-
-    def _diffuseOcean(self, dh):
-        r"""
-        For sediment reaching the marine realm, this function computes the related marine deposition diffusion. The approach is based on a nonlinear diffusion.
-
-        .. math::
-          \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d(h) \nabla h \right)
-
-        It calls the following *private functions*:
-
-        - _evalFunction
-        - _evalJacobian
-
-        .. note::
-
-            PETSc SNES and time stepping TS approaches are used to solve the nonlinear equation above over the considered time step.
-
-
-        :arg dh: numpy array of incoming marine depositional thicknesses
-        """
-
-        t0 = process_time()
-
-        x = self.tmp1.duplicate()
-        f = self.tmp1.duplicate()
-
-        # Get diffusion coefficients based on sediment type
-        self.Cd = np.zeros(self.lpoints)
-        self.Cd[self.seaID] = self.nlK
-        self.hl.setArray(dh)
-        self.hl.axpy(1.0, self.hLocal)
-        self.dm.localToGlobal(self.hl, self.h)
-
-        # Time stepping definition
-        ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
-        # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
-        ts.setType("rosw")
-
-        ts.setIFunction(self._evalFunction, self.tmp1)
-        ts.setIJacobian(self._evalJacobian, self.mat)
-
-        ts.setTime(0.0)
-        ts.setTimeStep(self.dt / 1000.0)
-        ts.setMaxTime(self.dt)
-        ts.setMaxSteps(self.tsStep)
-        ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
-
-        # Allow an unlimited number of failures
-        ts.setMaxSNESFailures(-1)  # (step will be rejected and retried)
-
-        # SNES nonlinear solver
-        snes = ts.getSNES()
-        snes.setTolerances(max_it=10)   # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
-
-        # KSP linear solver
-        ksp = snes.getKSP()
-        ksp.setType("preonly")
-        pc = ksp.getPC()
-        pc.setType("gasm")
-
-        ts.setFromOptions()
-        tstart = ts.getTime()
-        self._evalSolution(tstart, x)
-
-        # Solve nonlinear equation
-        ts.solve(x)
-        # te = ts.getTime()
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Nonlinear diffusion solution (%0.02f seconds)" % (process_time() - t0),
-                flush=True,
-            )
-            print(
-                "steps %d (%d rejected, %d SNES fails), nonlinear its %d, linear its %d"
-                % (
-                    ts.getStepNumber(),
-                    ts.getStepRejections(),
-                    ts.getSNESFailures(),
-                    ts.getSNESIterations(),
-                    ts.getKSPIterations(),
-                ),
-                flush=True,
-            )
-
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
-        ts.destroy()
-
-        # Get diffused sediment thicknesses
-        x.copy(result=self.h)
-        self.dh.waxpy(-1.0, self.hGlobal, self.h)
-        self.dm.globalToLocal(self.dh, self.tmpL)
-        ndepo = self.tmpL.getArray().copy()
-        self.tmpL.setArray(ndepo)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-
-        x.destroy()
-        f.destroy()
-        if self.memclear:
-            del ndepo
-            gc.collect()
-        petsc4py.PETSc.garbage_cleanup()
-
-        return
-
     def _depMarineSystem(self, sedflux):
         r"""
         Setup matrix for the marine sediment deposition.
@@ -418,7 +214,7 @@ class SEAMesh(object):
 
             \mathrm{Q_{s_i}} = \mathrm{Q_{t_i}} - \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Delta t}{\Omega_i}}
 
-        And the evolution of marine elevation is based on incoming sediment flux resulting.
+        And the evolution of marine elevation is based on incoming sediment flux:
 
         .. math::
 
@@ -600,7 +396,6 @@ class SEAMesh(object):
         - _distanceCoasts
         - _matOcean
         - _diffuseOcean
-
         """
 
         t0 = process_time()
@@ -677,3 +472,4 @@ class SEAMesh(object):
             gc.collect()
 
         return
+
