@@ -116,7 +116,7 @@ Soil production, erosion, transport and deposition
         b. ``maxProd`` is the soil production maximum rate (m/yr),
         c. ``depthProd`` is the soil production decay depth (m),
         d. ``roughnessL`` is the roughness length scale,
-        e. ``decayDepth`` is the soil transport decay depth for non-linear diffusion,
+        e. ``decayDepth`` is the soil transport decay depth for non-linear diffusion where the coefficient of diffusion is set to the values of ``hillslopeKa`` and ``hillslopeKm``,
         f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional). 
 
         Then the user can specify the initial soil thickness if any by setting **either**:
