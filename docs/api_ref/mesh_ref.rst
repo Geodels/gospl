@@ -33,7 +33,6 @@ Class UnstMesh
       ~UnstMesh._set_DMPlex_boundary_points
       ~UnstMesh._updateRain
       ~UnstMesh._updateEroFactor
-      ~UnstMesh._xyz2lonlat
 
 Public functions
 ---------------------
@@ -55,4 +54,3 @@ Private functions
 .. automethod:: mesher.unstructuredmesh.UnstMesh._set_DMPlex_boundary_points
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateRain
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateEroFactor
-.. automethod:: mesher.unstructuredmesh.UnstMesh._xyz2lonlat

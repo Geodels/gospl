@@ -33,6 +33,7 @@ Class ReadYaml
       ~ReadYaml._readOrography
       ~ReadYaml._readOut
       ~ReadYaml._readRain
+      ~ReadYaml._readSoilInfo
       ~ReadYaml._readSPL
       ~ReadYaml._readSealevel
       ~ReadYaml._readTectonics
@@ -59,6 +60,7 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._readOrography
 .. automethod:: tools.inputparser.ReadYaml._readOut
 .. automethod:: tools.inputparser.ReadYaml._readRain
+.. automethod:: tools.inputparser.ReadYaml._readSoilInfo
 .. automethod:: tools.inputparser.ReadYaml._readSPL
 .. automethod:: tools.inputparser.ReadYaml._readSealevel
 .. automethod:: tools.inputparser.ReadYaml._readTectonics

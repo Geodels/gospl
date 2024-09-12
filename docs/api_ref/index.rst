@@ -111,7 +111,23 @@ API reference
             :click-parent:
 
             See functions and source code.
+    
+    .. grid-item-card::
+        :text-align: center
 
+        **Class Hillslope**
+        ^^^
+
+        Functions to evaluate linear and non-linear hillslope processes.
+
+        +++
+
+        .. button-ref:: hill_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+    
     .. grid-item-card::
         :text-align: center
 
@@ -203,6 +219,7 @@ API reference
     flow_ref
     sed_ref
     sea_ref
+    hill_ref
     plate_ref
     stra_ref
     in_ref
