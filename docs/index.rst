@@ -134,6 +134,18 @@ BibTeX::
         DOI={10.21105/joss.02804}
     }
 
+Research using goSPL
+-------------------------
+
+Salles et al. (2023) **Hundred million years of landscape dynamics from catchment to global scale**, Science, 379:6635, `doi: 10.1126/science.add2541 <https://www.science.org/doi/full/10.1126/science.add2541>`_.
+
+
+Salles et al. (2023) **Landscape dynamics and the Phanerozoic diversification of the biosphere**, Nature, 624:115-121, `doi: 10.1038/s41586-023-06777-z <https://doi.org/10.1038/s41586-023-06777-z>`_.
+
+
+Salles et al. (2024) **Physiography, foraging mobility, and the first peopling of Sahul**, Nature Communications, 15:3430, `doi: 10.1038/s41467-024-47662-1 <https://doi.org/10.1038/s41467-024-47662-1>`_.
+
+
 Contributing to goSPL
 --------------------------
 
