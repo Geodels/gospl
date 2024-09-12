@@ -1,17 +1,17 @@
 [
     {
-        "name": "stable",
-        "version":"v2024.09.01",
-        "preferred": true,
-        "url": "https://gospl.readthedocs.io/en/stable/"
-    },
-    {
         "name": "development",
         "version":"dev",
         "url": "https://gospl.readthedocs.io/en/dev/"
     },
     {
-        "name": "v2024.09.01",
+        "name": "24.9.1 (stable)",
+        "version":"v2024.09.01",
+        "preferred": true,
+        "url": "https://gospl.readthedocs.io/en/stable/"
+    },
+    {
+        "name": "24.9.1",
         "version":"v2024.09.01",
         "url": "https://gospl.readthedocs.io/en/v2024.09.01/"
     }
