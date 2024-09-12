@@ -39,7 +39,7 @@ class SPL(object):
         self.stepED = self.hGlobal.duplicate()
         self.EbLocal = self.hLocal.duplicate()
         self.newH = self.hGlobal.duplicate()
-        self.EbLocal.set(0.0)
+        self.EbLocal.set(0.)
 
         return
 

@@ -20,14 +20,16 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class soilSPL(object):
     """
-    The class computes river incision expressed using a **stream power formulation** function of river discharge and slope.
+    The class computes river incision expressed using a **stream power formulation** function of river discharge and slope also **accounting for soil production**.
 
-    If the user has turned-on the sedimentation capability, this class solves implicitly the **stream power formulation** accounting for a sediment transport/deposition term (`Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_).
+    A non-linear diffusion of soil based on soil thickness is also implemented in this class.
+
+    If the user has turned-on the sedimentation capability, this class will solve implicitly the **stream power formulation** accounting for a sediment transport/deposition term (`Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_).
     """
 
     def __init__(self, *args, **kwargs):
         """
-        The initialisation of `soilSPL` class consists in the declaration of PETSc vectors and matrices.
+        Initialisation of `soilSPL` class.
         """
 
         self.soil_rtol = 1.0e-6
@@ -64,7 +66,16 @@ class soilSPL(object):
 
         return
 
-    def form_residual_soil(self, snes, h, F):
+    def _form_residual_soil(self, snes, h, F):
+        """
+        The nonlinear system (SNES) at each time step is solved iteratively by assessing the residual of the SPL equation accounting for erosion, deposition (transport-limited) and soil production.
+
+        Parameters:
+        -----------
+        snes : PETSc.SNES: The snes object.
+        h : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
+        F : PETSc.Vec: The residual vector to be filled.
+        """
 
         # Current state
         self.dm.globalToLocal(h, self.hl)
@@ -101,19 +112,22 @@ class soilSPL(object):
         return
 
     def _monitorsoil(self, snes, its, norm):
+        """
+        Non-linear SPL with soil production solver convergence evaluation.
+        """
 
         if MPIrank == 0 and its % 5 == 0:
             print(f"  ---  Non-linear soil SPL solver iteration {its}, Residual norm: {norm}", flush=True)
 
     def _solveSoil(self):
-        r"""
-        It calls the following *private functions*:
+        """
+        Solves the non-linear stream power law for the transport limited and soil case. This calls the following *private function*:
 
-        - form_residual_soil
+        - _form_residual_soil
 
         .. note::
 
-            PETSc SNES approach is used to solve the nonlinear equation above over the considered time step.
+            PETSc SNES approach is used to solve the nonlinear equation. In this implementation of the SNES, we do not form the Jacobian and PETSc calculates it based on the residual function. A Nonlinear Generalized Minimum Residual method is used ``ngmres``, a Preconditioned Conjugate Gradient ``cg`` method is defined for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
         """
 
         self.oldH = self.hGlobal.getArray()
@@ -161,7 +175,7 @@ class soilSPL(object):
             snes.setMonitor(self._monitorsoil)
 
         f = self.hGlobal.duplicate()
-        snes.setFunction(self.form_residual_soil, f)
+        snes.setFunction(self._form_residual_soil, f)
 
         # SNES solvers
         snes.setType('ngmres')
@@ -202,14 +216,14 @@ class soilSPL(object):
         return
     
     def _getEroDepRateSoil(self):
-        r"""
-        This function computes erosion deposition rates in metres per year. This is done on the filled elevation. We use the filled-limited elevation to ensure that erosion/deposition is not going to be underestimated by small depressions which are likely to be filled (either by sediments or water) during a single time step.
+        """
+        This function computes erosion deposition rates in metres per year and associated soil evolution. This is done on the filled elevation. 
 
-        The simplest law to simulate fluvial incision is based on the detachment-limited stream power law, in which erosion rate  depends on drainage area :math:`A`, net precipitation :math:`P` and local slope :math:`S` and takes the form:
+        The approach is based on **BasicHySa** governing equations from Terrainbento (as described in Appendix B20 from `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_).
 
-        .. math::
+        .. note::
 
-          E = − \kappa P^d (PA)^m S^n
+           The approach uses a continuous layer of soil–alluvium, which influences both hillslope and river-induced erosion. It relies on the SPACE algorithm of `Shobe et al. (2017) <https://gmd.copernicus.org/articles/10/4577/2017/>`_.
         """
 
         t0 = process_time()
@@ -241,6 +255,9 @@ class soilSPL(object):
         return
 
     def updateSoilThickness(self):
+        """
+        Updates soil thickness through time.
+        """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
         nHsoil = self.Lsoil.getArray() + self.tmpL.getArray()
@@ -256,10 +273,9 @@ class soilSPL(object):
 
     def erodepSPLsoil(self):
         """
-        Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediment in modulating erosion and deposition rate.
+        Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediments in modulating erosion and deposition rate, considering **non-linear slope dependency** and accounting for soil production.
 
-        It calls the private function `_getEroDepRate` described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses for the considered time step and update local elevation and cumulative erosion, deposition values.
-
+        It calls the private function `_getEroDepRateSoil` described above. Once erosion/deposition rates have been calculated, the function computes local thicknesses and soil evolution for the considered time step and update local elevation and cumulative erosion, deposition values.
         """
 
         t0 = process_time()
@@ -307,6 +323,10 @@ class soilSPL(object):
 
     def _evalFunctionSoil(self, ts, t, x, xdot, f):
         """
+        The non-linear system for soil diffusion is solved iteratively using PETSc time stepping and SNES solution and is based on Rosenbrock W-scheme (``rosw``).
+
+        Here again, we evaluate the residual function on a DMPlex for an implicit time-stepping method.
+
         Parameters:
         -----------
         ts : PETSc.TS: The time-stepper object.
@@ -328,6 +348,10 @@ class soilSPL(object):
 
     def _evalJacobianSoil(self, ts, t, x, xdot, a, A, B):
         """
+        The non-linear system for soil diffusion is solved iteratively using PETSc time stepping and SNES solution and is based on Rosenbrock W-scheme (``rosw``).
+
+        Here, we define the Jacobian matrix A and the preconditioner matrix B on a DMPlex.
+
         Parameters:
         -----------
         ts : PETSc.TS: The time-stepper object.
@@ -337,7 +361,6 @@ class soilSPL(object):
         a : float:  The shift factor for implicit methods.
         A : PETSc.Mat: The Jacobian matrix to be filled.
         B : PETSc.Mat: The preconditioner matrix to be filled.
-
         """
 
         self.dm.globalToLocal(x, self.hl)
@@ -363,6 +386,9 @@ class soilSPL(object):
         return True
 
     def _evalSolutionSoil(self, t, x):
+        """
+        Evaluate the initial solution of the SNES system.
+        """
 
         assert t == 0.0, "only for t=0.0"
         x.setArray(self.h.getArray())
@@ -371,7 +397,20 @@ class soilSPL(object):
 
     def diffuseSoil(self):
         r"""
-        deed
+        For river-transported sediments reaching the marine realm, this function computes the related marine deposition diffusion. It is based on a non-linear diffusion approach.
+
+        .. math::
+          \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d (1.0 - exp^{h_s/H_0} \nabla h \right)
+
+        It calls the following *private functions*:
+
+        - _evalFunctionSoil
+        - _evalJacobianSoil
+        - _evalSolutionSoil
+
+        .. note::
+
+            PETSc SNES and time stepping TS approaches are used to solve the non-linear equation above over the considered time step.
         """
 
         t0 = process_time()

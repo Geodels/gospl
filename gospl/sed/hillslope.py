@@ -326,7 +326,7 @@ class hillSLP(object):
         """
         The non-linear system for freshly-deposited marine sediments diffusion at each time step is solved iteratively using PETSc time stepping and SNES solution and is based on Rosenbrock W-scheme (``rosw``).
 
-        Here, we define the Jacobian matrix J and the preconditioner matrix P on a DMPlex.
+        Here, we define the Jacobian matrix A and the preconditioner matrix B on a DMPlex.
 
         Parameters:
         -----------
@@ -393,7 +393,6 @@ class hillSLP(object):
         .. note::
 
             PETSc SNES and time stepping TS approaches are used to solve the non-linear equation above over the considered time step.
-
 
         :arg dh: Numpy Array of incoming marine depositional thicknesses
         """
