@@ -153,7 +153,7 @@ Contributions of any kind to goSPL are more than welcome. That does not mean new
 
 All contributions should go through our GitHub repository. Bug reports, ideas or even questions should be raised by opening an issue on the GitHub tracker. Suggestions for changes in code or documentation should be submitted as a pull request. However, if you are not sure what to do, feel free to open an issue. All discussion will then take place on GitHub to keep the development of goSPL transparent.
 
-If you decide to contribute to the codebase, ensure that you are using an up-to-date ``master`` branch. The latest development version will always be there, including the documentation (powered by ``sphinx``).
+If you decide to contribute to the codebase, ensure that you are using an up-to-date ``master`` branch. The latest stable version will always be there, including the documentation (powered by ``sphinx``).
 
 Details are available in the :doc:`contributing guide <contributing>`.
 

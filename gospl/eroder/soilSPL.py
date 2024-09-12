@@ -36,14 +36,6 @@ class soilSPL(object):
         self.soil_atol = 1.e-6
         self.soil_maxit = 500
 
-        # self.cptSoil = True
-        # self.Ksoil = 2 * self.K # erodibility coefficient for soil
-        # self.P0 = 50. * 1.e-6 # soil production maximum rate (50 m/Myr)
-        # self.Hs = 0.5 # soil production decay depth
-        # self.h_star = 1.0 # roughness length_scale
-        # self.H0 = 0.7 # soil transport decay depth for diffusion
-        # self.Sperc = 0.0001 # soil / bedrock transition limit ratio factor of production
-
         if self.Sperc > 0:
             self.soil_transition = -np.log(self.Sperc) * self.Hs
         else:
