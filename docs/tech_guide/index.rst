@@ -20,10 +20,10 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
 
         The code is primarily a **parallel global scale landscape evolution model**, built to simulate **topography and basins** dynamics. The following processes are considered:
 
-        - **river incision** and **deposition** using stream power law,
-        - continental **deposition** in depressions,
-        - **marine deposition** at river mouth,
-        - **hillslope processes** in both marine and inland areas,
+        - **river incision** and **deposition** using stream power law (**detachment** & **transport-limited** formulation),
+        - continental **deposition** including **soil/alluvium** production and tracking,
+        - **marine deposition** at river mouth based on non-linear diffusion,
+        - **hillslope processes** (linear/nonlinear) in both marine and inland areas,
         - **sediment compaction** as stratigraphic layers geometry and properties change, 
         - spatially and temporally varying **tectonics** (horizontal and vertical displacements).
         - spatially and temporally varying **precipitation** grids as well as **orographic** rain and sea-level fluctuations, 

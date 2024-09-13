@@ -7,7 +7,7 @@ ruamel.yaml>=0.16.12
 sphinx_rtd_theme>=0.5.0
 sphinxcontrib-napoleon>=0.7
 sphinxemoji>=0.1.6
-pydata-sphinx-theme>=0.15.2
+pydata-sphinx-theme>=0.15.3
 ipython>=7.18.1
 nbsphinx>=0.7.1
 sphinxcontrib.bibtex

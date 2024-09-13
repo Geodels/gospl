@@ -119,3 +119,13 @@ In goSPL, this matrix is built in parallel using compressed sparse row matrix fu
 Once the matrix has been constructed, `PETSc <https://www.mcs.anl.gov/petsc/>`_ library is used to solve matrices and vectors across the decomposed domain. The performance of the **IDA** algorithm is strongly dependent on the choice of solver and preconditioner. In goSPL, the solution for **q** is obtained using the *Richardson solver* with block Jacobi preconditioning (*bjacobi*). This choice was made based on convergence results but can be changed if better solver and preconditioner combinations are found.
 
 Iterative methods allow for an initial guess to be provided. When this initial guess is close to the solution, the number of iterations required for convergence dramatically decreases. This option is used in goSPL by allocation the river discharge solution from previous time step as an initial guess. It allows to decrease the number of iterations of the IDA solver as discharge often exhibits small change between successive time intervals.
+
+.. important::
+
+  The approach presented here is run iteratively during a single time step based on identified depressions until all water *either flows to the ocean or is block within a pit* (*e.g.*, a lake). 
+  
+  Water is able to spill-over a depression based on depression's volume and the incoming upstream water volume. **It is worth mentioning that no infiltration or evaporation is considered in goSPL**. 
+  
+.. note::
+
+  The flow routing approach and corresponding flow CSR matrix (**W**) is also used in the sediment routing algorithm.

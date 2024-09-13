@@ -1,7 +1,7 @@
 .. _ero:
 
 ==============================
-Erosion rate and sediment flux
+Erosion and sediment flux
 ==============================
 
 
@@ -10,8 +10,11 @@ Stream power law
 
 River incision, associated sediment transport and subsequent deposition are critical elements of landscape evolution models.
 
-In goSPL, a detachment-limited approach is implemented. The detachment-limited hypothesis supposes that erosion is not limited by a transport capacity but instead by the ability of rivers to remove material from the bed.
-The sediment erosion rate is expressed using a **stream power** formulation function of river discharge, precipitation and slope (`Howard et al., 1994 <https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/94JB00744%4010.1002/%28ISSN%292169-9356.TECTOP1>`_).
+In goSPL, both **detachment** and **transport-limited** approaches are implemented. 
+
+The detachment-limited hypothesis supposes that erosion is not limited by a transport capacity but instead by the ability of rivers to remove material from the bed. In the transport-limited case, the concentration of sediment in the flow hinders the erosive ability of the flow.
+
+In both cases, the sediment erosion rate is expressed using a **stream power** formulation function of river discharge, precipitation, slope and upstream sediment flux (`Howard et al., 1994 <https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/94JB00744%4010.1002/%28ISSN%292169-9356.TECTOP1>`_).
 
 
 .. note::
@@ -22,16 +25,24 @@ The sediment erosion rate is expressed using a **stream power** formulation func
   2. enhanced erosion rates exposes fresh rocks at the surface therefore contributing to increased weathering.
 
 
-The volumetric entrainment flux of sediment per unit bed area :math:`\mathrm{E}` is of the following form:
+
+Detachment-limited
+^^^^^^^^^^^^^^^^^^^^
+
+Here we illustrate the approach implemented in goSPL based on the detachment-limited case with linear dependency on slope.
+
+In this case, the volumetric entrainment flux of sediment per unit bed area :math:`\mathrm{E}` is of the following form:
 
 .. math::
 
   \mathrm{E} =  \mathrm{\kappa P^d Q^m S^n}
 
 
-where :math:`\mathrm{\kappa}` is the precipitation-independent sediment erodibility parameter, :math:`\mathrm{P}` the annual precipitation rate, :math:`\mathrm{d}` is a positive exponent, :math:`\mathrm{Q}=\bar{P}A` is the water discharge (computed in the :ref:`River Discharge <flow>` section with :math:`\mathrm{A}` the flow accumulation) and :math:`\mathrm{S}` is the river local slope. :math:`\mathrm{m}` and :math:`\mathrm{n}` are scaling exponents.  In goSPL, :math:`\mathrm{\kappa}` is user defined and the coefficients :math:`\mathrm{m}` and :math:`\mathrm{n}` are set to 0.5 and 1 respectively.  :math:`\mathrm{E}` is in :math:`\mathrm{m/y}` and therefore the erodibility dimension is :math:`\mathrm{m\,y^{-0.5}}`.
+where :math:`\mathrm{\kappa}` is the precipitation-independent sediment erodibility parameter, :math:`\mathrm{P}` the annual precipitation rate, :math:`\mathrm{d}` is a positive exponent, :math:`\mathrm{Q}=\bar{P}A` is the water discharge (computed in the :ref:`River Discharge <flow>` section with :math:`\mathrm{A}` the flow accumulation) and :math:`\mathrm{S}` is the river local slope. :math:`\mathrm{m}` and :math:`\mathrm{n}` are scaling exponents.  
 
-The elevation (:math:`\mathrm{\eta_i}`) will change due to local river erosion rate and is defined implicitly by:
+In goSPL, :math:`\mathrm{\kappa}` is user defined and the coefficients :math:`\mathrm{m}` and :math:`\mathrm{n}` are set by default to 0.5 and 1 respectively (but could also be tuned).
+
+In the detachment-limited case with default values of :math:`\mathrm{m}` and :math:`\mathrm{n}`, the elevation (:math:`\mathrm{\eta_i}`) will change due to local river erosion rate and is defined implicitly by:
 
 .. math::
 
@@ -47,7 +58,7 @@ with the coefficient :math:`\mathrm{K_{f,i|rcv} = \kappa P^d_i \sqrt{Q_i} \Delta
 
 
 Matrix formalism
-------------------------------------
+^^^^^^^^^^^^^^^^^^^^
 
 In matrix form the system defined above  is equivalent to:
 
@@ -118,13 +129,74 @@ with
 
 The above system is **implicit** and the matrix is **sparse**. The `SciPy <https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csr_matrix.html>`_ compressed sparse row matrix functionality is used here again to build  :math:`\mathrm{\boldsymbol\Gamma}` on each local domain. The SciPy matrix format (*e.g.* csr_matrix) is efficiently loaded as a `PETSc <https://www.mcs.anl.gov/petsc/>`_ Python matrix and the system is then solved using *Richardson solver* with block Jacobi preconditioning (*bjacobi*) using an initial guess for the solution set to vertices elevation.
 
-
 .. figure:: ../images/ero.png
    :scale: 50 %
    :align: center
 
    Flow accumulation patterns and associated erosion based on a radially symmetric surface defined with a central, high region and a series of distal low-lying valleys. Resulting topography after 100,000 years of evolution under uniform precipitation for the multiple flow direction algorithms. Patterns of flow accumulation after 20,000 and 50,000 years are presented as well as estimated landscape erosion at the end of the simulation time.
 
+Transport-limited 
+^^^^^^^^^^^^^^^^^^^^
+
+An alternative method to the detachment-limited approach proposed above consists in accounting for the role played by sediment in modulating erosion and deposition rates. It follows the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, whereby the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`\mathrm{\Omega}` and water discharge :math:`\mathrm{Q}=\bar{P}A`. 
+
+The approach considers the local balance between erosion and deposition and is based on sediment flux resulting from net upstream erosion.  Here we illustrate the corresponding system of equation assuming a linear dependency on slope (:math:`\mathrm{m}` and :math:`\mathrm{n}` are set by default to 0.5 and 1 respectively).
+
+.. math::
+
+	\mathrm{\frac{\eta_i^{t+\Delta t}-\eta_i^t}{\Delta t}} =  \mathrm{-\kappa P^d_i \sqrt{Q_i} \frac{\eta_i^{t+\Delta t} - \eta_{rcv}^{t+\Delta t}}{\lambda_{i,rcv}}} + \mathrm{G' Q_{s_i} / \Omega_i}
+
+where :math:`\mathrm{\lambda_{i,rcv}}` is the length of the edges connecting the considered vertex to its receiver and :math:`\mathrm{\Omega_i}` is the area (voronoi) of the node :math:`i`. 
+
+:math:`\mathrm{Q_{s_i}}` is the upstream incoming sediment flux in m3/yr and :math:`\mathrm{G'}` is equal to :math:`\mathrm{G \Omega_i / \bar{P}A}`.
+
+The upstream incoming sediment flux is obtained from the total sediment flux :math:`\mathrm{Q_{t_i}}` where:
+
+.. math::
+
+	\mathrm{Q_{t_i}^{t+\Delta t} - \sum_{ups} w_{i,j} Q_{t_u}^{t+\Delta t}}= \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Omega_i}{\Delta t}}
+
+which gives:
+
+.. math::
+
+	\mathrm{Q_{s_i}} = \mathrm{Q_{t_i}} - \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Omega_i}{\Delta t}}
+
+This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables. 
+
+The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used to solve the coupled system with sub KSPs set to ``preonly`` and preconditioner set to ``hypre``. (See PETSC documentation for more details about the solver and preconditoner options and settings).  Barnhart
+
+
+Dynamic soil 
+^^^^^^^^^^^^^
+
+goSPL could also simulate **dynamic soil production and transport**. In this case, the implementation tracks a layer of regolith (defined as unconsolidated and potentially mobile sediment, such as soil or alluvium) in combination with sediment entrainment–deposition erosion law. 
+
+.. note::
+  
+  In this case, the **SPACE** model of `Shobe et al. (2017) <https://gmd.copernicus.org/articles/10/4577/2017/>`_ is used in place of entrainment–deposition law. As described in the **BasicHySa** governing equations from Terrainbento (Appendix B20 from `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_).
+
+
+Following `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_), the governing equations can be summarized as:
+
+
+.. math::
+
+	\mathrm{\eta} = \mathrm{H + \eta_b} 
+
+	\mathrm{\frac{\partial H}{ \partial t}} = \mathrm{P_0 e^{- H/H_s} - \kappa_s Q^m S^n (1-e^{-H/H_\star}) - \nabla \cdot {q_{h}} + G' Q_{s_i} / \Omega_i} 
+
+	\mathrm{\frac{\partial \eta_b}{ \partial t}} = -\mathrm{P_0 e^{- H/H_s} - \kappa_b Q^m S^n e^{-H/H_\star}}
+
+with :math:`H` the soil thickness and :math:`\eta_b` the bedrock elevation. :math:`\mathrm{P_0}` is the soil production maximum rate, :math:`\mathrm{H_s}` the soil production decay depth, and :math:`\mathrm{H_\star}` the roughness length scale. In addition we differentiate erodibility coefficients :math:`\kappa_b` and :math:`\kappa_s` for bedrock and soil respectively.
+
+The top soil layer is subject to diffusion :math:`\mathrm{q_{h}}` and follows:
+
+.. math::
+
+	\mathrm{q_{h}} = \mathrm{-D \left(1 -  e^{-H/H_0} \right) \nabla \cdot {\eta}}
+
+with :math:`\mathrm{H_0}` the soil transport decay depth for non-linear diffusion and :math:`\mathrm{D}` the coefficient of diffusion.
 
 
 Sediment entrainment
@@ -189,33 +261,3 @@ where :math:`\mathrm{e_{i} = E_{i} \Omega_i}` and :math:`\mathrm{N_d}` is the nu
 
 It is worth noting that in this system, the matrix **W** is the same as the one proposed for the :ref:`River Discharge <flow>` and therefore does not have to be built.  As for the previous system, this one is solved using the `PETSc <https://www.mcs.anl.gov/petsc/>`_ solver previously defined to find the :math:`\mathrm{q_{s,i}}` values implicitly.
 
-SPL with sediment deposition
---------------------------------
-
-An alternative method to the detachment-limited approach proposed above consists in accounting for the role played by sediment in modulating erosion and deposition rates. It follows the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_, whereby the deposition flux depends on a deposition coefficient :math:`G` and is proportional to the ratio between cell area :math:`\mathrm{\Omega}` and water discharge :math:`\mathrm{Q}=\bar{P}A`. 
-
-The approach considers the local balance between erosion and deposition and is based on sediment flux resulting from net upstream erosion. 
-
-.. math::
-
-	\mathrm{\frac{\eta_i^{t+\Delta t}-\eta_i^t}{\Delta t}} =  \mathrm{-\kappa P^d_i \sqrt{Q_i} \frac{\eta_i^{t+\Delta t} - \eta_{rcv}^{t+\Delta t}}{\lambda_{i,rcv}}} + \mathrm{G' Q_{s_i} / \Omega_i}
-
-where :math:`\mathrm{\lambda_{i,rcv}}` is the length of the edges connecting the considered vertex to its receiver and :math:`\mathrm{\Omega_i}` is the area (voronoi) of the node :math:`i`. 
-
-:math:`\mathrm{Q_{s_i}}` is the upstream incoming sediment flux in m3/yr and :math:`\mathrm{G'}` is equal to :math:`\mathrm{G \Omega_i / \bar{P}A}`.
-
-The upstream incoming sediment flux is obtained from the total sediment flux :math:`\mathrm{Q_{t_i}}` where:
-
-.. math::
-
-	\mathrm{Q_{t_i}^{t+\Delta t} - \sum_{ups} w_{i,j} Q_{t_u}^{t+\Delta t}}= \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Omega_i}{\Delta t}}
-
-which gives:
-
-.. math::
-
-	\mathrm{Q_{s_i}} = \mathrm{Q_{t_i}} - \mathrm{(\eta_i^{t} - \eta_i^{t+\Delta t}) \frac{\Omega_i}{\Delta t}}
-
-This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables. 
-
-The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used to solve the coupled system with sub KSPs set to ``preonly`` and preconditioner set to ``hypre``. (See PETSC documentation for more details about the solver and preconditoner options and settings).  
