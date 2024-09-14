@@ -164,7 +164,7 @@ which gives:
 
 This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables. 
 
-The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used to solve the coupled system with sub KSPs set to ``preonly`` and preconditioner set to ``hypre``. (See PETSC documentation for more details about the solver and preconditoner options and settings).  Barnhart
+The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used to solve the coupled system with sub KSPs set to ``preonly`` and preconditioner set to ``hypre``. (See PETSC documentation for more details about the solver and preconditoner options and settings).  
 
 
 Dynamic soil 
