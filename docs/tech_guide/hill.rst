@@ -7,6 +7,9 @@ Hillslope and marine deposition
 Hillslope: soil creep
 -----------------------
 
+Linear creep law
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Hillslope processes are known to strongly influence catchment morphology and drainage density and several formulations of hillslope transport laws have been proposed. Most of these formulations are based on a mass conservation equation and assume that a layer of soil available for transport is always present (*i.e.* precluding  case of bare exposed bedrock) and that dissolution and mass transport in solution can be neglected.
 
 Under such assumptions, the mass conservation equation widely applied in landscape modelling is of the form:
@@ -45,6 +48,42 @@ where :math:`\mathrm{\mathbf Q}` is sparse. The matrix terms  only depend on the
 
 In goSPL, these parameters remain fixed  during a model run and therefore :math:`\mathrm{\mathbf Q}` needs to be created only once at initialisation. At each iteration, hillslope induced changes in elevation :math:`\mathrm{\boldsymbol \eta}` are then obtained in a similar way as for the solution of the other systems using `PETSc <https://www.mcs.anl.gov/petsc/>`_ *Richardson solver* and *block Jacobi* preconditioning.
 
+
+Non-linear creep laws
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A more complex version of the creep law involves a non-linear relationship between soil flux and topographic gradient. Several nonlinear creep-transport laws have been suggested in the literature. 
+
+.. math::
+
+  \frac{\partial \eta}{\partial t}= -\nabla \cdot \left( D(\eta) \nabla \eta \right)
+
+
+and in goSPL, the user might choose between two approaches. 
+
+
+The first one follows is derived by Ganti et al. (2012) for the Andrews-Bucknam (see `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_). Where the non-linear formulation captures accelerated creep and shallow landsliding as the gradient approaches an effective angle of repose for loose granular material. It uses a truncated Taylor series formulation for soil flux and takes the following form:
+
+.. math::
+
+  \mathrm{q_h} = \mathrm{-D S \left[  1 + \left(\frac{S}{S_c}\right)^2 + \left(\frac{S}{S_c}\right)^4 + ... + + \left(\frac{S}{S_c}\right)^{2(N-1)}  \right] }
+
+where :math:`\mathrm{S = −\nabla \eta}` is topographic gradient (positive downhill), :math:`\mathrm{D}` is the transport efficiency factor, and :math:`\mathrm{S_c}` is a critical gradient. The user specifies the number of terms :math:`\mathrm{N}` to be used in the approximation. The nonlinear flux rule results in convex-up topography for shallow slopes and transitions to linear hillslopes for steeper slopes (see `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_).
+
+
+The second approach uses a non-critical hillslope model following the work of `Wang et al. (2024) <https://www.sciencedirect.com/science/article/pii/S0169555X24001053>`_. This hillslope model is compatible with the existing linear and non-linear hillslope models and is capable of emulating topographic evolution under arbitrary hillslope gradients. It takes the following form:
+
+.. math::
+
+  \mathrm{q_h} = \mathrm{-D S^n}
+
+:math:`\mathrm{n}` is a positive constant of the hillslope gradient exponent. When :math:`\mathrm{n=1}`, the equation simplifies to a linear hillslope model; when :math:`\mathrm{n>1}`, it becomes a non-linear hillslope model. 
+
+.. note::
+  
+  Since they share a common mathematical form, this last formulation can vary smoothly between linear and non-linear behaviors. Depending on the specific transport mechanisms involved, n is suggested to vary approximately between 1. and 3. (`Wang et al. (2024) <https://www.sciencedirect.com/science/article/pii/S0169555X24001053>`_).
+
+
 Marine deposition
 --------------------
 
@@ -54,7 +93,6 @@ In the marine realm, sediment transport is modelled through nonlinear diffusion 
 .. math::
 
   \mathrm{\frac{\partial \eta}{\partial t}} = \mathrm{\nabla \cdot \left( K_m(\eta) \nabla \eta \right)} + Q_{sr}
-  
 
 where :math:`\mathrm{K_m}` is the marine sediment transport coefficient (m2/yr), and :math:`\mathrm{Q_{sr}}` is the sediment flux coming at the river mouth. As the model progresses over time so does the shoreline position due to both offshore sedimentation and prescribed eustatic sea-level variations.
 
