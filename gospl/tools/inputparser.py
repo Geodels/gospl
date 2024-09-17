@@ -1491,23 +1491,86 @@ class ReadYaml(object):
                     "Field name gauss is not defined correctly or does not exist!"
                 )
             try:
-                self.elaH = iceDict["hela"]
+                elaH = iceDict["hela"]
             except KeyError:
-                self.elaH = 1800.0
+                elaH = 1800.0
             try:
-                self.iceH = iceDict["hice"]
+                iceH = iceDict["hice"]
             except KeyError:
-                self.iceH = 2100.0
+                iceH = 2100.0
+            try:
+                icefile = iceDict["evol"]
+            except KeyError:
+                icefile = None
             try:
                 self.scaleIce = iceDict["fice"]
             except KeyError:
-                self.scaleIce = 1.0
+                self.scaleIce = 0.5
             try:
                 self.Kice = iceDict["Ki"]
             except KeyError:
                 self.Kice = 0.0
+            try:
+                self.ice_m = iceDict["m"]
+            except KeyError:
+                self.ice_m = 0.5
         except KeyError:
             self.iceOn = False
+            icefile = None
+
+        if icefile is not None:
+            try:
+                with open(icefile) as fice:
+                    fice.close()
+                    try:
+                        icedata = pd.read_csv(
+                            icefile,
+                            sep=r",",
+                            engine="c",
+                            header=None,
+                            na_filter=False,
+                            dtype=np.float64,
+                            low_memory=False,
+                        )
+
+                    except ValueError:
+                        try:
+                            icedata = pd.read_csv(
+                                icefile,
+                                sep=r"\s+",
+                                engine="c",
+                                header=None,
+                                na_filter=False,
+                                dtype=np.float64,
+                                low_memory=False,
+                            )
+
+                        except ValueError:
+                            print(
+                                "The ice evolution file is not well formed: it should be comma or tab separated",
+                                flush=True,
+                            )
+                            raise ValueError("Wrong formating of ice evolution file.")
+            except IOError:
+                print("Unable to open file: ", icefile)
+                raise IOError("The ice evolution file is not found...")
+
+            if icedata[0].min() > self.tStart:
+                tmpS = []
+                tmpS.insert(0, {0: self.tStart, 1: icedata[1].iloc[0], 2: icedata[2].iloc[0]})
+                icedata = pd.concat([pd.DataFrame(tmpS), icedata], ignore_index=True)
+            if icedata[0].max() < self.tEnd:
+                tmpE = []
+                tmpE.insert(0, {0: self.tEnd, 1: icedata[1].iloc[-1], 2: icedata[2].iloc[-1]})
+                icedata = pd.concat([icedata, pd.DataFrame(tmpE)], ignore_index=True)
+            self.elaH = interp1d(icedata[0], icedata[1], kind="linear")
+            self.iceH = interp1d(icedata[0], icedata[2], kind="linear")
+        elif self.iceOn:
+            year = np.linspace(self.tStart, self.tEnd + self.dt, num=11, endpoint=True)
+            iceval = np.full(len(year), elaH)
+            self.elaH = interp1d(year, iceval, kind="linear")
+            iceval = np.full(len(year), iceH)
+            self.iceH = interp1d(year, iceval, kind="linear")
 
         return
 

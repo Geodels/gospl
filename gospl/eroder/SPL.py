@@ -63,10 +63,10 @@ class SPL(object):
         Kbr *= self.dt * (PA ** self.spl_m)
         Kbr[self.seaID] = 0.0
 
+        # In case glacial erosion is accounted for
         if self.iceOn:
             GA = self.iceFAL.getArray()
-            GA[~self.iceIDs] = 0.
-            Kbi = self.dt * self.Kice * GA
+            Kbi = self.dt * self.Kice * (GA ** self.ice_m)
             PA += GA
 
         # Initialise matrices...
@@ -110,7 +110,7 @@ class SPL(object):
                 data = np.divide(
                     Kbi * limiter,
                     self.distRcvi[:, k],
-                    out=np.zeros_like(PA),
+                    out=np.zeros_like(GA),
                     where=self.distRcvi[:, k] != 0,
                 )
                 tmpMat = self._matrix_build()

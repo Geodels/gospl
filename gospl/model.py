@@ -5,6 +5,7 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from .flow import FAMesh as _FAMesh
+    from .flow import IceMesh as _IceMesh
     from .flow import PITFill as _PITFill
     from .eroder import SPL as _SPL
     from .eroder import nlSPL as _nlSPL
@@ -43,6 +44,10 @@ else:
             pass
 
     class _FAMesh(object):
+        def __init__(self):
+            pass
+
+    class _IceMesh(object):
         def __init__(self):
             pass
 
@@ -93,6 +98,7 @@ class Model(
     _GridProcess,
     _Tectonics,
     _FAMesh,
+    _IceMesh,
     _SPL,
     _nlSPL,
     _soilSPL,
@@ -143,6 +149,9 @@ class Model(
 
         # River flow initialisation
         _FAMesh.__init__(self, *args, **kwargs)
+
+        # Ice flow initialisation
+        _IceMesh.__init__(self, *args, **kwargs)
 
         # SPL initialisation
         _SPL.__init__(self, *args, **kwargs)
@@ -223,6 +232,9 @@ class Model(
             _Tectonics.getTectonics(self)
 
             if not self.fast:
+                if self.iceOn:
+                    # Compute ice accumulation
+                    _IceMesh.iceAccumulation(self)
                 # Compute flow accumulation
                 _FAMesh.flowAccumulation(self)
 

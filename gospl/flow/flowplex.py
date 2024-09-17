@@ -42,9 +42,6 @@ class FAMesh(object):
         self.fillFAL = self.hLocal.duplicate()
         self.FAG = self.hGlobal.duplicate()
         self.FAL = self.hLocal.duplicate()
-        if self.iceOn:
-            self.iceFAG = self.hGlobal.duplicate()
-            self.iceFAL = self.hLocal.duplicate()
 
         return
 
@@ -419,11 +416,11 @@ class FAMesh(object):
         rainA = self.bL.getArray().copy()
         rainA[self.seaID] = 0.
         if self.iceOn:
-            tmp = (hl - self.elaH) / (self.iceH - self.elaH)
-            self.iceIDs = tmp > 0
+            elaH = self.elaH(self.tNow)
+            iceH = self.iceH(self.tNow)
+            tmp = (hl - elaH) / (iceH - elaH)
             tmp[tmp > 1.] = 1.0
             tmp[tmp < 0.] = 0.0
-            iceA = np.multiply(rainA, tmp)
             rainA = np.multiply(rainA, 1. - tmp)
 
         #  Solve flow/ice accumulation
@@ -431,29 +428,10 @@ class FAMesh(object):
         self.dm.localToGlobal(self.bL, self.bG)
         self._solve_KSP(True, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
-        if self.iceOn:
-            self.tmpL.setArray(iceA)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self._solve_KSP(True, self.fMat, self.tmp, self.iceFAG)
-            self.dm.globalToLocal(self.iceFAG, self.iceFAL)
 
         # Volume of water flowing downstream
         self.waterFilled = hl.copy()
         if (pitVol > 0.0).any():
-            if self.iceOn:
-                iFA = self.iceFAL.getArray().copy() * self.dt
-                excess = True
-                step = 0
-                while excess:
-                    t1 = process_time()
-                    excess, pitVol, iFA = self._distributeDownstream(pitVol, iFA, hl, step, ice=True)
-                    if MPIrank == 0 and self.verbose:
-                        print(
-                            "Downstream ice flow computation step %d (%0.02f seconds)"
-                            % (step, process_time() - t1),
-                            flush=True,
-                        )
-                    step += 1
             FA = self.FAL.getArray().copy() * self.dt
             excess = True
             step = 0
@@ -483,33 +461,6 @@ class FAMesh(object):
         # Get water level
         self.waterFilled -= hl
 
-        # Smooth the ice flow across cells
-        if self.iceOn:
-            ti = process_time()
-            self.iceFAL.copy(result=self.tmpL)
-            tmp = self.tmpL.getArray().copy()
-            self.dm.localToGlobal(self.tmpL, self.tmp1)
-            smthIce = self._hillSlope(smooth=1)
-            self.tmpL.setArray(smthIce * self.scaleIce)
-            self.dm.localToGlobal(self.tmpL, self.tmp1)
-            smthIce[~self.iceIDs] = tmp[~self.iceIDs]
-            self.iceFAL.setArray(smthIce)
-            self.dm.localToGlobal(self.iceFAL, self.iceFAG)
-            if MPIrank == 0 and self.verbose:
-                print(
-                    "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti),
-                    flush=True,
-                )
-
-            # Update fluvial flow accumulation
-            PA = self.FAL.getArray().copy()
-            PA[~self.iceIDs] += smthIce[~self.iceIDs]
-            self.FAL.setArray(PA)
-            self.dm.localToGlobal(self.FAL, self.FAG)
-            PA = self.fillFAL.getArray().copy()
-            PA[~self.iceIDs] += smthIce[~self.iceIDs]
-            self.fillFAL.setArray(PA)
-
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Flow Accumulation (%0.02f seconds)" % (process_time() - t0),
@@ -517,4 +468,3 @@ class FAMesh(object):
             )
 
         return
-

@@ -536,7 +536,7 @@ class PITFill(object):
 
     def fillElevation(self, sed=False):
         """
-        This functions is the main entry point to perform pit filling.
+        This function is the main entry point to perform pit filling.
 
         It relies on the following private functions:
 
@@ -582,6 +582,56 @@ class PITFill(object):
 
         if self.memclear:
             del hl, minh
+            gc.collect()
+
+        return
+
+    def fillIceElevation(self, hl):
+        """
+        This function is the main entry point to perform pit filling for glacier.
+
+        It relies on the following private functions:
+
+        - _performFilling
+        - _pitInformation
+
+        :arg sed: boolean specifying if the pits are filled with water or sediments.
+        """
+
+        tfill = process_time()
+        minh = self.hGlobal.min()[1]
+        if not self.flatModel:
+            minh += 1.0e-3
+        level = max(minh, self.sealevel + self.oFill)
+
+        self._performFilling(hl - level, level, False)
+        self.lFill += level
+        self._pitInformation(hl, level, False)
+
+        # Define specific filling levels for unfilled water depressions
+        if not False:
+            ids = self.pitParams[:, 0] > 0.0
+            dh = np.zeros((len(self.pitInfo), 6), dtype=np.float64)
+            dh[ids, 0] = self.pitParams[ids, 1] - self.pitParams[ids, 2]
+            dh[ids, 1:] = np.expand_dims(self.pitParams[ids, 2] / 5.0, axis=1)
+            self.filled_lvl = np.cumsum(dh, axis=1)[:, 1:]
+
+            self.filled_vol = np.zeros((len(self.pitInfo), 5), dtype=np.float64)
+            hl[hl < self.sealevel] = self.sealevel
+            self.filled_vol[:, :-1] = getpitvol(
+                self.filled_lvl[:, :-1], hl, self.pitIDs, self.inIDs
+            )
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.filled_vol, op=MPI.SUM)
+            self.filled_vol[:, -1] = self.pitParams[:, 0]
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Handling ice depressions over the smooth surface (%0.02f seconds)"
+                % (process_time() - tfill)
+            )
+
+        if self.memclear:
+            del minh
             gc.collect()
 
         return

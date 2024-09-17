@@ -66,7 +66,6 @@ class hillSLP(object):
         # Diffusion matrix construction
         if smooth == 1:
             Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
-            Cd[~self.iceIDs] = 0.0
         elif smooth == 2:
             # Hard-coded coefficients here, used to generate a smooth surface
             # for computing marine flow directions...
@@ -179,7 +178,7 @@ class hillSLP(object):
         F.setArray(res[self.glIDs])
 
         return
-    
+
     def _hillSlopeNL(self):
         r"""
         This function computes hillslope using a **non-linear** diffusion law:
@@ -206,7 +205,7 @@ class hillSLP(object):
         snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
         snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
                            max_it=self.snes_maxit)
-        
+
         # Set a monitor to see residual values
         if self.verbose:
             snes.setMonitor(self._diff_nl_monitor)
@@ -269,7 +268,7 @@ class hillSLP(object):
         if self.cptSoil:
             self.diffuseSoil()
             return
-        
+
         if self.K_nl == 1.0 and self.K_nb == 0:
             self._hillSlope(smooth=0)
         else:

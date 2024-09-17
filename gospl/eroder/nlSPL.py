@@ -56,12 +56,14 @@ class nlSPL(object):
 
         # Residuals based on the equation: h(t+dt) - h(t) + dt * K * A^m * S^n = 0
         res = h_array - self.hOldArray + self.Kbr * S**self.spl_n
+        if self.iceOn:
+            res += self.Kbi * S**self.spl_n
 
         # Residual vector
         F.setArray(res[self.glIDs])
 
         return
-    
+
     def _form_residual_ed(self, snes, h, F):
         """
         The nonlinear system (SNES) at each time step is solved iteratively by assessing the residual of the SPL equation accounting for erosion and deposition (transport-limited).
@@ -93,8 +95,10 @@ class nlSPL(object):
 
         # Residuals based on the equation: 
         # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0
-        res = (h_array - self.hOldArray) * (1.0 - self.fDep)  
+        res = (h_array - self.hOldArray) * (1.0 - self.fDep)
         res += self.Kbr * S**self.spl_n
+        if self.iceOn:
+            res += self.Kbi * S**self.spl_n
         res -= self.fDep * self.dt * Qt / self.larea
 
         # Residual vector
@@ -134,6 +138,8 @@ class nlSPL(object):
         coeffs[S == 0, :] = 0.
         ids = np.where(S > 0)[0]
         derivatives[ids] = self.spl_n * self.Kbr * np.power(S[ids], self.spl_n - 1.0)
+        if self.iceOn:
+            derivatives[ids] += self.spl_n * self.Kbi * np.power(S[ids], self.spl_n - 1.0)
 
         # Build Jacobian matrix
         for row in range(self.lpoints):
@@ -179,6 +185,12 @@ class nlSPL(object):
             self.Kbr = self.K * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
+
+        # In case glacial erosion is accounted for
+        if self.iceOn:
+            GA = self.iceFAL.getArray()
+            self.Kbi = self.dt * self.Kice * (GA ** self.ice_m) * elimiter
+            PA += GA
 
         # Dimensionless depositional coefficient
         self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
@@ -226,7 +238,7 @@ class nlSPL(object):
         petsc4py.PETSc.garbage_cleanup()
 
         return
-    
+
     def _solveNL(self):
         """
         Solves the non-linear stream power law for the detachment limited case. This calls the following *private functions*:
@@ -260,6 +272,11 @@ class nlSPL(object):
             self.Kbr = self.K * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
+
+        # In case glacial erosion is accounted for
+        if self.iceOn:
+            GA = self.iceFAL.getArray()
+            self.Kbi = self.dt * self.Kice * (GA ** self.ice_m) * elimiter
 
         snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
         snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,

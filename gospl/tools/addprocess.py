@@ -249,6 +249,7 @@ class GridProcess(object):
 
             # Interpolate back to goSPL mesh
             flexZ = self._regInterp(simflex.w)
+
             del simflex
             gc.collect()
 
@@ -273,6 +274,12 @@ class GridProcess(object):
         hl = self.hLocal.getArray().copy()
         dZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
         dZ[self.locIDs] = hl - self.hOldFlex.getArray()
+
+        # If glaciers exist then add corresponding equivalent sediment thickness
+        if self.iceOn:
+            dIce = self.iceHL.getArray() - self.iceFlex.getArray()
+            dZ[self.locIDs] += dIce * 910.0 / self.flex_rhos  # 910 kg/m3 ice density
+
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dZ, op=MPI.MAX)
         flexZ = None
 

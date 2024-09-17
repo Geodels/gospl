@@ -91,10 +91,12 @@ class soilSPL(object):
         hSoil = self.soilH + h_array - self.hOldArray
         hSoil[hSoil < 0.] = 0.
 
-        # Residuals based on the equation: 
+        # Residuals based on the equation:
         # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0
-        res = (h_array - self.hOldArray) * (1.0 - self.fDep)  
-        res += self.Kbr * (1.0 - np.exp(-hSoil / self.h_star) ) * S**self.spl_n 
+        res = (h_array - self.hOldArray) * (1.0 - self.fDep)
+        res += self.Kbr * (1.0 - np.exp(-hSoil / self.h_star)) * S**self.spl_n
+        if self.iceOn:
+            res += self.Kbi * (1.0 - np.exp(-hSoil / self.h_star)) * S**self.spl_n
         res += self.K_soil * np.exp(-hSoil / self.h_star) * S**self.spl_n
         res -= self.fDep * self.dt * Qt / self.larea
 
@@ -147,6 +149,13 @@ class soilSPL(object):
             self.Kbr = self.K * (self.rainVal ** self.coeffd)
         self.K_soil = self.Ksoil * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
+
+        # In case glacial erosion is accounted for
+        if self.iceOn:
+            GA = self.iceFAL.getArray()
+            self.Kbi = self.dt * self.Kice * (GA ** self.ice_m)
+            PA += GA
+
         self.K_soil *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
         self.K_soil[self.seaID] = 0.0
@@ -196,7 +205,7 @@ class soilSPL(object):
 
         # Update soil thicknesses
         self.dm.globalToLocal(self.tmp, self.tmpL)
-        nHsoil = self.soilH +  self.tmpL.getArray()
+        nHsoil = self.soilH + self.tmpL.getArray()
         nHsoil[nHsoil < 0.] = 0.
         # Limit soil thickness
         nHsoil[nHsoil > self.soil_transition] = self.soil_transition
@@ -206,16 +215,16 @@ class soilSPL(object):
         petsc4py.PETSc.garbage_cleanup()
 
         return
-    
+
     def _getEroDepRateSoil(self):
         """
-        This function computes erosion deposition rates in metres per year and associated soil evolution. This is done on the filled elevation. 
+        This function computes erosion deposition rates in metres per year and associated soil evolution. This is done on the filled elevation.
 
         The approach is based on **BasicHySa** governing equations from Terrainbento (as described in Appendix B20 from `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_).
 
         .. note::
 
-           The approach uses a continuous layer of soil–alluvium, which influences both hillslope and river-induced erosion. It relies on the SPACE algorithm of `Shobe et al. (2017) <https://gmd.copernicus.org/articles/10/4577/2017/>`_.
+           The approach uses a continuous layer of soil-alluvium, which influences both hillslope and river-induced erosion. It relies on the SPACE algorithm of `Shobe et al. (2017) <https://gmd.copernicus.org/articles/10/4577/2017/>`_.
         """
 
         t0 = process_time()
@@ -332,7 +341,7 @@ class soilSPL(object):
         with self.hl as hl, self.lHbed as zb, xdot as hdot:
             dh = hl - zb
             dh[dh < 0.1] = 0.0
-            Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-dh/self.H0)))
+            Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-dh / self.H0)))
             nlvec = fctcoeff(hl, Cd)
             f.setArray(hdot + nlvec[self.glIDs])
 
@@ -360,10 +369,10 @@ class soilSPL(object):
         with self.hl as hl, self.lHbed as zb:
             dh = hl - zb
             dh[dh < 0.1] = 0.0
-            Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-dh/self.H0)))
+            Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-dh / self.H0)))
 
             # Coefficient derivatives
-            Cp = np.multiply(self.Cd, np.exp(-dh/self.H0)/self.H0)
+            Cp = np.multiply(self.Cd, np.exp(-dh / self.H0) / self.H0)
             nlC = jacobiancoeff(hl, Cd, Cp)
 
             for row in range(self.lpoints):
@@ -417,8 +426,8 @@ class soilSPL(object):
         # Remove the soil thickness from the elevation
         self.hLocal.copy(result=self.hl)
         self.dm.localToGlobal(self.hl, self.h)
-        self.gHbed.waxpy(-1.0, self.Gsoil, self.hGlobal) 
-        self.lHbed.waxpy(-1.0, self.Lsoil, self.hLocal) 
+        self.gHbed.waxpy(-1.0, self.Gsoil, self.hGlobal)
+        self.lHbed.waxpy(-1.0, self.Lsoil, self.hLocal)
 
         # Time stepping definition
         ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)

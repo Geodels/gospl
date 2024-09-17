@@ -294,6 +294,19 @@ class WriteMesh(object):
                 if not self.fast:
                     data[self.seaID] = 1.0
                 f["iceFA"][:, 0] = data
+
+                f.create_dataset(
+                    "iceH",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                data = self.iceHL.getArray().copy()
+                data[data <= 1.0e-8] = 1.0e-8
+                if not self.fast:
+                    data[self.seaID] = 1.0
+                f["iceH"][:, 0] = data
+
             if self.flexOn:
                 f.create_dataset(
                     "flexIso",
@@ -408,6 +421,9 @@ class WriteMesh(object):
         self.dm.localToGlobal(self.FAL, self.FAG)
         self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
         self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
+
+        if self.iceOn:
+            self.iceHL = np.array(hf["/iceH"])[:, 0]
 
         if self.flexOn:
             self.localFlex = np.array(hf["/flexIso"])[:, 0]
@@ -547,6 +563,15 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/iceFA</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceH">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceH</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 
