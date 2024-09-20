@@ -182,8 +182,8 @@ class UnstMesh(object):
         A global VTK mesh is generated to compute the distance between mesh vertices and coastlines position.
 
         .. note::
-            The distance to the coastline for every marine vertices is used to define a maximum shelf slope during deposition. 
-            
+            The distance to the coastline for every marine vertices is used to define a maximum shelf slope during deposition.
+
             The coastline contours are efficiently obtained from VTK contouring function.
         """
 
@@ -728,6 +728,8 @@ class UnstMesh(object):
             self.iceHL.destroy()
             self.iceFAG.destroy()
             self.iceFAL.destroy()
+            if self.flexOn:
+                self.iceFlex.destroy()
 
         self.iMat.destroy()
         self.lgmap_col.destroy()

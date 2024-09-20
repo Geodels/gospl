@@ -13,6 +13,16 @@ python module _fortran
             double precision dimension(nb,13),intent(out),depend(nb) :: dcoeff
         end subroutine sethillslopecoeff
 
+        subroutine ice_flux(nb,hice,zbed,ad,as,glen,val)
+            integer :: nb
+            double precision dimension(nb),intent(in),depend(nb) :: hice
+            double precision dimension(nb),intent(in),depend(nb) :: zbed
+            double precision intent(in) :: ad
+            double precision intent(in) :: as
+            double precision intent(in) :: glen
+            double precision dimension(nb),intent(out),depend(nb) :: val
+        end subroutine ice_flux
+
         subroutine hillslp_nl(nb,elev,kd,exp,n,val)
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: elev

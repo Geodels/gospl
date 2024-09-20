@@ -147,18 +147,17 @@ class soilSPL(object):
             self.Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
         else:
             self.Kbr = self.K * (self.rainVal ** self.coeffd)
-        self.K_soil = self.Ksoil * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
+        self.Kbr[self.seaID] = 0.0
+
+        self.K_soil = self.Ksoil * (self.rainVal ** self.coeffd)
+        self.K_soil[self.seaID] = 0.0
 
         # In case glacial erosion is accounted for
         if self.iceOn:
-            GA = self.iceFAL.getArray()
-            self.Kbi = self.dt * self.Kice * (GA ** self.ice_m)
-            PA += GA
-
-        self.K_soil *= self.dt * (PA ** self.spl_m) * elimiter
-        self.Kbr[self.seaID] = 0.0
-        self.K_soil[self.seaID] = 0.0
+            Ai = self.iceFAL.getArray()
+            self.Kbi = self.Kice * self.dt * (Ai ** self.spl_m) * elimiter
+            self.Kbi[self.seaID] = 0.0
 
         # Dimensionless depositional coefficient
         self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)

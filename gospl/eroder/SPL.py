@@ -65,9 +65,9 @@ class SPL(object):
 
         # In case glacial erosion is accounted for
         if self.iceOn:
-            GA = self.iceFAL.getArray()
-            Kbi = self.dt * self.Kice * (GA ** self.ice_m)
-            PA += GA
+            Ai = self.iceFAL.getArray().copy()
+            Kbi = self.Kice * self.dt * (Ai ** self.spl_m)
+            Kbi[self.seaID] = 0.0
 
         # Initialise matrices...
         eMat = self.iMat.copy()
@@ -90,6 +90,15 @@ class SPL(object):
                 out=np.zeros_like(PA),
                 where=self.distRcvi[:, k] != 0,
             )
+
+            if self.iceOn:
+                data += np.divide(
+                    Kbi * limiter,
+                    self.distRcvi[:, k],
+                    out=np.zeros_like(PA),
+                    where=self.distRcvi[:, k] != 0,
+                )
+
             tmpMat = self._matrix_build()
             data = np.multiply(data, -wght[:, k])
             data[self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
@@ -106,28 +115,28 @@ class SPL(object):
             eMat.axpy(-1.0, tmpMat)
             tmpMat.destroy()
 
-            if self.iceOn:
-                data = np.divide(
-                    Kbi * limiter,
-                    self.distRcvi[:, k],
-                    out=np.zeros_like(GA),
-                    where=self.distRcvi[:, k] != 0,
-                )
-                tmpMat = self._matrix_build()
-                data = np.multiply(data, -wght[:, k])
-                data[self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
-                tmpMat.assemblyBegin()
-                tmpMat.setValuesLocalCSR(
-                    indptr,
-                    self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType),
-                    data,
-                )
-                tmpMat.assemblyEnd()
-                eMat.axpy(1.0, tmpMat)
-                tmpMat.destroy()
-                tmpMat = self._matrix_build_diag(data)
-                eMat.axpy(-1.0, tmpMat)
-                tmpMat.destroy()
+            # if self.iceOn:
+            #     data = np.divide(
+            #         Kbi * limiter,
+            #         self.distRcvi[:, k],
+            #         out=np.zeros_like(Ai),
+            #         where=self.distRcvi[:, k] != 0,
+            #     )
+            #     tmpMat = self._matrix_build()
+            #     data = np.multiply(data, -wght[:, k])
+            #     data[self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+            #     tmpMat.assemblyBegin()
+            #     tmpMat.setValuesLocalCSR(
+            #         indptr,
+            #         self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType),
+            #         data,
+            #     )
+            #     tmpMat.assemblyEnd()
+            #     eMat.axpy(1.0, tmpMat)
+            #     tmpMat.destroy()
+            #     tmpMat = self._matrix_build_diag(data)
+            #     eMat.axpy(-1.0, tmpMat)
+            #     tmpMat.destroy()
 
         if self.memclear:
             del dh, limiter, wght, data

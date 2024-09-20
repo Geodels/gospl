@@ -1484,39 +1484,57 @@ class ReadYaml(object):
             iceDict = self.input["ice"]
             self.iceOn = True
             try:
-                self.gaussIce = iceDict["gauss"]
+                self.gaussIce = iceDict["diff"]
             except KeyError:
-                print("Check your ice fields definition...", flush=True)
-                raise KeyError(
-                    "Field name gauss is not defined correctly or does not exist!"
-                )
+                self.gaussIce = 10.0
             try:
                 elaH = iceDict["hela"]
             except KeyError:
-                elaH = 1800.0
+                elaH = 2000.0
             try:
                 iceH = iceDict["hice"]
             except KeyError:
-                iceH = 2100.0
+                iceH = 2400.0
+            try:
+                iceT = iceDict["hterm"]  # glacier terminus
+            except KeyError:
+                iceT = 1800.0
             try:
                 icefile = iceDict["evol"]
             except KeyError:
                 icefile = None
             try:
-                self.scaleIce = iceDict["fice"]
-            except KeyError:
-                self.scaleIce = 0.5
-            try:
                 self.Kice = iceDict["Ki"]
             except KeyError:
                 self.Kice = 0.0
             try:
-                self.ice_m = iceDict["m"]
+                self.iceDir = iceDict["icedir"]
             except KeyError:
-                self.ice_m = 0.5
+                self.iceDir = 1
+            try:
+                self.meltfac = iceDict["melt"]  # Melting factor adjustment
+            except KeyError:
+                self.meltfac = 10.
+            try:
+                self.icewf = iceDict["fwidth"]  # width factor (a in Eq. (8))
+            except KeyError:
+                self.icewf = 1.5
+            try:
+                self.icewe = iceDict["eheight"]
+            except KeyError:
+                self.icewe = 0.25  # thickness-to-width ratio (delta in Eq. (9))
         except KeyError:
             self.iceOn = False
             icefile = None
+            elaH = None
+            iceH = None
+            iceT = None
+
+        self._extraIce(icefile, elaH, iceH, iceT)
+
+        return
+
+    def _extraIce(self, icefile, elaH, iceH, iceT):
 
         if icefile is not None:
             try:
@@ -1557,16 +1575,19 @@ class ReadYaml(object):
 
             if icedata[0].min() > self.tStart:
                 tmpS = []
-                tmpS.insert(0, {0: self.tStart, 1: icedata[1].iloc[0], 2: icedata[2].iloc[0]})
+                tmpS.insert(0, {0: self.tStart, 1: icedata[1].iloc[0], 2: icedata[2].iloc[0], 3: icedata[3].iloc[0]})
                 icedata = pd.concat([pd.DataFrame(tmpS), icedata], ignore_index=True)
             if icedata[0].max() < self.tEnd:
                 tmpE = []
-                tmpE.insert(0, {0: self.tEnd, 1: icedata[1].iloc[-1], 2: icedata[2].iloc[-1]})
+                tmpE.insert(0, {0: self.tEnd, 1: icedata[1].iloc[-1], 2: icedata[2].iloc[-1], 3: icedata[3].iloc[-1]})
                 icedata = pd.concat([icedata, pd.DataFrame(tmpE)], ignore_index=True)
-            self.elaH = interp1d(icedata[0], icedata[1], kind="linear")
-            self.iceH = interp1d(icedata[0], icedata[2], kind="linear")
+            self.iceT = interp1d(icedata[0], icedata[1], kind="linear")
+            self.elaH = interp1d(icedata[0], icedata[2], kind="linear")
+            self.iceH = interp1d(icedata[0], icedata[3], kind="linear")
         elif self.iceOn:
             year = np.linspace(self.tStart, self.tEnd + self.dt, num=11, endpoint=True)
+            iceval = np.full(len(year), iceT)
+            self.iceT = interp1d(year, iceval, kind="linear")
             iceval = np.full(len(year), elaH)
             self.elaH = interp1d(year, iceval, kind="linear")
             iceval = np.full(len(year), iceH)

@@ -188,9 +188,9 @@ class nlSPL(object):
 
         # In case glacial erosion is accounted for
         if self.iceOn:
-            GA = self.iceFAL.getArray()
-            self.Kbi = self.dt * self.Kice * (GA ** self.ice_m) * elimiter
-            PA += GA
+            Ai = self.iceFAL.getArray()
+            self.Kbi = self.Kice * self.dt * (Ai ** self.spl_m) * elimiter
+            self.Kbi[self.seaID] = 0.0
 
         # Dimensionless depositional coefficient
         self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
@@ -275,8 +275,9 @@ class nlSPL(object):
 
         # In case glacial erosion is accounted for
         if self.iceOn:
-            GA = self.iceFAL.getArray()
-            self.Kbi = self.dt * self.Kice * (GA ** self.ice_m) * elimiter
+            Ai = self.iceFAL.getArray()
+            self.Kbi = self.Kice * self.dt * (Ai ** self.spl_m) * elimiter
+            self.Kbi[self.seaID] = 0.0
 
         snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
         snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,

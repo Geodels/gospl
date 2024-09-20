@@ -746,6 +746,65 @@ end subroutine split
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
+!!           GLACIAL FLOW MODEL FUNCTIONS           !!
+!!                                                  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+subroutine ice_flux(nb, hice, zbed, ad, as, glen, val)
+!*****************************************************************************
+! Define the ice flux based on ice velocity (considering both deformation and 
+! sliding ones).
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    double precision, intent(in) :: hice(nb)
+    double precision, intent(in) :: zbed(nb)
+
+    double precision, intent(in) :: ad
+    double precision, intent(in) :: as
+    double precision, intent(in) :: glen 
+
+    double precision, intent(out) :: val(nb)
+
+    integer :: k, p, i
+    double precision :: hs, midh, nhs, s, ud, us, vol
+
+    val = 0.
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        ! Node total elevation
+        hs = zbed(k) + hice(k)
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            i = FVnID(k,p)+1
+            midh = 0.5*(hice(k)+hice(i))
+            ! Neighbor total elevation
+            nhs = zbed(i) + hice(i)  
+            ! Slope based on total elevation
+            s = (hs-nhs)/FVeLgt(k,p)
+            ! Deforming velocity
+            ud = ad*midh**(glen+1.)*abs(s)**(glen-1.)*s
+            ! Sliding velocity
+            us = as*midh**(glen-1.)*abs(s)**(glen-1.)*s
+            ! Ice flux equals (ud+us)*h
+            vol = (ud+us)*midh*FVvDist(k,p)
+            ! if(vol > hice(k)*FVarea(k)) vol = hice(k)*FVarea(k)
+            ! if(vol < -hice(i)*FVarea(i)) vol = -hice(k)*FVarea(k)
+            val(k) = val(k) + vol/FVarea(k)
+          endif
+        enddo
+      endif
+    enddo
+
+    return
+
+end subroutine ice_flux
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                  !!
 !!   HILLSLOPE AND ADVECTION PROCESSES FUNCTIONS    !!
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1717,7 +1776,7 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
         val = val + slp(p)
       enddo
       ! For marine deposition we don't scale the flow direction distribution
-      ! based on slope, rather eberything downstream will get an equal proportion
+      ! based on slope, rather everything downstream will get an equal proportion
       do p = 1, ngbs
         ! wgt(k,p) = slp(p) / val
         if(slp(p) > 0.)then

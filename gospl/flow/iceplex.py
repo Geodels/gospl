@@ -11,6 +11,7 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdreceivers
+    from gospl._fortran import epsfill
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -40,56 +41,71 @@ class IceMesh(object):
             self.iceHL = self.hLocal.duplicate()
             self.iceFAG = self.hGlobal.duplicate()
             self.iceFAL = self.hLocal.duplicate()
-            self.iceFlex = self.hLocal.duplicate()
+            if self.flexOn:
+                self.iceFlex = self.hLocal.duplicate()
             self.iceHL.set(0.0)
 
         return
 
-    def _buildIceDirection(self, h):
-        """
-        Compute the ice flow direction matrix.
-        """
+    def _matrixIceFlow(self, dir_ice=1):
 
-        # Define multiple flow directions for unfilled elevation
-        ice_rcvID, _, ice_wghtVal = mfdreceivers(
-            8, 1., h, self.sealevel
-        )
+        # The filled + eps is done on the global grid!
+        hl = self.hLocal.getArray().copy()
+        minh = self.hGlobal.min()[1] + 0.1
+        minh = max(minh, self.sealevel)
+        if self.flatModel:
+            hl[self.idBorders] = -1.e6
+        fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        fillz[self.locIDs] = hl
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
+        if MPIrank == 0:
+            fillz = epsfill(minh, fillz)
+        # Send elevation + eps to other processors
+        fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
+        fillz = fillEPS[self.locIDs]
 
-        ice_rcvID[self.ghostIDs, :] = -1
-        ice_wghtVal[self.ghostIDs, :] = 0
+        # Get the SFD components
+        rcv, _, wght = mfdreceivers(dir_ice, 1.0, fillz, -1.0e6)
 
         # Set borders nodes
         if self.flatModel:
-            ice_rcvID[self.idBorders, :] = np.tile(self.idBorders, (8, 1)).T
-            ice_wghtVal[self.idBorders, :] = 0.0
+            rcv[self.idBorders, :] = np.tile(self.idBorders, (dir_ice, 1)).T
+            wght[self.idBorders, :] = 0.0
 
-        iceMat = self.iMat.copy()
+        self.iceRcv = rcv.copy()
+        self.iceWght = wght.copy()
+
+        # Define downstream matrix based on filled + dir elevations
+        self.iceMat = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
 
-        for k in range(0, 8):
+        for k in range(dir_ice):
             # Flow direction matrix for a specific direction
             tmpMat = self._matrix_build()
-            data = -ice_wghtVal[:, k].copy()
-            data[ice_rcvID[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+            data = wght[:, k].copy()
+            data[rcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
             tmpMat.assemblyBegin()
             tmpMat.setValuesLocalCSR(
                 indptr,
-                ice_rcvID[:, k].astype(petsc4py.PETSc.IntType),
+                rcv[:, k].astype(petsc4py.PETSc.IntType),
                 data,
             )
             tmpMat.assemblyEnd()
+
             # Add the weights from each direction
-            iceMat.axpy(1.0, tmpMat)
+            self.iceMat.axpy(-1.0, tmpMat)
             tmpMat.destroy()
 
         if self.memclear:
             del data, indptr, nodes
+            del hl, fillz, fillEPS, rcv, wght
             gc.collect()
 
-        petsc4py.PETSc.garbage_cleanup()
+        # Store flow direction matrix
+        self.iceMat.transpose()
 
-        return iceMat.transpose()
+        return
 
     def iceAccumulation(self):
         """
@@ -101,58 +117,60 @@ class IceMesh(object):
         if self.flexOn:
             self.iceHL.copy(result=self.iceFlex)
 
-        # Define a smoothed surface to compute ice flow
-        hl = self.hLocal.getArray()
+        iceH = self.iceH(self.tNow)  # Ice Cap Altitude
+        elaH = self.elaH(self.tNow)  # Equilibrium-Line Altitude
+        iceT = self.iceT(self.tNow)  # Glacier terminus
 
-        # Get amount of ice
-        rainA = self.bL.getArray()
-        elaH = self.elaH(self.tNow)
-        iceH = self.iceH(self.tNow)
+        # In case elevation too low to get ice
+        max_elev = self.hGlobal.max()[1]
+        if max_elev < elaH:
+            self.iceHL.set(0.)
+            self.iceFAL.set(0.)
+            self.iceFAG.set(0.)
+            if self.flexOn:
+                self.iceFlex.set(0.)
+            return
+
+        # Compute Ice Flow matrix
+        self._matrixIceFlow(self.iceDir)
+
+        # Ice accumulation
+        hl = self.hLocal.getArray().copy()
+        rainA = self.bL.getArray().copy()
         tmp = (hl - elaH) / (iceH - elaH)
         tmp[tmp > 1.] = 1.0
+        tmp[tmp < 0.] *= self.meltfac
+
         iceA = np.multiply(rainA, tmp)
-
-        self.hGlobal.copy(result=self.tmp1)
-        smthH = self._hillSlope(smooth=1)
-
-        # Get ice flow directions
-        iceMat = self._buildIceDirection(smthH)
-
-        # Solve ice accumulation
         self.tmpL.setArray(iceA)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(True, iceMat, self.tmp, self.iceFAG)
+        self._solve_KSP(True, self.iceMat, self.tmp, self.iceFAG)
         self.dm.globalToLocal(self.iceFAG, self.iceFAL)
-        iceMat.destroy()
-
-        # Get corresponding ice thicknesses
         tmp = self.iceFAL.getArray()
-        tmp[tmp < 0] = 0.
+        tmp[tmp < 0.] = 0.0
+        tmp[hl < iceT] = 0.0
         self.iceFAL.setArray(tmp)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
-        tmp = self.iceFAL.getArray().copy()
-        iceH = self.scaleIce * tmp**0.3
-        iceH[tmp <= 1.e-3] = 0.
 
-        # Smooth ice thicknesses
-        self.tmpL.setArray(iceH + hl)
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        # Diffuse glacier flow accumulation
+        self.iceFAG.copy(result=self.tmp1)
         smthIce = self._hillSlope(smooth=1)
-        self.hGlobal.copy(result=self.tmp1)
-        smthH = self._hillSlope(smooth=1)
-        tmp = smthIce - smthH
-        tmp[tmp < 0.1] = 0.
-        self.iceHL.setArray(tmp)
-
-        # Update ice accumulation
-        smthIce = (tmp / self.scaleIce)**(1. / 0.3)
+        smthIce[smthIce < 0.] = 0.
         self.iceFAL.setArray(smthIce)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
-        petsc4py.PETSc.garbage_cleanup()
 
-        # If simulation starts then set the ice flex variable to the initial glacier thickness
-        if self.tNow == self.tStart:
-            self.iceHL.copy(result=self.iceFlex)
+        # Ice thickness based on glacier width
+        if self.flexOn:
+            # iceWidth = self.icewf * smthIce**0.3
+            tmp = self.icewe * self.icewf * smthIce**0.3
+            tmp[tmp < 1.e-1] = 0.
+            self.tmpL.setArray(tmp)
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            tmp = self._hillSlope(smooth=1)
+            self.iceHL.setArray(tmp)
+            # If simulation starts then set the ice flex variable to the initial glacier thickness
+            if self.tNow == self.tStart:
+                self.iceHL.copy(result=self.iceFlex)
 
         if MPIrank == 0 and self.verbose:
             print(

@@ -33,7 +33,7 @@ class hillSLP(object):
         self.Dlimit = 5.
         self.dexp = 0.05
         self.minDiff = 1.e-4
-    
+
         self.mat = self.dm.createMatrix()
         self.mat.setOption(self.mat.Option.NEW_NONZERO_LOCATIONS, True)
 

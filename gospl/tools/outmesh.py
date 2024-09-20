@@ -423,13 +423,22 @@ class WriteMesh(object):
         self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
 
         if self.iceOn:
-            self.iceHL = np.array(hf["/iceH"])[:, 0]
+            if "/iceH" in hf:
+                self.iceHL.setArray(np.array(hf["/iceH"])[:, 0])
+            else:
+                self.iceHL.set(0.)
 
         if self.flexOn:
-            self.localFlex = np.array(hf["/flexIso"])[:, 0]
+            if "/flexIso" in hf:
+                self.localFlex = np.array(hf["/flexIso"])[:, 0]
+            else:
+                self.localFlex = np.zeros(self.lpoints)
 
         if self.cptSoil:
-            self.Lsoil.setArray(np.array(hf["/soilH"])[:, 0])
+            if "/soilH" in hf:
+                self.Lsoil.setArray(np.array(hf["/soilH"])[:, 0])
+            else:
+                self.Lsoil.set(0.)
             self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
         hf.close()

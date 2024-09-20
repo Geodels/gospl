@@ -133,21 +133,22 @@ class SEAMesh(object):
 
         # Define multiple flow directions for filled + eps elevations
         hl = self.hLocal.getArray().copy()
+        minh = self.hGlobal.min()[1] + 0.1
         if not self.flatModel:
             # Only consider filleps in the first kms offshore
+            minh = max(minh, self.oFill)
             hsmth = self._hillSlope(smooth=2)
             hsmth[self.coastDist > self.offshore] = -1.e6
         else:
+            minh = max(minh, self.oFill)
             hsmth = hl.copy()
+            hsmth[self.idBorders] = -1.e6
 
         # The filled + eps is done on the global grid!
         fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
         fillz[self.locIDs] = hsmth
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
         if MPIrank == 0:
-            minh = np.min(fillz) + 0.1
-            if not self.flatModel:
-                minh = min(minh, self.oFill)
             fillz = epsfill(minh, fillz)
         # Send elevation + eps to other processors
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
@@ -472,4 +473,3 @@ class SEAMesh(object):
             gc.collect()
 
         return
-
