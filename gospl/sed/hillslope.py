@@ -163,8 +163,8 @@ class hillSLP(object):
         h_array = self.hl.getArray()
 
         # Compute slope
-        if self.K_nb == 0:
-            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_nl, 0)
+        if self.K_sc == 0:
+            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_nl, -1)
         else:
             val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_sc, self.K_nb)
 
@@ -269,7 +269,7 @@ class hillSLP(object):
             self.diffuseSoil()
             return
 
-        if self.K_nl == 1.0 and self.K_nb == 0:
+        if self.K_nl == 1.0 and self.K_sc == 0.0:
             self._hillSlope(smooth=0)
         else:
             self._hillSlopeNL()

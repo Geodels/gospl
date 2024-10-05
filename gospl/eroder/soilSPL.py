@@ -79,26 +79,30 @@ class soilSPL(object):
         S[S < 0.] = 0.
 
         # Compute upstream sediment flux
-        self.tmp.waxpy(-1.0, h, self.hOld)
-        self.tmp1.pointwiseMult(self.tmp, self.areaGlobal)
-        self.tmp1.scale(1. / self.dt)
-        self._solve_KSP(True, self.fMati, self.tmp1, self.tmp)
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        Qt = self.tmpL.getArray()
-        Qt[Qt < 0.] = 0.
+        if self.fDepa > 0:
+            self.tmp.waxpy(-1.0, h, self.hOld)
+            self.tmp1.pointwiseMult(self.tmp, self.areaGlobal)
+            self.tmp1.scale(1. / self.dt)
+            self._solve_KSP(True, self.fMati, self.tmp1, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            Qt = self.tmpL.getArray()
+            Qt[Qt < 0.] = 0.
 
-        # Compute soil thickness
+        # Compute soil thickness based on changes in elevation and soil production rates
         hSoil = self.soilH + h_array - self.hOldArray
-        hSoil[hSoil < 0.] = 0.
+        hSoil[hSoil < 0] = 0.
+        hSoil += self.dt * self.P0 * np.exp(-hSoil / self.Hs)
+        self.nsoilH = hSoil.copy()
 
-        # Residuals based on the equation:
+        # Residuals based on the equation
         # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0
         res = (h_array - self.hOldArray) * (1.0 - self.fDep)
-        res += self.Kbr * (1.0 - np.exp(-hSoil / self.h_star)) * S**self.spl_n
+        res += self.Kbr * np.exp(-hSoil / self.h_star) * S**self.spl_n
         if self.iceOn:
-            res += self.Kbi * (1.0 - np.exp(-hSoil / self.h_star)) * S**self.spl_n
-        res += self.K_soil * np.exp(-hSoil / self.h_star) * S**self.spl_n
-        res -= self.fDep * self.dt * Qt / self.larea
+            res += self.Kbi * np.exp(-hSoil / self.h_star) * S**self.spl_n
+        res += self.K_soil * (1.0 - np.exp(-hSoil / self.h_star)) * S**self.spl_n
+        if self.fDepa > 0:
+            res -= self.fDep * self.dt * Qt / self.larea
 
         # Residual vector
         F.setArray(res[self.glIDs])
@@ -110,7 +114,7 @@ class soilSPL(object):
         Non-linear SPL with soil production solver convergence evaluation.
         """
 
-        if MPIrank == 0 and its % 5 == 0:
+        if MPIrank == 0 and its % 10 == 0:
             print(f"  ---  Non-linear soil SPL solver iteration {its}, Residual norm: {norm}", flush=True)
 
     def _solveSoil(self):
@@ -127,9 +131,10 @@ class soilSPL(object):
         self.oldH = self.hGlobal.getArray()
         self.hOldArray = self.hLocal.getArray().copy()
 
-        # Apply production rate to existing soil
+        # Get soil thickness from previous time step
         self.soilH = self.Lsoil.getArray().copy()
-        self.soilH += self.dt * self.P0 * np.exp(-self.soilH / self.Hs)
+        # Consider bedrock exposed when soil thickness is below 10 cm
+        self.soilH[self.soilH < 1.e-1] = 0.0
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
@@ -150,7 +155,7 @@ class soilSPL(object):
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
 
-        self.K_soil = self.Ksoil * (self.rainVal ** self.coeffd)
+        self.K_soil = self.Ksoil * self.dt * (PA ** self.spl_m) * elimiter
         self.K_soil[self.seaID] = 0.0
 
         # In case glacial erosion is accounted for
@@ -203,9 +208,8 @@ class soilSPL(object):
         x.destroy()
 
         # Update soil thicknesses
-        self.dm.globalToLocal(self.tmp, self.tmpL)
-        nHsoil = self.soilH + self.tmpL.getArray()
-        nHsoil[nHsoil < 0.] = 0.
+        nHsoil = self.nsoilH.copy()
+        nHsoil[nHsoil < 1.e-1] = 0.
         # Limit soil thickness
         nHsoil[nHsoil > self.soil_transition] = self.soil_transition
         self.Lsoil.setArray(nHsoil)

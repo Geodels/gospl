@@ -333,8 +333,7 @@ class SEAMesh(object):
 
     def _distOcean(self, sedflux):
         """
-        Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute
-        locally sediments downslope.
+        Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute locally sediments downslope.
 
         :arg sedflux: incoming marine sediment volumes
 

@@ -40,7 +40,7 @@ class Tectonics(object):
         self.hdisp = None
         self.tecNb = -1
         self.paleoZ = None
-        self.minZ = None
+        # self.minZ = None
         self.plateStep = False
 
         self.fiso = self.hGlobal.duplicate()
@@ -109,14 +109,14 @@ class Tectonics(object):
                 self.upsub = None
 
             # Paleo-elevation fitting
-            self.minZ = None
+            # self.minZ = None
             self.paleoZ = None
             if self.tecdata.iloc[nb, 3] != "empty":
                 fname = self.tecdata.iloc[nb, 3][0] + ".npz"
                 mdata = np.load(fname)
                 key = self.tecdata.iloc[nb, 3][1]
                 if len(self.tecdata.iloc[nb, 3]) == 3:
-                    self.minZ = self.tecdata.iloc[nb, 2][2]
+                    # self.minZ = self.tecdata.iloc[nb, 2][2]
                     self.paleoZ = mdata[key][self.locIDs]
 
             del mdata
@@ -618,7 +618,8 @@ class Tectonics(object):
 
         # Send local elevation globally
         hl = self.hLocal.getArray().copy()
-        ids = np.where(hl <= self.minZ)[0]
+        # ids = np.where(hl <= self.minZ)[0]
+        ids = np.where(hl <= self.sealevel)[0]
         hl[ids] = self.paleoZ[ids]
 
         # Fit simulated elevations to paleoelevation ones

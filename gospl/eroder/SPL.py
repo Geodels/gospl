@@ -115,29 +115,6 @@ class SPL(object):
             eMat.axpy(-1.0, tmpMat)
             tmpMat.destroy()
 
-            # if self.iceOn:
-            #     data = np.divide(
-            #         Kbi * limiter,
-            #         self.distRcvi[:, k],
-            #         out=np.zeros_like(Ai),
-            #         where=self.distRcvi[:, k] != 0,
-            #     )
-            #     tmpMat = self._matrix_build()
-            #     data = np.multiply(data, -wght[:, k])
-            #     data[self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
-            #     tmpMat.assemblyBegin()
-            #     tmpMat.setValuesLocalCSR(
-            #         indptr,
-            #         self.rcvIDi[:, k].astype(petsc4py.PETSc.IntType),
-            #         data,
-            #     )
-            #     tmpMat.assemblyEnd()
-            #     eMat.axpy(1.0, tmpMat)
-            #     tmpMat.destroy()
-            #     tmpMat = self._matrix_build_diag(data)
-            #     eMat.axpy(-1.0, tmpMat)
-            #     tmpMat.destroy()
-
         if self.memclear:
             del dh, limiter, wght, data
             gc.collect()

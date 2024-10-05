@@ -563,8 +563,8 @@ class ReadYaml(object):
                 self.soilFile = None
 
             if soilfile is not None:
-                self.soilFile =  soilfile[0] + ".npz"
-                self.soilData =  soilfile[1]
+                self.soilFile = soilfile[0] + ".npz"
+                self.soilData = soilfile[1]
                 try:
                     with open(self.soilFile) as sinfo:
                         sinfo.close()

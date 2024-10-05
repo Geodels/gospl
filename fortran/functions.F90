@@ -890,8 +890,8 @@ subroutine hillslp_nl(nb, elev, kd, exp, n, val)
 
     double precision, intent(out) :: val(nb)
 
-    integer :: k, p, i, j
-    double precision :: s, c, ck, cn, v, dz, su, f
+    integer :: k, p, i, jn
+    double precision :: s, c, ck, cn, v, dz, su, fval
 
     val = 0.
     do k = 1, nb
@@ -905,15 +905,24 @@ subroutine hillslp_nl(nb, elev, kd, exp, n, val)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
             dz = elev(i) - elev(k)
             s = abs(dz/FVeLgt(k,p))
-            if(n .eq. 0)then
+            if(n .eq. -1)then
+              ! Wang et al. (2024) approach
               val(k) = val(k) + v*dz*exp*(s**(exp-1.))
             else
-              su = 1.
-              f = s/exp
-              do j = 1, nb-1
-                su = su + f**(2*j)
-              enddo
-              val(k) = val(k) + v*dz*s*su
+              if(n > 0)then
+                ! Barnhart et al. (2019) approach
+                su = 1.
+                fval = s/exp
+                do jn = 1, n-1
+                  su = su + (2*jn+1)*(fval**(2*jn))
+                enddo
+                val(k) = val(k) + v*dz*su
+              else
+                ! Andrews–Bucknam law: flux diverges close to Sc
+                fval = min(s/exp, 0.8)
+                su = (1 + fval**2) / (1 - fval**2 )**2
+                val(k) = val(k) + v*dz*su
+              endif
             endif
           endif
         enddo

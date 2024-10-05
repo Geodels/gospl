@@ -93,7 +93,7 @@ class nlSPL(object):
         Qt = self.tmpL.getArray()
         Qt[Qt < 0.] = 0.
 
-        # Residuals based on the equation: 
+        # Residuals based on the equation
         # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0
         res = (h_array - self.hOldArray) * (1.0 - self.fDep)
         res += self.Kbr * S**self.spl_n
