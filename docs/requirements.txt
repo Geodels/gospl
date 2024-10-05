@@ -16,5 +16,5 @@ myst-parser>=0.12.10
 myst_nb
 numpydoc
 sphinx_design
-jupyterlite_sphinx
+jupyterlite_sphinx==0.16.5
 intersphinx_registry
