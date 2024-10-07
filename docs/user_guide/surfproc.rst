@@ -126,15 +126,18 @@ Glacial erosion
         Then the user can specify the initial soil thickness if any by setting **either**:
 
         **or**:
+
         h. ``evol`` is the glacier characteristics over time (`csv` file). When used ``hterm``, ``hela``, ``hice`` are not required because they are defined in this file. 
         
         When the flexural isostasy is turned-on the glacier thickness is also calculated based on the following parameters:
+
+
         i. ``fwidth`` glacier width factor (default value: 1.5). 
         j. ``eheight`` thickness-to-width ratio (default value: 0.25). 
         
-.. important::
+        .. important::
 
-    The glacial evolution file is defined as a 4 columns **csv** file containing in the first column the time in years (it doesn't need to be regularly temporally spaced) and in the second the glacier characteristics for the given time. When goSPL interprets this file, it will interpolate linearly between the defined times to find the values of ``hterm``, ``hela`` and ``hice`` for every time step.
+            The glacial evolution file is defined as a 4 columns **csv** file containing in the first column the time in years (it doesn't need to be regularly temporally spaced) and in the second the glacier characteristics for the given time. When goSPL interprets this file, it will interpolate linearly between the defined times to find the values of ``hterm``, ``hela`` and ``hice`` for every time step.
 
 
 Soil production, erosion, transport and deposition
