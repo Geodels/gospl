@@ -1349,6 +1349,7 @@ class ReadYaml(object):
 
         except KeyError:
             self.flexOn = False
+            self.flex_method = 'FD'
 
         self._extraFlex()
 

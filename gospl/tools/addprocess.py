@@ -425,7 +425,7 @@ class GridProcess(object):
             oroRain *= 3600.  # mm hr-1
             oroRain += self.oro_precip_base
             # Precipitation rate must be a value greater than minimum precipitation/runoff to avoid errors when precip_rate <= 0
-            oroRain[oroRain <= 0] = self.oro_precip_min
+            oroRain[oroRain <= self.oro_precip_min] = self.oro_precip_min
             # Conversion from mm/hr to m/yr
             oroRain *= 0.366 * self.rainfall_frequency
 

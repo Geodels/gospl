@@ -89,9 +89,56 @@ Hillslope and marine deposition parameters
         In this last model, the non-linear creep formulation is described in `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_ (section 3.4.3 **EQ. 14**).
 
 
-Soil production, erosion, transport and deposition
+Glacial erosion
 -----------------------------------------------------
 
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::  
+        
+        **Declaration example**:
+
+        .. code:: yaml
+
+            ice:
+                icedir: 1
+                Ki: 6.e-6
+                fmelt: 10.
+                diff: 20.
+                # Either constant glacial parameters
+                hterm: 1700.0
+                hela: 1850.0
+                hice: 2100.0
+                # Or using a file to characterise glacial evolution
+                # evol: 'data/ice_evol.csv'
+                fwidth: 1.5
+                eheight: 0.25
+
+        a. ``icedir`` is the flow direction used to evaluate ice flow (default: 1 - i.e. SFD),
+        b. ``Ki`` is the erodibility coefficient for glacial erosion,
+        c. ``fmelt`` is the melting factor adjustment (default: 10.),
+        d. ``diff`` is the diffusion coefficient applied to the ice flow accumulation,
+        e. ``hterm`` is the glacier terminus elevation (m),
+        f. ``hela`` is the equilibrium-line altitude (m),
+        g. ``hice`` is the ice cap altitude (m). 
+
+        Then the user can specify the initial soil thickness if any by setting **either**:
+
+        **or**:
+        h. ``evol`` is the glacier characteristics over time (`csv` file). When used ``hterm``, ``hela``, ``hice`` are not required because they are defined in this file. 
+        
+        When the flexural isostasy is turned-on the glacier thickness is also calculated based on the following parameters:
+        i. ``fwidth`` glacier width factor (default value: 1.5). 
+        j. ``eheight`` thickness-to-width ratio (default value: 0.25). 
+        
+.. important::
+
+    The glacial evolution file is defined as a 4 columns **csv** file containing in the first column the time in years (it doesn't need to be regularly temporally spaced) and in the second the glacier characteristics for the given time. When goSPL interprets this file, it will interpolate linearly between the defined times to find the values of ``hterm``, ``hela`` and ``hice`` for every time step.
+
+
+Soil production, erosion, transport and deposition
+-----------------------------------------------------
 
 .. grid:: 1
     :padding: 3

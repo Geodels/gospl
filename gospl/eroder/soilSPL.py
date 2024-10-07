@@ -87,6 +87,7 @@ class soilSPL(object):
             self.dm.globalToLocal(self.tmp, self.tmpL)
             Qt = self.tmpL.getArray()
             Qt[Qt < 0.] = 0.
+            Qt[self.seaID] = 0.
 
         # Compute soil thickness based on changes in elevation and soil production rates
         hSoil = self.soilH + h_array - self.hOldArray
@@ -168,6 +169,7 @@ class soilSPL(object):
         self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
         self.fDep[self.seaID] = 0.
         self.fDep[self.fDep > 0.99] = 0.99
+        self.fDep[self.seaID] = 0.0
         if self.flatModel:
             self.fDep[self.idBorders] = 0.
 
