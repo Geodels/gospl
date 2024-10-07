@@ -20,7 +20,7 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class IceMesh(object):
     """
-    This class calculates **ice flow acculation** based on a multiple flow direction paths (MFD) performed on a smooth landscape elevation mesh.
+    This class calculates **ice flow acculation** based on a multiple flow direction paths (MFD).
 
     Useful links for improvements:
     - `Braun et al. (1999) <https://doi.org/10.3189/172756499781821797>`_
@@ -35,6 +35,9 @@ class IceMesh(object):
     def __init__(self, *args, **kwargs):
         """
         Initialisation of the `IceMesh` class.
+
+        This method initializes the ice-related fields (ice height, flow accumulation, and flexural response)
+        based on the configuration flags `iceOn` and `flexOn`. Memory is allocated for these fields.
         """
 
         if self.iceOn:
@@ -48,6 +51,17 @@ class IceMesh(object):
         return
 
     def _matrixIceFlow(self, dir_ice=1):
+        """
+        Compute Flow Direction Matrix for Ice Flow.
+
+        This function calculates the flow direction matrix for ice flow using a multiple flow direction (MFD) algorithm.
+        It fills in elevation data (using `epsfill`) and constructs the matrix for flow direction and weighting.
+
+        Parameters:
+        -----------
+        dir_ice : int, optional
+            Number of flow directions to consider. Defaults to 1.
+        """
 
         # The filled + eps is done on the global grid!
         hl = self.hLocal.getArray().copy()
@@ -60,14 +74,14 @@ class IceMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
         if MPIrank == 0:
             fillz = epsfill(minh, fillz)
-        # Send elevation + eps to other processors
+        # Broadcast filled elevation data across processors
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
         fillz = fillEPS[self.locIDs]
 
-        # Get the SFD components
+        # Calculate receivers and weights for the flow direction matrix
         rcv, _, wght = mfdreceivers(dir_ice, 1.0, fillz, -1.0e6)
 
-        # Set borders nodes
+        # Handle borders for flat models
         if self.flatModel:
             rcv[self.idBorders, :] = np.tile(self.idBorders, (dir_ice, 1)).T
             wght[self.idBorders, :] = 0.0
@@ -75,7 +89,7 @@ class IceMesh(object):
         self.iceRcv = rcv.copy()
         self.iceWght = wght.copy()
 
-        # Define downstream matrix based on filled + dir elevations
+        # Create and assemble the flow direction matrix
         self.iceMat = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         nodes = indptr[:-1]
@@ -93,7 +107,7 @@ class IceMesh(object):
             )
             tmpMat.assemblyEnd()
 
-            # Add the weights from each direction
+            # Accumulate weights for each direction
             self.iceMat.axpy(-1.0, tmpMat)
             tmpMat.destroy()
 
@@ -102,26 +116,32 @@ class IceMesh(object):
             del hl, fillz, fillEPS, rcv, wght
             gc.collect()
 
-        # Store flow direction matrix
+        # Transpose the flow matrix for further computations
         self.iceMat.transpose()
 
         return
 
     def iceAccumulation(self):
         """
-        This function is the **main entry point** for ice accumulation computation.
+        Main Ice Accumulation Calculation.
+
+        This method calculates ice accumulation based on the elevation, equilibrium-line altitude (ELA), and terminus positions. It integrates the flow direction matrix and computes ice flow across the landscape.
+
+        The method also accounts for flexural responses if enabled.
         """
 
         ti = process_time()
 
+        # Copy ice height to flexural parameter if flexure modeling is active
         if self.flexOn:
             self.iceHL.copy(result=self.iceFlex)
 
+        # Get dynamic properties such as ice cap altitude and equilibrium-line altitude
         iceH = self.iceH(self.tNow)  # Ice Cap Altitude
         elaH = self.elaH(self.tNow)  # Equilibrium-Line Altitude
         iceT = self.iceT(self.tNow)  # Glacier terminus
 
-        # In case elevation too low to get ice
+        # If maximum elevation is below ELA, no ice accumulation occurs
         max_elev = self.hGlobal.max()[1]
         if max_elev < elaH:
             self.iceHL.set(0.)
@@ -131,16 +151,17 @@ class IceMesh(object):
                 self.iceFlex.set(0.)
             return
 
-        # Compute Ice Flow matrix
+        # Compute the flow direction matrix for ice
         self._matrixIceFlow(self.iceDir)
 
-        # Ice accumulation
+        # Ice accumulation calculation
         hl = self.hLocal.getArray().copy()
         rainA = self.bL.getArray().copy()
         tmp = (hl - elaH) / (iceH - elaH)
         tmp[tmp > 1.] = 1.0
         tmp[tmp < 0.] *= self.meltfac
 
+        # Calculate accumulation rates
         iceA = np.multiply(rainA, tmp)
         self.tmpL.setArray(iceA)
         self.dm.localToGlobal(self.tmpL, self.tmp)
@@ -152,14 +173,14 @@ class IceMesh(object):
         self.iceFAL.setArray(tmp)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
 
-        # Diffuse glacier flow accumulation
+        # Smooth and diffuse glacier flow accumulation
         self.iceFAG.copy(result=self.tmp1)
         smthIce = self._hillSlope(smooth=1)
         smthIce[smthIce < 0.] = 0.
         self.iceFAL.setArray(smthIce)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
 
-        # Ice thickness based on glacier width
+        # Ice thickness calculation based on glacier width
         if self.flexOn:
             # iceWidth = self.icewf * smthIce**0.3
             tmp = self.icewe * self.icewf * smthIce**0.3

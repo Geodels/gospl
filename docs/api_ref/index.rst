@@ -211,6 +211,22 @@ API reference
     .. grid-item-card::
         :text-align: center
 
+        **Class IceMesh**
+        ^^^
+
+        Functions related to glacial erosion.
+
+        +++
+
+        .. button-ref:: ice_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
         **Class Input**
         ^^^
 
@@ -272,6 +288,7 @@ API reference
     sea_ref
     hill_ref
     plate_ref
+    ice_ref
     stra_ref
     in_ref
     grid_ref

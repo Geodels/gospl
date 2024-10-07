@@ -132,7 +132,8 @@ Glacial erosion
         When the flexural isostasy is turned-on the glacier thickness is also calculated based on the following parameters:
 
 
-        i. ``fwidth`` glacier width factor (default value: 1.5). 
+        i. ``fwidth`` glacier width factor (default value: 1.5).
+        
         j. ``eheight`` thickness-to-width ratio (default value: 0.25). 
         
         .. important::
