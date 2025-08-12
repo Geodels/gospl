@@ -51,6 +51,7 @@ Hillslope and marine deposition parameters
                 hillslopeKa: 0.02
                 hillslopeKm: 0.2
                 nonlinKm: 500.0
+                Gmar: 1.0
                 clinSlp: 5.e-5
 
         Hillslope processes in goSPL is defined using a classical *diffusion law* in which sediment deposition and erosion depend on slopes (*simple creep*). The marine deposition of freshly deposited sediments by rivers is obtained using a non-linear diffusion and the following parameters can be tuned based on your model resolution:
@@ -58,7 +59,8 @@ Hillslope and marine deposition parameters
         a. ``hillslopeKa`` is the diffusion coefficient for the aerial domain,
         b. ``hillslopeKm`` is the diffusion coefficient for the marine domain,
         c. ``nonlinKm`` is the transport coefficient of freshly deposited sediments entering the ocean from rivers (non-linear diffusion),
-        d. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.        
+        d. ``Gmar`` is a dimensionless deposition coefficient for marine domain,
+        e. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.        
                 
         *Optional additions for non-linear diffusion model*
 

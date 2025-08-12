@@ -417,7 +417,10 @@ class GridProcess(object):
             m = sign * np.sqrt(np.abs(mf_num / mf_den * (kx ** 2 + ky ** 2)))
 
             # Transfer function
-            P_karot = ((self.oro_cw * 1j * sigma * hhat) / ((1 - (self.oro_hw * m * 1j)) * (1 + (sigma * self.oro_conv_time * 1j)) * (1 + (sigma * self.oro_fall_time * 1j))))
+            P_karot = ((self.oro_cw * 1j * sigma * hhat) / 
+                       ((1 - (self.oro_hw * m * 1j)) * 
+                        (1 + (sigma * self.oro_conv_time * 1j)) * 
+                        (1 + (sigma * self.oro_fall_time * 1j))))
 
             # Inverse FFT, de-pad, convert units, add uniform rate
             oroRain = np.fft.ifft2(P_karot)

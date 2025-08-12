@@ -476,7 +476,6 @@ class ReadYaml(object):
 
         try:
             hillDict = self.input["diffusion"]
-
             try:
                 self.nlK = hillDict["nonlinKm"]
             except KeyError:
