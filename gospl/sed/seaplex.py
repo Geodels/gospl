@@ -240,7 +240,15 @@ class SEAMesh(object):
             else:
                 Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
             nlvec = fctcoeff(hl, Cd)
-            f.setArray(hdot + nlvec[self.glIDs])
+
+            residual = hdot + nlvec[self.glIDs]
+            # Enforce no-erosion of initial ocean surface
+            # For nodes where solution tries to go below initial bed,
+            # replace equation with: h^{n+1} - zb = 0  (pin to floor)
+            eroding = (hl - zb) < 0.0
+            residual[eroding[self.glIDs]] = (hl - zb)[eroding[self.glIDs]]
+            
+            f.setArray(residual) #hdot + nlvec[self.glIDs])
 
         return
 
@@ -281,10 +289,17 @@ class SEAMesh(object):
                 Cp = np.multiply(self.Cd, self.dexp * np.exp(-self.dexp * dh))
             nlC = jacobiancoeff(hl, Cd, Cp)
 
+            eroding = (hl - zb) < 0.0   # local node mask
             for row in range(self.lpoints):
-                B.setValuesLocal(row, row, a + nlC[row, 0])
-                cols = self.FVmesh_ngbID[row, :]
-                B.setValuesLocal(row, cols, nlC[row, 1:])
+                if eroding[row]:
+                    # Identity row: dF/dh = 1, all off-diagonals = 0
+                    B.setValuesLocal(row, row, 1.0)
+                    cols = self.FVmesh_ngbID[row, :]
+                    B.setValuesLocal(row, cols, np.zeros_like(cols, dtype=float))
+                else:
+                    B.setValuesLocal(row, row, a + nlC[row, 0])
+                    cols = self.FVmesh_ngbID[row, :]
+                    B.setValuesLocal(row, cols, nlC[row, 1:])
             B.assemble()
 
             if A != B:
@@ -317,8 +332,8 @@ class SEAMesh(object):
 
 
         :arg dh: numpy array of incoming marine depositional thicknesses
-
-        :return: ndepo (updated deposition numpy arrays)
+ 
+        #:return: ndepo (updated deposition numpy arrays)
         """
 
         t0 = process_time()
@@ -340,7 +355,8 @@ class SEAMesh(object):
         ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
         # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
         ts.setType("rosw")
-
+        ts.setTolerances(atol=1e-4, rtol=1e-4)   # add this for adaptive stepping
+        
         ts.setIFunction(self._evalFunction, self.tmp1)
         ts.setIJacobian(self._evalJacobian, self.mat)
 
