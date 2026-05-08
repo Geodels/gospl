@@ -204,10 +204,9 @@ class ReadYaml(object):
             self.overlap = 1
 
         try:
-            dataFile = domainDict["nperodep"]
-            self.dataFile = dataFile + ".npz"
-            with open(self.dataFile) as dataFile:
-                dataFile.close()
+            self.dataFile = domainDict["nperodep"] + ".npz"
+            with open(self.dataFile) as fh:
+                pass
         except KeyError:
             self.dataFile = None
 
@@ -217,10 +216,9 @@ class ReadYaml(object):
             self.nodep = False
 
         try:
-            strataFile = domainDict["npstrata"]
-            self.strataFile = strataFile + ".npz"
-            with open(self.strataFile) as strataFile:
-                strataFile.close()
+            self.strataFile = domainDict["npstrata"] + ".npz"
+            with open(self.strataFile) as fh:
+                pass
         except KeyError:
             self.strataFile = None
 
@@ -239,12 +237,17 @@ class ReadYaml(object):
             advscheme = domainDict["advect"]
             if advscheme == 'iioe1':
                 self.advscheme = 2
-            if advscheme == 'iioe2':
+            elif advscheme == 'iioe2':
                 self.advscheme = 3
             elif advscheme == 'upwind':
                 self.advscheme = 1
             elif advscheme == 'interp':
                 self.advscheme = 0
+            else:
+                raise ValueError(
+                    "Unknown advect scheme '%s'; expected one of "
+                    "iioe1 / iioe2 / upwind / interp." % advscheme
+                )
         except KeyError:
             self.advscheme = 1
 
@@ -536,7 +539,7 @@ class ReadYaml(object):
                 # soil production decay depth
                 self.Hs = 0.0
             try:
-                self.h_star = int(soilDict["roughnessL"])
+                self.h_star = float(soilDict["roughnessL"])
             except KeyError:
                 # roughness length_scale
                 self.h_star = 1.0
@@ -781,31 +784,31 @@ class ReadYaml(object):
 
         try:
             tecStart = tecSort[k]["start"]
-        except Exception:
+        except KeyError:
             print("For each tectonic event a start time is required.", flush=True)
             raise ValueError("Tectonic event {} has no parameter start".format(k))
 
         try:
             tecEnd = tecSort[k]["end"]
-        except Exception:
+        except KeyError:
             print("For each tectonic event an end time is required.", flush=True)
             raise ValueError("Tectonic event {} has no parameter end".format(k))
 
         try:
             tMap = tecSort[k]["upsub"]
-        except Exception:
+        except KeyError:
             pass
         self._isKeyinFile(tMap)
 
         try:
             hMap = tecSort[k]["hdisp"]
-        except Exception:
+        except KeyError:
             pass
         self._isKeyinFile(hMap)
 
         try:
             zMap = tecSort[k]["zfit"]
-        except Exception:
+        except KeyError:
             pass
         self._isKeyinFile(zMap)
 
@@ -922,7 +925,7 @@ class ReadYaml(object):
                 sMap = None
                 try:
                     sStart = sedSort[k]["start"]
-                except Exception:
+                except KeyError:
                     print(
                         "For each sediment factor a start time is required.", flush=True
                     )
@@ -931,11 +934,11 @@ class ReadYaml(object):
                     )
                 try:
                     sUniform = sedSort[k]["uniform"]
-                except Exception:
+                except KeyError:
                     pass
                 try:
                     sMap = sedSort[k]["map"]
-                except Exception:
+                except KeyError:
                     pass
 
                 if sMap is not None:
@@ -1072,7 +1075,7 @@ class ReadYaml(object):
                 rMap = None
                 try:
                     rStart = teSort[k]["start"]
-                except Exception:
+                except KeyError:
                     print(
                         "For each elastic map event a start time is required.", flush=True
                     )
@@ -1081,11 +1084,11 @@ class ReadYaml(object):
                     )
                 try:
                     rUniform = teSort[k]["uniform"]
-                except Exception:
+                except KeyError:
                     pass
                 try:
                     rMap = teSort[k]["map"]
-                except Exception:
+                except KeyError:
                     pass
 
                 if rMap is not None:
@@ -1224,7 +1227,7 @@ class ReadYaml(object):
                 rMap = None
                 try:
                     rStart = rainSort[k]["start"]
-                except Exception:
+                except KeyError:
                     print(
                         "For each climate event a start time is required.", flush=True
                     )
@@ -1233,11 +1236,11 @@ class ReadYaml(object):
                     )
                 try:
                     rUniform = rainSort[k]["uniform"]
-                except Exception:
+                except KeyError:
                     pass
                 try:
                     rMap = rainSort[k]["map"]
-                except Exception:
+                except KeyError:
                     pass
 
                 if rMap is not None:
@@ -1480,6 +1483,10 @@ class ReadYaml(object):
             ref_density = oroDict["ref_density"]
         except KeyError:
             ref_density = 7.4e-3
+        if lapse_rate == 0:
+            raise ValueError(
+                "Orographic precipitation: env_lapse_rate must be non-zero."
+            )
         self.oro_cw = ref_density * lapse_rate_m / lapse_rate
         try:
             self.oro_conv_time = oroDict["conv_time"]

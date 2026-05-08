@@ -1,7 +1,10 @@
 import os
+
 import gc
 import sys
 import vtk
+vtk.vtkObject.GlobalWarningDisplayOff()
+
 import warnings
 import petsc4py
 import numpy as np
@@ -52,6 +55,11 @@ class SEAMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, label_offset, op=MPI.MAX)
         offset = np.cumsum(label_offset)[:-1]
         totpts = np.sum(label_offset)
+
+        # Edge case: no rank has any coastline points (all-continental run or
+        # all marine), so the cKDTree below would raise on an empty input.
+        if totpts == 0:
+            return
 
         coastpts = np.zeros(((totpts) * 3,), dtype=np.float64)
         MPI.COMM_WORLD.Allgatherv(
@@ -245,15 +253,11 @@ class SEAMesh(object):
         sysMat.assemblyBegin()
         sysMat.assemblyEnd()
 
-        # Clean up
+        # Clean up. 
         A00.destroy()
         A01.destroy()
         A10.destroy()
         self.dMat2.destroy()
-        mats[0][0].destroy()
-        mats[0][1].destroy()
-        mats[1][0].destroy()
-        mats[1][1].destroy()
 
         # Create nested vectors
         self.tmpL.setArray(1. - fDepm)
@@ -289,6 +293,8 @@ class SEAMesh(object):
 
         ksp.solve(rhs_vec, hq_vec)
         r = ksp.getConvergedReason()
+        # Note: on KSP divergence we log and continue. Marine deposition this
+        # step may be inaccurate; operators should monitor this warning.
         if r < 0:
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
             if MPIrank == 0:
@@ -346,8 +352,27 @@ class SEAMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         vdep = np.zeros(self.lpoints, dtype=float)
 
+        # Convergence threshold: relative to initial input volume (1e-6 of
+        # total) with a fixed floor of 1 m^3. Scales with input magnitude so
+        # continental-scale runs converge in far fewer iterations than the
+        # previous fixed `> 1.0 m^3` rule, while small grids still terminate
+        # cleanly. A max-iteration cap protects against pathological cases.
+        sumExcess = self.tmp.sum()
+        initial_total = sumExcess
+        threshold = max(1.0, 1.0e-6 * initial_total)
+        max_iters = 5000
+
         step = 0
-        while self.tmp.sum() > 1.0:
+        while sumExcess > threshold:
+            if step >= max_iters:
+                if MPIrank == 0:
+                    print(
+                        "  --- Marine routing did not converge after %d "
+                        "iterations (residual %.3e m^3); continuing."
+                        % (max_iters, sumExcess),
+                        flush=True,
+                    )
+                break
 
             # Move to downstream nodes
             self.dMat1.mult(self.tmp, self.tmp1)
@@ -372,6 +397,8 @@ class SEAMesh(object):
             self.tmpL.setArray(sinkVol)
             self.dm.localToGlobal(self.tmpL, self.tmp)
 
+            # One Allreduce per iteration that doubles as the loop condition
+            # for the next pass and the print value for this pass.
             sumExcess = self.tmp.sum()
             if MPIrank == 0 and self.verbose:
                 if step % 100 == 0:
@@ -433,6 +460,8 @@ class SEAMesh(object):
 
         # Diffuse downstream
         dh = np.divide(marDep, self.larea, out=np.zeros_like(self.larea), where=self.larea != 0)
+        # Drop sub-millimeter deposits: numerical cleanup to avoid accumulating
+        # round-off thicknesses across many timesteps.
         dh[dh < 1.e-3] = 0.
         self.tmpL.setArray(dh)
         self.dm.localToGlobal(self.tmpL, self.tmp)

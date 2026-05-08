@@ -72,6 +72,10 @@ class STRAMesh(object):
             self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+            # Treat layer 0 as an effectively infinite bedrock reservoir when
+            # no initial stratigraphy file is provided. The 1e6 m sentinel
+            # cancels out in erodeStrat (cumThick / eroVal share the offset)
+            # so it does not contaminate eroded volumes.
             self.stratH[:, 0] = 1.0e6
             self.phiS[:, 0] = self.phi0s
 
@@ -153,8 +157,9 @@ class STRAMesh(object):
         # Update thickness of top stratigraphic layer
         self.stratH[nids, eroLayNb] = eroVal
         self.stratH[nids, 0] -= 1.0e6
-        self.stratH[self.stratH < 0] = 0.0
-        self.phiS[self.stratH < 0] = 0.0
+        neg = self.stratH < 0
+        self.stratH[neg] = 0.0
+        self.phiS[neg] = 0.0
         self.thCoarse /= self.dt
 
         return
@@ -186,7 +191,7 @@ class STRAMesh(object):
         phiS = np.minimum(phiS, self.phiS[:, : self.stratStep + 1])
 
         # Compute the solid phase in each layers
-        tmpS = self.stratH[:, : self.stratStep + 1]
+        tmpS = self.stratH[:, : self.stratStep + 1].copy()
         tmpS *= 1.0 - self.phiS[:, : self.stratStep + 1]
         solidPhase = tmpS
 

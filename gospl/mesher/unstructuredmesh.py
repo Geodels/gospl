@@ -1,7 +1,9 @@
 import os
+os.environ["VTK_USE_VISKORES"] = "0"
 import gc
 import sys
 import vtk
+vtk.vtkObject.GlobalWarningDisplayOff()
 
 import warnings
 import petsc4py
@@ -147,7 +149,7 @@ class UnstMesh(object):
         self.larea[np.isnan(self.larea)] = 1.0
         issues = np.zeros(1)
         issues[0] = np.max(np.abs(larea - self.larea))
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, issues, op=MPI.MIN)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, issues, op=MPI.MAX)
         if MPIrank == 0 and issues[0] > 1.e2 and self.flatModel:
             print(
                 "\n--------------\n"
@@ -165,7 +167,7 @@ class UnstMesh(object):
 
         self.maxarea = np.zeros(1, dtype=np.float64)
         self.maxarea[0] = self.larea.max()
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MIN)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MAX)
 
         del Tmesh, edges_nodes, cells_nodes, cells_edges, cc, larea
         gc.collect()
@@ -284,7 +286,7 @@ class UnstMesh(object):
 
         # Create DMPlex
         t0 = process_time()
-        self._meshfrom_cell_list(2, loadData["c"], self.mCoords)
+        self._meshfrom_cell_list(2, loadData[self.infoCells], self.mCoords)
         del loadData
         gc.collect()
         if MPIrank == 0 and self.verbose:
@@ -336,7 +338,7 @@ class UnstMesh(object):
         point_closure = None
         for c in range(cStart, cEnd):
             point_closure = self.dm.getTransitiveClosure(c)[0]
-            self.lcells[c, :] = point_closure[-3:] - cEnd
+            self.lcells[c - cStart, :] = point_closure[-3:] - cEnd
         if point_closure is not None:
             del point_closure
         gc.collect()
@@ -399,10 +401,13 @@ class UnstMesh(object):
             xmax = self.mCoords[:, 0].max()
             ymin = self.mCoords[:, 1].min()
             ymax = self.mCoords[:, 1].max()
-            self.southPts = np.where(self.lcoords[:, 1] == ymin)[0]
-            self.northPts = np.where(self.lcoords[:, 1] == ymax)[0]
-            self.eastPts = np.where(self.lcoords[:, 0] == xmax)[0]
-            self.westPts = np.where(self.lcoords[:, 0] == xmin)[0]
+            # Use np.isclose so boundary detection survives any future
+            # coordinate transformation that introduces float drift.
+            tol = 1.0e-9
+            self.southPts = np.where(np.isclose(self.lcoords[:, 1], ymin, atol=tol))[0]
+            self.northPts = np.where(np.isclose(self.lcoords[:, 1], ymax, atol=tol))[0]
+            self.eastPts = np.where(np.isclose(self.lcoords[:, 0], xmax, atol=tol))[0]
+            self.westPts = np.where(np.isclose(self.lcoords[:, 0], xmin, atol=tol))[0]
 
         del idLocal
         vIS.destroy()
@@ -482,7 +487,6 @@ class UnstMesh(object):
                 # mark the boundary points
                 for vertex in vertices:
                     self.dm.setLabelValue(label, vertex, 1)
-            del vertices
 
         edgeIS.destroy()
 
@@ -717,7 +721,6 @@ class UnstMesh(object):
         self.newH.destroy()
         self.tmpL.destroy()
         self.tmp.destroy()
-        self.Qs.destroy()
         self.QsL.destroy()
         self.nQs.destroy()
         self.tmp1.destroy()
@@ -737,6 +740,21 @@ class UnstMesh(object):
         self.dm.destroy()
         self.zMat.destroy()
         self.mat.destroy()
+
+        # Cached KSP/SNES/TS helpers (created lazily on first use)
+        for name in (
+            "_ksp_main", "_ksp_fallback",
+            "_snes_ed", "_snes_ed_f", "_snes_ed_x",
+            "_snes_nl", "_snes_nl_f", "_snes_nl_x", "_snes_nl_J",
+            "_snes_soil", "_snes_soil_f", "_snes_soil_x",
+            "_snes_hill", "_snes_hill_f", "_snes_hill_x",
+            "_ts_marine", "_ts_marine_x",
+            "_ts_soil", "_ts_soil_x", "_ts_soil_f",
+        ):
+            obj = getattr(self, name, None)
+            if obj is not None:
+                obj.destroy()
+
         petsc4py.PETSc.garbage_cleanup()
 
         del self.lcoords, self.lcells, self.inIDs

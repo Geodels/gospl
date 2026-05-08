@@ -102,9 +102,13 @@ class WriteMesh(object):
         if self.rStep == 0:
             if self.makedir:
                 if os.path.exists(self.outputDir):
-                    self.outputDir += "_" + str(
-                        len(glob.glob(self.outputDir + str("*"))) - 1
-                    )
+                    # Find the first free numeric suffix (handles gaps in the
+                    # numbering caused by manual deletion of intermediate dirs).
+                    base = self.outputDir
+                    n = 0
+                    while os.path.exists(f"{base}_{n}"):
+                        n += 1
+                    self.outputDir = f"{base}_{n}"
             else:
                 if os.path.exists(self.outputDir):
                     shutil.rmtree(self.outputDir, ignore_errors=True)
@@ -404,44 +408,41 @@ class WriteMesh(object):
             + str(MPIrank)
             + ".h5"
         )
-        if os.path.exists(h5file):
-            hf = h5py.File(h5file, "r")
-        else:
+        if not os.path.exists(h5file):
             raise ValueError("Restart file is missing...")
-        self.hLocal.setArray(np.array(hf["/elev"])[:, 0])
-        self.dm.localToGlobal(self.hLocal, self.hGlobal)
-        self.cumEDLocal.setArray(np.array(hf["/erodep"])[:, 0])
-        self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-        self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
-        self.dm.localToGlobal(self.vSedLocal, self.vSed)
-        self.EbLocal.setArray(np.array(hf["/EDrate"])[:, 0])
-        self.dm.localToGlobal(self.EbLocal, self.Eb)
-        self.FAL.setArray(np.array(hf["/FA"])[:, 0])
-        self.fillFAL.setArray(np.array(hf["/fillFA"])[:, 0])
-        self.dm.localToGlobal(self.FAL, self.FAG)
-        self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
-        self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
+        with h5py.File(h5file, "r") as hf:
+            self.hLocal.setArray(np.array(hf["/elev"])[:, 0])
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            self.cumEDLocal.setArray(np.array(hf["/erodep"])[:, 0])
+            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
+            self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
+            self.dm.localToGlobal(self.vSedLocal, self.vSed)
+            self.EbLocal.setArray(np.array(hf["/EDrate"])[:, 0])
+            self.dm.localToGlobal(self.EbLocal, self.Eb)
+            self.FAL.setArray(np.array(hf["/FA"])[:, 0])
+            self.fillFAL.setArray(np.array(hf["/fillFA"])[:, 0])
+            self.dm.localToGlobal(self.FAL, self.FAG)
+            self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
+            self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
 
-        if self.iceOn:
-            if "/iceH" in hf:
-                self.iceHL.setArray(np.array(hf["/iceH"])[:, 0])
-            else:
-                self.iceHL.set(0.)
+            if self.iceOn:
+                if "/iceH" in hf:
+                    self.iceHL.setArray(np.array(hf["/iceH"])[:, 0])
+                else:
+                    self.iceHL.set(0.)
 
-        if self.flexOn:
-            if "/flexIso" in hf:
-                self.localFlex = np.array(hf["/flexIso"])[:, 0]
-            else:
-                self.localFlex = np.zeros(self.lpoints)
+            if self.flexOn:
+                if "/flexIso" in hf:
+                    self.localFlex = np.array(hf["/flexIso"])[:, 0]
+                else:
+                    self.localFlex = np.zeros(self.lpoints)
 
-        if self.cptSoil:
-            if "/soilH" in hf:
-                self.Lsoil.setArray(np.array(hf["/soilH"])[:, 0])
-            else:
-                self.Lsoil.set(0.)
-            self.dm.localToGlobal(self.Lsoil, self.Gsoil)
-
-        hf.close()
+            if self.cptSoil:
+                if "/soilH" in hf:
+                    self.Lsoil.setArray(np.array(hf["/soilH"])[:, 0])
+                else:
+                    self.Lsoil.set(0.)
+                self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
         if self.stratNb > 0 and self.stratStep > 0:
             h5file = (
@@ -452,19 +453,15 @@ class WriteMesh(object):
                 + str(MPIrank)
                 + ".h5"
             )
-            if os.path.exists(h5file):
-                hf = h5py.File(h5file, "r")
-            else:
+            if not os.path.exists(h5file):
                 raise ValueError("Restart file is missing...")
-
-            self.stratZ.fill(0.0)
-            self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
-            self.stratH.fill(0.0)
-            self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
-            self.phiS.fill(0.0)
-            self.phiS[:, : self.stratStep] = np.array(hf["/phiS"])
-
-            hf.close()
+            with h5py.File(h5file, "r") as hf:
+                self.stratZ.fill(0.0)
+                self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
+                self.stratH.fill(0.0)
+                self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
+                self.phiS.fill(0.0)
+                self.phiS[:, : self.stratStep] = np.array(hf["/phiS"])
 
         return
 
@@ -669,24 +666,22 @@ class WriteMesh(object):
         """
 
         xdmf_file = self.outputDir + "/" + self.file + ".xdmf"
-        f = open(xdmf_file, "w")
+        with open(xdmf_file, "w") as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+            f.write('<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd">\n')
+            f.write('<Xdmf Version="2.0" xmlns:xi="http://www.w3.org/2001/XInclude">\n')
+            f.write(" <Domain>\n")
+            f.write('    <Grid GridType="Collection" CollectionType="Temporal">\n')
 
-        f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-        f.write('<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd">\n')
-        f.write('<Xdmf Version="2.0" xmlns:xi="http://www.w3.org/2001/XInclude">\n')
-        f.write(" <Domain>\n")
-        f.write('    <Grid GridType="Collection" CollectionType="Temporal">\n')
+            for s in range(self.step + 1):
+                xmf_file = "xmf/" + self.file + str(s) + ".xmf"
+                f.write(
+                    '      <xi:include href="%s" xpointer="xpointer(//Xdmf/Domain/Grid)"/>\n'
+                    % xmf_file
+                )
 
-        for s in range(self.step + 1):
-            xmf_file = "xmf/" + self.file + str(s) + ".xmf"
-            f.write(
-                '      <xi:include href="%s" xpointer="xpointer(//Xdmf/Domain/Grid)"/>\n'
-                % xmf_file
-            )
-
-        f.write("    </Grid>\n")
-        f.write(" </Domain>\n")
-        f.write("</Xdmf>\n")
-        f.close()
+            f.write("    </Grid>\n")
+            f.write(" </Domain>\n")
+            f.write("</Xdmf>\n")
 
         return

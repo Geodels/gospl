@@ -36,6 +36,18 @@ class soilSPL(object):
         self.soil_atol = 1.e-6
         self.soil_maxit = 100
 
+        # Cached SNES + helper vectors for the soil-aware SPL solver; created
+        # lazily on first call and reused across timesteps.
+        self._snes_soil = None
+        self._snes_soil_f = None
+        self._snes_soil_x = None
+
+        # Cached TS for the non-linear soil diffusion (rosw scheme); created
+        # lazily on first call and reused across timesteps.
+        self._ts_soil = None
+        self._ts_soil_x = None
+        self._ts_soil_f = None
+
         if self.Sperc > 0:
             self.soil_transition = -np.log(self.Sperc) * self.Hs
         else:
@@ -146,7 +158,6 @@ class soilSPL(object):
             PETSc SNES approach is used to solve the nonlinear equation. In this implementation of the SNES, we do not form the Jacobian and PETSc calculates it based on the residual function. A Nonlinear Generalized Minimum Residual method is used ``ngmres``, a Preconditioned Conjugate Gradient ``cg`` method is defined for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
         """
 
-        self.oldH = self.hGlobal.getArray()
         self.hOldArray = self.hLocal.getArray().copy()
 
         # Get soil thickness from previous time step
@@ -158,10 +169,7 @@ class soilSPL(object):
         PA = self.FAL.getArray()
 
         # Define erosion limiter to prevent formation of flat
-        dh = []
-        for k in range(0, self.flowDir):
-            dh.append(self.hOldArray - self.hOldArray[self.rcvIDi[:, k]])
-        dh = np.array(dh).max(0)
+        dh = (self.hOldArray[:, None] - self.hOldArray[self.rcvIDi]).max(axis=1)
         elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
                              where=dh != 0)
 
@@ -186,45 +194,43 @@ class soilSPL(object):
         self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
         self.fDep[self.seaID] = 0.
         self.fDep[self.fDep > 0.99] = 0.99
-        self.fDep[self.seaID] = 0.0
         if self.flatModel:
             self.fDep[self.idBorders] = 0.
 
-        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-        snes.setTolerances(rtol=self.soil_rtol, atol=self.soil_atol,
-                           max_it=self.soil_maxit)
+        if self._snes_soil is None:
+            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+            snes.setTolerances(rtol=self.soil_rtol, atol=self.soil_atol,
+                               max_it=self.soil_maxit)
+            if self.verbose:
+                snes.setMonitor(self._monitorsoil)
+            self._snes_soil_f = self.hGlobal.duplicate()
+            snes.setFunction(self._form_residual_soil, self._snes_soil_f)
+            snes.setType('ngmres')
+            ksp = snes.getKSP()
+            ksp.setType("cg")
+            pc = ksp.getPC()
+            pc.setType("hypre")
+            petsc_options = petsc4py.PETSc.Options()
+            petsc_options['pc_hypre_type'] = 'boomeramg'
+            ksp.getPC().setFromOptions()
+            ksp.setTolerances(rtol=1.0e-6)
+            self._snes_soil_x = self.hGlobal.duplicate()
+            self._snes_soil = snes
 
-        # Set a monitor to see residual values
-        if self.verbose:
-            snes.setMonitor(self._monitorsoil)
-
-        f = self.hGlobal.duplicate()
-        snes.setFunction(self._form_residual_soil, f)
-
-        # SNES solvers
-        snes.setType('ngmres')
-        ksp = snes.getKSP()
-        ksp.setType("cg")
-        pc = ksp.getPC()
-        pc.setType("hypre")
-        petsc_options = petsc4py.PETSc.Options()
-        petsc_options['pc_hypre_type'] = 'boomeramg'
-        ksp.getPC().setFromOptions()
-        ksp.setTolerances(rtol=1.0e-6)
-
-        b, x = None, f.duplicate()
+        snes = self._snes_soil
+        x = self._snes_soil_x
         self.hGlobal.copy(result=x)
-        snes.solve(b, x)
-
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
+        snes.solve(None, x)
+        r = snes.getConvergedReason()
+        if r < 0 and MPIrank == 0:
+            print(
+                "Soil SPL SNES failed to converge after %d iterations (reason %d)"
+                % (snes.getIterationNumber(), r),
+                flush=True,
+            )
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)
-        f.destroy()
-        x.destroy()
 
         # Update soil thicknesses
         nHsoil = self.nsoilH.copy()
@@ -397,10 +403,18 @@ class soilSPL(object):
             Cp = np.multiply(self.Cd, np.exp(-dh / self.H0) / self.H0)
             nlC = jacobiancoeff(hl, Cd, Cp)
 
+            # Combine the diagonal and off-diagonal columns into one
+            # setValuesLocal call per row (was two), halving the Python -> PETSc
+            # transitions. CSR-style batch is not safe here because the mesh
+            # lgmap is keyed by mesh-local indices (length lpoints), not by
+            # matrix-local rows (length n_owned).
+            diag_col = np.arange(self.lpoints, dtype=petsc4py.PETSc.IntType)
+            cols_2d = np.column_stack([diag_col[:, None], self.FVmesh_ngbID]).astype(
+                petsc4py.PETSc.IntType
+            )
+            vals_2d = np.column_stack([(a + nlC[:, 0])[:, None], nlC[:, 1:]])
             for row in range(self.lpoints):
-                B.setValuesLocal(row, row, a + nlC[row, 0])
-                cols = self.FVmesh_ngbID[row, :]
-                B.setValuesLocal(row, cols, nlC[row, 1:])
+                B.setValuesLocal(row, cols_2d[row], vals_2d[row])
             B.assemble()
 
             if A != B:
@@ -438,9 +452,6 @@ class soilSPL(object):
 
         t0 = process_time()
 
-        x = self.tmp1.duplicate()
-        f = self.tmp1.duplicate()
-
         # Get diffusion soil coefficient
         self.Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
         self.Cd[self.seaID] = self.Cdm
@@ -451,34 +462,39 @@ class soilSPL(object):
         self.gHbed.waxpy(-1.0, self.Gsoil, self.hGlobal)
         self.lHbed.waxpy(-1.0, self.Lsoil, self.hLocal)
 
-        # Time stepping definition
-        ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
-        # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
-        ts.setType("rosw")
+        # Time stepping definition (cached across timesteps)
+        if self._ts_soil is None:
+            ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
+            # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
+            ts.setType("rosw")
+            ts.setIFunction(self._evalFunctionSoil, self.tmp1)
+            ts.setIJacobian(self._evalJacobianSoil, self.mat)
+            ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
+            # Allow an unlimited number of failures (step rejected and retried)
+            ts.setMaxSNESFailures(-1)
+            # SNES nonlinear solver
+            snes = ts.getSNES()
+            snes.setTolerances(max_it=10)
+            # KSP linear solver
+            ksp = snes.getKSP()
+            ksp.setType("preonly")
+            pc = ksp.getPC()
+            pc.setType("gasm")
+            ts.setFromOptions()
+            self._ts_soil = ts
+            self._ts_soil_x = self.tmp1.duplicate()
+            self._ts_soil_f = self.tmp1.duplicate()
 
-        ts.setIFunction(self._evalFunctionSoil, self.tmp1)
-        ts.setIJacobian(self._evalJacobianSoil, self.mat)
-
+        ts = self._ts_soil
+        x = self._ts_soil_x
+        # Soil thicknesses are meters; mm-level absolute tolerance is plenty.
+        ts.setTolerances(atol=1e-3, rtol=1e-3)
         ts.setTime(0.0)
-        ts.setTimeStep(self.dt / 1000.0)
+        # Larger initial step (was self.dt / 1000.0).
+        ts.setTimeStep(self.dt / 100.0)
         ts.setMaxTime(self.dt)
         ts.setMaxSteps(self.tsStep)
-        ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
 
-        # Allow an unlimited number of failures
-        ts.setMaxSNESFailures(-1)  # (step will be rejected and retried)
-
-        # SNES nonlinear solver
-        snes = ts.getSNES()
-        snes.setTolerances(max_it=10)   # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
-
-        # KSP linear solver
-        ksp = snes.getKSP()
-        ksp.setType("preonly")
-        pc = ksp.getPC()
-        pc.setType("gasm")
-
-        ts.setFromOptions()
         tstart = ts.getTime()
         self._evalSolutionSoil(tstart, x)
 
@@ -502,12 +518,6 @@ class soilSPL(object):
                 flush=True,
             )
 
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
-        ts.destroy()
-
         # Get diffused sediment thicknesses
         self.dh.waxpy(-1.0, self.hGlobal, x)
         self.dm.globalToLocal(self.dh, self.tmpL)
@@ -515,11 +525,6 @@ class soilSPL(object):
         self.tmpL.setArray(chgSoil)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
-        x.destroy()
-        f.destroy()
-        if self.memclear:
-            del depSoil
-            gc.collect()
         petsc4py.PETSc.garbage_cleanup()
 
         # Update cumulative erosion and deposition as well as elevation

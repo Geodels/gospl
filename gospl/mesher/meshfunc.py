@@ -199,7 +199,9 @@ class VoroBuild(object):
     @property
     def surface_areas(self):
         if self._surface_areas is None:
-            self._surface_areas = self._compute_surface_areas()
+            self._surface_areas = self._compute_surface_areas(
+                np.arange(len(self.cells["nodes"]))
+            )
         return self._surface_areas
 
     @property

@@ -9,11 +9,6 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
-petsc4py.init(sys.argv)
-MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
-MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
-MPIcomm = MPI.COMM_WORLD
-
 if "READTHEDOCS" not in os.environ:
     from gflex.f2d import F2D
     from gospl._fortran import flexure
@@ -169,7 +164,11 @@ class GridProcess(object):
             if nb == -1:
                 nb = 0
             self.teNb = nb
-            if self.flex_method != 'global' and self.tedata["tUni"][nb] == 0.:
+            if self.flex_method == 'global':
+                loadData = np.load(self.tedata.iloc[nb, 2])
+                self.flexTe = loadData[self.tedata.iloc[nb, 3]]
+                del loadData
+            elif self.tedata["tUni"][nb] == 0.:
                 loadData = np.load(self.tedata.iloc[nb, 2])
                 teVal = loadData[self.tedata.iloc[nb, 3]]
                 del loadData
@@ -177,10 +176,6 @@ class GridProcess(object):
                 if len(self.regOnIDs) > 0:
                     self.flexTe[self.regOnIDs] = teVal[self.regIDs[self.regOnIDs, 0]]
                 self.flexTe = self.flexTe.reshape(self.reg_ny, self.reg_nx)
-            if self.flex_method == 'global':
-                loadData = np.load(self.tedata.iloc[nb, 2])
-                self.flexTe = loadData[self.tedata.iloc[nb, 3]]
-                del loadData
             else:
                 self.flexTe = self.tedata.iloc[nb, 1] * np.ones((self.reg_ny, self.reg_nx))
 
@@ -424,7 +419,10 @@ class GridProcess(object):
 
             # Inverse FFT, de-pad, convert units, add uniform rate
             oroRain = np.fft.ifft2(P_karot)
-            oroRain = np.real(oroRain[pad:-pad, pad:-pad])
+            if pad > 0:
+                oroRain = np.real(oroRain[pad:-pad, pad:-pad])
+            else:
+                oroRain = np.real(oroRain)
             oroRain *= 3600.  # mm hr-1
             oroRain += self.oro_precip_base
             # Precipitation rate must be a value greater than minimum precipitation/runoff to avoid errors when precip_rate <= 0

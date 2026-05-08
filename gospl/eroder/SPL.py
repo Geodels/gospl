@@ -168,15 +168,10 @@ class SPL(object):
         sysMat.assemblyBegin()
         sysMat.assemblyEnd()
 
-        # Clean up
+        # Clean up submatrix handles. The nest holds its own references;
         A00.destroy()
         A01.destroy()
         A10.destroy()
-        eMat.destroy()
-        mats[0][0].destroy()
-        mats[0][1].destroy()
-        mats[1][0].destroy()
-        mats[1][1].destroy()
 
         # Create nested vectors
         self.tmpL.setArray(1. - self.fDep)
@@ -207,6 +202,8 @@ class SPL(object):
 
         ksp.solve(rhs_vec, hq_vec)
         r = ksp.getConvergedReason()
+        # Note: on KSP divergence we log and continue. The downstream newH may
+        # be inaccurate; operators should monitor this warning in long runs.
         if r < 0:
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
             if MPIrank == 0:
@@ -291,6 +288,8 @@ class SPL(object):
             # Dimensionless depositional coefficient
             self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
             self.fDep[self.seaID] = 0.
+            # Cap fDep to keep the coupled (I - W^T) Q + (1-fDep) h block
+            # well-conditioned; values approaching 1 lead to a singular system.
             self.fDep[self.fDep > 0.99] = 0.99
             if self.flatModel:
                 self.fDep[self.idBorders] = 0.

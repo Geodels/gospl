@@ -32,6 +32,17 @@ class nlSPL(object):
         self.snes_atol = 1.e-6
         self.snes_maxit = 500
 
+        # Cached SNES + helper vectors for the two non-linear solvers; created
+        # lazily on first call and reused across timesteps to avoid per-call
+        # SNES/KSP/PC create+destroy overhead.
+        self._snes_ed = None
+        self._snes_ed_f = None
+        self._snes_ed_x = None
+        self._snes_nl = None
+        self._snes_nl_f = None
+        self._snes_nl_x = None
+        self._snes_nl_J = None
+
         return
 
     def _form_residual(self, snes, h, F):
@@ -164,17 +175,13 @@ class nlSPL(object):
             PETSc SNES approach is used to solve the nonlinear equation above over the considered time step. In this implementation of the SNES, we do not form the Jacobian and PETSc calculates it based on the residual function. A Nonlinear Generalized Minimum Residual method is used ``ngmres``, a Preconditioned Conjugate Gradient ``cg`` method is defined for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
         """
 
-        self.oldH = self.hGlobal.getArray()
         self.hOldArray = self.hLocal.getArray().copy()
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
 
         # Define erosion limiter to prevent formation of flat
-        dh = []
-        for k in range(0, self.flowDir):
-            dh.append(self.hOldArray - self.hOldArray[self.rcvIDi[:, k]])
-        dh = np.array(dh).max(0)
+        dh = (self.hOldArray[:, None] - self.hOldArray[self.rcvIDi]).max(axis=1)
         elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
                              where=dh != 0)
 
@@ -199,42 +206,40 @@ class nlSPL(object):
         if self.flatModel:
             self.fDep[self.idBorders] = 0.
 
-        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-        snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                           max_it=self.snes_maxit)
+        if self._snes_ed is None:
+            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+            snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
+                               max_it=self.snes_maxit)
+            if self.verbose:
+                snes.setMonitor(self._monitor)
+            snes.setType('ngmres')
+            ksp = snes.getKSP()
+            ksp.setType("cg")
+            pc = ksp.getPC()
+            pc.setType("hypre")
+            petsc_options = petsc4py.PETSc.Options()
+            petsc_options['pc_hypre_type'] = 'boomeramg'
+            ksp.getPC().setFromOptions()
+            ksp.setTolerances(rtol=1.0e-6)
+            self._snes_ed_f = self.hGlobal.duplicate()
+            snes.setFunction(self._form_residual_ed, self._snes_ed_f)
+            self._snes_ed_x = self.hGlobal.duplicate()
+            self._snes_ed = snes
 
-        # Set a monitor to see residual values
-        if self.verbose:
-            snes.setMonitor(self._monitor)
-
-        f = self.hGlobal.duplicate()
-        snes.setFunction(self._form_residual_ed, f)
-
-        # SNES solvers
-        snes.setType('ngmres')
-        ksp = snes.getKSP()
-        ksp.setType("cg")
-        pc = ksp.getPC()
-        pc.setType("hypre")
-        petsc_options = petsc4py.PETSc.Options()
-        petsc_options['pc_hypre_type'] = 'boomeramg'
-        ksp.getPC().setFromOptions()
-        ksp.setTolerances(rtol=1.0e-6)
-
-        b, x = None, f.duplicate()
+        snes = self._snes_ed
+        x = self._snes_ed_x
         self.hGlobal.copy(result=x)
-        snes.solve(b, x)
-
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
+        snes.solve(None, x)
+        r = snes.getConvergedReason()
+        if r < 0 and MPIrank == 0:
+            print(
+                "Non-linear SPL SNES failed to converge after %d iterations (reason %d)"
+                % (snes.getIterationNumber(), r),
+                flush=True,
+            )
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)
-        f.destroy()
-        x.destroy()
-
         petsc4py.PETSc.garbage_cleanup()
 
         return
@@ -251,17 +256,13 @@ class nlSPL(object):
             PETSc SNES approach is used to solve the nonlinear equation above over the considered time step. In this implementation of the SNES, we provide the Jacobian. A Nonlinear Generalized Minimum Residual method is used ``nrichardson``, a Generalized Minimum Residual method is used ``gmres`` for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
         """
 
-        self.oldH = self.hGlobal.getArray()
         self.hOldArray = self.hLocal.getArray().copy()
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
 
         # Define erosion limiter to prevent formation of flat
-        dh = []
-        for k in range(0, self.flowDir):
-            dh.append(self.hOldArray - self.hOldArray[self.rcvIDi[:, k]])
-        dh = np.array(dh).max(0)
+        dh = (self.hOldArray[:, None] - self.hOldArray[self.rcvIDi]).max(axis=1)
         elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
                              where=dh != 0)
 
@@ -279,48 +280,43 @@ class nlSPL(object):
             self.Kbi = self.Kice * self.dt * (Ai ** self.spl_m) * elimiter
             self.Kbi[self.seaID] = 0.0
 
-        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-        snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                           max_it=self.snes_maxit)
+        if self._snes_nl is None:
+            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+            snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
+                               max_it=self.snes_maxit)
+            if self.verbose:
+                snes.setMonitor(self._monitor)
+            self._snes_nl_f = self.hGlobal.duplicate()
+            snes.setFunction(self._form_residual, self._snes_nl_f)
+            self._snes_nl_J = self.dm.createMatrix()
+            self._snes_nl_J.setOption(self._snes_nl_J.Option.NEW_NONZERO_LOCATIONS, True)
+            snes.setJacobian(self._form_jacobian, self._snes_nl_J)
+            snes.setType('nrichardson')
+            ksp = snes.getKSP()
+            ksp.setType("gmres")
+            pc = ksp.getPC()
+            pc.setType("hypre")  # hypre or gamg
+            petsc_options = petsc4py.PETSc.Options()
+            petsc_options['pc_hypre_type'] = 'boomeramg'
+            ksp.getPC().setFromOptions()
+            ksp.setTolerances(rtol=1.0e-6)
+            self._snes_nl_x = self.hGlobal.duplicate()
+            self._snes_nl = snes
 
-        # Set a monitor to see residual values
-        if self.verbose:
-            snes.setMonitor(self._monitor)
-
-        f = self.hGlobal.duplicate()
-        snes.setFunction(self._form_residual, f)
-
-        # Setting the Jacobian function
-        J = self.dm.createMatrix()
-        J.setOption(J.Option.NEW_NONZERO_LOCATIONS, True)
-        snes.setJacobian(self._form_jacobian, J)
-
-        # SNES solvers
-        snes.setType('nrichardson')
-        ksp = snes.getKSP()
-        ksp.setType("gmres")
-        pc = ksp.getPC()
-        pc.setType("hypre")  # hypre or gamg
-        petsc_options = petsc4py.PETSc.Options()
-        petsc_options['pc_hypre_type'] = 'boomeramg'
-        ksp.getPC().setFromOptions()
-        ksp.setTolerances(rtol=1.0e-6)
-
-        b, x = None, f.duplicate()
+        snes = self._snes_nl
+        x = self._snes_nl_x
         self.hGlobal.copy(result=x)
-        snes.solve(b, x)
-
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
+        snes.solve(None, x)
+        r = snes.getConvergedReason()
+        if r < 0 and MPIrank == 0:
+            print(
+                "Non-linear SPL SNES failed to converge after %d iterations (reason %d)"
+                % (snes.getIterationNumber(), r),
+                flush=True,
+            )
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)
-        f.destroy()
-        x.destroy()
-        J.destroy()
-
         petsc4py.PETSc.garbage_cleanup()
 
         return

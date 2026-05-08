@@ -40,7 +40,6 @@ class Tectonics(object):
         self.hdisp = None
         self.tecNb = -1
         self.paleoZ = None
-        # self.minZ = None
         self.plateStep = False
 
         self.fiso = self.hGlobal.duplicate()
@@ -109,14 +108,12 @@ class Tectonics(object):
                 self.upsub = None
 
             # Paleo-elevation fitting
-            # self.minZ = None
             self.paleoZ = None
             if self.tecdata.iloc[nb, 3] != "empty":
                 fname = self.tecdata.iloc[nb, 3][0] + ".npz"
                 mdata = np.load(fname)
                 key = self.tecdata.iloc[nb, 3][1]
                 if len(self.tecdata.iloc[nb, 3]) == 3:
-                    # self.minZ = self.tecdata.iloc[nb, 2][2]
                     self.paleoZ = mdata[key][self.locIDs]
 
             del mdata
@@ -372,7 +369,8 @@ class Tectonics(object):
             del rCoeffs
 
         advMat_left.destroy()
-        del edL, nedL, hL, nhL, lCoeffs
+        if self.flatModel:
+            del nedL, nhL
         gc.collect()
 
         return
@@ -520,7 +518,7 @@ class Tectonics(object):
         lgNghbs = self.idNbghs[self.locIDs, :].flatten()
 
         # Global IDs required locally but part of another partition
-        gids = lgNghbs[~np.in1d(lgNghbs, self.locIDs)]
+        gids = lgNghbs[~np.isin(lgNghbs, self.locIDs)]
 
         # Get all points that have to be transferred
         vals = np.zeros(self.mpoints, dtype=int)
@@ -549,7 +547,14 @@ class Tectonics(object):
         nghs = self.tec_IDs[self.locIDs]
         wgts = self.tec_weights[self.locIDs, :, None]
         sumw = self.tec_sumw[self.locIDs, :, None]
-        onID = self.tec_onIDs[self.locIDs]
+        # onID = self.tec_onIDs[self.locIDs]
+        # tec_onIDs holds global-mesh indices where the advected node
+        # coincides exactly. Remap to local-mesh indices and keep only
+        # entries this rank owns.
+        g2l = np.full(self.mpoints, -1, dtype=int)
+        g2l[self.locIDs] = np.arange(len(self.locIDs))
+        onID = g2l[self.tec_onIDs]
+        onID = onID[onID >= 0]
 
         self.stratH[:, : self.stratStep] = self._updateStratInfo(
             redIDs, self.stratH[:, : self.stratStep], sumw, onID, wgts, nghs
@@ -618,7 +623,6 @@ class Tectonics(object):
 
         # Send local elevation globally
         hl = self.hLocal.getArray().copy()
-        # ids = np.where(hl <= self.minZ)[0]
         ids = np.where(hl <= self.sealevel)[0]
         hl[ids] = self.paleoZ[ids]
 

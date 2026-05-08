@@ -118,7 +118,7 @@ class SEDMesh(object):
             localPts = spillIDs[localSpill]
             nvSed = np.zeros(self.lpoints, dtype=np.float64)
             nvSed[localPts] = eV[eIDs][localSpill]
-            ids = np.in1d(self.pitIDs, np.where(eV > 0.0)[0])
+            ids = np.isin(self.pitIDs, np.where(eV > 0.0)[0])
             self.sedFilled[ids] = self.lFill[ids]
 
         # Update unfilled depressions volumes

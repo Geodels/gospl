@@ -3,7 +3,6 @@ import gc
 import sys
 import petsc4py
 import numpy as np
-import numpy_indexed as npi
 
 from mpi4py import MPI
 from time import process_time
@@ -40,6 +39,17 @@ class hillSLP(object):
         self.h = self.hGlobal.duplicate()
         self.hl = self.hLocal.duplicate()
         self.dh = self.hGlobal.duplicate()
+
+        # Cached SNES + helper vectors for the non-linear hillslope solver;
+        # created lazily on first call and reused across timesteps.
+        self._snes_hill = None
+        self._snes_hill_f = None
+        self._snes_hill_x = None
+
+        # Cached TS for marine non-linear diffusion (rosw scheme); created
+        # lazily on first call and reused across timesteps.
+        self._ts_marine = None
+        self._ts_marine_x = None
 
         return
 
@@ -202,40 +212,39 @@ class hillSLP(object):
         self.Cd_nl[self.seaID] = self.Cdm
         self.hOldArray = self.hLocal.getArray().copy()
 
-        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-        snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                           max_it=self.snes_maxit)
+        if self._snes_hill is None:
+            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+            snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
+                               max_it=self.snes_maxit)
+            if self.verbose:
+                snes.setMonitor(self._diff_nl_monitor)
+            self._snes_hill_f = self.hGlobal.duplicate()
+            snes.setFunction(self._form_residual_nl_hillslope, self._snes_hill_f)
+            snes.setType('ngmres')
+            ksp = snes.getKSP()
+            ksp.setType("cg")
+            pc = ksp.getPC()
+            pc.setType("hypre")
+            petsc_options = petsc4py.PETSc.Options()
+            petsc_options['pc_hypre_type'] = 'boomeramg'
+            ksp.getPC().setFromOptions()
+            ksp.setTolerances(rtol=1.0e-6)
+            self._snes_hill_x = self.hGlobal.duplicate()
+            self._snes_hill = snes
 
-        # Set a monitor to see residual values
-        if self.verbose:
-            snes.setMonitor(self._diff_nl_monitor)
-
-        f = self.hGlobal.duplicate()
-        snes.setFunction(self._form_residual_nl_hillslope, f)
-
-        # SNES solvers
-        snes.setType('ngmres')
-        ksp = snes.getKSP()
-        ksp.setType("cg")
-        pc = ksp.getPC()
-        pc.setType("hypre")
-        petsc_options = petsc4py.PETSc.Options()
-        petsc_options['pc_hypre_type'] = 'boomeramg'
-        ksp.getPC().setFromOptions()
-        ksp.setTolerances(rtol=1.0e-6)
-
-        b, x = None, f.duplicate()
+        snes = self._snes_hill
+        x = self._snes_hill_x
         self.hGlobal.copy(result=x)
-        snes.solve(b, x)
-
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
+        snes.solve(None, x)
+        r = snes.getConvergedReason()
+        if r < 0 and MPIrank == 0:
+            print(
+                "Non-linear hillslope SNES failed to converge after %d iterations (reason %d)"
+                % (snes.getIterationNumber(), r),
+                flush=True,
+            )
 
         x.copy(result=self.hGlobal)
-        f.destroy()
-        x.destroy()
 
         # Update cumulative erosion/deposition and elevation
         self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
@@ -313,9 +322,9 @@ class hillSLP(object):
             dh = hl - zb
             dh[dh < 0.1] = 0.0
             if self.dlim:
-                Cd = self.minDiff + np.multiply(self.Cd, dh / (dh + self.Dlimit))
+                Cd = self.minDiff_vec + np.multiply(self.Cd, dh / (dh + self.Dlimit))
             else:
-                Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
+                Cd = self.minDiff_vec + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
             nlvec = fctcoeff(hl, Cd)
             f.setArray(hdot + nlvec[self.glIDs])
 
@@ -344,9 +353,9 @@ class hillSLP(object):
             dh = hl - zb
             dh[dh < 0.1] = 0.0
             if self.dlim:
-                Cd = self.minDiff + np.multiply(self.Cd, dh / (dh + self.Dlimit))
+                Cd = self.minDiff_vec + np.multiply(self.Cd, dh / (dh + self.Dlimit))
             else:
-                Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
+                Cd = self.minDiff_vec + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
 
             # Coefficient derivatives
             if self.dlim:
@@ -354,11 +363,16 @@ class hillSLP(object):
             else:
                 Cp = np.multiply(self.Cd, self.dexp * np.exp(-self.dexp * dh))
             nlC = jacobiancoeff(hl, Cd, Cp)
-
-            for row in range(self.lpoints):
-                B.setValuesLocal(row, row, a + nlC[row, 0])
-                cols = self.FVmesh_ngbID[row, :]
-                B.setValuesLocal(row, cols, nlC[row, 1:])
+            diag = a + nlC[:, 0]
+            offdiag = nlC[:, 1:]
+            # Combine the diagonal and off-diagonal columns into one array for setting values in the matrix
+            ngb_cols = self.FVmesh_ngbID[self.glIDs, :]
+            cols_2d = np.column_stack([self.glIDs[:, None], ngb_cols]).astype(
+                petsc4py.PETSc.IntType
+            )
+            vals_2d = np.column_stack([diag[self.glIDs, None], offdiag[self.glIDs]])
+            for i, row in enumerate(self.glIDs):
+                B.setValuesLocal(row, cols_2d[i], vals_2d[i])
             B.assemble()
 
             if A != B:
@@ -398,8 +412,7 @@ class hillSLP(object):
 
         t0 = process_time()
 
-        x = self.tmp1.duplicate()
-        f = self.tmp1.duplicate()
+        self.mat.zeroEntries()
 
         # Get diffusion coefficients based on sediment type
         self.Cd = np.zeros(self.lpoints)
@@ -408,34 +421,43 @@ class hillSLP(object):
         self.hl.axpy(1.0, self.hLocal)
         self.dm.localToGlobal(self.hl, self.h)
 
-        # Time stepping definition
-        ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
-        # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
-        ts.setType("rosw")
+        self.minDiff_vec = np.zeros(self.lpoints)
+        self.minDiff_vec[self.seaID] = self.minDiff
 
-        ts.setIFunction(self._evalFunctionMardDiff, self.tmp1)
-        ts.setIJacobian(self._evalJacobianMardDiff, self.mat)
+        # Time stepping definition (cached across timesteps)
+        if self._ts_marine is None:
+            ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
+            # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
+            ts.setType("rosw")
+            ts.setIFunction(self._evalFunctionMardDiff, self.tmp1)
+            ts.setIJacobian(self._evalJacobianMardDiff, self.mat)
+            ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
+            # Allow an unlimited number of failures (step rejected and retried)
+            ts.setMaxSNESFailures(-1)
+            # SNES nonlinear solver
+            snes = ts.getSNES()
+            snes.setTolerances(max_it=10)
+            # KSP linear solver
+            ksp = snes.getKSP()
+            ksp.setType("preonly")
+            pc = ksp.getPC()
+            pc.setType("gasm")
+            ts.setFromOptions()
+            self._ts_marine = ts
+            self._ts_marine_x = self.tmp1.duplicate()
 
+        ts = self._ts_marine
+        x = self._ts_marine_x
+        # Marine sediment thicknesses are meters; mm-level absolute tolerance
+        # is plenty and avoids a lot of unnecessary substepping.
+        ts.setTolerances(atol=1e-3, rtol=1e-3)
         ts.setTime(0.0)
-        ts.setTimeStep(self.dt / 1000.0)
+        # Larger initial step (was self.dt / 1000.0). TS adapts down on stiff
+        # cases but typically converges in fewer substeps with this start.
+        ts.setTimeStep(self.dt / 100.0)
         ts.setMaxTime(self.dt)
         ts.setMaxSteps(self.tsStep)
-        ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
 
-        # Allow an unlimited number of failures
-        ts.setMaxSNESFailures(-1)  # (step will be rejected and retried)
-
-        # SNES nonlinear solver
-        snes = ts.getSNES()
-        snes.setTolerances(max_it=10)   # Stop nonlinear solve after 10 iterations (TS will retry with shorter step)
-
-        # KSP linear solver
-        ksp = snes.getKSP()
-        ksp.setType("preonly")
-        pc = ksp.getPC()
-        pc.setType("gasm")
-
-        ts.setFromOptions()
         tstart = ts.getTime()
         self._evalSolutionMardDiff(tstart, x)
 
@@ -458,22 +480,15 @@ class hillSLP(object):
                 flush=True,
             )
 
-        # Clean solver
-        pc.destroy()
-        ksp.destroy()
-        snes.destroy()
-        ts.destroy()
-
         # Get diffused sediment thicknesses
         x.copy(result=self.h)
         self.dh.waxpy(-1.0, self.hGlobal, self.h)
         self.dm.globalToLocal(self.dh, self.tmpL)
         ndepo = self.tmpL.getArray().copy()
+        ndepo[ndepo < 0.0] = 0.0
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
-        x.destroy()
-        f.destroy()
         if self.memclear:
             del ndepo
             gc.collect()

@@ -208,10 +208,19 @@ class PITFill(object):
         # Sorting label transfer between processors
         if len(df) > 1:
             sorting = True
+            stp = 0
             while sorting:
                 df2 = self._sortingPits(df)
                 sorting = not df.equals(df2)
                 df = df2.copy()
+                stp += 1
+                if stp > 1000:
+                    if MPIrank == 0:
+                        print(
+                            "Pit sorting did not converge after 1000 iterations; continuing.",
+                            flush=True,
+                        )
+                    break
         for k in range(len(df)):
             label[label == df["p2"].iloc[k]] = df["p1"].iloc[k]
         if MPIrank == 0 and self.verbose:
@@ -345,7 +354,7 @@ class PITFill(object):
         inIDs[out] = 0
         outEdges = self.outEdges.copy()
         outEdges[out] = 0
-        out = np.where((ledges == 0) & (ledges == 2))[0]
+        out = np.where((ledges == 0) | (ledges == 2))[0]
         gBounds = np.zeros(self.lpoints, dtype=int)
         gBounds[out] = 1
 
@@ -393,15 +402,15 @@ class PITFill(object):
             lgrph = len(cgraph)
 
         # Add processor number to the graph
-        offset, sum = self._offsetGlobal(lgrph)
-        graph = -np.ones((sum, 5), dtype=float)
+        offset, total = self._offsetGlobal(lgrph)
+        graph = -np.ones((total, 5), dtype=float)
         if lgrph > 0:
             graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
             graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
 
         # Build global spillover graph on master
         if MPIrank == 0:
-            mgraph = -np.ones((sum, 5), dtype=float)
+            mgraph = -np.ones((total, 5), dtype=float)
         else:
             mgraph = None
         MPI.COMM_WORLD.Reduce(graph, mgraph, op=MPI.MAX, root=0)
@@ -423,6 +432,9 @@ class PITFill(object):
         ids = np.where(proc == 1)[0]
         ids2 = np.where(graph[ids, 0] == graph[graph[ids, 3].astype(int), 0])[0]
         graph[ids[ids2], 3] = 0.0
+        # Sentinel filter: physical Earth elevations are bounded by ~9 km;
+        # entries outside [-1e8, 1e7] m come from the global-graph initialiser
+        # (-1.0e8 sentinel) and any extreme outliers, both flagged as -1e8.
         graph[graph[:, 0] < -1.0e8, 0] = -1.0e8
         graph[graph[:, 0] > 1.0e7, 0] = -1.0e8
 
@@ -609,20 +621,20 @@ class PITFill(object):
         self._pitInformation(hl, level, False)
 
         # Define specific filling levels for unfilled water depressions
-        if not False:
-            ids = self.pitParams[:, 0] > 0.0
-            dh = np.zeros((len(self.pitInfo), 6), dtype=np.float64)
-            dh[ids, 0] = self.pitParams[ids, 1] - self.pitParams[ids, 2]
-            dh[ids, 1:] = np.expand_dims(self.pitParams[ids, 2] / 5.0, axis=1)
-            self.filled_lvl = np.cumsum(dh, axis=1)[:, 1:]
+        # if not False:
+        ids = self.pitParams[:, 0] > 0.0
+        dh = np.zeros((len(self.pitInfo), 6), dtype=np.float64)
+        dh[ids, 0] = self.pitParams[ids, 1] - self.pitParams[ids, 2]
+        dh[ids, 1:] = np.expand_dims(self.pitParams[ids, 2] / 5.0, axis=1)
+        self.filled_lvl = np.cumsum(dh, axis=1)[:, 1:]
 
-            self.filled_vol = np.zeros((len(self.pitInfo), 5), dtype=np.float64)
-            hl[hl < self.sealevel] = self.sealevel
-            self.filled_vol[:, :-1] = getpitvol(
-                self.filled_lvl[:, :-1], hl, self.pitIDs, self.inIDs
-            )
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.filled_vol, op=MPI.SUM)
-            self.filled_vol[:, -1] = self.pitParams[:, 0]
+        self.filled_vol = np.zeros((len(self.pitInfo), 5), dtype=np.float64)
+        hl[hl < self.sealevel] = self.sealevel
+        self.filled_vol[:, :-1] = getpitvol(
+            self.filled_lvl[:, :-1], hl, self.pitIDs, self.inIDs
+        )
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.filled_vol, op=MPI.SUM)
+        self.filled_vol[:, -1] = self.pitParams[:, 0]
 
         if MPIrank == 0 and self.verbose:
             print(

@@ -33,6 +33,13 @@ class FAMesh(object):
         # KSP solver parameters
         self.rtol = 1.0e-10
 
+        # Cached KSP/PC objects: created lazily on first solve and reused
+        # across timesteps so we avoid the create/destroy churn (~5-10ms per
+        # solve). PETSc auto-detects matrix changes via setOperators and
+        # rebuilds the preconditioner factor when necessary.
+        self._ksp_main = None
+        self._ksp_fallback = None
+
         # Identity matrix construction
         self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
@@ -113,13 +120,16 @@ class FAMesh(object):
 
         :return: vector2 PETSc vector of the new flow discharge values
         """
-        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
-        ksp.setInitialGuessNonzero(True)
+        if self._ksp_fallback is None:
+            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+            ksp.setType("fgmres")
+            ksp.getPC().setType("asm")
+            ksp.setTolerances(rtol=1.0e-6, divtol=1.e20)
+            ksp.setInitialGuessNonzero(True)
+            self._ksp_fallback = ksp
+
+        ksp = self._ksp_fallback
         ksp.setOperators(matrix, matrix)
-        ksp.setType("fgmres")
-        pc = ksp.getPC()
-        pc.setType("asm")
-        ksp.setTolerances(rtol=1.0e-6, divtol=1.e20)
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
@@ -131,12 +141,9 @@ class FAMesh(object):
                     flush=True,
                 )
                 print("with reason: ", KSPReasons[r], flush=True)
+            # If the fgmres+asm fallback also diverges, return a zero discharge
+            # for this step. Operators should monitor the warning above.
             vector2.set(0.0)
-            pc.destroy()
-            ksp.destroy()
-        else:
-            pc.destroy()
-            ksp.destroy()
         petsc4py.PETSc.garbage_cleanup()
 
         return vector2
@@ -159,23 +166,21 @@ class FAMesh(object):
         :return: vector2 PETSc vector of the new flow discharge values
         """
 
-        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        if self._ksp_main is None:
+            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+            ksp.setType("richardson")
+            ksp.getPC().setType("bjacobi")
+            ksp.setTolerances(rtol=self.rtol)
+            self._ksp_main = ksp
+
+        ksp = self._ksp_main
         if guess:
-            ksp.setInitialGuessNonzero(guess)
+            ksp.setInitialGuessNonzero(True)
         ksp.setOperators(matrix, matrix)
-        ksp.setType("richardson")
-        pc = ksp.getPC()
-        pc.setType("bjacobi")
-        ksp.setTolerances(rtol=self.rtol)
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
-            pc.destroy()
-            ksp.destroy()
             vector2 = self._solve_KSP2(matrix, vector1, vector2)
-        else:
-            pc.destroy()
-            ksp.destroy()
         petsc4py.PETSc.garbage_cleanup()
 
         return vector2
@@ -334,7 +339,7 @@ class FAMesh(object):
             localPts = spillIDs[localSpill]
             nFA = np.zeros(self.lpoints, dtype=np.float64)
             nFA[localPts] = eV[eIDs][localSpill]
-            ids = np.in1d(self.pitIDs, np.where(eV > 0.0)[0])
+            ids = np.isin(self.pitIDs, np.where(eV > 0.0)[0])
             self.waterFilled[ids] = self.lFill[ids]
 
         # Update unfilled depressions volumes and assign water level in depressions
@@ -345,9 +350,14 @@ class FAMesh(object):
                 axis=1
             )
             fill_lvl = self.filled_lvl[eIDs, nid]
-            for k in range(len(eIDs)):
-                ids = (self.waterFilled <= fill_lvl[k]) & (self.pitIDs == eIDs[k])
-                self.waterFilled[ids] = fill_lvl[k]
+            # Vectorised replacement of the per-pit Python loop. Build a
+            # pit-id → fill-level lookup and apply it in one pass over nodes.
+            in_eIDs = np.isin(self.pitIDs, eIDs)
+            pit_fill_lvl = np.zeros(len(self.pitParams))
+            pit_fill_lvl[eIDs] = fill_lvl
+            node_lvl = pit_fill_lvl[self.pitIDs]
+            mask = in_eIDs & (self.waterFilled <= node_lvl)
+            self.waterFilled[mask] = node_lvl[mask]
 
         # In case there is still remaining water flux to distribute downstream
         if (eV > 1.0e-3).any():
@@ -359,6 +369,9 @@ class FAMesh(object):
                 self._buildFlowDirection(self.waterFilled)
             self.tmpL.setArray(nFA / self.dt)
             self.dm.localToGlobal(self.tmpL, self.tmp)
+            # Skip the KSP solve for negligible residual fluxes: comparing
+            # total residual flux (m^3/yr) against the largest cell area is a
+            # cheap "less than 1 m of water over the biggest cell" guard.
             if self.tmp.sum() > self.maxarea[0]:
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
@@ -453,6 +466,10 @@ class FAMesh(object):
             self.FAL.setArray(FA)
             self.dm.localToGlobal(self.FAL, self.FAG)
             self.dm.globalToLocal(self.FAG, self.FAL)
+            # Lake-erosion proxy: assign a background discharge (10% of the
+            # global max) at filled-depression nodes so that SPL still produces
+            # some erosion on the filled topography. FAL itself stays zero
+            # there because no water actually flows.
             FA[ids] = self.FAG.max()[1] * 0.1
             self.fillFAL.setArray(FA)
         else:

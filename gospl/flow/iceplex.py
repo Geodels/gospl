@@ -151,6 +151,16 @@ class IceMesh(object):
                 self.iceFlex.set(0.)
             return
 
+        # Degenerate config: ice-cap altitude must lie above the ELA, otherwise
+        # the (hl - elaH) / (iceH - elaH) ratio below produces NaN/Inf.
+        if iceH <= elaH:
+            self.iceHL.set(0.)
+            self.iceFAL.set(0.)
+            self.iceFAG.set(0.)
+            if self.flexOn:
+                self.iceFlex.set(0.)
+            return
+
         # Compute the flow direction matrix for ice
         self._matrixIceFlow(self.iceDir)
 
@@ -182,7 +192,6 @@ class IceMesh(object):
 
         # Ice thickness calculation based on glacier width
         if self.flexOn:
-            # iceWidth = self.icewf * smthIce**0.3
             tmp = self.icewe * self.icewf * smthIce**0.3
             tmp[tmp < 1.e-1] = 0.
             self.tmpL.setArray(tmp)
