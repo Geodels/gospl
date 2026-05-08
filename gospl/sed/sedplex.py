@@ -10,7 +10,6 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import setmaxnb
-    from gospl._fortran import scale_volume
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -90,9 +89,13 @@ class SEDMesh(object):
         :arg vSed: excess sediment volume array
         :arg step: downstream distribution step
 
-        :return: excess (boolean set to True if excess sediment fluxes remain to be distributed)
+        :return: (excess, sedFilled_changed) where excess is True when sediment
+            still needs to be redistributed, and sedFilled_changed is True when
+            at least one pit saturated this iteration (signalling that the
+            flow direction matrix should be rebuilt next call).
         """
         excess = False
+        sedFilled_changed = False
 
         # Remove points belonging to other processors
         vSed = np.multiply(vSed, self.inIDs)
@@ -120,6 +123,7 @@ class SEDMesh(object):
             nvSed[localPts] = eV[eIDs][localSpill]
             ids = np.isin(self.pitIDs, np.where(eV > 0.0)[0])
             self.sedFilled[ids] = self.lFill[ids]
+            sedFilled_changed = True
 
         # Update unfilled depressions volumes
         eIDs = eV < 0
@@ -128,19 +132,31 @@ class SEDMesh(object):
 
         # In case there is still remaining sediment flux to distribute downstream
         if (eV > 1.0e-3).any():
-            if step == 100:
-                self._buildFlowDirection(self.lFill)
-            else:
-                self._buildFlowDirection(self.sedFilled)
+            # Only rebuild the flow direction matrix when the topography has
+            # actually changed (a pit saturated this iteration), or on the
+            # very first iteration when no matrix exists yet, or on the
+            # special step==100 fallback that switches to lFill. Otherwise
+            # reuse the matrix built on the previous iteration.
+            need_rebuild = (
+                sedFilled_changed or step == 0 or step == 100
+            )
+            if need_rebuild:
+                if step > 0 and self.fMat is not None:
+                    self.fMat.destroy()
+                if step == 100:
+                    self._buildFlowDirection(self.lFill)
+                else:
+                    self._buildFlowDirection(self.sedFilled)
             self.tmpL.setArray(nvSed)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             if self.tmp.sum() > 0.5 * self.maxarea[0]:
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
-            self.fMat.destroy()
+            # Note: matrix lifecycle moved to _distributeSediment so we don't
+            # destroy/rebuild on every iteration when the topography is stable.
 
-        return excess
+        return excess, sedFilled_changed
 
     def _distributeSediment(self, hl):
         """
@@ -158,12 +174,25 @@ class SEDMesh(object):
         # Get the volumetric sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
         vSed = self.QsL.getArray().copy() * self.dt
 
+        # Drop any matrix from the prior context; _moveDownstream will rebuild
+        # on iteration 0 and only rebuild thereafter when sedFilled changes.
+        self.fMat.destroy()
+        self.fMat = None
+
         step = 0
         excess = True
-        self.fMat.destroy()
+        max_iters = 5000
         while excess:
+            if step >= max_iters:
+                if MPIrank == 0:
+                    print(
+                        "Continental sediment routing did not converge after "
+                        "%d iterations; continuing." % max_iters,
+                        flush=True,
+                    )
+                break
             t1 = process_time()
-            excess = self._moveDownstream(vSed, step)
+            excess, _ = self._moveDownstream(vSed, step)
             if excess:
                 vSed = self.tmpL.getArray().copy()
                 nvSed = vSed.copy()
@@ -178,6 +207,12 @@ class SEDMesh(object):
                     flush=True,
                 )
             step += 1
+
+        # Final cleanup of the cached flow matrix
+        if self.fMat is not None:
+            self.fMat.destroy()
+            self.fMat = None
+
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
 
         if MPIrank == 0 and self.verbose:
@@ -193,24 +228,48 @@ class SEDMesh(object):
         """
         This function updates depressions elevations based on incoming sediment volumes. It runs until all inland sediments have reached either a sink which is not completely filled or the open ocean.
 
+        Sediment is deposited as a bottom-up fill: for each pit we find the
+        lake-surface elevation `target_lvl` such that the volume below that
+        level (above the bathymetry) equals the deposited volume. Nodes
+        already above `target_lvl` get no deposit; nodes below are raised to
+        `target_lvl`. This produces a horizontal lake surface and a deposit
+        thickness that varies with the bathymetry, which is far more
+        physical than the previous uniform "(lFill-hl) * fraction" fill.
+
         :arg hl: local elevation prior deposition
         """
 
-        # Difference between initial volume and remaining one
+        # Sediment volume deposited per pit (m^3)
         depo = self.pitParams[:, 0] - self.pitVol
         depo[depo < 0] = 0.0
-        with np.errstate(divide="ignore", over="ignore"):
-            scaleV = np.divide(
-                depo,
-                self.pitParams[:, 0],
-                out=np.zeros_like(self.pitParams[:, 0]),
-                where=self.pitParams[:, 0] != 0,
-            )
-        scaleV[scaleV > 1.0] = 1.0
-        scale = scale_volume(self.pitIDs, scaleV)
+
+        # Find target lake surface per pit by interpolating the discrete
+        # depth-volume curves built in fillElevation. Prepend a (0, pitMin)
+        # point so very small deposits also interpolate correctly (the curve
+        # otherwise starts at filled_lvl[p, 0] which is 20% above pit floor).
+        num_pits = len(self.pitParams)
+        target_lvl = np.full(num_pits, -np.inf, dtype=np.float64)
+        active = np.where(depo > 0)[0]
+        for p in active:
+            pit_min = self.pitParams[p, 1] - self.pitParams[p, 2]
+            vols = np.concatenate(([0.0], self.filled_vol[p]))
+            lvls = np.concatenate(([pit_min], self.filled_lvl[p]))
+            target_lvl[p] = np.interp(depo[p], vols, lvls)
+
+        # Broadcast per-pit target level to nodes; zero deposit outside pits
+        node_target_lvl = np.full(self.lpoints, -np.inf, dtype=np.float64)
+        in_pit = self.pitIDs >= 0
+        node_target_lvl[in_pit] = target_lvl[self.pitIDs[in_pit]]
+
+        # Cap at the spill elevation (rim) so over-fills cannot push the
+        # surface above the pit's outlet. Then bottom-up: each node rises to
+        # max(hl, surface).
+        surface = np.minimum(node_target_lvl, self.lFill)
+        delta = np.maximum(0.0, surface - hl)
+        delta[~in_pit] = 0.0
 
         # Update cumulative erosion and deposition as well as elevation
-        self.tmpL.setArray((self.lFill - hl) * scale)
+        self.tmpL.setArray(delta)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.cumED.axpy(1.0, self.tmp)
         self.hGlobal.axpy(1.0, self.tmp)

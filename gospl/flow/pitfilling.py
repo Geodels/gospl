@@ -570,21 +570,25 @@ class PITFill(object):
         self.lFill += level
         self._pitInformation(hl, level, sed)
 
-        # Define specific filling levels for unfilled water depressions
-        if not sed:
-            ids = self.pitParams[:, 0] > 0.0
-            dh = np.zeros((len(self.pitInfo), 6), dtype=np.float64)
-            dh[ids, 0] = self.pitParams[ids, 1] - self.pitParams[ids, 2]
-            dh[ids, 1:] = np.expand_dims(self.pitParams[ids, 2] / 5.0, axis=1)
-            self.filled_lvl = np.cumsum(dh, axis=1)[:, 1:]
+        # Compute discrete depth-volume curves per pit. Used by water filling
+        # (sed=False) for routing residual flux, and by the bottom-up
+        # sediment fill in _updateSinks (sed=True) to find the lake-surface
+        # level that matches the deposited volume.
+        ids = self.pitParams[:, 0] > 0.0
+        dh = np.zeros((len(self.pitInfo), 6), dtype=np.float64)
+        dh[ids, 0] = self.pitParams[ids, 1] - self.pitParams[ids, 2]
+        dh[ids, 1:] = np.expand_dims(self.pitParams[ids, 2] / 5.0, axis=1)
+        self.filled_lvl = np.cumsum(dh, axis=1)[:, 1:]
 
-            self.filled_vol = np.zeros((len(self.pitInfo), 5), dtype=np.float64)
-            hl[hl < self.sealevel] = self.sealevel
-            self.filled_vol[:, :-1] = getpitvol(
-                self.filled_lvl[:, :-1], hl, self.pitIDs, self.inIDs
-            )
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.filled_vol, op=MPI.SUM)
-            self.filled_vol[:, -1] = self.pitParams[:, 0]
+        self.filled_vol = np.zeros((len(self.pitInfo), 5), dtype=np.float64)
+        hl_clip = hl.copy()
+        if not sed:
+            hl_clip[hl_clip < self.sealevel] = self.sealevel
+        self.filled_vol[:, :-1] = getpitvol(
+            self.filled_lvl[:, :-1], hl_clip, self.pitIDs, self.inIDs
+        )
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.filled_vol, op=MPI.SUM)
+        self.filled_vol[:, -1] = self.pitParams[:, 0]
 
         if MPIrank == 0 and self.verbose:
             print(
