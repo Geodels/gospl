@@ -411,33 +411,72 @@ class hillSLP(object):
         """
 
         t0 = process_time()
+        ndepo = self._diffuseImplicit(
+            dh, self.seaID, self.nlK, label="marine"
+        )
+        self.tmpL.setArray(ndepo)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Marine diffusion total (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        if self.memclear:
+            del ndepo
+            gc.collect()
+        petsc4py.PETSc.garbage_cleanup()
+
+        return
+
+    def _diffuseImplicit(self, dh, mask, Cd_val, label="diffusion"):
+        """
+        Solve the non-linear thickness diffusion equation
+
+        .. math::
+            \\partial_t h = \\nabla \\cdot (C_d(h) \\nabla h)
+
+        on the cells indicated by ``mask`` for one global timestep ``self.dt``.
+        Cells outside ``mask`` get a zero diffusion coefficient and therefore
+        do not move. The cached PETSc TS (rosw) solver is reused across calls;
+        ``self.Cd`` and ``self.minDiff_vec`` are swapped in-place so the same
+        solver can be applied to marine sediments, lake sediments, or any
+        other sub-domain.
+
+        :arg dh: per-node initial deposit thickness (m)
+        :arg mask: bool array (lpoints) or integer index array; cells where
+                   diffusion is active.
+        :arg Cd_val: scalar non-linear diffusion coefficient (m^2/yr)
+        :arg label: log label (e.g. "marine" or "lake") for the timing print
+
+        :return: ndepo - smoothed deposit thickness (m), zeroed where negative
+        """
+
+        t0 = process_time()
 
         self.mat.zeroEntries()
 
-        # Get diffusion coefficients based on sediment type
         self.Cd = np.zeros(self.lpoints)
-        self.Cd[self.seaID] = self.nlK
+        self.Cd[mask] = Cd_val
+
+        self.minDiff_vec = np.zeros(self.lpoints)
+        self.minDiff_vec[mask] = self.minDiff
+
         self.hl.setArray(dh)
         self.hl.axpy(1.0, self.hLocal)
         self.dm.localToGlobal(self.hl, self.h)
 
-        self.minDiff_vec = np.zeros(self.lpoints)
-        self.minDiff_vec[self.seaID] = self.minDiff
-
-        # Time stepping definition (cached across timesteps)
+        # Cached TS (rosw IMEX) shared across all _diffuseImplicit callers.
         if self._ts_marine is None:
             ts = petsc4py.PETSc.TS().create(comm=petsc4py.PETSc.COMM_WORLD)
-            # arkimex: IMEX Runge-Kutta schemes | rosw: Rosenbrock W-schemes
             ts.setType("rosw")
             ts.setIFunction(self._evalFunctionMardDiff, self.tmp1)
             ts.setIJacobian(self._evalJacobianMardDiff, self.mat)
             ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
-            # Allow an unlimited number of failures (step rejected and retried)
             ts.setMaxSNESFailures(-1)
-            # SNES nonlinear solver
             snes = ts.getSNES()
             snes.setTolerances(max_it=10)
-            # KSP linear solver
             ksp = snes.getKSP()
             ksp.setType("preonly")
             pc = ksp.getPC()
@@ -448,12 +487,22 @@ class hillSLP(object):
 
         ts = self._ts_marine
         x = self._ts_marine_x
-        # Marine sediment thicknesses are meters; mm-level absolute tolerance
-        # is plenty and avoids a lot of unnecessary substepping.
-        ts.setTolerances(atol=1e-3, rtol=1e-3)
+        # Note: do NOT call ts.reset() here. TSReset destroys the TS's
+        # internal Jacobian reference (the link we set up via setIJacobian
+        # at TS creation), causing PCSetUp_GASM to fail with PETSc error 56
+        # on the next solve. The TS internal state is fine to reuse across
+        # calls; setTime / setTimeStep below override the previous timing.
+        # Per-step error bound = min(atol, rtol*|x|). For marine sediment
+        # thicknesses we already drop sub-mm deposits as numerical noise
+        # elsewhere in the pipeline, so a 1 cm absolute floor is physically
+        # adequate. rtol=1e-4 (0.01 %) is loose enough for the controller to
+        # take large steps but tight enough to suppress the "peak" overshoot
+        # artefacts seen with 1e-3/1e-3.
+        ts.setTolerances(atol=5.0e-3, rtol=1.0e-4)
         ts.setTime(0.0)
-        # Larger initial step (was self.dt / 1000.0). TS adapts down on stiff
-        # cases but typically converges in fewer substeps with this start.
+        # Initial dt close to the controller's typical equilibrium for
+        # marine diffusion; minor over-large warmup is corrected by the
+        # adaptive controller within a step or two.
         ts.setTimeStep(self.dt / 100.0)
         ts.setMaxTime(self.dt)
         ts.setMaxSteps(self.tsStep)
@@ -461,11 +510,11 @@ class hillSLP(object):
         tstart = ts.getTime()
         self._evalSolutionMardDiff(tstart, x)
 
-        # Solve nonlinear equation
         ts.solve(x)
         if MPIrank == 0 and self.verbose:
             print(
-                "Nonlinear diffusion solution (%0.02f seconds)" % (process_time() - t0),
+                "Nonlinear diffusion solution (%s, %0.02f seconds)"
+                % (label, process_time() - t0),
                 flush=True,
             )
             print(
@@ -480,18 +529,11 @@ class hillSLP(object):
                 flush=True,
             )
 
-        # Get diffused sediment thicknesses
+        # Extract resulting deposit thickness
         x.copy(result=self.h)
         self.dh.waxpy(-1.0, self.hGlobal, self.h)
         self.dm.globalToLocal(self.dh, self.tmpL)
         ndepo = self.tmpL.getArray().copy()
         ndepo[ndepo < 0.0] = 0.0
-        self.tmpL.setArray(ndepo)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
 
-        if self.memclear:
-            del ndepo
-            gc.collect()
-        petsc4py.PETSc.garbage_cleanup()
-
-        return
+        return ndepo

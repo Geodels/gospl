@@ -499,12 +499,30 @@ class ReadYaml(object):
                 self.offshore = hillDict["offshore"]
             except KeyError:
                 self.offshore = 100.e5
+            # Lake / depression non-linear diffusion thresholds: only run the
+            # expensive marine-style nonlinear diffusion in pits that are both
+            # large in volume AND deep, otherwise fall back to bottom-up fill.
+            try:
+                self.nl_pit_volume = hillDict["nlPitVolume"]
+            except KeyError:
+                self.nl_pit_volume = 1.0e9   # 1 km^3
+            try:
+                self.nl_pit_depth = hillDict["nlPitDepth"]
+            except KeyError:
+                self.nl_pit_depth = 100.0    # 100 m
+            try:
+                self.nl_pit_K = hillDict["nlPitK"]
+            except KeyError:
+                self.nl_pit_K = self.nlK
         except KeyError:
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
             self.Gmar = 0.
             self.tsStep = 2000
             self.offshore = 100.e5
+            self.nl_pit_volume = 1.0e9
+            self.nl_pit_depth = 100.0
+            self.nl_pit_K = self.nlK
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
 
