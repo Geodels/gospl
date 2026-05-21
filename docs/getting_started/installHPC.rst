@@ -31,10 +31,9 @@ Installing dependencies
     python3 -m pip install  h5py          # (3.11.0)
     python3 -m pip install vtk            # (9.3.1)
     python3 -m pip install xarray         # (2024.7.0)
-    python3 -m pip install meshio         # (5.3.5)
     python3 -m pip install ruamel.yaml    # (0.18.6)
     python3 -m pip install numpy-indexed  # (0.3.7)
-    python3 -m pip install pyshtools      # (0.17.0)
+    python3 -m pip install pyshtools     
     python3 -m pip install gflex          # (1.2.0)
     python3 -m pip install meson_python   # (0.16.0)
 

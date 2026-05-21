@@ -54,7 +54,6 @@ dependencies = [
     "numpy-indexed",
     "pandas",
     "h5py",
-    "meshio",
     "vtk",
     "ruamel.yaml",
     "mpi4py",

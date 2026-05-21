@@ -97,7 +97,6 @@ petsc4py                  3.13.0             Interface to PETSc libraries
 h5py                      2.10.0             Interface to the HDF5 binary data format
 pandas                    1.1.2              Data analysis and manipulation tool
 ruamel.yaml               0.16.12            Parsing YAML to Python objects
-meshio                    4.2.2              I/O for mesh files.
 pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       9.0.3              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
