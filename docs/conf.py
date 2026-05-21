@@ -310,7 +310,6 @@ MOCK_MODULES = [
     "vtk",
     "vtk.util",
     "gflex",
-    "xarray",
 ]
 
 for m in MOCK_MODULES:

@@ -115,11 +115,3 @@ Once all the listed dependencies above have been installed, goSPL source files a
 It can then be installed locally on your system using::
 
       pip install --no-build-isolation -e .
-
-In addition, the latest version of goSPL requires the `isoFlex` library that can be installed from `GitHub <https://github.com/Geodels/isoFlex>`_::
-
-      git clone github.com/Geodels/isoFlex.git
-
-It can then be installed locally on your system using::
-
-      pip install --no-build-isolation -e .

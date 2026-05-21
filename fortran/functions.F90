@@ -1314,10 +1314,14 @@ subroutine fctcoeff(h, Kd, dcoeff, nb)
           if(FVvDist(k,p)>0.)then
             n = FVnID(k,p)+1
             cn = Kd(n)
-            c = 0.5*(ck+cn)/FVarea(k)
-            v = c*FVvDist(k,p)/FVeLgt(k,p)
-            dcoeff(k) = dcoeff(k) - v*h(n)
-            dcoeff(k) = dcoeff(k) + v*h(k)
+            ! No flux across faces where either side has zero diffusivity
+            ! (e.g. marine/land interface for the marine-only diffusion).
+            if(ck>0.d0 .and. cn>0.d0)then
+              c = 0.5*(ck+cn)/FVarea(k)
+              v = c*FVvDist(k,p)/FVeLgt(k,p)
+              dcoeff(k) = dcoeff(k) - v*h(n)
+              dcoeff(k) = dcoeff(k) + v*h(k)
+            endif
           endif
         enddo
       endif
@@ -1354,12 +1358,16 @@ subroutine jacobiancoeff(h, Kd, Kp, dcoeff, nb)
             n = FVnID(k,p)+1
             cn = Kd(n)
             cpn = Kp(n)
-            c = 0.5*(ck+cn+cpk*(h(k)-h(n)))/FVarea(k)
-            v = c*FVvDist(k,p)/FVeLgt(k,p)
-            dcoeff(k,1) = dcoeff(k,1) + v
-            c = 0.5*(ck+cn+cpn*(h(n)-h(k)))/FVarea(k)
-            v = c*FVvDist(k,p)/FVeLgt(k,p)
-            dcoeff(k,p+1) = -v
+            ! No flux across faces where either side has zero diffusivity,
+            ! matching the gating in fctcoeff so the Jacobian stays consistent.
+            if(ck>0.d0 .and. cn>0.d0)then
+              c = 0.5*(ck+cn+cpk*(h(k)-h(n)))/FVarea(k)
+              v = c*FVvDist(k,p)/FVeLgt(k,p)
+              dcoeff(k,1) = dcoeff(k,1) + v
+              c = 0.5*(ck+cn+cpn*(h(n)-h(k)))/FVarea(k)
+              v = c*FVvDist(k,p)/FVeLgt(k,p)
+              dcoeff(k,p+1) = -v
+            endif
           endif
         enddo
       endif

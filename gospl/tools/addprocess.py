@@ -4,6 +4,7 @@ import sys
 import petsc4py
 import numpy as np
 import pandas as pd
+import pyshtools as pysh
 
 from mpi4py import MPI
 from scipy import spatial
@@ -12,14 +13,6 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from gflex.f2d import F2D
     from gospl._fortran import flexure
-    libisoglob = True
-    try:
-        import isoflex
-    except ModuleNotFoundError:
-        libisoglob = False
-        pass
-    if libisoglob:
-        from isoflex.model import Model as iflex
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -34,10 +27,7 @@ class GridProcess(object):
     1. **Flexural isostasy**: it allows to compute isostatic deflections of Earth's lithosphere with uniform or non-uniform flexural rigidity. Evolving surface loads are defined from erosion/deposition values associated to modelled surface processes.
     2. **Orographic rain**: it accounts for change in rainfall patterns associated to change in topography. The orographic precipitation function is based on `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_ linear model.
 
-    For global simulation, the library `isoFlex <https://github.com/Geodels/isoFlex>`_ provides a  wrapper around `gFlex <https://github.com/awickert/gFlex>`_ to estimate global-scale flexural isostasy based on tiles distribution and projection in parallel. 
-
-    .. note::
-        Better implementation would likely provide better performance than the one proposed here for computing flexural isostasy...
+    For global simulation, the library `pyshtools <https://shtools.github.io/SHTOOLS/>`_ provides a framework to estimate global-scale flexural isostasy. 
 
     """
 
@@ -57,7 +47,7 @@ class GridProcess(object):
                 self.boundflex = self.boundCond.replace('0', '2')
                 self.boundflex = self.boundflex.replace('1', '0')
                 self.boundflex = self.boundflex.replace('2', '1')
-            self.globalfData = None
+            self.flexTe_dh = None
         if self.oroOn:
             self.oroEPS = np.finfo(float).eps
 
@@ -65,6 +55,8 @@ class GridProcess(object):
             # Build regular grid for flexure or orographic precipitation calculation
             if MPIrank == 0 and self.flex_method != 'global':
                 self._buildRegGrid()
+            if MPIrank == 0 and self.flexOn and self.flex_method == 'global':
+                self._buildDHGrid()
 
         return
 
@@ -168,6 +160,8 @@ class GridProcess(object):
                 loadData = np.load(self.tedata.iloc[nb, 2])
                 self.flexTe = loadData[self.tedata.iloc[nb, 3]]
                 del loadData
+                if MPIrank == 0:
+                    self.flexTe_dh = self._unstr2dh(self.flexTe)
             elif self.tedata["tUni"][nb] == 0.:
                 loadData = np.load(self.tedata.iloc[nb, 2])
                 teVal = loadData[self.tedata.iloc[nb, 3]]
@@ -250,6 +244,251 @@ class GridProcess(object):
 
         return flexZ
 
+    def _buildDHGrid(self):
+        """
+        Build the Driscoll-Healy (DH2, shape N x 2N) target grid for global
+        flexure and precompute the interpolation weights linking the
+        unstructured spherical mesh (``self.mCoords``) and the DH grid.
+
+        Forward direction (mesh -> DH): 3-D inverse-distance weighting via
+        ``scipy.spatial.cKDTree`` on the existing Cartesian coordinates,
+        which avoids polar / dateline singularities.
+
+        Backward direction (DH -> mesh): bilinear interpolation with
+        precomputed integer indices and fractional offsets. The DH grid is
+        implicitly extended at call time with a south-pole row and a
+        wrap-around longitude column so every mesh point sits inside a
+        2 x 2 stencil.
+
+        Because the unstructured mesh is fixed for a given simulation,
+        weights are built once and reused for every flexure step.
+        """
+
+        # ---- 1. DH2 grid coordinates --------------------------------------
+        N = int(round(180.0 / self.flex_res_deg))
+        if N % 2:
+            N += 1
+        self.dh_N = N
+        self.dh_dlat = 180.0 / N
+        self.dh_dlon = 360.0 / (2 * N)
+        self.dh_lat = 90.0 - self.dh_dlat * np.arange(N)
+        self.dh_lon = self.dh_dlon * np.arange(2 * N)
+
+        # ---- 2. Forward weights: unstructured -> DH -----------------------
+        lon2d, lat2d = np.meshgrid(np.deg2rad(self.dh_lon),
+                                   np.deg2rad(self.dh_lat))
+        cosLat = np.cos(lat2d)
+        gridXYZ = np.stack([self.radius * cosLat * np.cos(lon2d),
+                            self.radius * cosLat * np.sin(lon2d),
+                            self.radius * np.sin(lat2d)],
+                           axis=-1).reshape(-1, 3)
+
+        tree = spatial.cKDTree(self.mCoords[:, :3], leafsize=10)
+        distances, self.dhIDs = tree.query(gridXYZ, k=self.rgrd_interp)
+        self.dhWeights = np.divide(
+            1.0, distances ** 2,
+            out=np.zeros_like(distances), where=distances != 0,
+        )
+        self.dhSumWeights = np.sum(self.dhWeights, axis=1)
+        self.dhOnIDs = np.where(self.dhSumWeights == 0)[0]
+        self.dhSumWeights[self.dhSumWeights == 0] = 1.0e-4
+
+        # ---- 3. Backward indices: padded DH -> unstructured (bilinear) ----
+        # Padded DH grid (built on demand inside `_dh2unstr`):
+        #   lat: dh_lat with -90 appended  -> shape (N+1,), step  dh_dlat
+        #   lon: dh_lon with 360 appended  -> shape (2N+1,), step dh_dlon
+        norm = np.linalg.norm(self.mCoords[:, :3], axis=1)
+        uLat = np.rad2deg(np.arcsin(np.clip(self.mCoords[:, 2] / norm,
+                                            -1.0, 1.0)))
+        uLon = np.rad2deg(np.arctan2(self.mCoords[:, 1],
+                                     self.mCoords[:, 0])) % 360.0
+
+        fracLat = (90.0 - uLat) / self.dh_dlat
+        self.uIdxLat = fracLat.astype(np.intp)
+        self.uFracLat = fracLat - self.uIdxLat
+        mask = self.uIdxLat >= N
+        self.uIdxLat[mask] = N - 1
+        self.uFracLat[mask] = 1.0
+
+        fracLon = uLon / self.dh_dlon
+        self.uIdxLon = fracLon.astype(np.intp)
+        self.uFracLon = fracLon - self.uIdxLon
+        mask = self.uIdxLon >= 2 * N
+        self.uIdxLon[mask] = 2 * N - 1
+        self.uFracLon[mask] = 1.0
+
+        # ---- 4. Constant elastic-operator eigenvalues ---------------------
+        lmax = N // 2 - 1
+        ll = np.arange(lmax + 1)
+        self.dh_P_l = ((ll * (ll + 1)) ** 2 - 4.0 * ll * (ll + 1)) \
+            / self.radius ** 4
+
+        del tree, distances, gridXYZ, lon2d, lat2d, cosLat
+        del norm, uLat, uLon, fracLat, fracLon, mask
+        gc.collect()
+
+        return
+
+    def _unstr2dh(self, field):
+        """
+        Inverse-distance interpolation of a 1-D unstructured field defined at
+        ``self.mCoords`` onto the DH2 grid (shape ``(dh_N, 2*dh_N)``).
+        """
+
+        g = np.sum(self.dhWeights * field[self.dhIDs], axis=1) \
+            / self.dhSumWeights
+        if len(self.dhOnIDs) > 0:
+            g[self.dhOnIDs] = field[self.dhIDs[self.dhOnIDs, 0]]
+        return g.reshape(self.dh_N, 2 * self.dh_N)
+
+    def _dh2unstr(self, field_dh):
+        """
+        Bilinear interpolation of a DH2-grid array back to the unstructured
+        mesh. The grid is padded at call time with a south-pole row (mean of
+        the southernmost DH row) and a wrap-around longitude column.
+        """
+
+        N = self.dh_N
+        south = field_dh[-1:, :].mean(axis=1, keepdims=True)
+        south = np.broadcast_to(south, (1, 2 * N)).copy()
+        padded = np.concatenate([field_dh, south], axis=0)
+        padded = np.concatenate([padded, padded[:, :1]], axis=1)
+
+        i, j = self.uIdxLat, self.uIdxLon
+        fy, fx = self.uFracLat, self.uFracLon
+        return (
+            (1.0 - fy) * (1.0 - fx) * padded[i,     j    ] +
+            (1.0 - fy) *        fx  * padded[i,     j + 1] +
+                   fy  * (1.0 - fx) * padded[i + 1, j    ] +
+                   fy  *        fx  * padded[i + 1, j + 1]
+        )
+
+    def _cmptFlexGlobal(self, erodep_dh, te_dh, rho_infill=0.0, max_iter=50,
+                        flex_tol=5.0e-4, relax=1.0, anderson_depth=5):
+        r"""
+        Spectral thin-elastic-shell flexure solve on the precomputed
+        Driscoll-Healy (DH2) grid.
+
+        Parameters
+        ----------
+        erodep_dh : np.ndarray, shape ``(dh_N, 2*dh_N)``
+            Erosion(-) / deposition(+) thickness in metres on the DH2 grid.
+            Produced by :meth:`_unstr2dh` from the unstructured mesh field.
+        te_dh : float or np.ndarray of shape ``(dh_N, 2*dh_N)``
+            Elastic thickness in metres. Scalar -> constant-Te spectral
+            solve. Array (same grid as ``erodep_dh``) -> iterative
+            varying-Te solve.
+        rho_infill : float
+            Density (kg/m^3) of the material filling the flexural moat
+            (0 = air, 1030 = sea water).
+        max_iter, flex_tol, relax, anderson_depth : int, float, float, int
+            Picard / Anderson iteration controls for the varying-Te branch.
+            ``relax < 1`` damps the update (useful for strong Te contrasts).
+
+        Returns
+        -------
+        np.ndarray, shape ``(dh_N, 2*dh_N)``
+            Flexural deflection in metres on the DH2 grid. Sign:
+            **negative = down** (subsidence under deposition; rebound gives
+            positive w under erosion).
+        """
+
+        # ---- 1. Te field / reference rigidity ------------------------------
+        if isinstance(te_dh, np.ndarray):
+            # Maximum Te as reference guarantees dD = D(x) - D0 <= 0 and
+            # ||dD/D0||_inf < 1, required for Picard contraction. Mean-Te
+            # diverges when oceanic Te << continental Te.
+            Te0 = float(np.max(te_dh))
+            varying_te = True
+        else:
+            Te0 = float(te_dh)
+            te_dh = None
+            varying_te = False
+
+        if Te0 <= 0:
+            raise ValueError("elastic thickness must be positive")
+
+        D0 = self.young * Te0 ** 3 / (12.0 * (1.0 - self.nu ** 2))
+        if varying_te:
+            D_field = self.young * te_dh ** 3 / (12.0 * (1.0 - self.nu ** 2))
+            dD = D_field - D0
+        drho = self.flex_rhoa - rho_infill
+
+        # ---- 2. spectral filter (P_l precomputed in _buildDHGrid) ----------
+        P_l = self.dh_P_l
+        filt = 1.0 / (drho * self.gravity + D0 * P_l)
+        filt[:2] = 0.0   # drop degree 0 (mean) and 1 (centre-of-mass drift)
+
+        def _sh_solve(q_field):
+            qlm = pysh.SHGrid.from_array(q_field, grid='DH').expand()
+            qlm.coeffs[:] *= filt[None, :, None]
+            return qlm.expand(grid='DH2', extend=False).to_array()
+
+        def _elastic_op(w_field):
+            wlm = pysh.SHGrid.from_array(w_field, grid='DH').expand()
+            wlm.coeffs[:] *= P_l[None, :, None]
+            return wlm.expand(grid='DH2', extend=False).to_array()
+
+        # ---- 3. surface load -----------------------------------------------
+        q_dh = erodep_dh * self.flex_rhos * self.gravity   # Pa, signed
+
+        # ---- 4. solve ------------------------------------------------------
+        if not varying_te:
+            w_dh = _sh_solve(q_dh)
+            if self.verbose:
+                print(f"[shflex] constant Te = {Te0:.1f} m -> single-pass solve")
+        else:
+            # Constant-Te0 solution is much closer to the fixed point than
+            # zero, so convergence starts immediately.
+            w_dh = _sh_solve(q_dh)
+            F_hist = []   # F(w_k)        - Anderson history
+            g_hist = []   # F(w_k) - w_k  - residuals
+            rel = np.nan
+            for it in range(max_iter):
+                Mw    = _elastic_op(w_dh)
+                q_eff = q_dh - dD * Mw
+                Fw    = _sh_solve(q_eff)
+                g     = Fw - w_dh
+
+                rel = np.linalg.norm(g) / max(np.linalg.norm(Fw), 1.0e-30)
+                if self.verbose:
+                    print(f"[shflex] iter {it:3d}  |dw|/|w| = {rel:.2e}")
+                if rel < flex_tol:
+                    w_dh = Fw
+                    break
+
+                F_hist.append(Fw)
+                g_hist.append(g)
+                if len(F_hist) > anderson_depth + 1:
+                    F_hist.pop(0)
+                    g_hist.pop(0)
+
+                if anderson_depth > 0 and len(g_hist) >= 2:
+                    # Anderson type-II: find gamma minimising ||g_n - dG gamma||,
+                    # then w_{n+1} = F(w_n) - dF gamma.
+                    dG = np.stack([g_hist[i + 1] - g_hist[i]
+                                   for i in range(len(g_hist) - 1)])
+                    dF = np.stack([F_hist[i + 1] - F_hist[i]
+                                   for i in range(len(F_hist) - 1)])
+                    dG_flat = dG.reshape(dG.shape[0], -1).T
+                    dF_flat = dF.reshape(dF.shape[0], -1).T
+                    gamma, *_ = np.linalg.lstsq(dG_flat,
+                                                g_hist[-1].ravel(),
+                                                rcond=None)
+                    w_new = Fw - (dF_flat @ gamma).reshape(Fw.shape)
+                else:
+                    w_new = Fw
+
+                if relax != 1.0:
+                    w_new = relax * w_new + (1.0 - relax) * w_dh
+                w_dh = w_new
+            else:
+                if self.verbose:
+                    print(f"[shflex] warning: did not converge in {max_iter} "
+                          f"iters (rel={rel:.2e})")
+
+        return -w_dh
+
     def applyFlexure(self):
         r"""
         This function computes the flexural isostasy equilibrium based on topographic change. It is a simple routine that accounts for flexural isostatic rebound associated with erosional loading/unloading.
@@ -278,31 +517,16 @@ class GridProcess(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dZ, op=MPI.MAX)
         flexZ = None
 
-        if self.flex_method == 'global' and libisoglob:
-            if self.globalfData is None:
-                self.globalfData = np.zeros((len(self.mCoords), 5))
-                self.globalfData[:, :3] = self.mCoords[:, :3]
-
+        if self.flex_method == 'global':
             if self.tedata is not None:
                 self._updateTe()
-                Te = self.flexTe.copy()
-            else:
-                Te = self.flex_eet * np.ones(len(self.mCoords))
-            self.globalfData[:, 3] = dZ
-            self.globalfData[:, 4] = Te
 
-            fmodel = iflex(None, None, self.globalfData, None,
-                           self.young, self.nu, self.flex_rhoa,
-                           self.flex_rhos, self.gravity,
-                           2, self.verbose)
-            fmodel.runFlex()
             if MPIrank == 0:
-                flexZ = fmodel.simflex.copy()
-            del fmodel
-            gc.collect()
-
-        if self.flex_method == 'global' and not libisoglob and MPIrank == 0:
-            flexZ = np.zeros(len(self.mCoords))
+                erodep_dh = self._unstr2dh(dZ)
+                te_dh = self.flexTe_dh if self.tedata is not None \
+                    else float(self.flex_eet)
+                wflex_dh = self._cmptFlexGlobal(erodep_dh, te_dh)
+                flexZ = self._dh2unstr(wflex_dh)
 
         if MPIrank == 0 and self.flex_method != 'global':
             flexZ = self._cptFlex2D(dZ)

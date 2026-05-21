@@ -100,12 +100,11 @@ This will save the file locally under the same name as it was on github: ``envir
         - gflex
         - mpi4py
         - xarray
-        - rioxarray
+        - pyshtools
         - pyproj
         - cython
         - compilers
         - pip:
-            - git+https://github.com/Geodels/isoFlex.git
             - git+https://github.com/Geodels/gospl.git
 
 
@@ -201,7 +200,7 @@ The full stack environment contains not only the libraries used for running goSP
         - gflex
         - netcdf4
         - xarray
-        - rioxarray
+        - pyshtools
         - uxarray
         - pyinterp
         - jigsawpy
@@ -220,7 +219,6 @@ The full stack environment contains not only the libraries used for running goSP
         - pyproj 
         - triangle
         - pip:
-            - git+https://github.com/Geodels/isoFlex.git
             - git+https://github.com/Geodels/gospl.git
 
 This conda environment will allow you to run all the examples provided in this `repository <https://github.com/Geodels/goSPL-examples>`_. 

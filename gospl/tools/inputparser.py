@@ -1415,6 +1415,13 @@ class ReadYaml(object):
                 self.nu = flexDict["nu"]
             except KeyError:
                 self.nu = 0.25
+            # Resolution at which the SH expansion is performed. Input is
+            # regridded to this; output is interpolated back to the input grid.
+            # Default 0.25 deg -> lmax = 359, well below the elastic cutoff.
+            try:
+                self.flex_res_deg = flexDict["res_deg"]
+            except KeyError:
+                self.flex_res_deg = 0.25
             try:
                 self.flex_bcN = flexDict["bcN"]
             except KeyError:

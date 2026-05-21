@@ -112,16 +112,16 @@ The approach solves the bi-harmonic equation governing the bending/flexure of a 
 
 where :math:`D` is the flexural rigidity,  :math:`w` is vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material.
 
-**isoFlex** for global simulations 
+**pyshtools** for global simulations 
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-A wrapper around `gFlex <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_ to estimate global-scale flexural isostasy based on tiles distribution and projection in parallel.
+When running goSPL in global mode, the flexural isostasy equilibrium is computed based on topographic change using `pyshtools <https://shtools.github.io/SHTOOLS/>`_.
 
-.. note::
-  
-  This is not the most elegant method, but will probably do the trick for now...
+In this case, the global flexural-isostatic response is computed via thin-elastic-shell theory in the spherical-harmonic domain (Turcotte 1979; Willemann & Turcotte 1981).
 
-The globe is divided into 142 overriding tiles to account for UTM projection distortions and `gFlex <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_ is apply on each tile before reprojecting it back to spherical cartesian coordinates...
+There are two modes available for the flexural isostasy computation:
 
-`isoFlex <https://github.com/Geodels/isoFlex>`_ uses the finite difference (FD) method from `gFlex <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_ with the van Wees and Cloetingh (1994) ('vWC1994') option for the plate solution type.
+1. In the case of a constant Te (scalar ``te``), a single-pass spectral solve is used.
+2. In the case of spatially-varying Te (``te``), Picard iteration  with the constant-Te spectral solver as the inner kernel; the rigidity perturbation ``D(x) - D0`` is treated as a spatial correction load that is updated each iteration until self-consistent.
 
+Note that the approximation drops gradient-of-D terms in the elastic operator, so very sharp Te steps may need to be smoothed (e.g. Gaussian with sigma ~ flexural wavelength / 4) before being passed in.
