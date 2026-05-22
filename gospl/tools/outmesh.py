@@ -294,7 +294,11 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 data = self.iceFAL.getArray().copy()
-                data[data <= 1.0e-8] = 1.0e-8
+                # Suppress sub-1 noise (mostly MPI partition-edge artefacts
+                # from the linear-diffusion smoothing in iceAccumulation).
+                # The in-memory iceFAL is unchanged; only the on-disk
+                # visualisation field is floored.
+                data[data < 1.0] = 1.0
                 if not self.fast:
                     data[self.seaID] = 1.0
                 f["iceFA"][:, 0] = data
