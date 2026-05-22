@@ -78,8 +78,21 @@ class STRAMesh(object):
             # so it does not contaminate eroded volumes.
             self.stratH[:, 0] = 1.0e6
             self.phiS[:, 0] = self.phi0s
+            self.bedrockLay = 1          # layer 0 is the infinite-bedrock sentinel
 
         return
+    
+    def _fillZeroPorosity(self, phiS):
+        """
+        Where ``phiS == 0`` (layer has been emptied or never deposited),
+        inherit the value from the nearest underlying layer with non-zero
+        porosity. Vectorised forward-fill from low → high index along axis 1.
+        Leading zeros at the column base stay zero (no valid layer below).
+        """
+        mask = phiS > 0
+        idx = np.where(mask, np.arange(phiS.shape[1])[None, :], 0)
+        np.maximum.accumulate(idx, axis=1, out=idx)
+        return np.take_along_axis(phiS, idx, axis=1)
 
     def deposeStrat(self):
         """
@@ -160,6 +173,10 @@ class STRAMesh(object):
         neg = self.stratH < 0
         self.stratH[neg] = 0.0
         self.phiS[neg] = 0.0
+        self.phiS[neg] = 0.0
+        self.phiS[:, : self.stratStep + 1] = self._fillZeroPorosity(
+            self.phiS[:, : self.stratStep + 1]
+        )
         self.thCoarse /= self.dt
 
         return
@@ -172,7 +189,7 @@ class STRAMesh(object):
         self.stratZ[:, self.stratStep] = self.hLocal.getArray()
 
         return
-
+    
     def _depthPorosity(self, depth):
         """
         This function uses the depth-porosity relationships to compute the porosities for each lithology and then the solid phase to get each layer thickness changes due to compaction.
@@ -204,7 +221,14 @@ class STRAMesh(object):
         newH[newH <= 0] = 0.0
         phiS[newH <= 0] = 0.0
 
+        # Freeze the bedrock sentinel so it neither compacts nor drives surface drop
+        if self.bedrockLay > 0:
+            b = self.bedrockLay
+            newH[:, :b] = self.stratH[:, :b]      # thickness unchanged (1e6 sentinel)
+            phiS[:, :b] = self.phiS[:, :b]        # porosity unchanged
+
         # Update porosities in each sedimentary layer
+        phiS = self._fillZeroPorosity(phiS)
         self.phiS[:, : self.stratStep + 1] = phiS
 
         if self.memclear:

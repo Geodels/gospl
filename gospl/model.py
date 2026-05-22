@@ -224,7 +224,8 @@ class Model(
                 return
 
             # Create new stratal layer
-            if self.tNow >= self.saveStrat:
+            newLayer = self.tNow >= self.saveStrat
+            if newLayer:
                 self.stratStep += 1
                 self.saveStrat += self.strat
 
@@ -260,7 +261,7 @@ class Model(
                 # Hillslope diffusion (linear and non-linear)
                 _hillSLP.getHillslope(self)
 
-            if self.tNow >= self.saveStrat:
+            if newLayer:
                 # Stratigraphic layer porosity and thicknesses under compaction
                 _STRAMesh.getCompaction(self)
 
