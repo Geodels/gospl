@@ -381,10 +381,13 @@ class SEDMesh(object):
 
     def _diffuseLargePit(self, hl, depo, pit_select):
         """
-        Deposit sediment in large/deep partially-filled pits via inlet pile
-        plus marine-style non-linear diffusion. Mass is approximately
-        conserved by the diffusion solver; a per-pit rescale at the end
-        absorbs any boundary drift.
+        Deposit sediment in large/deep partially-filled pits.
+
+        The initial deposit shape is a bathymetric bottom-up fill (most of the
+        volume distributed proportional to water depth below the target lake
+        level) combined with a small inlet bias that seeds delta progradation.
+        Marine-style non-linear diffusion then refines the surface, and a
+        per-pit rescale at the end enforces exact volume conservation.
 
         :arg hl: local elevation prior deposition
         :arg depo: per-pit deposited volume
@@ -467,14 +470,65 @@ class SEDMesh(object):
             # Step 3: sync inlet_count so all ranks see the bumps
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inlet_count, op=MPI.MAX)
 
-        # Initial deposit thickness: depo[pit] / (n_inlets * inlet_area)
+        # Initial deposit shape: (1 - bias_frac) of each pit's volume is
+        # distributed proportional to local water depth below the target lake
+        # level (a bottom-up bathymetric fill), and bias_frac is concentrated
+        # at the inlets to seed delta progradation. Starting the diffusion
+        # solver from a near-final lake-floor geometry avoids the rim-only
+        # blocky artefact produced by a pure inlet-point pile. The fraction
+        # is configurable via the `nlPitInletBias` YAML key (clamped [0, 1]).
+        bias_frac = self.nl_pit_inlet_bias
+
+        # Target lake water level per active pit (same interp the bottom-up
+        # path uses; volume -> level mapping built when the pit was labelled).
+        target_lvl = np.full(num_pits, -np.inf, dtype=np.float64)
+        for p in active:
+            pit_min = self.pitParams[p, 1] - self.pitParams[p, 2]
+            vols = np.concatenate(([0.0], self.filled_vol[p]))
+            lvls = np.concatenate(([pit_min], self.filled_lvl[p]))
+            target_lvl[p] = np.interp(depo[p], vols, lvls)
+
+        in_pit = self.pitIDs >= 0
+        pit_safe = np.where(in_pit, self.pitIDs, 0)
+        node_lvl = np.where(in_pit, target_lvl[pit_safe], -np.inf)
+        water_depth = np.maximum(0.0, node_lvl - hl)
+        water_depth[~sel_node] = 0.0
+
+        # Per-pit sum of water_depth * area over owned cells, MPI-reduced.
+        denom = np.zeros(num_pits, dtype=np.float64)
+        owned = (self.inIDs == 1) & sel_node
+        if owned.any():
+            ids = self.pitIDs[owned]
+            grp = npi.group_by(ids)
+            up, sums = grp.sum((water_depth * self.larea)[owned])
+            denom[up] = sums
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, denom, op=MPI.SUM)
+
+        # Bathymetric baseline: thick where the lake is deep, thin near rim.
         delta_init = np.zeros(self.lpoints, dtype=np.float64)
+        denom_node = denom[pit_safe]
+        ok = (denom_node > 0) & sel_node
+        delta_init[ok] = (
+            (1.0 - bias_frac)
+            * depo[pit_safe[ok]]
+            * water_depth[ok]
+            / np.maximum(denom_node[ok], 1e-30)
+        )
+
+        # Inlet bias: bias_frac * depo[p] / (n_inlets * area). For pits where
+        # the bathymetric baseline is degenerate (denom == 0) fall back to
+        # the original inlet-only behaviour so all the volume is still placed.
+        bias_at_inlet = np.where(denom > 0, bias_frac, 1.0)
         if inlet_mask.any():
             iIDs = np.where(inlet_mask)[0]
             for c in iIDs:
                 p = self.pitIDs[c]
                 if inlet_count[p] > 0:
-                    delta_init[c] = depo[p] / (inlet_count[p] * self.larea[c])
+                    delta_init[c] += (
+                        bias_at_inlet[p]
+                        * depo[p]
+                        / (inlet_count[p] * self.larea[c])
+                    )
 
         # Run non-linear diffusion over the selected pit cells. Diffusion is
         # zero outside this mask so deposit cannot spread out of the basin.

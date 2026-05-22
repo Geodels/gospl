@@ -514,6 +514,14 @@ class ReadYaml(object):
                 self.nl_pit_K = hillDict["nlPitK"]
             except KeyError:
                 self.nl_pit_K = self.nlK
+            # Fraction of each pit's deposit concentrated at the inlets
+            # (delta seed); the remainder is distributed as a bathymetric
+            # bottom-up baseline. 0.0 = pure bowl fill, 1.0 = original
+            # inlet-only spike.
+            try:
+                self.nl_pit_inlet_bias = hillDict["pitInletBias"]
+            except KeyError:
+                self.nl_pit_inlet_bias = 0.10
         except KeyError:
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
@@ -523,8 +531,10 @@ class ReadYaml(object):
             self.nl_pit_volume = 1.0e9
             self.nl_pit_depth = 100.0
             self.nl_pit_K = self.nlK
+            self.nl_pit_inlet_bias = 0.50
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
+        self.nl_pit_inlet_bias = min(1.0, max(0.0, self.nl_pit_inlet_bias))
 
         return
 
