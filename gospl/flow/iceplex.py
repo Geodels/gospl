@@ -44,9 +44,14 @@ class IceMesh(object):
             self.iceHL = self.hLocal.duplicate()
             self.iceFAG = self.hGlobal.duplicate()
             self.iceFAL = self.hLocal.duplicate()
+            # Local meltwater field captured at the end of iceAccumulation
+            # and re-injected into the river FA source term in flowplex so
+            # glacial discharge is not lost downstream.
+            self.iceMeltL = self.hLocal.duplicate()
             if self.flexOn:
                 self.iceFlex = self.hLocal.duplicate()
             self.iceHL.set(0.0)
+            self.iceMeltL.set(0.0)
 
         return
 
@@ -147,6 +152,7 @@ class IceMesh(object):
             self.iceHL.set(0.)
             self.iceFAL.set(0.)
             self.iceFAG.set(0.)
+            self.iceMeltL.set(0.)
             if self.flexOn:
                 self.iceFlex.set(0.)
             return
@@ -157,6 +163,7 @@ class IceMesh(object):
             self.iceHL.set(0.)
             self.iceFAL.set(0.)
             self.iceFAG.set(0.)
+            self.iceMeltL.set(0.)
             if self.flexOn:
                 self.iceFlex.set(0.)
             return
@@ -177,27 +184,55 @@ class IceMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self._solve_KSP(True, self.iceMat, self.tmp, self.iceFAG)
         self.dm.globalToLocal(self.iceFAG, self.iceFAL)
-        tmp = self.iceFAL.getArray()
-        tmp[tmp < 0.] = 0.0
-        tmp[hl < iceT] = 0.0
-        self.iceFAL.setArray(tmp)
+        ice_clamped = self.iceFAL.getArray()
+        ice_clamped[ice_clamped < 0.] = 0.0
+        ice_clamped[hl < iceT] = 0.0
+        self.iceFAL.setArray(ice_clamped)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
 
-        # Smooth and diffuse glacier flow accumulation
+        # Capture glacial meltwater for the river FA. Below ELA the local
+        # ablation rate is `|hl - elaH|/(iceH - elaH)` of the precipitation;
+        # we gate by ice presence (clamped, pre-smoothing iceFAL > 0) so we
+        # only release water where ice actually reached. `meltfac` is
+        # deliberately NOT applied here because it is a numerical
+        # sink-amplifier inside the implicit ice solver, not a physical
+        # melt multiplier. This is consumed by flowplex.flowAccumulation
+        # and added back to `rainA` before the river FA is solved.
+        melt_local = np.zeros(self.lpoints, dtype=np.float64)
+        below_ela = hl < elaH
+        if below_ela.any():
+            ablation = np.zeros(self.lpoints, dtype=np.float64)
+            ablation[below_ela] = np.clip(
+                -(hl[below_ela] - elaH) / (iceH - elaH), 0.0, 1.0
+            )
+            has_ice = ice_clamped > 1.0e-8
+            melt_local = ablation * rainA * has_ice
+        self.iceMeltL.setArray(melt_local)
+
+        # Smooth and diffuse glacier flow accumulation.
+        # NB: the linear-diffusion smoothing below is NOT mass-conservative
+        # (it spreads the field for visualisation and erosion-driver
+        # robustness). The output `iceFA` therefore differs slightly from
+        # the strict accumulated source. The meltwater field above was
+        # captured BEFORE smoothing, so the river re-injection is based on
+        # the true (un-smeared) ice presence.
         self.iceFAG.copy(result=self.tmp1)
         smthIce = self._hillSlope(smooth=1)
         smthIce[smthIce < 0.] = 0.
         self.iceFAL.setArray(smthIce)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
 
-        # Ice thickness calculation based on glacier width
+        # Ice thickness from Bahr-style width-area scaling. Computed
+        # whenever ice is on (used by both flexure and the `iceH` output);
+        # the flex copy stays gated behind `flexOn`.
+        tmp = self.icewe * self.icewf * smthIce**0.3
+        tmp[tmp < 1.e-1] = 0.
+        self.tmpL.setArray(tmp)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        tmp = self._hillSlope(smooth=1)
+        self.iceHL.setArray(tmp)
+
         if self.flexOn:
-            tmp = self.icewe * self.icewf * smthIce**0.3
-            tmp[tmp < 1.e-1] = 0.
-            self.tmpL.setArray(tmp)
-            self.dm.localToGlobal(self.tmpL, self.tmp1)
-            tmp = self._hillSlope(smooth=1)
-            self.iceHL.setArray(tmp)
             # If simulation starts then set the ice flex variable to the initial glacier thickness
             if self.tNow == self.tStart:
                 self.iceHL.copy(result=self.iceFlex)

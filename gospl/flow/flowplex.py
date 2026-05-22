@@ -435,6 +435,14 @@ class FAMesh(object):
             tmp[tmp > 1.] = 1.0
             tmp[tmp < 0.] = 0.0
             rainA = np.multiply(rainA, 1. - tmp)
+            # Re-inject glacial meltwater captured during iceAccumulation:
+            # sub-ELA cells with ice present release the local ablation
+            # rate as liquid water into the river source. Without this,
+            # melt computed in the ice solve is discarded by the negative
+            # clamp on iceFAL and downstream basins under-predict
+            # discharge.
+            rainA = rainA + self.iceMeltL.getArray()
+            rainA[self.seaID] = 0.
 
         #  Solve flow/ice accumulation
         self.bL.setArray(rainA)
