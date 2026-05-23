@@ -98,7 +98,6 @@ This will save the file locally under the same name as it was on github: ``envir
         - ruamel.yaml
         - gflex
         - mpi4py
-        - xarray
         - pyshtools
         - cython
         - compilers
@@ -107,6 +106,10 @@ This will save the file locally under the same name as it was on github: ``envir
 
 
 Alternatively you can get it from your preferred web browser by clicking on the following link: `environment.yml <https://raw.githubusercontent.com/Geodels/gospl/master/environment.yml>`_ and saving it under the following name ``environment.yml``.
+
+.. note::
+
+   ``pyshtools`` is required: the flexural-isostasy module switched from the older ``isoFlex`` Python wrapper to a direct ``pyshtools``-based spherical-harmonic implementation. ``meshio`` and ``pyproj`` are no longer required dependencies.
 
 .. note::
 

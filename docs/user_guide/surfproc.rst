@@ -60,7 +60,29 @@ Hillslope and marine deposition parameters
         b. ``hillslopeKm`` is the diffusion coefficient for the marine domain,
         c. ``nonlinKm`` is the transport coefficient of freshly deposited sediments entering the ocean from rivers (non-linear diffusion),
         d. ``Gmar`` is a dimensionless deposition coefficient for marine domain,
-        e. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.        
+        e. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.
+
+        The following parameters tune the **marine** non-linear diffusion solver:
+
+        f. ``tsSteps`` is the maximum number of internal time-steps the adaptive controller may take per goSPL step (default: 2000). Increase if the verbose log shows many rejected steps,
+        g. ``offshore`` is the distance offshore (m) beyond which the clinoform-distance cap is no longer applied (default: 1.0e7),
+        h. ``oFill`` is the minimum elevation (m) below which the priority-flood algorithm is not applied — used to skip deep ocean cells (default: -6000.0).
+
+        The following parameters control how partial-fill deposition in **inland depressions** is distributed (see :ref:`dep`):
+
+        .. code:: yaml
+
+            diffusion:
+                # ... above keys ...
+                nlPitVolume: 1.0e9
+                nlPitDepth: 100.0
+                nlPitK: 10.0
+                pitInletBias: 0.10
+
+        i. ``nlPitVolume`` is the volume threshold (m³) above which a partially-filled depression uses the bathymetric-pile + inlet-bias geometry instead of bottom-up fill (default: 1.0e9),
+        j. ``nlPitDepth`` is the depth threshold (m) — both ``nlPitVolume`` AND ``nlPitDepth`` must be exceeded to trigger the diffusion path (default: 100.0),
+        k. ``nlPitK`` is the non-linear diffusion coefficient (m²/yr) used inside selected pits (default: same as ``nonlinKm``). Higher values let the delta wedge prograde further per step,
+        l. ``pitInletBias`` is the fraction (0–1) of each pit's deposit concentrated at the inlets to seed delta progradation; the remainder is distributed as a bathymetric bottom-up baseline. ``0.0`` = pure bowl fill, ``1.0`` = original inlet-only spike. Default: ``0.10``. See :ref:`dep` for the underlying algorithm.
                 
         *Optional additions for non-linear diffusion model*
 
@@ -106,7 +128,7 @@ Glacial erosion
             ice:
                 icedir: 1
                 Ki: 6.e-6
-                fmelt: 10.
+                melt: 10.
                 diff: 20.
                 # Either constant glacial parameters
                 hterm: 1700.0
@@ -118,12 +140,12 @@ Glacial erosion
                 eheight: 0.25
 
         a. ``icedir`` is the flow direction used to evaluate ice flow (default: 1 - i.e. SFD),
-        b. ``Ki`` is the erodibility coefficient for glacial erosion,
-        c. ``fmelt`` is the melting factor adjustment (default: 10.),
+        b. ``Ki`` is the erodibility coefficient for glacial erosion (default: 0.0 — set this to enable ice-driven erosion in the SPL),
+        c. ``melt`` is the melting-factor amplifier used by the implicit ice solver to make sub-ELA cells act as strong sinks (default: 10.). This is a numerical solver knob, not the physical melt multiplier — the meltwater released into the river network uses the unamplified local ablation rate (see :ref:`ice`),
         d. ``diff`` is the diffusion coefficient applied to the ice flow accumulation,
         e. ``hterm`` is the glacier terminus elevation (m),
         f. ``hela`` is the equilibrium-line altitude (m),
-        g. ``hice`` is the ice cap altitude (m). 
+        g. ``hice`` is the ice cap altitude (m).
 
         Then the user can specify the initial soil thickness if any by setting **either**:
 

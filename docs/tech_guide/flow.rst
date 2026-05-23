@@ -129,3 +129,14 @@ Iterative methods allow for an initial guess to be provided. When this initial g
 .. note::
 
   The flow routing approach and corresponding flow CSR matrix (**W**) is also used in the sediment routing algorithm.
+
+Coupling with glacial meltwater
+-------------------------------
+
+When the ice module is enabled, the source term :math:`\mathrm{b_i}` is *not* simply the local precipitation. Cells above the equilibrium-line altitude (ELA) divert a fraction of their precipitation into the ice accumulator (see :ref:`ice`), and cells below the ELA that hold ice receive the corresponding ablation rate back as liquid water. Concretely, before solving for **q** goSPL replaces:
+
+.. math::
+
+  \mathrm{b_i} \rightarrow \mathrm{b_i \cdot (1 - r_i^{ice}/P_i) + m_i}
+
+where :math:`\mathrm{r_i^{ice}}` is the ice-accumulation rate and :math:`\mathrm{m_i}` is the meltwater rate produced where ice exists below the ELA. This keeps glacier-fed rivers from under-predicting discharge downstream of melt zones.

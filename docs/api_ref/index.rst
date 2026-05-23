@@ -273,12 +273,29 @@ API reference
 
             See functions and source code.
 
+    .. grid-item-card::
+        :text-align: center
+
+        **Class VoroBuild**
+        ^^^
+
+        Voronoi helper used by ``UnstMesh`` to build the Centroidal Voronoi Tessellation underlying the finite-volume discretisation.
+
+        +++
+
+        .. button-ref:: voro_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
 .. toctree::
     :maxdepth: 3
     :hidden:
 
     model_ref
     mesh_ref
+    voro_ref
     pit_ref
     flow_ref
     spl_ref

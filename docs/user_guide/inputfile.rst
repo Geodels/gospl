@@ -43,7 +43,7 @@ Initial mesh definition and simulation declaration
 
         c. boundary conditions (``bc``) when not running a global model. Each integer corresponds to an edge defined in the following order: south, east, north, and west. The integer is set to either 0 for open or to 1 for fixed boundaries.
         d. the ``fast`` key allows you to run a model without applying any surface processes on top. This is used to check your input files prior to run your simulation with all options. By default it is set to *False*.
-        e. ``seadepo`` performing marine deposition or not. By default it is set to *False*.
+        e. ``seadepo`` performing marine deposition or not. By default it is set to *True*.
         f. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file (**.npz** format with the erosion deposition defined with the key ``ed``) containing for each vertex of the mesh the cumulative erosion deposition values in metres. 
         g. to start a simulation using an initial stratigraphic layer use the ``npstrata`` key (**.npz** file) and specify a file containing for each vertex of the mesh the stratigraphic layer thickness ``strataH``, the elevation at time of deposition ``strataZ``, and the porosities of the sediment ``phiS``. 
         h. ``advect`` define the advection scheme used when applying horizontal displacements. Choices are ``upwind``, ``iioe1``, ``iioe2`` and ``interp``  (go to the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ in the documentation for more information). 

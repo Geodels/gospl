@@ -1,0 +1,81 @@
+{% set name = "gospl" %}
+{% set version = "2026.05.21.rc" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  # Build from the repository root (path is relative to this meta.yaml).
+  path: ..
+
+build:
+  number: 0
+  # MPI tooling is not supported on Windows in this recipe.
+  skip: true  # [win]
+  # Standard meson-python entry point. --no-deps avoids pip resolving deps
+  # that conda has already supplied at host scope.
+  script: {{ PYTHON }} -m pip install . --no-build-isolation --no-deps -vv
+
+requirements:
+  build:
+    - {{ compiler('c') }}
+    - {{ compiler('fortran') }}
+    # Cross-compilation glue (only used by build farms; harmless locally).
+    - cross-python_{{ target_platform }}     # [build_platform != target_platform]
+    - python                                  # [build_platform != target_platform]
+    - numpy                                   # [build_platform != target_platform]
+    - pkg-config
+  host:
+    - python {{ python }}
+    - pip
+    - meson-python >=0.15.0
+    - setuptools >=61.0
+    - cython
+    - numpy
+    - mpi4py
+    - petsc4py
+  run:
+    - python
+    - {{ pin_compatible('numpy') }}
+    - scipy
+    - numpy-indexed
+    - pandas
+    - h5py
+    - vtk
+    - ruamel.yaml
+    - mpi4py
+    - petsc4py
+    - gflex >=1.2.0
+    - pyshtools
+
+test:
+  imports:
+    - gospl
+    - gospl._fortran
+  requires:
+    - pip
+  commands:
+    - pip check
+
+about:
+  home: https://github.com/Geodels/gospl
+  license: GPL-3.0-or-later
+  license_family: GPL3
+  license_file: ../LICENSE
+  summary: Global Scalable Paleo Landscape Evolution
+  description: |
+    goSPL (Global Scalable Paleo Landscape Evolution) is an open-source,
+    GPL-licensed library providing a scalable parallelised Python-based
+    numerical model to simulate global-scale landscapes and sedimentary
+    basin evolution. It implements river incision, sediment transport
+    and deposition, hillslope diffusion, marine deposition, lake/depression
+    filling, sediment compaction, glacial ice accumulation/erosion,
+    flexural isostasy, and time-varying tectonic and climatic forcing
+    over unstructured PETSc DMPlex meshes running under MPI.
+  doc_url: https://gospl.readthedocs.io
+  dev_url: https://github.com/Geodels/gospl
+
+extra:
+  recipe-maintainers:
+    - tristansalles

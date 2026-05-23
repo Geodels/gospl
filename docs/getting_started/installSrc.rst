@@ -97,11 +97,16 @@ petsc4py                  3.13.0             Interface to PETSc libraries
 h5py                      2.10.0             Interface to the HDF5 binary data format
 pandas                    1.1.2              Data analysis and manipulation tool
 ruamel.yaml               0.16.12            Parsing YAML to Python objects
-pre-commit                2.7.1              Managing and maintaining multi-language pre-commit hooks
 vtk                       9.0.3              Toolkit for 3D computer graphics and image processing
 numpy-indexed             0.3.5              Functionality for indexed operations on numpy ndarrays
 gflex                     1.1.0              Compute flexural isostasy
+pyshtools                 4.10               Spherical-harmonic backend used by the flexure module
+meson-python              0.15.0             Build backend
 ========================= ================== =============================================================
+
+.. note::
+
+   ``meshio`` and ``pyproj`` are no longer required by goSPL. The flexure module switched from the older ``isoFlex`` wrapper to a ``pyshtools`` spherical-harmonic implementation; if your environment still lists ``isoFlex``, it can be removed.
 
 
 goSPL installation
@@ -114,3 +119,5 @@ Once all the listed dependencies above have been installed, goSPL source files a
 It can then be installed locally on your system using::
 
       pip install --no-build-isolation -e .
+
+The ``--no-build-isolation`` flag is required so that pip uses the dependencies already installed in your environment (notably ``meson-python``, ``numpy``, ``cython``, ``mpi4py`` and ``petsc4py``) rather than fetching a fresh build environment that may not see your local PETSc/MPI installation.

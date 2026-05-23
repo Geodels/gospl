@@ -56,3 +56,40 @@ If the cumulative sediment volume  transported by the rivers draining in a speci
 The updated elevation field is then used to compute the flow accumulation following the approach presented in section :ref:`1 <flow>` and :ref:`2 <ero>`. The sediment fluxes are initially set to zero except on the spillover nodes and the excess sediments are transported downstream.
 
 During a specific time step, the processed described above is iteratively repeated until all sediments are deposited in inlands depressions or have entered the marine environment.
+
+Partial-fill geometry in large/deep depressions
+-----------------------------------------------
+
+For depressions that receive *less* sediment than their volume in a given time step (:math:`\mathrm{V_s^{in} < V_{pit}}`), goSPL chooses between two deposition geometries depending on the depression size and depth. Both are mass-conservative; they differ only in *how* the deposit is distributed within the basin.
+
+**Path 1 — bottom-up fill (small or shallow pits).**
+
+When a depression is small or shallow (volume below ``nlPitVolume`` *or* depth below ``nlPitDepth`` in the YAML ``diffusion`` block), the deposit is added as a horizontal layer that fills the bowl from the bottom up. The deposited surface is set to a target level :math:`\mathrm{\eta^t}` determined by interpolating the volume-vs-level table built when the pit was labelled:
+
+.. math::
+
+   \mathrm{\delta_i = \max(0,\; \min(\eta^t,\; \eta^f_i) - \eta_i)}
+
+A barely-perceptible (~:math:`\mathrm{10^{-6}}` m/m) tilt toward the spill point is then added so the next flow-routing step does not face a perfectly flat lake surface.
+
+**Path 2 — bathymetric pile + inlet bias (large and deep pits).**
+
+When a depression is *both* large in volume (``volume >= nlPitVolume``) and deep (``depth >= nlPitDepth``), a horizontal fill looks artificial because real lakes accumulate sediment both at the inlet (delta progradation) and across the basin floor (suspended settling). goSPL therefore builds the deposit as the sum of two contributions:
+
+1. A **bathymetric baseline** that distributes a fraction :math:`\mathrm{(1 - b)}` of the deposited volume proportionally to local water depth below the target level:
+
+   .. math::
+
+      \mathrm{\delta_i^{bath}} = \mathrm{(1 - b)\; \frac{V_s^{in}\; w_i}{\sum_j w_j \Omega_j},\quad w_i = \max(0,\; \eta^t - \eta_i)}
+
+2. An **inlet bias** that concentrates the remaining fraction :math:`\mathrm{b}` of the volume at the cells where flow enters the depression from outside (the natural delta-formation cells):
+
+   .. math::
+
+      \mathrm{\delta_c^{inlet}} = \mathrm{\frac{b\; V_s^{in}}{n_{\text{inlets}}\; \Omega_c}}
+
+The combined initial pile is then passed through the marine-style non-linear diffusion solver (with coefficient ``nlPitK``), restricted to the in-pit cells, so neither contribution can spill out of the basin. A final per-pit mass rescale absorbs any boundary drift introduced by the diffusion.
+
+.. important::
+
+   The inlet bias fraction :math:`\mathrm{b}` is set in the YAML ``diffusion`` block via the ``pitInletBias`` key (default ``0.10``, clamped to ``[0, 1]``). Lower values (0.0–0.2) produce mostly bowl-fill geometry; mid-range values (0.3–0.6) produce visible delta progradation while still filling the basin interior; high values (>0.7) reproduce the older "inlet spike" behaviour that tends to look blocky at the rim. Tune in conjunction with ``nlPitK``, which controls how far the delta wedge progrades under diffusion (length :math:`\sim \sqrt{K \Delta t}`).

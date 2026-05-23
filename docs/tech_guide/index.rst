@@ -134,6 +134,22 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
 
             Learn more about the tectonics implementation.
 
+    .. grid-item-card::
+        :text-align: center
+
+        **Ice accumulation and meltwater**
+        ^^^
+
+        First-order mass-balance proxy for glacial ice: ELA-based accumulation, MFD routing on the filled DEM, and meltwater re-injection into the river network.
+
+        +++
+
+        .. button-ref:: ice
+            :color: secondary
+            :click-parent:
+
+            Learn more about the ice implementation.
+
 
 .. toctree::
     :maxdepth: 3
@@ -145,3 +161,4 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     hill
     strat
     tecto
+    ice

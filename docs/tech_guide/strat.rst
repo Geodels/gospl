@@ -71,3 +71,21 @@ where the thickness of that layer :math:`\mathrm{\Delta z_i^{k}}` is related to 
 The values of :math:`\mathrm{\Delta z_i^{k}}` for :math:`\mathrm{i=1,...,k}` are then computed sequentially from the top to the bottom of the sedimentary pile.
 
 Sedimentary layer elevation is then decreased based on the sum of compaction happening in each layer between two consecutive time steps.
+
+Bedrock sentinel
+^^^^^^^^^^^^^^^^
+
+When no initial stratigraphy file (``npstrata``) is provided, goSPL treats stratigraphic layer 0 as an effectively infinite bedrock reservoir by initialising its thickness to a sentinel value of :math:`\mathrm{10^6}` m. The erosion logic adds and subtracts this offset internally so it cancels out of all eroded-volume calculations.
+
+The compaction step explicitly **freezes** the sentinel layer: when ``bedrockLay > 0`` (set to ``1`` for the no-file case and ``0`` when an initial stratigraphy file is loaded), the corresponding rows of :math:`\mathrm{\Delta z}` and :math:`\mathrm{\phi}` are restored to their pre-compaction values at the end of ``_depthPorosity``. Without this, the sentinel would compute a near-zero equilibrium porosity at the resulting half-million-metre burial depth and shrink to roughly half its thickness in a single step, producing a catastrophic surface drop.
+
+Porosity inheritance for empty layers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Stratigraphic layers can become *empty* between erosion and the next deposition window — their thickness is set to zero and their porosity is cleared. To keep the output porosity field continuous (and to avoid spurious zero values in compaction calculations on subsequent steps), zero-thickness layers inherit the porosity of the nearest underlying layer with non-zero porosity. The fill is a vectorised forward-fill along the layer axis:
+
+.. math::
+
+   \mathrm{\phi_k \leftarrow \phi_j,\quad j = \max\{m < k : \phi_m > 0\}}
+
+with the convention that leading zeros at the column base (no valid layer below) remain zero. This is applied both at the end of ``_depthPorosity`` (after compaction) and at the end of ``erodeStrat`` (after erosion).

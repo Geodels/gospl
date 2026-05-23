@@ -18,6 +18,7 @@ Class PITFill
    .. autosummary::
 
       ~PITFill.fillElevation
+      ~PITFill.fillIceElevation
 
    .. rubric:: Private Methods
 
@@ -37,6 +38,7 @@ Public functions
 ---------------------
 
 .. automethod:: flow.pitfilling.PITFill.fillElevation
+.. automethod:: flow.pitfilling.PITFill.fillIceElevation
 
 
 Private functions

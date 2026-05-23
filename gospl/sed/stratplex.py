@@ -65,6 +65,9 @@ class STRAMesh(object):
             self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiS[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
+            # All layers in the file are real sediment; no bedrock sentinel.
+            self.bedrockLay = 0
+
             if self.memclear:
                 del fileData, stratVal
                 gc.collect()
