@@ -163,7 +163,7 @@ html_theme_options = {
         # "json_url": "https://raw.githubusercontent.com/Geodels/gospl/master/docs/_static/version_switch.json",
         "version_match": version,
     },
-    "show_version_warning_banner": True,
+    "show_version_warning_banner": False,
     "secondary_sidebar_items": ["page-toc"],
     # The service https://plausible.io is used to gather simple
     # and privacy-friendly analytics for the site. The dashboard can be accessed
@@ -177,12 +177,10 @@ html_theme_options = {
 
 if 'dev' in version:
     html_theme_options["switcher"]["version_match"] = "development"
-    html_theme_options["show_version_warning_banner"] = True
 elif 'rc' in version:
     # Release-candidate: match the "release-candidate" entry in
     # docs/_static/version_switch.json so the switcher highlights it.
     html_theme_options["switcher"]["version_match"] = "release-candidate"
-    html_theme_options["show_version_warning_banner"] = True
 
 if 'versionwarning' in tags:  # noqa: F821
     # Specific to docs.scipy.org deployment.
