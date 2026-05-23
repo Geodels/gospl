@@ -14,6 +14,12 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Opt the existing v3/v4 actions into the Node.js 24 runtime now; the runner
+# forces this default on 2026-06-02 anyway. Remove this once we bump to
+# action versions that ship Node 24 natively.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     name: ${{ matrix.os }} / py${{ matrix.python }}
@@ -40,6 +46,9 @@ jobs:
           miniforge-version: latest
           channels: conda-forge
           channel-priority: strict
+          # Don't add the `defaults` channel implicitly — we only want
+          # conda-forge resolving deps for the build.
+          conda-remove-defaults: true
           activate-environment: ""
           auto-update-conda: true
 
