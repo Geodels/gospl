@@ -46,7 +46,7 @@ requirements:
     - ruamel.yaml
     - mpi4py
     - petsc4py
-    - gflex >=1.2.0
+    - gflex >=1.1.0
     - pyshtools
 
 test:

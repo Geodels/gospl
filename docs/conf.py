@@ -60,7 +60,7 @@ author = "Tristan Salles"
 # release = version
 
 # The short X.Y version
-version = "2024.09.01.dev"
+version = "2026.05.21.rc"
 # The full version, including alpha/beta/rc tags
 release = version
 
@@ -176,6 +176,11 @@ html_theme_options = {
 
 if 'dev' in version:
     html_theme_options["switcher"]["version_match"] = "development"
+    html_theme_options["show_version_warning_banner"] = True
+elif 'rc' in version:
+    # Release-candidate: match the "release-candidate" entry in
+    # docs/_static/version_switch.json so the switcher highlights it.
+    html_theme_options["switcher"]["version_match"] = "release-candidate"
     html_theme_options["show_version_warning_banner"] = True
 
 if 'versionwarning' in tags:  # noqa: F821
