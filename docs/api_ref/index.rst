@@ -276,7 +276,7 @@ API reference
     .. grid-item-card::
         :text-align: center
 
-        **Class VoroBuild**
+        **Class Voronoi**
         ^^^
 
         Voronoi helper used by ``UnstMesh`` to build the Centroidal Voronoi Tessellation underlying the finite-volume discretisation.
