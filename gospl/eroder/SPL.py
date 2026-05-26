@@ -55,11 +55,16 @@ class SPL(object):
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
 
+        # Per-node erodibility multiplier from the top of the local
+        # stratigraphic column (1.0 = use self.K as-is). Bedrock layers
+        # imposed via the initial-strata `stratK` field show up here.
+        surfK = self._surfaceK()
+
         # Incorporate the effect of local mean annual precipitation rate on erodibility
         if self.sedfacVal is not None:
-            Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
+            Kbr = self.K * surfK * self.sedfacVal * (self.rainVal ** self.coeffd)
         else:
-            Kbr = self.K * (self.rainVal ** self.coeffd)
+            Kbr = self.K * surfK * (self.rainVal ** self.coeffd)
         Kbr *= self.dt * (PA ** self.spl_m)
         Kbr[self.seaID] = 0.0
 

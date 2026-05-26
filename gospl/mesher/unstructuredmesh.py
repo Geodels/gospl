@@ -673,15 +673,30 @@ class UnstMesh(object):
 
             self.rainNb = nb
             if pd.isnull(self.raindata["rUni"][nb]):
-                loadData = np.load(self.raindata.iloc[nb, 2])
-                rainVal = loadData[self.raindata.iloc[nb, 3]]
-                del loadData
+                if pd.isnull(self.raindata["rzA"][nb]):
+                    loadData = np.load(self.raindata.iloc[nb, 4])
+                    rainVal = loadData[self.raindata.iloc[nb, 5]]
+                    self.rainA = None
+                    self.rainB = None
+                    del loadData
+                else:
+                    self.rainA = self.raindata.iloc[nb, 2]
+                    self.rainB = self.raindata.iloc[nb, 3]
             else:
+                self.rainA = None
+                self.rainB = None
                 rainVal = np.full(self.mpoints, self.raindata.iloc[nb, 1])
-            rainVal[rainVal < 0] = 0.0
-            self.rainMesh = rainVal
+            
+            if self.rainA is None:
+                rainVal[rainVal < 0] = 0.0
+                self.rainMesh = rainVal
 
-        self.rainVal = self.rainMesh[self.locIDs]
+        if self.rainA is None:
+            self.rainVal = self.rainMesh[self.locIDs]    
+        else:
+            tmp = self.hLocal.getArray().copy()
+            self.rainVal = tmp  * self.rainA + self.rainB
+            self.rainVal[self.rainVal < 0] = 0.0
         self.bL.setArray(self.rainVal * self.larea)
         self.dm.localToGlobal(self.bL, self.bG)
 

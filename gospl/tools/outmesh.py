@@ -172,6 +172,21 @@ class WriteMesh(object):
             )
             f["phiS"][:, : self.stratStep + 1] = self.phiS[:, : self.stratStep + 1]
 
+            # Per-layer erodibility multiplier (applied on top of self.K
+            # in the SPL evaluation when the layer is exposed). Always 1.0
+            # for layers deposited by goSPL; can be non-uniform when the
+            # initial-strata file supplies a `stratK` field.
+            if self.stratK is not None:
+                f.create_dataset(
+                    "stratK",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    compression="gzip",
+                )
+                f["stratK"][:, : self.stratStep + 1] = self.stratK[
+                    :, : self.stratStep + 1
+                ]
+
         MPIcomm.Barrier()
 
         if MPIrank == 0 and self.verbose:
@@ -466,6 +481,13 @@ class WriteMesh(object):
                 self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
                 self.phiS.fill(0.0)
                 self.phiS[:, : self.stratStep] = np.array(hf["/phiS"])
+                if "/stratK" in hf and self.stratK is not None:
+                    # Restart-safe restore of per-layer K multipliers.
+                    # Older outputs without this dataset fall back to the
+                    # initialised 1.0 array (no scaling), preserving
+                    # behaviour for any pre-existing restart files.
+                    self.stratK.fill(1.0)
+                    self.stratK[:, : self.stratStep] = np.array(hf["/stratK"])
 
         return
 

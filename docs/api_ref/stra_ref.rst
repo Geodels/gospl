@@ -28,6 +28,8 @@ Class StraMesh
    .. autosummary::
 
       ~STRAMesh._depthPorosity
+      ~STRAMesh._fillZeroPorosity
+      ~STRAMesh._surfaceK
 
 Public functions
 ---------------------
@@ -44,3 +46,5 @@ Private functions
 ---------------------
 
 .. automethod:: sed.stratplex.STRAMesh._depthPorosity
+.. automethod:: sed.stratplex.STRAMesh._fillZeroPorosity
+.. automethod:: sed.stratplex.STRAMesh._surfaceK

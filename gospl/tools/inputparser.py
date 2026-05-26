@@ -1185,7 +1185,7 @@ class ReadYaml(object):
 
         return
 
-    def _defineRain(self, k, rStart, rMap, rUniform, raindata):
+    def _defineRain(self, k, rStart, rMap, rUniform, rZscale,raindata):
         """
         Define precipitation conditions.
 
@@ -1193,47 +1193,55 @@ class ReadYaml(object):
         :arg rStart: precipitation event start time
         :arg rMap: precipitation map file event
         :arg rUniform: precipitation uniform value event
+        :arg rZscale: precipitation scaled with elevation value event
         :arg raindata: pandas dataframe storing each precipitation event
         :return: appended raindata
         """
 
-        if rMap is None and rUniform is None:
+        if rMap is None and rUniform is None and rZscale is None:
             print(
-                "For each climate event a rainfall value (uniform) or a rainfall \
-                grid (map) is required.",
+                "For each climate event a rainfall value (uniform), a rainfall "
+                "grid (map), or an elevation-scaling pair (zscale: [A, B]) is required.",
                 flush=True,
             )
             raise ValueError(
-                "Climate event {} has no rainfall value (uniform) or a rainfall \
-                map (map).".format(
-                    k
-                )
+                "Climate event {} has no rainfall value (uniform), rainfall map "
+                "(map), or elevation-scaling pair (zscale).".format(k)
             )
 
         tmpRain = []
         if rMap is None:
-            tmpRain.insert(
-                0,
-                {"start": rStart, "rUni": rUniform, "rMap": None, "rKey": None},
-            )
+            if rUniform is not None:
+                tmpRain.insert(
+                    0,
+                    {"start": rStart, "rUni": rUniform, "rzA": None, "rzB": None, "rMap": None, "rKey": None},
+                )
+            else:
+                tmpRain.insert(
+                    0,
+                    {"start": rStart, "rUni": None, "rzA": rZscale[0], "rzB": rZscale[1],
+                     "rMap": None, "rKey": None},
+                )
         else:
             tmpRain.insert(
                 0,
                 {
                     "start": rStart,
                     "rUni": None,
+                    "rzA": None,
+                    "rzB": None,
                     "rMap": rMap[0] + ".npz",
                     "rKey": rMap[1],
                 },
             )
 
         if k == 0:
-            raindata = pd.DataFrame(tmpRain, columns=["start", "rUni", "rMap", "rKey"])
+            raindata = pd.DataFrame(tmpRain, columns=["start", "rUni", "rzA", "rzB", "rMap", "rKey"])
         else:
             raindata = pd.concat(
                 [
                     raindata,
-                    pd.DataFrame(tmpRain, columns=["start", "rUni", "rMap", "rKey"]),
+                    pd.DataFrame(tmpRain, columns=["start", "rUni", "rzA", "rzB", "rMap", "rKey"]),
                 ],
                 ignore_index=True,
             )
@@ -1252,6 +1260,7 @@ class ReadYaml(object):
             for k in range(len(rainSort)):
                 rStart = None
                 rUniform = None
+                rZscale = None
                 rMap = None
                 try:
                     rStart = rainSort[k]["start"]
@@ -1264,6 +1273,10 @@ class ReadYaml(object):
                     )
                 try:
                     rUniform = rainSort[k]["uniform"]
+                except KeyError:
+                    pass
+                try:
+                    rZscale = rainSort[k]["zscale"]
                 except KeyError:
                     pass
                 try:
@@ -1312,17 +1325,17 @@ class ReadYaml(object):
                             "Field name for rainfall is not defined correctly or does not exist!"
                         )
 
-                raindata = self._defineRain(k, rStart, rMap, rUniform, raindata)
+                raindata = self._defineRain(k, rStart, rMap, rUniform, rZscale, raindata)
 
             if raindata["start"][0] > self.tStart:
                 tmpRain = []
                 tmpRain.insert(
-                    0, {"start": self.tStart, "rUni": 0.0, "rMap": None, "rKey": None}
+                    0, {"start": self.tStart, "rUni": 0.0, "rzA":None, "rzB":None, "rMap": None, "rKey": None}
                 )
                 raindata = pd.concat(
                     [
                         pd.DataFrame(
-                            tmpRain, columns=["start", "rUni", "rMap", "rKey"]
+                            tmpRain, columns=["start", "rUni", "rzA", "rzB", "rMap", "rKey"]
                         ),
                         raindata,
                     ],

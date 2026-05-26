@@ -185,11 +185,16 @@ class nlSPL(object):
         elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
                              where=dh != 0)
 
+        # Per-node erodibility multiplier from the top of the local
+        # stratigraphic column (1.0 = use self.K as-is). Bedrock layers
+        # imposed via the initial-strata `stratK` field show up here.
+        surfK = self._surfaceK()
+
         # Incorporate the effect of local mean annual precipitation rate on erodibility
         if self.sedfacVal is not None:
-            self.Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
+            self.Kbr = self.K * surfK * self.sedfacVal * (self.rainVal ** self.coeffd)
         else:
-            self.Kbr = self.K * (self.rainVal ** self.coeffd)
+            self.Kbr = self.K * surfK * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
 
@@ -266,11 +271,15 @@ class nlSPL(object):
         elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
                              where=dh != 0)
 
+        # Per-node erodibility multiplier from the top of the local
+        # stratigraphic column (1.0 = use self.K as-is).
+        surfK = self._surfaceK()
+
         # Incorporate the effect of local mean annual precipitation rate on erodibility
         if self.sedfacVal is not None:
-            self.Kbr = self.K * self.sedfacVal * (self.rainVal ** self.coeffd)
+            self.Kbr = self.K * surfK * self.sedfacVal * (self.rainVal ** self.coeffd)
         else:
-            self.Kbr = self.K * (self.rainVal ** self.coeffd)
+            self.Kbr = self.K * surfK * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
 

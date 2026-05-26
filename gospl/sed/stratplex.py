@@ -33,6 +33,12 @@ class STRAMesh(object):
         self.stratH = None
         self.stratZ = None
         self.phiS = None
+        # Per-layer erodibility multiplier (lpoints, stratNb). Effective K
+        # at the surface = self.K * stratK[<top non-empty layer>]. Fresh
+        # deposits and the bedrock sentinel default to 1.0 (no scaling).
+        # An optional `stratK` key in the npstrata file lets the user
+        # impose a non-uniform multiplier on the initial layers.
+        self.stratK = None
 
         return
 
@@ -65,6 +71,16 @@ class STRAMesh(object):
             self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiS[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
 
+            # Per-layer K multiplier. Loaded from the optional `stratK`
+            # key in the npstrata file (same (mpoints, initLay) shape as
+            # the other layer fields); defaults to 1.0 (use self.K as-is).
+            self.stratK = np.ones((self.lpoints, self.stratNb), dtype=np.float64)
+            if "stratK" in fileData.files:
+                stratVal = fileData["stratK"]
+                self.stratK[:, 0 : self.initLay] = stratVal[
+                    self.locIDs, 0 : self.initLay
+                ]
+
             # All layers in the file are real sediment; no bedrock sentinel.
             self.bedrockLay = 0
 
@@ -75,6 +91,7 @@ class STRAMesh(object):
             self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
             self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+            self.stratK = np.ones((self.lpoints, self.stratNb), dtype=np.float64)
             # Treat layer 0 as an effectively infinite bedrock reservoir when
             # no initial stratigraphy file is provided. The 1e6 m sentinel
             # cancels out in erodeStrat (cumThick / eroVal share the offset)
@@ -97,6 +114,35 @@ class STRAMesh(object):
         np.maximum.accumulate(idx, axis=1, out=idx)
         return np.take_along_axis(phiS, idx, axis=1)
 
+    def _surfaceK(self):
+        """
+        Return the per-node erodibility multiplier of the topmost
+        non-empty stratigraphic layer. Used by the SPL flavours to scale
+        the scalar ``self.K`` according to the bedrock currently exposed
+        at the surface.
+
+        Returns 1.0 everywhere when stratigraphy is disabled
+        (``stratNb == 0``) or when the column is fully empty at a node,
+        so the SPL evaluation falls back to the YAML-default K.
+        """
+        if self.stratNb == 0 or self.stratK is None:
+            return np.ones(self.lpoints, dtype=np.float64)
+
+        sK = self.stratK[:, : self.stratStep + 1]
+        mask = sK > 0
+        # For each row, locate the highest column index where the layer
+        # has a non-zero multiplier. Reverse-then-argmax picks the first
+        # non-zero starting from the top of the column.
+        rev = mask[:, ::-1]
+        any_valid = rev.any(axis=1)
+        top_from_right = np.argmax(rev, axis=1)
+        top_idx = sK.shape[1] - 1 - top_from_right
+
+        out = np.ones(self.lpoints, dtype=np.float64)
+        rows = np.arange(sK.shape[0])
+        out[any_valid] = sK[rows[any_valid], top_idx[any_valid]]
+        return out
+
     def deposeStrat(self):
         """
         Add deposition on top of an existing stratigraphic layer. The following variables will be recorded:
@@ -111,6 +157,10 @@ class STRAMesh(object):
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         self.phiS[ids, self.stratStep] = self.phi0s
+        # Freshly deposited sediment carries the default erodibility (no
+        # multiplier). If you want re-deposited sediment to keep its
+        # source-layer K, this is the line to revisit.
+        self.stratK[ids, self.stratStep] = 1.0
 
         # Cleaning arrays
         if self.memclear:
@@ -176,9 +226,14 @@ class STRAMesh(object):
         neg = self.stratH < 0
         self.stratH[neg] = 0.0
         self.phiS[neg] = 0.0
-        self.phiS[neg] = 0.0
+        self.stratK[neg] = 0.0
         self.phiS[:, : self.stratStep + 1] = self._fillZeroPorosity(
             self.phiS[:, : self.stratStep + 1]
+        )
+        # Same forward-fill for the K multiplier so an emptied layer
+        # inherits the bedrock K of the layer below it once exposed.
+        self.stratK[:, : self.stratStep + 1] = self._fillZeroPorosity(
+            self.stratK[:, : self.stratStep + 1]
         )
         self.thCoarse /= self.dt
 

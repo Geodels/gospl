@@ -89,3 +89,27 @@ Stratigraphic layers can become *empty* between erosion and the next deposition 
    \mathrm{\phi_k \leftarrow \phi_j,\quad j = \max\{m < k : \phi_m > 0\}}
 
 with the convention that leading zeros at the column base (no valid layer below) remain zero. This is applied both at the end of ``_depthPorosity`` (after compaction) and at the end of ``erodeStrat`` (after erosion).
+
+Per-layer erodibility multiplier
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For runs initialised from an ``npstrata`` file, goSPL accepts an optional ``stratK`` field of shape ``(mesh_points, initial_layers)`` containing a **per-layer multiplier** applied to the SPL erodibility coefficient. The effective per-node erodibility seen by the stream-power law becomes
+
+.. math::
+
+   \mathrm{K_{eff}(i)} = \mathrm{K \cdot s_K(i) \cdot f_{sed}(i) \cdot P_i^{\,d}}
+
+where :math:`\mathrm{K}` is the scalar value declared in the YAML ``spl`` block, :math:`\mathrm{s_K(i)}` is the multiplier read from the topmost non-empty layer in node :math:`i`'s stratigraphic column, :math:`\mathrm{f_{sed}(i)}` is the optional ``sedfactor`` map, and :math:`\mathrm{P_i^{\,d}}` is the precipitation-dependent term controlled by the YAML ``spl.d`` exponent.
+
+The multiplier is stored as ``self.stratK[lpoints, stratNb]`` parallel to ``stratH`` / ``phiS``, with these conventions:
+
+- **Initial layers**: read directly from the ``stratK`` key of the ``npstrata`` file. If the key is absent, all initial layers default to ``1.0`` (no scaling).
+- **Bedrock sentinel** (no ``npstrata`` file): layer 0 defaults to ``1.0`` so the SPL falls back to the YAML-default :math:`\mathrm{K}`.
+- **Freshly deposited layers**: ``stratK`` is reset to ``1.0``. Material eroded from a bedrock layer and re-deposited downstream therefore loses the bedrock-specific multiplier — physically, the rock has been broken into sediment and no longer carries its original resistance.
+- **Emptied layers**: ``stratK`` is cleared to zero alongside ``stratH`` / ``phiS`` and then forward-filled from the nearest non-empty layer below, so a partially-exhumed column always exposes a real bedrock multiplier at the surface.
+
+The lookup of the surface multiplier is a vectorised search for the highest non-zero layer index per node, performed once per SPL evaluation. When stratigraphy is disabled (``stratNb == 0``) or the column is fully empty, the helper returns ``1.0`` and the SPL behaviour is identical to a run without ``stratK``.
+
+.. note::
+
+   The per-layer multiplier is currently a **single value per layer** and applies only to the bedrock SPL coefficient. It is not available in the dual coarse/fine sediment configuration, and it does not scale the soil-layer erodibility ``Ksoil`` in the soil-coupled SPL flavour.

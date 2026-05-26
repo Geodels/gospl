@@ -52,13 +52,27 @@ Climatic (rainfall) forcing conditions
                   map: ['rain_map','r']
                 - start: 20000.
                   uniform: 1.
+                - start: 30000.
+                  zscale: [0.0008, 0.5]
 
 
-        The climatic forcing is defined in a similar fashion as the tectonic one. It is based on a sequence of events with each event starting at a given time (``start`` in years) and corresponding to a given precipitation condition. This could either be an uniform rainfall over the entire mesh (``uniform``) or a precipitation mesh ``map``. The rainfall values have to be in metres per year and the precipitation is updated at every time step (defined by ``dt``).
+        The climatic forcing is defined in a similar fashion as the tectonic one. It is based on a sequence of events with each event starting at a given time (``start`` in years) and corresponding to a given precipitation condition. Each event must specify **one** of three rainfall sources:
+
+        a. ``uniform`` — a single rainfall value (m/yr) applied across the whole mesh.
+        b. ``map`` — a path-and-key pair pointing at a precipitation grid stored in an ``.npz`` file (e.g. ``['rain_map', 'r']`` where ``'r'`` is the key holding the per-vertex values, in m/yr).
+        c. ``zscale`` — a two-element list ``[A, B]`` that makes the rainfall scale **linearly with elevation** at every node and every time step: :math:`\mathrm{P_i = A \cdot \eta_i + B}` (clamped to non-negative values), where :math:`\mathrm{\eta_i}` is the current surface elevation in metres and :math:`\mathrm{P_i}` is the resulting precipitation rate in m/yr. ``A`` is therefore in ``(m/yr) per m`` and ``B`` is the sea-level intercept in ``m/yr``.
+
+        The precipitation field is re-evaluated at every time step (defined by ``dt``). For ``zscale`` this means the rain pattern follows the evolving topography — newly uplifted regions wet, eroded regions dry — without needing pre-baked maps for every snapshot.
 
 .. important::
 
     When defining a precipitation grid, one needs to use the **npz** format and needs to specify the key corresponding to the precipitation variable in the file. In the above example this key is ``'r'``. The precipitation grid needs to define values for all vertices in the mesh.
+
+.. note::
+
+    The ``zscale`` option is a cheap proxy for orographic precipitation: it captures the first-order increase in rainfall with elevation but ignores wind direction, atmospheric dynamics, and rain-shadow effects. For the full orographic precipitation model — including airflow, condensation, and downwind drying — see the dedicated *Orographic precipitation* section below.
+
+    Negative values of :math:`\mathrm{P_i}` (which can occur for low ``B`` and sub-sea-level nodes) are clamped to zero before being routed through the flow accumulation, so coastal depressions do not act as moisture sinks.
 
 
 Orographic precipitation definition
