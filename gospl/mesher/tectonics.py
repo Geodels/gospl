@@ -18,7 +18,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import getrange
     from gospl._fortran import getfacevelocity
 
-petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD

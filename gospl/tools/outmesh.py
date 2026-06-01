@@ -12,7 +12,6 @@ from time import process_time
 
 from gospl.tools.constants import DISCHARGE_FLOOR
 
-petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD

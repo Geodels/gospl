@@ -27,7 +27,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import spill_pts
     from gospl._fortran import sort_ids
 
-petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIcomm = petsc4py.PETSc.COMM_WORLD
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()

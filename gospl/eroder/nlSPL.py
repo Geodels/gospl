@@ -12,7 +12,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import local_spl
     from gospl._fortran import local_spl_coeff
 
-petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIcomm = petsc4py.PETSc.COMM_WORLD
 

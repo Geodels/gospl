@@ -12,7 +12,6 @@ from gospl.tools.constants import BEDROCK_SENTINEL
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import strataonesed
 
-petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = petsc4py.PETSc.COMM_WORLD

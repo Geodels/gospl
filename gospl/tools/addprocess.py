@@ -16,7 +16,6 @@ if "READTHEDOCS" not in os.environ:
     from gflex.f2d import F2D
     from gospl._fortran import flexure
 
-petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
