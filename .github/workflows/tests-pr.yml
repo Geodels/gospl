@@ -1,0 +1,76 @@
+name: tests-pr
+
+# Fast-tier regression tests (parser-only). Runs on every PR and on every
+# push to a tracked branch. The fast tier exercises tests/test_regression.py
+# tests marked `not slow` — TEST 1 (uniform sedfactor populates sUni) and
+# TEST 2 (forcing DataFrame column order contract). These tests bypass the
+# full Model() init and need no mesh fixtures, so they catch parser-class
+# bugs cheaply (target wall-clock < 60s including the env build).
+#
+# The slow tier (Model instantiation + sediment/erosion physics) runs from
+# tests-slow.yml on a nightly schedule and before release tags.
+
+on:
+  pull_request:
+    branches: [master, release-candidate]
+  push:
+    branches: [master, release-candidate]
+
+# Opt the existing v3/v4 actions into the Node.js 24 runtime, matching the
+# style of conda-build.yml so all workflows behave identically once Node 24
+# becomes the runner default.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+# Cancel an in-progress run when a new commit lands on the same branch/PR.
+concurrency:
+  group: tests-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    name: parser tests / ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest first for the fastest signal; macos-14 covers
+        # platform-specific surprises (path separators, dtype defaults).
+        os: [ubuntu-latest, macos-14]
+        python: ['3.11', '3.12']
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up conda env from environment.yml
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          channel-priority: strict
+          conda-remove-defaults: true
+          environment-file: environment.yml
+          activate-environment: gospl
+          python-version: ${{ matrix.python }}
+          auto-update-conda: true
+
+      - name: Install goSPL (editable, builds the Fortran extension)
+        # The fast tier in principle does not need the Fortran extension,
+        # but `gospl/tools/__init__.py` imports `addprocess` (and ultimately
+        # `gospl._fortran`) unconditionally, so the package must be built
+        # before `gospl.tools.inputparser` can be imported. The build is
+        # cached implicitly by conda's package cache; subsequent runs are
+        # fast.
+        run: pip install --no-build-isolation -e . -v
+
+      - name: Run fast tier
+        run: pytest tests/ -m 'not slow' -v --tb=short
+
+      - name: Show pytest summary on failure
+        if: failure()
+        run: pytest tests/ -m 'not slow' -v --tb=long --no-header || true

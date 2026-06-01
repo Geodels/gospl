@@ -1,0 +1,79 @@
+name: tests-slow
+
+# Slow-tier regression tests: the full suite (parser tier + Model-based
+# tests 3-6). Runs at 04:00 UTC nightly, when a release tag is pushed, and
+# on manual dispatch from the Actions tab. Each Model-based test spins up
+# a real PETSc DMPlex from a committed mesh fixture, so wall-clock is in
+# the minute range per matrix cell (most of it is the env build).
+#
+# If a test fixture is missing the relevant test skips cleanly rather than
+# failing — see tests/conftest.py.
+
+on:
+  # Nightly. Adjust the cron to match team timezones if needed.
+  schedule:
+    - cron: '0 4 * * *'
+  # On any version tag (matches conda-build.yml).
+  push:
+    tags:
+      - 'v*'
+  # Manual run from the Actions tab.
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: tests-slow-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  slow:
+    name: full suite / ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        python: ['3.11', '3.12']
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        # Slow-tier tests need the mesh fixtures under tests/fixtures/.
+        # Make sure those are committed (text YAML + .npz). If the mesh
+        # files are too large to commit, store them under Git LFS or
+        # generate them in a pre-test step here.
+        with:
+          lfs: true
+
+      - name: Set up conda env from environment.yml
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          channel-priority: strict
+          conda-remove-defaults: true
+          environment-file: environment.yml
+          activate-environment: gospl
+          python-version: ${{ matrix.python }}
+          auto-update-conda: true
+
+      - name: Install goSPL (editable)
+        run: pip install --no-build-isolation -e . -v
+
+      - name: Run full suite
+        run: pytest tests/ -v --tb=short --durations=10
+
+      - name: Upload pytest cache on failure (helps re-run locally)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-cache-${{ matrix.os }}-py${{ matrix.python }}
+          path: .pytest_cache
+          if-no-files-found: ignore
+          retention-days: 7
