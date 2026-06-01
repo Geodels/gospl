@@ -80,6 +80,46 @@ class ReadYaml(object):
 
         return
 
+    def _get_param(self, *keys, default=None):
+        """
+        Safe traversal into ``self.input``.
+
+        Returns ``default`` (None by default) if any key in the chain is
+        missing, or if an intermediate node is not a dict. Never raises
+        KeyError.
+
+        Examples::
+
+            self._get_param("name")                  # self.input.get("name", default)
+            self._get_param("domain", "flowdir")     # self.input["domain"].get("flowdir", default)
+            self._get_param("spl", "K", default=1e-12)
+
+        Use this for direct access through ``self.input``. For inner
+        keys on a pre-extracted section dict (e.g. ``splDict =
+        self.input["spl"]`` bound on an earlier line), prefer the
+        Python builtin ``splDict.get(key, default)`` — it makes the
+        data flow more visible and avoids a redundant top-level lookup.
+
+        Out of scope: this helper navigates ``self.input`` only. For
+        NPZ-archive accesses elsewhere in this file (``_isKeyinFile``,
+        the rainKey/sedKey blocks inside ``_readRain``/``_readErofactor``/
+        ``_readTeMap``), keep the existing ``try/except KeyError`` since
+        those exceptions carry user-facing diagnostics about missing
+        fields in the data file.
+
+        See AGENTS.md > The ``_extra*`` methods are mandatory
+        continuations: the call chain (``_readDomain → _extraDomain →
+        _extraDomain2``, ``_readHillslope → _extraHillslope``, etc.) is
+        load-bearing. The internal ``try/except KeyError`` blocks
+        inside those methods are NOT load-bearing and use this helper.
+        """
+        node = self.input
+        for k in keys:
+            if not isinstance(node, dict) or k not in node:
+                return default
+            node = node[k]
+        return node
+
     def _restartUpdate(self):
         """
         Update some forcing parameters in case of a restart.
@@ -131,6 +171,7 @@ class ReadYaml(object):
         Read domain definition, boundary conditions and flow direction parameters.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review
         try:
             domainDict = self.input["domain"]
         except KeyError:
@@ -139,21 +180,16 @@ class ReadYaml(object):
             )
             raise KeyError("Key domain is required in the input file!")
 
-        try:
-            self.flowDir = domainDict["flowdir"]
-        except KeyError:
-            self.flowDir = 8
+        self.flowDir = domainDict.get("flowdir", 8)
 
         # try:
         #     self.flowExp = domainDict["flowexp"]
         # except KeyError:
         self.flowExp = 1.1
 
-        try:
-            self.boundCond = domainDict["bc"]
-        except KeyError:
-            self.boundCond = '1111'
+        self.boundCond = domainDict.get("bc", '1111')
 
+        # TODO-REFACTOR: complex except, needs manual review
         try:
             meshInfo = domainDict["npdata"]
         except KeyError:
@@ -176,10 +212,7 @@ class ReadYaml(object):
             print("Unable to open numpy dataset: {}".format(self.meshFile), flush=True)
             raise IOError("The numpy dataset is not found...")
 
-        try:
-            self.fast = domainDict["fast"]
-        except KeyError:
-            self.fast = False
+        self.fast = domainDict.get("fast", False)
 
         self._extraDomain()
 
@@ -192,34 +225,26 @@ class ReadYaml(object):
 
         domainDict = self.input["domain"]
 
-        try:
-            self.seaDepo = domainDict["seadepo"]
-        except KeyError:
-            self.seaDepo = True
+        self.seaDepo = domainDict.get("seadepo", True)
+        self.overlap = domainDict.get("overlap", 1)
 
-        try:
-            self.overlap = domainDict["overlap"]
-        except KeyError:
-            self.overlap = 1
-
-        try:
-            self.dataFile = domainDict["nperodep"] + ".npz"
+        nperodep = domainDict.get("nperodep")
+        if nperodep is None:
+            self.dataFile = None
+        else:
+            self.dataFile = nperodep + ".npz"
             with open(self.dataFile) as fh:
                 pass
-        except KeyError:
-            self.dataFile = None
 
-        try:
-            self.nodep = domainDict["nodep"]
-        except KeyError:
-            self.nodep = False
+        self.nodep = domainDict.get("nodep", False)
 
-        try:
-            self.strataFile = domainDict["npstrata"] + ".npz"
+        npstrata = domainDict.get("npstrata")
+        if npstrata is None:
+            self.strataFile = None
+        else:
+            self.strataFile = npstrata + ".npz"
             with open(self.strataFile) as fh:
                 pass
-        except KeyError:
-            self.strataFile = None
 
         self._extraDomain2()
 
@@ -232,33 +257,25 @@ class ReadYaml(object):
 
         domainDict = self.input["domain"]
 
-        try:
-            advscheme = domainDict["advect"]
-            if advscheme == 'iioe1':
-                self.advscheme = 2
-            elif advscheme == 'iioe2':
-                self.advscheme = 3
-            elif advscheme == 'upwind':
-                self.advscheme = 1
-            elif advscheme == 'interp':
-                self.advscheme = 0
-            else:
-                raise ValueError(
-                    "Unknown advect scheme '%s'; expected one of "
-                    "iioe1 / iioe2 / upwind / interp." % advscheme
-                )
-        except KeyError:
+        advscheme = domainDict.get("advect")
+        if advscheme is None:
             self.advscheme = 1
+        elif advscheme == 'iioe1':
+            self.advscheme = 2
+        elif advscheme == 'iioe2':
+            self.advscheme = 3
+        elif advscheme == 'upwind':
+            self.advscheme = 1
+        elif advscheme == 'interp':
+            self.advscheme = 0
+        else:
+            raise ValueError(
+                "Unknown advect scheme '%s'; expected one of "
+                "iioe1 / iioe2 / upwind / interp." % advscheme
+            )
 
-        try:
-            self.radius = domainDict["radius"]
-        except KeyError:
-            self.radius = 6378137.0
-
-        try:
-            self.gravity = domainDict["gravity"]
-        except KeyError:
-            self.gravity = 9.81
+        self.radius = domainDict.get("radius", 6378137.0)
+        self.gravity = domainDict.get("gravity", 9.81)
 
         return
 
@@ -267,6 +284,7 @@ class ReadYaml(object):
         Read simulation time declaration.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review
         try:
             timeDict = self.input["time"]
         except KeyError:
@@ -275,6 +293,7 @@ class ReadYaml(object):
             )
             raise KeyError("Key time is required in the input file!")
 
+        # TODO-REFACTOR: complex except, needs manual review
         try:
             self.tStart = timeDict["start"]
         except KeyError:
@@ -284,6 +303,7 @@ class ReadYaml(object):
             )
             raise KeyError("Simulation start time needs to be declared.")
 
+        # TODO-REFACTOR: complex except, needs manual review
         try:
             self.tEnd = timeDict["end"]
         except KeyError:
@@ -296,6 +316,7 @@ class ReadYaml(object):
         if self.tEnd <= self.tStart:
             raise ValueError("Simulation end/start times do not make any sense!")
 
+        # TODO-REFACTOR: complex except, needs manual review
         try:
             self.dt = timeDict["dt"]
         except KeyError:
@@ -305,6 +326,7 @@ class ReadYaml(object):
             )
             raise KeyError("Simulation discretisation time step needs to be declared.")
 
+        # TODO-REFACTOR: complex except, needs manual review (default + print side effect)
         try:
             self.tout = timeDict["tout"]
         except KeyError:
@@ -325,10 +347,7 @@ class ReadYaml(object):
         Read additional time parameters.
         """
 
-        try:
-            self.rStep = timeDict["rstep"]
-        except KeyError:
-            self.rStep = 0
+        self.rStep = timeDict.get("rstep", 0)
 
         if self.tStart + self.tout > self.tEnd:
             self.tout = self.tEnd - self.tStart
@@ -348,10 +367,7 @@ class ReadYaml(object):
                 flush=True,
             )
 
-        try:
-            self.strat = timeDict["strat"]
-        except KeyError:
-            self.strat = 0
+        self.strat = timeDict.get("strat", 0)
 
         if self.tout < self.strat:
             self.strat = self.tout
@@ -379,8 +395,10 @@ class ReadYaml(object):
         Read surface processes erosion and deposition laws parameters.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section multi-default on missing "spl")
         try:
             splDict = self.input["spl"]
+            # TODO-REFACTOR: complex except, needs manual review (K is required inside spl)
             try:
                 self.K = splDict["K"]
             except KeyError:
@@ -389,22 +407,10 @@ class ReadYaml(object):
                     flush=True,
                 )
                 raise ValueError("Surface Process Model: K coefficient not found.")
-            try:
-                self.coeffd = splDict["d"]
-            except KeyError:
-                self.coeffd = 0.0
-            try:
-                self.fDepa = splDict["G"]
-            except KeyError:
-                self.fDepa = 0.0
-            try:
-                self.spl_m = splDict["m"]
-            except KeyError:
-                self.spl_m = 0.5
-            try:
-                self.spl_n = splDict["n"]
-            except KeyError:
-                self.spl_n = 1.0
+            self.coeffd = splDict.get("d", 0.0)
+            self.fDepa = splDict.get("G", 0.0)
+            self.spl_m = splDict.get("m", 0.5)
+            self.spl_n = splDict.get("n", 1.0)
         except KeyError:
             self.K = 1.0e-12
             self.coeffd = 0.0
@@ -419,9 +425,11 @@ class ReadYaml(object):
         Read hillslope parameters.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section multi-default on missing "diffusion")
         try:
             hillDict = self.input["diffusion"]
 
+            # TODO-REFACTOR: complex except, needs manual review (hillslopeKa is required inside diffusion)
             try:
                 self.Cda = hillDict["hillslopeKa"]
             except KeyError:
@@ -432,6 +440,7 @@ class ReadYaml(object):
                 raise ValueError(
                     "Hillslope: Cd coefficient for aerial environment not found."
                 )
+            # TODO-REFACTOR: complex except, needs manual review (hillslopeKm is required inside diffusion)
             try:
                 self.Cdm = hillDict["hillslopeKm"]
             except KeyError:
@@ -442,22 +451,10 @@ class ReadYaml(object):
                 raise ValueError(
                     "Hillslope: Cd coefficient for marine environment not found."
                 )
-            try:
-                self.K_nl = hillDict["hillslopenl"]
-            except KeyError:
-                self.K_nl = 1.0
-            try:
-                self.K_sc = hillDict["hillslopeSc"]
-            except KeyError:
-                self.K_sc = 0.0
-            try:
-                self.K_nb = int(hillDict["hillslopeNb"])
-            except KeyError:
-                self.K_nb = 0
-            try:
-                self.oFill = hillDict["oFill"]
-            except KeyError:
-                self.oFill = -6000.0
+            self.K_nl = hillDict.get("hillslopenl", 1.0)
+            self.K_sc = hillDict.get("hillslopeSc", 0.0)
+            self.K_nb = int(hillDict.get("hillslopeNb", 0))
+            self.oFill = hillDict.get("oFill", -6000.0)
 
         except KeyError:
             self.Cda = 0.0
@@ -476,51 +473,25 @@ class ReadYaml(object):
         Read extra hillslope parameters.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section multi-default on missing "diffusion")
         try:
             hillDict = self.input["diffusion"]
-            try:
-                self.nlK = hillDict["nonlinKm"]
-            except KeyError:
-                self.nlK = 10.0
-            try:
-                self.clinSlp = hillDict["clinSlp"]
-            except KeyError:
-                self.clinSlp = 1.0e-6
-            try:
-                self.tsStep = hillDict["tsSteps"]
-            except KeyError:
-                self.tsStep = 2000
-            try:
-                self.Gmar = hillDict["Gmar"]
-            except KeyError:
-                self.Gmar = 0.0
-            try:
-                self.offshore = hillDict["offshore"]
-            except KeyError:
-                self.offshore = 100.e5
+            self.nlK = hillDict.get("nonlinKm", 10.0)
+            self.clinSlp = hillDict.get("clinSlp", 1.0e-6)
+            self.tsStep = hillDict.get("tsSteps", 2000)
+            self.Gmar = hillDict.get("Gmar", 0.0)
+            self.offshore = hillDict.get("offshore", 100.e5)
             # Lake / depression non-linear diffusion thresholds: only run the
             # expensive marine-style nonlinear diffusion in pits that are both
             # large in volume AND deep, otherwise fall back to bottom-up fill.
-            try:
-                self.nl_pit_volume = hillDict["nlPitVolume"]
-            except KeyError:
-                self.nl_pit_volume = 1.0e9   # 1 km^3
-            try:
-                self.nl_pit_depth = hillDict["nlPitDepth"]
-            except KeyError:
-                self.nl_pit_depth = 100.0    # 100 m
-            try:
-                self.nl_pit_K = hillDict["nlPitK"]
-            except KeyError:
-                self.nl_pit_K = self.nlK
+            self.nl_pit_volume = hillDict.get("nlPitVolume", 1.0e9)   # 1 km^3
+            self.nl_pit_depth = hillDict.get("nlPitDepth", 100.0)     # 100 m
+            self.nl_pit_K = hillDict.get("nlPitK", self.nlK)
             # Fraction of each pit's deposit concentrated at the inlets
             # (delta seed); the remainder is distributed as a bathymetric
             # bottom-up baseline. 0.0 = pure bowl fill, 1.0 = original
             # inlet-only spike.
-            try:
-                self.nl_pit_inlet_bias = hillDict["pitInletBias"]
-            except KeyError:
-                self.nl_pit_inlet_bias = 0.10
+            self.nl_pit_inlet_bias = hillDict.get("pitInletBias", 0.10)
         except KeyError:
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
@@ -542,9 +513,11 @@ class ReadYaml(object):
         Read soil information parameters.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section multi-default on missing "soil" + cptSoil flag)
         try:
             soilDict = self.input["soil"]
             self.cptSoil = True
+            # TODO-REFACTOR: complex except, needs manual review (soilK is required inside soil)
             try:
                 self.Ksoil = soilDict["soilK"]
             except KeyError:
@@ -555,41 +528,25 @@ class ReadYaml(object):
                 raise ValueError(
                     "Soil: Erodibility coefficient for soil not found."
                 )
-            try:
-                self.P0 = soilDict["maxProd"]
-            except KeyError:
-                # soil production maximum rate (50 m/Myr)
-                self.P0 = 50.e-6
-            try:
-                self.Hs = soilDict["depthProd"]
-            except KeyError:
-                # soil production decay depth
-                self.Hs = 0.0
-            try:
-                self.h_star = float(soilDict["roughnessL"])
-            except KeyError:
-                # roughness length_scale
-                self.h_star = 1.0
-            try:
-                self.H0 = soilDict["decayDepth"]
-            except KeyError:
-                # soil transport decay depth for diffusion
-                self.H0 = 0.7
-            try:
-                self.Sperc = soilDict["bedrockConv"]
-            except KeyError:
-                # soil / bedrock transition limit ratio factor of production
-                self.Sperc = 0.0001
-            try:
-                self.cstSoilH = soilDict["uniform"]
-            except KeyError:
-                # initial soil thickness
-                self.cstSoilH = 1.0
+            # soil production maximum rate (50 m/Myr)
+            self.P0 = soilDict.get("maxProd", 50.e-6)
+            # soil production decay depth
+            self.Hs = soilDict.get("depthProd", 0.0)
+            # roughness length_scale
+            self.h_star = float(soilDict.get("roughnessL", 1.0))
+            # soil transport decay depth for diffusion
+            self.H0 = soilDict.get("decayDepth", 0.7)
+            # soil / bedrock transition limit ratio factor of production
+            self.Sperc = soilDict.get("bedrockConv", 0.0001)
+            # initial soil thickness
+            self.cstSoilH = soilDict.get("uniform", 1.0)
+            # TODO-REFACTOR: complex except, needs manual review (except sets BOTH local soilfile and self.soilFile)
             try:
                 soilfile = soilDict["soilMap"]
             except KeyError:
                 soilfile = None
                 self.soilFile = None
+            # TODO-REFACTOR: complex except, needs manual review (except sets BOTH local tempfile and self.tempFile)
             try:
                 tempfile = soilDict["tempMap"]
             except KeyError:
@@ -615,16 +572,10 @@ class ReadYaml(object):
                 except IOError:
                     print("Unable to open numpy dataset: {}".format(self.tempFile), flush=True)
                     raise IOError("The numpy dataset is not found...")
-            try:
-                self.energyAct = soilDict["activation"]
-            except KeyError:
-                # Activation energy (J/mol) 
-                self.energyAct = 40.e3
-            try:
-                self.tempRef = soilDict["tempRef"]
-            except KeyError:
-                # Reference temperature in Celsius
-                self.tempRef = 15.0
+            # Activation energy (J/mol)
+            self.energyAct = soilDict.get("activation", 40.e3)
+            # Reference temperature in Celsius
+            self.tempRef = soilDict.get("tempRef", 15.0)
 
         except KeyError:
             self.cptSoil = False
@@ -652,6 +603,7 @@ class ReadYaml(object):
         seafile = None
         sealevel = 0.0
         self.seafunction = None
+        # TODO-REFACTOR: complex except, needs manual review (nested position/curve fallback logic)
         try:
             seaDict = self.input["sea"]
             try:
@@ -743,6 +695,7 @@ class ReadYaml(object):
                 )
             mdata = np.load(dmap[0] + ".npz")
 
+            # TODO-REFACTOR: complex except, needs manual review (out of scope: accesses np.load() archive, not self.input; carries a user-facing diagnostic about missing NPZ field)
             try:
                 vkey = mdata[dmap[1]]
                 if vkey is not None:
@@ -809,34 +762,27 @@ class ReadYaml(object):
         tMap = None
         hMap = None
 
+        # TODO-REFACTOR: complex except, needs manual review (tecStart is required)
         try:
             tecStart = tecSort[k]["start"]
         except KeyError:
             print("For each tectonic event a start time is required.", flush=True)
             raise ValueError("Tectonic event {} has no parameter start".format(k))
 
+        # TODO-REFACTOR: complex except, needs manual review (tecEnd is required)
         try:
             tecEnd = tecSort[k]["end"]
         except KeyError:
             print("For each tectonic event an end time is required.", flush=True)
             raise ValueError("Tectonic event {} has no parameter end".format(k))
 
-        try:
-            tMap = tecSort[k]["upsub"]
-        except KeyError:
-            pass
+        tMap = tecSort[k].get("upsub")
         self._isKeyinFile(tMap)
 
-        try:
-            hMap = tecSort[k]["hdisp"]
-        except KeyError:
-            pass
+        hMap = tecSort[k].get("hdisp")
         self._isKeyinFile(hMap)
 
-        try:
-            zMap = tecSort[k]["zfit"]
-        except KeyError:
-            pass
+        zMap = tecSort[k].get("zfit")
         self._isKeyinFile(zMap)
 
         tecdata = self._storeTectonics(k, tecStart, hMap, tMap, zMap, tecEnd, tecdata)
@@ -849,6 +795,7 @@ class ReadYaml(object):
         """
 
         tecdata = None
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets self.tecdata = None on missing "tectonics")
         try:
             tecDict = self.input["tectonics"]
 
@@ -943,6 +890,7 @@ class ReadYaml(object):
         """
 
         sedfacdata = None
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets self.sedfactNb=0, self.sedfacdata=None on missing "sedfactor")
         try:
             sedDict = self.input["sedfactor"]
             sedSort = sorted(sedDict, key=itemgetter("start"))
@@ -950,6 +898,7 @@ class ReadYaml(object):
                 sStart = None
                 sUniform = None
                 sMap = None
+                # TODO-REFACTOR: complex except, needs manual review (sStart is required)
                 try:
                     sStart = sedSort[k]["start"]
                 except KeyError:
@@ -959,14 +908,8 @@ class ReadYaml(object):
                     raise ValueError(
                         "Sediment factor map {} has no parameter start".format(k)
                     )
-                try:
-                    sUniform = sedSort[k]["uniform"]
-                except KeyError:
-                    pass
-                try:
-                    sMap = sedSort[k]["map"]
-                except KeyError:
-                    pass
+                sUniform = sedSort[k].get("uniform")
+                sMap = sedSort[k].get("map")
 
                 if sMap is not None:
                     try:
@@ -986,6 +929,7 @@ class ReadYaml(object):
                     mdata = np.load(sMap[0] + ".npz")
                     sedfacSet = mdata.files
 
+                    # TODO-REFACTOR: complex except, needs manual review (out of scope: accesses np.load() archive, not self.input; carries a user-facing diagnostic about missing NPZ field)
                     try:
                         sedKey = mdata[sMap[1]]
                         if sedKey is not None:
@@ -1093,6 +1037,7 @@ class ReadYaml(object):
         """
 
         tedata = None
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets self.tedata = None on missing "temap")
         try:
             teDict = self.input["temap"]
             teSort = sorted(teDict, key=itemgetter("start"))
@@ -1100,6 +1045,7 @@ class ReadYaml(object):
                 rStart = None
                 rUniform = None
                 rMap = None
+                # TODO-REFACTOR: complex except, needs manual review (rStart is required)
                 try:
                     rStart = teSort[k]["start"]
                 except KeyError:
@@ -1109,14 +1055,8 @@ class ReadYaml(object):
                     raise ValueError(
                         "Elastic event {} has no parameter start".format(k)
                     )
-                try:
-                    rUniform = teSort[k]["uniform"]
-                except KeyError:
-                    pass
-                try:
-                    rMap = teSort[k]["map"]
-                except KeyError:
-                    pass
+                rUniform = teSort[k].get("uniform")
+                rMap = teSort[k].get("map")
 
                 if rMap is not None:
                     if self.meshFile != rMap[0] + ".npz":
@@ -1139,6 +1079,7 @@ class ReadYaml(object):
                     else:
                         mdata = np.load(self.meshFile)
                         teSet = mdata.files
+                    # TODO-REFACTOR: complex except, needs manual review (out of scope: accesses np.load() archive, not self.input; carries a user-facing diagnostic about missing NPZ field)
                     try:
                         rainKey = mdata[rMap[1]]
                         if rainKey is not None:
@@ -1253,6 +1194,7 @@ class ReadYaml(object):
         """
 
         raindata = None
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets self.raindata = None on missing "climate")
         try:
             rainDict = self.input["climate"]
             rainSort = sorted(rainDict, key=itemgetter("start"))
@@ -1261,6 +1203,7 @@ class ReadYaml(object):
                 rUniform = None
                 rZscale = None
                 rMap = None
+                # TODO-REFACTOR: complex except, needs manual review (rStart is required)
                 try:
                     rStart = rainSort[k]["start"]
                 except KeyError:
@@ -1270,18 +1213,9 @@ class ReadYaml(object):
                     raise ValueError(
                         "Climate event {} has no parameter start".format(k)
                     )
-                try:
-                    rUniform = rainSort[k]["uniform"]
-                except KeyError:
-                    pass
-                try:
-                    rZscale = rainSort[k]["zscale"]
-                except KeyError:
-                    pass
-                try:
-                    rMap = rainSort[k]["map"]
-                except KeyError:
-                    pass
+                rUniform = rainSort[k].get("uniform")
+                rZscale = rainSort[k].get("zscale")
+                rMap = rainSort[k].get("map")
 
                 if rMap is not None:
                     if self.meshFile != rMap[0] + ".npz":
@@ -1304,6 +1238,7 @@ class ReadYaml(object):
                     else:
                         mdata = np.load(self.meshFile)
                         rainSet = mdata.files
+                    # TODO-REFACTOR: complex except, needs manual review (out of scope: accesses np.load() archive, not self.input; carries a user-facing diagnostic about missing NPZ field)
                     try:
                         rainKey = mdata[rMap[1]]
                         if rainKey is not None:
@@ -1354,16 +1289,11 @@ class ReadYaml(object):
         Read compaction parameters.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section multi-default on missing "compaction")
         try:
             compDict = self.input["compaction"]
-            try:
-                self.phi0s = compDict["phis"]
-            except KeyError:
-                self.phi0s = 0.49
-            try:
-                self.z0s = compDict["z0s"]
-            except KeyError:
-                self.z0s = 3700.0
+            self.phi0s = compDict.get("phis", 0.49)
+            self.z0s = compDict.get("z0s", 3700.0)
 
         except KeyError:
             self.phi0s = 0.49
@@ -1376,13 +1306,11 @@ class ReadYaml(object):
         Parse flexural isostasy variables.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets flexOn=False, flex_method='FD' on missing "flexure")
         try:
             flexDict = self.input["flexure"]
             self.flexOn = True
-            try:
-                self.flex_method = flexDict["method"]
-            except KeyError:
-                self.flex_method = 'FD'
+            self.flex_method = flexDict.get("method", 'FD')
 
             if self.flex_method != 'global' and self.flex_method != 'FD' and self.flex_method != 'FFT':
                 print(
@@ -1392,31 +1320,13 @@ class ReadYaml(object):
                 raise ValueError(
                     "Method name for flexure is not recognised choices are FD, FFT or global."
                 )
-            try:
-                self.reg_dx = flexDict["regdx"]
-            except KeyError:
-                self.reg_dx = 1000.0
-                # raise ValueError("Flexure definition: regular grid spacing is required.")
-            try:
-                self.rgrd_interp = flexDict["ninterp"]
-            except KeyError:
-                self.rgrd_interp = 4
-            try:
-                self.flex_rhoa = flexDict["rhoa"]
-            except KeyError:
-                self.flex_rhoa = 3300.0
-            try:
-                self.flex_eet = flexDict["thick"]
-            except KeyError:
-                self.flex_eet = 10000.0
-            try:
-                self.flex_rhos = flexDict["rhoc"]
-            except KeyError:
-                self.flex_rhos = 2300.0
-            try:
-                self.young = flexDict["young"]
-            except KeyError:
-                self.young = 65e9
+            self.reg_dx = flexDict.get("regdx", 1000.0)
+            # raise ValueError("Flexure definition: regular grid spacing is required.")
+            self.rgrd_interp = flexDict.get("ninterp", 4)
+            self.flex_rhoa = flexDict.get("rhoa", 3300.0)
+            self.flex_eet = flexDict.get("thick", 10000.0)
+            self.flex_rhos = flexDict.get("rhoc", 2300.0)
+            self.young = flexDict.get("young", 65e9)
 
         except KeyError:
             self.flexOn = False
@@ -1431,35 +1341,18 @@ class ReadYaml(object):
         Read flexure additional information.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets flexOn=False on missing "flexure")
         try:
             flexDict = self.input["flexure"]
-            try:
-                self.nu = flexDict["nu"]
-            except KeyError:
-                self.nu = 0.25
+            self.nu = flexDict.get("nu", 0.25)
             # Resolution at which the SH expansion is performed. Input is
             # regridded to this; output is interpolated back to the input grid.
             # Default 0.25 deg -> lmax = 359, well below the elastic cutoff.
-            try:
-                self.flex_res_deg = flexDict["res_deg"]
-            except KeyError:
-                self.flex_res_deg = 0.25
-            try:
-                self.flex_bcN = flexDict["bcN"]
-            except KeyError:
-                self.flex_bcN = "0Slope0Shear"
-            try:
-                self.flex_bcS = flexDict["bcS"]
-            except KeyError:
-                self.flex_bcS = "0Slope0Shear"
-            try:
-                self.flex_bcE = flexDict["bcE"]
-            except KeyError:
-                self.flex_bcE = "0Slope0Shear"
-            try:
-                self.flex_bcW = flexDict["bcW"]
-            except KeyError:
-                self.flex_bcW = "0Slope0Shear"
+            self.flex_res_deg = flexDict.get("res_deg", 0.25)
+            self.flex_bcN = flexDict.get("bcN", "0Slope0Shear")
+            self.flex_bcS = flexDict.get("bcS", "0Slope0Shear")
+            self.flex_bcE = flexDict.get("bcE", "0Slope0Shear")
+            self.flex_bcW = flexDict.get("bcW", "0Slope0Shear")
         except KeyError:
             self.flexOn = False
 
@@ -1470,14 +1363,17 @@ class ReadYaml(object):
         Parse orographic precipitation variables.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets oroOn=False on missing "orography")
         try:
             oroDict = self.input["orography"]
             self.oroOn = True
 
+            # TODO-REFACTOR: complex except, needs manual review (regdx is required when "orography" is present)
             try:
                 self.reg_dx = oroDict["regdx"]
             except KeyError:
                 raise ValueError("Orographic definition: regular grid spacing is required.")
+            # TODO-REFACTOR: complex except, needs manual review (try body has bounds-check + raise ValueError)
             try:
                 self.wind_latitude = oroDict["latitude"]
                 if self.wind_latitude > 90 or self.wind_latitude < -90:
@@ -1488,22 +1384,10 @@ class ReadYaml(object):
                     raise ValueError("Latitude value not appropriately set.")
             except KeyError:
                 self.wind_latitude = 0.0
-            try:
-                self.wind_speed = oroDict["wind_speed"]
-            except KeyError:
-                self.wind_speed = 10.
-            try:
-                self.wind_dir = oroDict["wind_dir"]
-            except KeyError:
-                self.wind_dir = 0.0
-            try:
-                self.oro_nm = oroDict["nm"]
-            except KeyError:
-                self.oro_nm = 0.01
-            try:
-                self.oro_hw = oroDict["hw"]
-            except KeyError:
-                self.oro_hw = 3400.0
+            self.wind_speed = oroDict.get("wind_speed", 10.)
+            self.wind_dir = oroDict.get("wind_dir", 0.0)
+            self.oro_nm = oroDict.get("nm", 0.01)
+            self.oro_hw = oroDict.get("hw", 3400.0)
 
             self.rgrd_interp = 4
             self._extraOrography(oroDict)
@@ -1518,43 +1402,19 @@ class ReadYaml(object):
         Read domain additional information.
         """
 
-        try:
-            lapse_rate = oroDict["env_lapse_rate"]
-        except KeyError:
-            lapse_rate = -4.0
-        try:
-            lapse_rate_m = oroDict["moist_lapse_rate"]
-        except KeyError:
-            lapse_rate_m = -7.0
-        try:
-            ref_density = oroDict["ref_density"]
-        except KeyError:
-            ref_density = 7.4e-3
+        lapse_rate = oroDict.get("env_lapse_rate", -4.0)
+        lapse_rate_m = oroDict.get("moist_lapse_rate", -7.0)
+        ref_density = oroDict.get("ref_density", 7.4e-3)
         if lapse_rate == 0:
             raise ValueError(
                 "Orographic precipitation: env_lapse_rate must be non-zero."
             )
         self.oro_cw = ref_density * lapse_rate_m / lapse_rate
-        try:
-            self.oro_conv_time = oroDict["conv_time"]
-        except KeyError:
-            self.oro_conv_time = 1000.0
-        try:
-            self.oro_fall_time = oroDict["fall_time"]
-        except KeyError:
-            self.oro_fall_time = 1000.0
-        try:
-            self.oro_precip_base = oroDict["precip_base"]
-        except KeyError:
-            self.oro_precip_base = 7.0
-        try:
-            self.oro_precip_min = oroDict["precip_min"]
-        except KeyError:
-            self.oro_precip_min = 0.01
-        try:
-            self.rainfall_frequency = oroDict["rainfall_frequency"]
-        except KeyError:
-            self.rainfall_frequency = 1
+        self.oro_conv_time = oroDict.get("conv_time", 1000.0)
+        self.oro_fall_time = oroDict.get("fall_time", 1000.0)
+        self.oro_precip_base = oroDict.get("precip_base", 7.0)
+        self.oro_precip_min = oroDict.get("precip_min", 0.01)
+        self.rainfall_frequency = oroDict.get("rainfall_frequency", 1)
 
         return
 
@@ -1563,49 +1423,21 @@ class ReadYaml(object):
         Parse ice flow variables.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets iceOn=False + 4 local defaults on missing "ice")
         try:
             iceDict = self.input["ice"]
             self.iceOn = True
-            try:
-                self.gaussIce = iceDict["diff"]
-            except KeyError:
-                self.gaussIce = 10.0
-            try:
-                elaH = iceDict["hela"]
-            except KeyError:
-                elaH = 2000.0
-            try:
-                iceH = iceDict["hice"]
-            except KeyError:
-                iceH = 2400.0
-            try:
-                iceT = iceDict["hterm"]  # glacier terminus
-            except KeyError:
-                iceT = 1800.0
-            try:
-                icefile = iceDict["evol"]
-            except KeyError:
-                icefile = None
-            try:
-                self.Kice = iceDict["Ki"]
-            except KeyError:
-                self.Kice = 0.0
-            try:
-                self.iceDir = iceDict["icedir"]
-            except KeyError:
-                self.iceDir = 1
-            try:
-                self.meltfac = iceDict["melt"]  # Melting factor adjustment
-            except KeyError:
-                self.meltfac = 10.
-            try:
-                self.icewf = iceDict["fwidth"]  # width factor (a in Eq. (8))
-            except KeyError:
-                self.icewf = 1.5
-            try:
-                self.icewe = iceDict["eheight"]
-            except KeyError:
-                self.icewe = 0.25  # thickness-to-width ratio (delta in Eq. (9))
+            self.gaussIce = iceDict.get("diff", 10.0)
+            elaH = iceDict.get("hela", 2000.0)
+            iceH = iceDict.get("hice", 2400.0)
+            iceT = iceDict.get("hterm", 1800.0)  # glacier terminus
+            icefile = iceDict.get("evol")
+            self.Kice = iceDict.get("Ki", 0.0)
+            self.iceDir = iceDict.get("icedir", 1)
+            self.meltfac = iceDict.get("melt", 10.)  # Melting factor adjustment
+            self.icewf = iceDict.get("fwidth", 1.5)  # width factor (a in Eq. (8))
+            # thickness-to-width ratio (delta in Eq. (9))
+            self.icewe = iceDict.get("eheight", 0.25)
         except KeyError:
             self.iceOn = False
             icefile = None
@@ -1683,16 +1515,11 @@ class ReadYaml(object):
         Parse output directory.
         """
 
+        # TODO-REFACTOR: complex except, needs manual review (outer-section multi-default on missing "output")
         try:
             outDict = self.input["output"]
-            try:
-                self.outputDir = outDict["dir"]
-            except KeyError:
-                self.outputDir = "output"
-            try:
-                self.makedir = outDict["makedir"]
-            except KeyError:
-                self.makedir = False
+            self.outputDir = outDict.get("dir", "output")
+            self.makedir = outDict.get("makedir", False)
         except KeyError:
             self.outputDir = "output"
             self.makedir = False
