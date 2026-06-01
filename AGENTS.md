@@ -236,3 +236,5 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 4. If you used a scratch Vec, did you document which ones in the method's docstring?
 5. If you changed a method called by `Model.runProcesses` (`model.py:217-286`), did you check every caller AND the mixin init order (`model.py:126-198`)?
 6. If you added a new KSP/SNES/TS solver, did you pick the right lifecycle (CACHED for hot-path solvers, AD-HOC for nested-fieldsplit) AND, if cached, add the attribute to the `destroy_DMPlex` list in `unstructuredmesh.py`?
+7. If you added a new forcing type, did you follow `docs/HOW_TO_ADD_FORCING.md` including the `destroy_DMPlex` registration?
+8. If you added a new output field, did you follow `docs/HOW_TO_ADD_OUTPUT.md` including the `destroy_DMPlex` registration and XDMF entry?
