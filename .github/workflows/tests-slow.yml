@@ -64,7 +64,10 @@ jobs:
           auto-update-conda: true
 
       - name: Install goSPL (editable)
-        run: pip install --no-build-isolation -e . -v
+        # `--no-deps` skips pip's runtime-dep resolution; the conda env
+        # already supplies everything from conda-forge (including
+        # pyshtools, whose from-source build fails on CI runners).
+        run: pip install --no-deps --no-build-isolation -e . -v
 
       - name: Run full suite
         run: pytest tests/ -v --tb=short --durations=10

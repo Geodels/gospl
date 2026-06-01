@@ -63,10 +63,15 @@ jobs:
         # The fast tier in principle does not need the Fortran extension,
         # but `gospl/tools/__init__.py` imports `addprocess` (and ultimately
         # `gospl._fortran`) unconditionally, so the package must be built
-        # before `gospl.tools.inputparser` can be imported. The build is
-        # cached implicitly by conda's package cache; subsequent runs are
-        # fast.
-        run: pip install --no-build-isolation -e . -v
+        # before `gospl.tools.inputparser` can be imported.
+        #
+        # `--no-deps` is required: every runtime dependency declared in
+        # pyproject.toml is already supplied by the conda env (see
+        # environment.yml). Without --no-deps, pip ignores the conda-
+        # installed packages and tries to rebuild pyshtools from source,
+        # which fails on its meson/setuptools_scm step outside a git
+        # checkout.
+        run: pip install --no-deps --no-build-isolation -e . -v
 
       - name: Run fast tier
         run: pytest tests/ -m 'not slow' -v --tb=short

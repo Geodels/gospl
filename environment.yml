@@ -21,5 +21,6 @@ dependencies:
   - pyshtools
   - cython
   - compilers
+  - pytest
   - pip:
     - git+https://github.com/Geodels/gospl.git
