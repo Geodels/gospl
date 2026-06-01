@@ -269,8 +269,10 @@ class soilSPL(object):
 
         self._solveSoil()
 
-        # Update erosion rate (positive for incision)
-        E = -self.tmp.getArray().copy()
+        # Update erosion/deposition rate (thickness convention: positive
+        # for deposition, negative for incision; same sign as cumED and
+        # the on-disk EDrate field). See SPL.py for the convention note.
+        E = self.tmp.getArray().copy()
         E = np.divide(E, self.dt)
         self.Eb.setArray(E)
         self.dm.globalToLocal(self.Eb, self.EbLocal)
@@ -321,9 +323,10 @@ class soilSPL(object):
         self.dm.globalToLocal(self.hOld, self.hOldLocal)
         self._getEroDepRateSoil()
 
-        # Get erosion / deposition thicknesses
+        # Get erosion / deposition thicknesses (Eb is in thickness rate
+        # convention: positive deposition, negative incision). See SPL.py.
         Eb = self.Eb.getArray().copy()
-        self.tmp.setArray(-Eb * self.dt)
+        self.tmp.setArray(Eb * self.dt)
         self.cumED.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.hGlobal.axpy(1.0, self.tmp)

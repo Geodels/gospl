@@ -347,11 +347,13 @@ def test_erosion_sign_conventions(incising_model):
     out nodes whose elevation moved for non-erosional reasons
     (compaction, flexural subsidence, advection).
 
-    Note: this test does NOT assert anything about `self.Eb` (global).
-    `Eb` and `EbLocal` use different sign conventions after `erodepSPL`
-    (see AGENTS.md). If you need to guard `Eb` (positive-for-incision)
-    separately, add a test that reads `self.Eb.getArray()` after a
-    single SPL step before any subsequent kernel writes to `EbLocal`.
+    Note: as of 2026-06, `self.Eb` (global) and `self.EbLocal` (local)
+    share the same thickness-rate convention (positive deposition,
+    negative incision). They still hold DIFFERENT content by end-of-step
+    — `Eb` is the river-only rate from the most recent SPL flavour,
+    while `EbLocal` is the net rate including hillslope and marine
+    contributions axpy'd in afterwards — but the SIGN of each follows
+    the same rule.
     """
     model = incising_model
     h_before = model.hLocal.getArray().copy()

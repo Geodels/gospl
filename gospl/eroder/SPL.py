@@ -307,8 +307,14 @@ class SPL(object):
                 )
             self.tmp.waxpy(-1.0, self.hOld, self.newH)
 
-        # Update erosion rate (positive for incision)
-        E = -self.tmp.getArray().copy()
+        # Update erosion/deposition rate. Convention: thickness rate
+        # (m/yr) — positive for deposition, negative for incision. Same
+        # sign convention as cumED and the on-disk `EDrate` output field.
+        # self.tmp here holds (stepED - hOld), i.e. the elevation change
+        # from one SPL substep: negative at incising nodes, positive at
+        # depositional ones, so dividing by dt gives the desired sign
+        # directly with no inversion.
+        E = self.tmp.getArray().copy()
         E = np.divide(E, self.dt)
         self.Eb.setArray(E)
         self.dm.globalToLocal(self.Eb, self.EbLocal)
@@ -347,9 +353,11 @@ class SPL(object):
         self.dm.globalToLocal(self.hOld, self.hOldLocal)
         self._getEroDepRate()
 
-        # Get erosion / deposition thicknesses
+        # Get erosion / deposition thicknesses (Eb is in thickness rate
+        # convention: positive deposition, negative incision; so Eb*dt is
+        # the signed thickness change directly, no inversion needed).
         Eb = self.Eb.getArray().copy()
-        self.tmp.setArray(-Eb * self.dt)
+        self.tmp.setArray(Eb * self.dt)
         self.cumED.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.hGlobal.axpy(1.0, self.tmp)

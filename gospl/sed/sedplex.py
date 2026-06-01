@@ -55,12 +55,17 @@ class SEDMesh(object):
 
         # Stratigraphic layers exist
         if self.stratNb > 0:
-            # Get erosion rate (m/yr) to volume
+            # thCoarse is already an erosion-positive rate (m/yr) from
+            # stratplex.erodeStrat; use as-is.
             self.tmpL.setArray(self.thCoarse)
             self.dm.localToGlobal(self.tmpL, self.tmp)
         else:
-            # Get erosion rate (m/yr) to volume
+            # Eb is in the thickness-rate convention (positive deposition,
+            # negative incision); the upstream-integration solve below
+            # wants an erosion-positive source so that vSed (m^3/yr)
+            # accumulates as positive sediment flux downstream. Negate.
             self.Eb.copy(result=self.tmp)
+            self.tmp.scale(-1.0)
 
         # Get the volume of sediment transported in m3/yr
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)

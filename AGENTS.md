@@ -79,22 +79,22 @@ self.lsinki   = self.lsink.copy()
 ```
 The `i` suffix means **initial (pre-fill)**. All SPL kernels (`eroder/SPL.py`, `eroder/nlSPL.py`, `eroder/soilSPL.py`) and `sedplex._getSedFlux` MUST use the `i`-suffix versions. The live `self.rcvID/wghtVal/distRcv/fMat/lsink` are valid **only** inside `flowplex._distributeDownstream` and `sedplex._moveDownstream`, where they are rebuilt against the current filled/sediment-filled topography. Outside those two functions their state is undefined.
 
-## Eb / EbLocal sign convention (Eb and EbLocal DISAGREE)
-**`Eb` (global) is positive for incision.** Set inside `_getEroDepRate` (SPL.py:313 and the equivalent in nlSPL / soilSPL): `E = -tmp/dt` then `self.Eb.setArray(E)`. After SPL completes, nothing else writes `self.Eb`, so it holds the *river* erosion rate, positive for incision, for the rest of the timestep.
+## Eb / EbLocal sign convention (unified, thickness-rate)
+**Both `self.Eb` (global) and `self.EbLocal` (local) are in the thickness-rate convention: positive for deposition, negative for incision.** Same sign as `cumED`, same sign as the on-disk `EDrate` output field, same sign as the restart loader (`outmesh.py:439-440`). Unified 2026-06.
 
-**`EbLocal` (local) is positive for DEPOSITION, negative for incision.** Each SPL `erodepSPL*` wrapper *overwrites* `EbLocal` at the end with `add_rate = tmp/dt = -Eb` (SPL.py:367, nlSPL.py:419, soilSPL.py:341). Subsequent kernels `axpy` thickness rates into it (positive = deposit):
-- `seaplex.py:486` — marine deposition (positive contributions).
-- `hillslope.py:297` — linear hillslope (positive = deposit, negative = erode).
-- `soilSPL.py:549` — soil diffusion.
+What each field contains by end-of-step:
+- **`self.Eb`** — river-only thickness rate from the most recent SPL flavour (`SPL.py:_getEroDepRate` / `nlSPL.py:_getEroDepRateNL` / `soilSPL.py:_getEroDepRateSoil`). Not re-synced after marine/hillslope contributions, so it reflects ONLY the river step.
+- **`self.EbLocal`** — net thickness rate including all axpy contributions from later kernels (`seaplex.py:486`, `hillslope.py:297`, `soilSPL.py:549`). This is what `outmesh.py:272` writes to disk as `EDrate`.
 
-By end-of-step, `EbLocal` is the **net thickness rate**, same sign convention as `cumED`: positive = net deposition, negative = net erosion. The output field `EDrate` (`outmesh.py:272`) writes `EbLocal`, so Paraview shows "positive = deposition".
+Same convention, different content. `self.Eb` and `self.EbLocal` are NOT local/global views of the same field — the wrapper at the end of each `erodepSPL*` overwrites `EbLocal` with `add_rate = tmp/dt = Eb`, then downstream kernels mutate `EbLocal` only.
 
-**The divergence between `Eb` (incision-positive) and `EbLocal` (deposition-positive) is a long-standing inconsistency, not a documented intentional choice.** Treat `Eb` and `EbLocal` as different fields. If you need the river erosion rate in `m/yr` (positive for incision), read `self.Eb`. If you need the net erosion/deposition thickness rate (positive for deposition), read `self.EbLocal`. Do NOT assume they are local/global views of the same field.
+Thickness conversion (in case of future refactors):
+- Inside `_getEroDepRate*`: `tmp = stepED - hOld` is the elevation change → divide by `dt` directly to get the thickness-rate `Eb` (no inversion).
+- Inside `erodepSPL*` wrapper: `tmp = Eb * dt` is the signed thickness change (negative at incising, positive at depositing cells).
+- `cumED.axpy(1.0, tmp)` → cumED in thickness convention.
+- `hGlobal.axpy(1.0, tmp)` → at incision, h drops correctly.
 
-Thickness conversion sanity check, in case of future refactors:
-- `tmp = -Eb*dt` → positive for deposition, negative for erosion (thickness convention).
-- `cumED.axpy(1.0, tmp)` → cumED in thickness convention (positive = net deposition).
-- `hGlobal.axpy(1.0, tmp)` → at incision, h drops.
+One quirk worth knowing: **`sedplex._getSedFlux` (sedplex.py:63) negates `self.Eb` before the upstream-integration solve**, because that solve needs an erosion-positive source for `vSed` (m³/yr) to accumulate as positive downstream flux. The `stratNb > 0` branch uses `self.thCoarse` which is already erosion-positive (from `stratplex.erodeStrat`), so no negation there.
 
 ## The `_extra*` methods are mandatory continuations
 NOT optional parsers. Each sets attributes required by other modules. Never delete or rename without following the full call chain in `inputparser._readDomain/_readTime/_readHillslope/_readFlex/_readOrography/_readIce`.
@@ -134,11 +134,12 @@ These literals MUST NOT be reintroduced inline. New uses should reference this l
 - **`tools/inputparser.py`** — owns all parameter parsing; forcing DataFrame column order is API; the `_extra*` chain is mandatory.
 
 ## Known bugs (fix before refactoring)
-- **`Eb` (global) and `EbLocal` (local) end the timestep in different sign conventions** (see "Eb / EbLocal sign convention" section). `Eb` is positive-for-incision (set by `_getEroDepRate`, never re-synced after the per-step SPL wrapper overwrites `EbLocal` with `-Eb`). `EbLocal` is positive-for-deposition. Any code that calls `dm.localToGlobal(EbLocal, Eb)` or `globalToLocal(Eb, EbLocal)` after `erodepSPL` will produce a sign-flipped field. Test `test_regression.py::test_erosion_sign_conventions` guards the EbLocal convention. No test guards `Eb` directly. Whoever picks this up: decide which convention is canonical, make them consistent, and add an `Eb`-side test.
+- _(none currently open)_
 
 ## Fixed (regression-guarded)
 - **`rUni`/`sUni` key/column mismatch** — fixed 2026-06 at `inputparser.py:915` (dict key `'rUni'` → `'sUni'` in the uniform branch of `_defineErofactor`). Before the fix, a YAML with a uniform `sedfactor` event landed `NaN` in `sedfacdata['sUni']`, then crashed `unstructuredmesh._updateEroFactor` on `np.load(None)`. Guarded by `tests/test_regression.py::test_uniform_sedfactor_populates_sUni`.
 - **Marine sediment leak at terminal ocean sinks** — fixed 2026-06 at `seaplex._distOcean`. `_matOcean` constructs `dMat1` with a zero column at every terminal sink (cells whose every flow direction is self-referential, typically deep-ocean basin floors); the first `dMat1.mult` therefore annihilated any `sedflux` that landed directly at a sink. `vSed` upstream-integration naturally accumulates large flux at these sinks, so this was the dominant mass-loss path. Diagnostic: 9.748e12 m³ marine sediment supply per step → 4.107e12 m³ landing at sinks (42% of input) → 0 m³ deposited via the routing loop → silently dropped. The fix adds a pre-drain step at the top of `_distOcean` that deposits any sinkVol at terminal sinks directly into `vdep` before the first `dMat1.mult`. The in-loop force-deposit and exit-residual drain (added alongside) handle any sediment that subsequently arrives at sinks during multi-step routing. Guarded by `tests/test_regression.py::test_mass_conservation`. The corresponding `is_sink_local` mask is computed in `_matOcean` once per call.
+- **`Eb` vs `EbLocal` sign-convention divergence** — fixed 2026-06 by adopting the thickness-rate convention (positive deposition, negative incision) for both fields. Changes: drop the leading minus in `E = -tmp.getArray()` inside `_getEroDepRate` (SPL.py), `_getEroDepRateNL` (nlSPL.py), `_getEroDepRateSoil` (soilSPL.py); drop the minus in `tmp.setArray(-Eb * dt)` inside the three matching `erodepSPL*` wrappers; negate `Eb` inside `sedplex._getSedFlux` (sedplex.py:63) where the upstream-integration solve still wants an erosion-positive source. Before the fix, `Eb` was incision-positive while `EbLocal` (after the wrapper's `add_rate = tmp/dt` overwrite) was deposition-positive, so the two fields disagreed in sign by end-of-step; the on-disk `EDrate` field was always deposition-positive (because it's written from `EbLocal`), and the restart loader at `outmesh.py:439-440` restored `Eb` in deposition-positive convention from `EDrate` — so fresh-run state and restart-state were inconsistent before this fix. Guarded by `tests/test_regression.py::test_erosion_sign_conventions` (which asserts `EbLocal <= 0` at incising nodes; `Eb` follows the same convention now).
 
 ## Intentional surprises (do NOT "fix")
 - **N/S boundary swap in gFlex**. `addprocess.py:221-222` deliberately assigns `simflex.BC_S = self.flex_bcN` and `simflex.BC_N = self.flex_bcS` to compensate for a coordinate-convention mismatch with gFlex. Verified intentional in project memory.
