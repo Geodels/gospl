@@ -1,0 +1,33 @@
+name: incising test
+
+domain:
+    npdata: ['incising','v','c','z']
+    flowdir: 3
+    bc: '0000'
+    nodep: False
+
+time:
+    start: 0.
+    end: 300.
+    tout: 300
+    dt: 100.
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 0.
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'incising'

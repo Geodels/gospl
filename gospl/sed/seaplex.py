@@ -170,6 +170,21 @@ class SEAMesh(object):
             rcv[self.idBorders, :] = np.tile(self.idBorders, (12, 1)).T
             wght[self.idBorders, :] = 0.0
 
+        # Detect terminal sinks: cells whose every flow direction points
+        # back to themselves. After the dMat1 transpose below the column
+        # at each such cell is identically zero, so dMat1.mult would
+        # annihilate any sediment that lands there. _distOcean uses this
+        # mask to force-deposit at sinks instead of routing through dMat1.
+        # On flat models the open-boundary cells were artificially marked
+        # self-draining just above; exclude them here so the existing
+        # vdep[idBorders]=0 rule keeps handling outflux at the edge.
+        nodes_idx = np.arange(self.lpoints)
+        self.is_sink_local = np.all(
+            rcv.astype(int) == nodes_idx[:, None], axis=1
+        )
+        if self.flatModel:
+            self.is_sink_local[self.idBorders] = False
+
         # Define downstream matrix based on filled + dir elevations
         self.dMat1 = self.zMat.copy()
         if not self.flatModel and self.Gmar > 0.:
@@ -348,9 +363,29 @@ class SEAMesh(object):
 
         marVol = self.maxDepQs.copy()
         sinkVol = sedflux.copy()
+        vdep = np.zeros(self.lpoints, dtype=float)
+
+        # Drain initial sediment at terminal sinks BEFORE the routing loop.
+        # dMat1 has zero columns at sink cells (rcv==self for every flow
+        # direction, see _matOcean), so the very first dMat1.mult below
+        # would annihilate any sedflux that landed directly at a sink. On
+        # global sphere fixtures this is the dominant mass-loss path:
+        # vSed naturally accumulates at deep ocean basins (sinks are
+        # sediment attractors), so a large fraction of the marine supply
+        # arrives at sinks in the very first iteration. Without this
+        # pre-drain ~25% of total redistributed sediment vanishes per run
+        # (regression: test_mass_conservation; AGENTS.md Known bugs entry
+        # dated 2026-06). The in-loop force-deposit below additionally
+        # catches sediment that arrives at sinks from upstream during
+        # later iterations.
+        if self.is_sink_local.any():
+            sink_mass = sinkVol[self.is_sink_local]
+            if (sink_mass != 0).any():
+                vdep[self.is_sink_local] += sink_mass
+                sinkVol[self.is_sink_local] = 0.0
+
         self.tmpL.setArray(sinkVol)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        vdep = np.zeros(self.lpoints, dtype=float)
 
         # Convergence threshold: relative to initial input volume (1e-6 of
         # total) with a fixed floor of 1 m^3. Scales with input magnitude so
@@ -393,6 +428,20 @@ class SEAMesh(object):
             sinkVol[noexcess] = 0.0
             sinkVol[self.idBorders] = 0.0
 
+            # Force-deposit at terminal sinks. Their dMat1 column is zero
+            # (rcv==self for all directions, see _matOcean), so the next
+            # dMat1.mult would annihilate any remaining sinkVol at these
+            # cells once marVol is exhausted. Without this guard ~25% of
+            # marine sediment vanished at saturated basin floors on global
+            # sphere runs (regression: test_mass_conservation; see
+            # AGENTS.md Known bugs entry dated 2026-06). The overflow
+            # accumulates above clinoH at the sink; lateral spreading is
+            # subsequently handled by _diffuseOcean in seaChange.
+            sink_mask = self.is_sink_local
+            if sink_mask.any():
+                vdep[sink_mask] += sinkVol[sink_mask]
+                sinkVol[sink_mask] = 0.0
+
             # Find where excess and sink
             self.tmpL.setArray(sinkVol)
             self.dm.localToGlobal(self.tmpL, self.tmp)
@@ -409,6 +458,18 @@ class SEAMesh(object):
                     )
 
             step += 1
+
+        # Drain any residual sediment still in self.tmp at loop exit
+        # (because the convergence threshold is non-zero, or because the
+        # max_iters cap was hit). The in-loop force-deposit at sinks
+        # should already drain almost everything; this is the safety net
+        # that converts the few remaining cubic metres to a local deposit
+        # rather than silently dropping them.
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        residual = self.tmpL.getArray().copy()
+        if residual.any():
+            vdep += residual
+            vdep[self.idBorders] = 0.0
 
         if self.memclear:
             del marVol, sinkVol

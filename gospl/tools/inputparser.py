@@ -912,7 +912,7 @@ class ReadYaml(object):
         if sMap is None:
             tmpErof.insert(
                 0,
-                {"start": sStart, "rUni": sUniform, "sMap": None, "sKey": None},
+                {"start": sStart, "sUni": sUniform, "sMap": None, "sKey": None},
             )
         else:
             tmpErof.insert(
