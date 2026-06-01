@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last reviewed 2026-05-30 against `release-candidate`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
+Last reviewed 2026-06-01 against `release-candidate`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
 
 ## What goSPL does
 goSPL is a parallel landscape-evolution model that integrates the stream-power law (river incision), linear and non-linear hillslope diffusion, marine sediment transport, glacial accumulation, flexural isostasy, and horizontal/vertical tectonics on an unstructured Voronoi/Delaunay finite-volume mesh. The mesh is either a 2D flat plane (`self.flatModel == True`) or a global sphere; partitioning, halo exchange, and all linear/non-linear solves run on PETSc DMPlex via petsc4py. Time integration is an explicit outer Euler loop in `Model.runProcesses` with implicit KSP/SNES/TS inner solves for diffusion, flow accumulation, and sediment routing.
@@ -16,6 +16,8 @@ Both sides hold physical units; the boundary is about **who owns halo synchronis
 
 ## MPI contract
 **Collective** (every rank must call, in the same order): `self.dm.localToGlobal`, `self.dm.globalToLocal`, `MPI.COMM_WORLD.Allreduce/Bcast/bcast/Allgatherv/Reduce/Barrier`, `ksp.solve`, `snes.solve`, `ts.solve`, `vec.sum/max/min`, `vec.assemblyBegin/End`, `mat.assemblyBegin/End`, `vec.duplicate/destroy`, `mat.destroy`, `dm.distribute`. **Rank-local**: `vec.getArray()`, `vec.setArray()`, all numpy ops, anything inside `if MPIrank == 0:`.
+
+**PETSc initialisation happens exactly once**, in `gospl/__init__.py` (`petsc4py.init(sys.argv)`, line 25). Python guarantees the package `__init__` runs before any submodule, so module-level code in submodules (e.g. `MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()` at import time) can rely on PETSc being live. **Do NOT re-introduce `petsc4py.init` in any submodule** — until 2026-06 every submodule called it at import time (15 sites); the call is idempotent so duplicates were harmless but obscured where state was created. Submodules still `import petsc4py` to access `petsc4py.PETSc.X` symbols; that's a separate concern from `init()`.
 
 Two communicator patterns coexist (until unified):
 - `MPIcomm = petsc4py.PETSc.COMM_WORLD` — `flow/*`, `sed/*`, `eroder/*` (10 files).
@@ -105,6 +107,24 @@ NOT optional parsers. Each sets attributes required by other modules. Never dele
 - `_extraFlex` (:1430) → `nu`, `flex_res_deg`, `flex_bcN/S/E/W`.
 - `_extraOrography` (:1517) → `oro_cw`, `oro_conv_time`, `oro_fall_time`, `oro_precip_*`, `rainfall_frequency`.
 - `_extraIce` (:1621) → `iceT`, `elaH`, `iceH` interpolators.
+
+## YAML parsing helpers (use `_get_param` / `dict.get`)
+`tools/inputparser.py` no longer uses bare `try/except KeyError` for default-on-miss. Two patterns are canonical:
+
+- **`self._get_param(*keys, default=None)`** — safe traversal into `self.input`. Returns `default` if any key in the chain is missing. Use when accessing `self.input` directly without pre-extracting a section.
+- **`section_dict.get(key, default)`** — Python builtin, used when the section dict has already been pulled into a local variable (e.g. `domainDict = self.input["domain"]`). Preferred over `_get_param` in that case — it makes the data flow more visible.
+
+Both replace the old `try: self.x = dict[key]; except KeyError: self.x = default` boilerplate.
+
+**Do NOT re-introduce that boilerplate.** ~85 blocks were collapsed in 2026-06; the helper docstring (`_get_param` at the top of `ReadYaml`) explains the convention.
+
+**Out of scope for these helpers** (keep the existing `try/except KeyError`, do NOT convert):
+1. **Required keys** that print a user-facing diagnostic and raise (16 sites — e.g. `K` in `spl`, `start`/`end`/`dt` in `time`). The except handler is part of the user-facing error contract.
+2. **Outer-section blocks** that set multiple defaults + flip a feature flag (e.g. `flexOn=False` when `flexure` is missing — 15 sites). Inverting these to `if "section" in self.input` is a real control-flow refactor, not a 1-line swap.
+3. **Other side-effect handlers** (5 sites — the `tout` print, the dual-assignment `soilfile/self.soilFile` pair, the convoluted `sea`/`position`/`curve` nested fallback, the `latitude` bounds-check inside the try).
+4. **NPZ archive accesses** (4 sites — `mdata[key]` lookups in `_isKeyinFile` and the rainKey/sedKey/teKey blocks). `mdata` is an `np.load()` result, not `self.input`.
+
+All 33 such sites carry a `# TODO-REFACTOR: complex except, needs manual review` comment with the specific reason.
 
 ## Forcing DataFrame layout contract
 Consumers use `iloc[nb, k]` positional access. **Column order is part of the API. New columns MUST be appended at the END.**
