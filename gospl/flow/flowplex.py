@@ -360,7 +360,7 @@ class FAMesh(object):
             self.waterFilled[mask] = node_lvl[mask]
 
         # In case there is still remaining water flux to distribute downstream
-        if (eV > 1.0e-3).any():
+        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (water-routing convergence threshold); do not replace
             if step == 100:
                 self.fMat.destroy()
                 self._buildFlowDirection(self.lFill)

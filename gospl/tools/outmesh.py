@@ -10,6 +10,8 @@ import numpy as np
 from mpi4py import MPI
 from time import process_time
 
+from gospl.tools.constants import DISCHARGE_FLOOR
+
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
@@ -285,7 +287,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.fillFAL.getArray().copy()
-            data[data <= 1.0e-8] = 1.0e-8
+            data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
             if not self.fast:
                 data[self.seaID] = 1.0
             f["fillFA"][:, 0] = data
@@ -296,7 +298,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.FAL.getArray().copy()
-            data[data <= 1.0e-8] = 1.0e-8
+            data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
             if not self.fast:
                 data[self.seaID] = 1.0
             f["FA"][:, 0] = data
@@ -325,7 +327,7 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 data = self.iceHL.getArray().copy()
-                data[data <= 1.0e-8] = 1.0e-8
+                data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
                 if not self.fast:
                     data[self.seaID] = 1.0
                 f["iceH"][:, 0] = data
@@ -354,7 +356,7 @@ class WriteMesh(object):
                 compression="gzip",
             )
             data = self.vSedLocal.getArray().copy()
-            data[data <= 1.0e-8] = 1.0e-8
+            data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
             f["sedLoad"][:, 0] = data
             if self.upsub is not None:
                 f.create_dataset(

@@ -8,6 +8,8 @@ import numpy_indexed as npi
 from mpi4py import MPI
 from time import process_time
 
+from gospl.tools.constants import BEDROCK_EXPOSED
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fctcoeff
     from gospl._fortran import local_spl
@@ -163,7 +165,7 @@ class soilSPL(object):
         # Get soil thickness from previous time step
         self.soilH = self.Lsoil.getArray().copy()
         # Consider bedrock exposed when soil thickness is below 10 cm
-        self.soilH[self.soilH < 1.e-1] = 0.0
+        self.soilH[self.soilH < BEDROCK_EXPOSED] = 0.0
 
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
@@ -240,7 +242,7 @@ class soilSPL(object):
 
         # Update soil thicknesses
         nHsoil = self.nsoilH.copy()
-        nHsoil[nHsoil < 1.e-1] = 0.
+        nHsoil[nHsoil < BEDROCK_EXPOSED] = 0.
         # Limit soil thickness
         nHsoil[nHsoil > self.soil_transition] = self.soil_transition
         self.Lsoil.setArray(nHsoil)

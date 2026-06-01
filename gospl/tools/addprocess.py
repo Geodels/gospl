@@ -10,6 +10,8 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
+from gospl.tools.constants import MISSING_DATA_SENTINEL
+
 if "READTHEDOCS" not in os.environ:
     from gflex.f2d import F2D
     from gospl._fortran import flexure
@@ -506,7 +508,7 @@ class GridProcess(object):
 
         # Get elevations from time of equilibrium and after erosion deposition
         hl = self.hLocal.getArray().copy()
-        dZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        dZ = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
         dZ[self.locIDs] = hl - self.hOldFlex.getArray()
 
         # If glaciers exist then add corresponding equivalent sediment thickness
@@ -585,7 +587,7 @@ class GridProcess(object):
 
         # Get elevations from the unstructured mesh structure
         hl = self.hLocal.getArray().copy()
-        newZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        newZ = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
         newZ[self.locIDs] = hl
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, newZ, op=MPI.MAX)
 

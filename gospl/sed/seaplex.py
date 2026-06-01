@@ -14,6 +14,12 @@ from mpi4py import MPI
 from time import process_time
 from vtk.util import numpy_support  # type: ignore
 
+from gospl.tools.constants import (
+    BOUNDARY_FLOW_SENTINEL,
+    DEPOSIT_FLOOR,
+    MISSING_DATA_SENTINEL,
+)
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdrcvrs
     from gospl._fortran import epsfill
@@ -146,14 +152,14 @@ class SEAMesh(object):
             # Only consider filleps in the first kms offshore
             minh = max(minh, self.oFill)
             hsmth = self._hillSlope(smooth=2)
-            hsmth[self.coastDist > self.offshore] = -1.e6
+            hsmth[self.coastDist > self.offshore] = BOUNDARY_FLOW_SENTINEL
         else:
             minh = max(minh, self.oFill)
             hsmth = hl.copy()
-            hsmth[self.idBorders] = -1.e6
+            hsmth[self.idBorders] = BOUNDARY_FLOW_SENTINEL
 
         # The filled + eps is done on the global grid!
-        fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        fillz = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
         fillz[self.locIDs] = hsmth
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
         if MPIrank == 0:
@@ -163,7 +169,7 @@ class SEAMesh(object):
         fillz = fillEPS[self.locIDs]
         if not self.flatModel:
             fillz[self.coastDist > self.offshore] = hl[self.coastDist > self.offshore]
-        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillz, -1.0e6)
+        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillz, BOUNDARY_FLOW_SENTINEL)
 
         # Set borders nodes
         if self.flatModel:
@@ -498,9 +504,9 @@ class SEAMesh(object):
                 warnings.filterwarnings("ignore")
                 self._distanceCoasts(hl)
             # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
-            self.clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp
+            self.clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (clinoH 1mm offset below sealevel); do not replace
         else:
-            self.clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)
+            self.clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (clinoH 1mm offset); do not replace
         self.clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
         self.clinoH[self.clinoH < hl] = hl[self.clinoH < hl]
         self.maxDepQs = (self.clinoH - hl) * self.larea
@@ -523,7 +529,7 @@ class SEAMesh(object):
         dh = np.divide(marDep, self.larea, out=np.zeros_like(self.larea), where=self.larea != 0)
         # Drop sub-millimeter deposits: numerical cleanup to avoid accumulating
         # round-off thicknesses across many timesteps.
-        dh[dh < 1.e-3] = 0.
+        dh[dh < DEPOSIT_FLOOR] = 0.
         self.tmpL.setArray(dh)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.dm.globalToLocal(self.tmp, self.tmpL)

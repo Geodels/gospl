@@ -9,6 +9,8 @@ import numpy_indexed as npi
 from mpi4py import MPI
 from time import process_time
 
+from gospl.tools.constants import BOUNDARY_FLOW_SENTINEL, MISSING_DATA_SENTINEL
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdreceivers
     from gospl._fortran import epsfill
@@ -73,8 +75,8 @@ class IceMesh(object):
         minh = self.hGlobal.min()[1] + 0.1
         minh = max(minh, self.sealevel)
         if self.flatModel:
-            hl[self.idBorders] = -1.e6
-        fillz = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+            hl[self.idBorders] = BOUNDARY_FLOW_SENTINEL
+        fillz = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
         fillz[self.locIDs] = hl
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
         if MPIrank == 0:
@@ -84,7 +86,7 @@ class IceMesh(object):
         fillz = fillEPS[self.locIDs]
 
         # Calculate receivers and weights for the flow direction matrix
-        rcv, _, wght = mfdreceivers(dir_ice, 1.0, fillz, -1.0e6)
+        rcv, _, wght = mfdreceivers(dir_ice, 1.0, fillz, BOUNDARY_FLOW_SENTINEL)
 
         # Handle borders for flat models
         if self.flatModel:
@@ -205,7 +207,7 @@ class IceMesh(object):
             ablation[below_ela] = np.clip(
                 -(hl[below_ela] - elaH) / (iceH - elaH), 0.0, 1.0
             )
-            has_ice = ice_clamped > 1.0e-8
+            has_ice = ice_clamped > 1.0e-8  # TODO-REFACTOR: value matches DISCHARGE_FLOOR but distinct role (ice-presence threshold for melt capture); do not replace
             melt_local = ablation * rainA * has_ice
         self.iceMeltL.setArray(melt_local)
 
@@ -226,7 +228,7 @@ class IceMesh(object):
         # whenever ice is on (used by both flexure and the `iceH` output);
         # the flex copy stays gated behind `flexOn`.
         tmp = self.icewe * self.icewf * smthIce**0.3
-        tmp[tmp < 1.e-1] = 0.
+        tmp[tmp < 1.e-1] = 0.  # TODO-REFACTOR: value matches BEDROCK_EXPOSED but distinct role (minimum ice thickness for visualization); do not replace
         self.tmpL.setArray(tmp)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
         tmp = self._hillSlope(smooth=1)

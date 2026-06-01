@@ -9,6 +9,8 @@ import numpy_indexed as npi
 from mpi4py import MPI
 from time import process_time
 
+from gospl.tools.constants import GRAPH_OUTLIER_CAP, MISSING_DATA_SENTINEL
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import edge_tile
     from gospl._fortran import fill_tile
@@ -315,7 +317,7 @@ class PITFill(object):
         _, hh = grp.max(self.lFill[ids])
         _, dh = grp.max(self.lFill[ids] - hl[ids])
         totv = np.zeros(nbpits, dtype=np.float64)
-        hmax = -np.ones(nbpits, dtype=np.float64) * 1.0e8
+        hmax = np.full(nbpits, MISSING_DATA_SENTINEL, dtype=np.float64)
         diffh = np.zeros(nbpits, dtype=np.float64)
         ids = uids > -1
         totv[uids[ids]] = vol[ids]
@@ -433,10 +435,11 @@ class PITFill(object):
         ids2 = np.where(graph[ids, 0] == graph[graph[ids, 3].astype(int), 0])[0]
         graph[ids[ids2], 3] = 0.0
         # Sentinel filter: physical Earth elevations are bounded by ~9 km;
-        # entries outside [-1e8, 1e7] m come from the global-graph initialiser
-        # (-1.0e8 sentinel) and any extreme outliers, both flagged as -1e8.
-        graph[graph[:, 0] < -1.0e8, 0] = -1.0e8
-        graph[graph[:, 0] > 1.0e7, 0] = -1.0e8
+        # entries outside [MISSING_DATA_SENTINEL, GRAPH_OUTLIER_CAP] m come
+        # from the global-graph initialiser (MISSING_DATA_SENTINEL) and any
+        # extreme outliers, both flagged as MISSING_DATA_SENTINEL.
+        graph[graph[:, 0] < MISSING_DATA_SENTINEL, 0] = MISSING_DATA_SENTINEL
+        graph[graph[:, 0] > GRAPH_OUTLIER_CAP, 0] = MISSING_DATA_SENTINEL
 
         # Define global solution by combining depressions/flat together
         lFill = fill_depressions(0.0, hl, lFill, label.astype(int), graph[:, 0])
@@ -563,7 +566,7 @@ class PITFill(object):
         hl = self.hLocal.getArray().copy()
         minh = self.hGlobal.min()[1]
         if not self.flatModel:
-            minh += 1.0e-3
+            minh += 1.0e-3  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (minh epsilon nudge for fillElevation); do not replace
         level = max(minh, self.sealevel + self.oFill)
 
         self._performFilling(hl - level, level, sed)
@@ -617,7 +620,7 @@ class PITFill(object):
         tfill = process_time()
         minh = self.hGlobal.min()[1]
         if not self.flatModel:
-            minh += 1.0e-3
+            minh += 1.0e-3  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (minh epsilon nudge for fillIceElevation); do not replace
         level = max(minh, self.sealevel + self.oFill)
 
         self._performFilling(hl - level, level, False)

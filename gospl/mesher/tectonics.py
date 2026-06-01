@@ -8,6 +8,8 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
+from gospl.tools.constants import MISSING_DATA_SENTINEL, MISSING_LARGE_SENTINEL
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import adveciioe
     from gospl._fortran import adveciioe2
@@ -265,7 +267,7 @@ class Tectonics(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
         if self.flatModel:
             hL = self.hLocal.getArray().copy()
-            hL[self.idBorders] = -1.e8
+            hL[self.idBorders] = MISSING_DATA_SENTINEL
             nhL = fitedges(hL)
             self.hLocal.setArray(nhL)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
@@ -294,7 +296,7 @@ class Tectonics(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         if self.flatModel:
             edL = self.cumEDLocal.getArray().copy()
-            edL[self.idBorders] = -1.e8
+            edL[self.idBorders] = MISSING_DATA_SENTINEL
             nedL = fitedges(edL)
             self.cumEDLocal.setArray(nedL)
             self.dm.localToGlobal(self.cumEDLocal, self.cumED)
@@ -427,26 +429,26 @@ class Tectonics(object):
         # Send local elevation globally
         t0 = process_time()
         hl = self.hLocal.getArray().copy()
-        gZ = np.zeros(self.mpoints, dtype=np.float64) - 1.0e8
+        gZ = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
         gZ[self.locIDs] = hl
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
 
         # Send local erosion deposition globally
         edl = self.cumEDLocal.getArray().copy()
-        gED = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
+        gED = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
         gED[self.locIDs] = edl
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
 
         # Send local flexural isostasy globally
         if self.flexOn:
-            gFI = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
+            gFI = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
             gFI[self.locIDs] = self.localFlex
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gFI, op=MPI.MAX)
 
         # Send local soil thickness globally
         if self.cptSoil:
             lsoil = self.Lsoil.getArray().copy()
-            gSL = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
+            gSL = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
             gSL[self.locIDs] = lsoil
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gSL, op=MPI.MAX)
 
@@ -590,7 +592,7 @@ class Tectonics(object):
         """
 
         # Reduce variable so that all values that need to be read from another partition can be
-        vals = np.zeros((self.mpoints, self.stratStep), dtype=np.float64) - 1.0e8
+        vals = np.zeros((self.mpoints, self.stratStep), dtype=np.float64) + MISSING_DATA_SENTINEL
         vals[self.locIDs, :] = variable
         redVals = vals[reduceIDs, :]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, redVals, op=MPI.MAX)

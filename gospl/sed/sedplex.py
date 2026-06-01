@@ -136,7 +136,7 @@ class SEDMesh(object):
         self.pitVol[self.pitVol < 0] = 0.0
 
         # In case there is still remaining sediment flux to distribute downstream
-        if (eV > 1.0e-3).any():
+        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (sediment-routing convergence threshold); do not replace
             # Only rebuild the flow direction matrix when the topography has
             # actually changed (a pit saturated this iteration), or on the
             # very first iteration when no matrix exists yet, or on the

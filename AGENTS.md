@@ -119,14 +119,25 @@ Consumers use `iloc[nb, k]` positional access. **Column order is part of the API
 `tectonics.py:78` reads `iloc[nb, -1]` (== `hMap` today). Appending a column to `tecdata` breaks this line silently.
 
 ## Magic numbers
-These literals MUST NOT be reintroduced inline. New uses should reference this list (and ideally a shared `constants` module if you add one):
-- `MISSING_DATA_SENTINEL = -1.0e8` — pre-fill before `Allreduce(MAX)` (addprocess.py:509,588; tectonics.py:430).
-- `DISCHARGE_FLOOR = 1.0e-8` — minimum FA/discharge written to output (outmesh.py:288,299,328,357).
-- `DEPOSIT_FLOOR = 1.0e-3` (1 mm) — drop sub-mm sediment deposit (seaplex.py:465; sedplex.py:156).
-- `BEDROCK_EXPOSED = 1.0e-1` (10 cm) — soil-vs-bedrock threshold (soilSPL.py:166,243).
-- `BEDROCK_SENTINEL = 1.0e6` — infinite-bedrock layer-0 thickness (stratplex.py:99,194,225).
+All sentinels and threshold values are defined in `gospl/tools/constants.py` and imported by name. **These literal values MUST NOT be reintroduced inline.** If you add a new constant, add an entry to both this section AND `gospl/tools/constants.py` so the two stay in sync.
 
-`-1.0e6` (seaplex.py:153; iceplex.py:76) is a **boundary marker** for flow-direction Fortran, NOT a missing-data sentinel — keep distinct.
+| Constant | Value | Role |
+|---|---|---|
+| `MISSING_DATA_SENTINEL` | `-1.0e8` | Pre-fill before `Allreduce(MAX)` + boundary marker before `fitedges`. |
+| `MISSING_LARGE_SENTINEL` | `-1.0e10` | Same as above but for fields whose magnitude can exceed 1e8 (cumED, flexure, soil thickness — used in `tectonics._advectPlates`). Two orders below `MISSING_DATA_SENTINEL` so they never collide. |
+| `DISCHARGE_FLOOR` | `1.0e-8` | Minimum FA/discharge/sedLoad value written to HDF5 outputs (avoids `-inf` in log10 viz). |
+| `DEPOSIT_FLOOR` | `1.0e-3` (1 mm) | Drop sub-mm marine sediment as numerical noise. |
+| `BEDROCK_EXPOSED` | `1.0e-1` (10 cm) | Soil-vs-bedrock threshold in soil-aware SPL. |
+| `BEDROCK_SENTINEL` | `1.0e6` | Infinite-bedrock layer-0 sentinel thickness; offset cancels in cumsum arithmetic. |
+| `BOUNDARY_FLOW_SENTINEL` | `-1.0e6` | Mfd no-data marker passed to `mfdreceivers`/`mfdrcvrs`; **distinct from `MISSING_DATA_SENTINEL`** — kept two orders apart so a mix-up is obvious in diagnostics. |
+| `GRAPH_OUTLIER_CAP` | `1.0e7` | Upper-bound clamp in `pitfilling._performFilling`; entries above this are rewritten to `MISSING_DATA_SENTINEL`. |
+
+**Same value, different role — DO NOT replace these with the listed constants:**
+- `1.0e-8` at `flow/iceplex.py:208` (ice-presence threshold), `sed/stratplex.py:219` (thickness numerical-noise floor).
+- `1.0e-3` at `flow/flowplex.py:363` (water-routing convergence), `sed/sedplex.py:139` (sediment-routing convergence), `flow/pitfilling.py:568,622` (minh epsilon nudges), `sed/seaplex.py:507,509` (clinoH 1mm offset).
+- `1.0e-1` at `flow/iceplex.py:231` (minimum ice thickness for visualization).
+
+Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but distinct role; do not replace` comment so future readers know the coincidence is intentional.
 
 ## High-risk modules (do not edit without full regression run)
 - **`mesher/unstructuredmesh.py`** — owns `dm`, every shared mesh attribute, forcing dispatch, and `destroy_DMPlex` (lines 738-799) which names every Vec/Mat by hand. Adding a new persistent Vec elsewhere requires adding it to that destroy list or it leaks.
@@ -143,9 +154,6 @@ These literals MUST NOT be reintroduced inline. New uses should reference this l
 
 ## Intentional surprises (do NOT "fix")
 - **N/S boundary swap in gFlex**. `addprocess.py:221-222` deliberately assigns `simflex.BC_S = self.flex_bcN` and `simflex.BC_N = self.flex_bcS` to compensate for a coordinate-convention mismatch with gFlex. Verified intentional in project memory.
-
-## Fixed (regression-guarded)
-- **`rUni`/`sUni` key/column mismatch** — fixed 2026-06 at `inputparser.py:915` (dict key `'rUni'` → `'sUni'` in the uniform branch of `_defineErofactor`). Before the fix, a YAML with a uniform `sedfactor` event landed `NaN` in `sedfacdata['sUni']`, then crashed `unstructuredmesh._updateEroFactor` on `np.load(None)`. Guarded by `tests/test_regression.py::test_uniform_sedfactor_populates_sUni`.
 
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.

@@ -16,6 +16,8 @@ from time import process_time
 
 from vtk.util import numpy_support  # type: ignore
 
+from gospl.tools.constants import MISSING_DATA_SENTINEL
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import globalngbhs
     from gospl._fortran import definetin
@@ -612,19 +614,19 @@ class UnstMesh(object):
             tmp = self.hLocal.getArray().copy()
             if self.south == 0 and len(self.southPts) > 0:
                 # tmp[self.southPts] = getbc(len(self.southPts), tmp, self.southPts)
-                tmp[self.southPts] = -1.e8
+                tmp[self.southPts] = MISSING_DATA_SENTINEL
                 tmp = fitedges(tmp)
             if self.north == 0 and len(self.northPts) > 0:
                 # tmp[self.northPts] = getbc(len(self.northPts), tmp, self.northPts)
-                tmp[self.northPts] = -1.e8
+                tmp[self.northPts] = MISSING_DATA_SENTINEL
                 tmp = fitedges(tmp)
             if self.east == 0 and len(self.eastPts) > 0:
                 # tmp[self.eastPts] = getbc(len(self.eastPts), tmp, self.eastPts)
-                tmp[self.eastPts] = -1.e8
+                tmp[self.eastPts] = MISSING_DATA_SENTINEL
                 tmp = fitedges(tmp)
             if self.west == 0 and len(self.westPts) > 0:
                 # tmp[self.westPts] = getbc(len(self.westPts), tmp, self.westPts)
-                tmp[self.westPts] = -1.e8
+                tmp[self.westPts] = MISSING_DATA_SENTINEL
                 tmp = fitedges(tmp)
             self.hLocal.setArray(tmp)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)

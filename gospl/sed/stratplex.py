@@ -7,6 +7,8 @@ import numpy as np
 from mpi4py import MPI
 from time import process_time
 
+from gospl.tools.constants import BEDROCK_SENTINEL
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import strataonesed
 
@@ -96,7 +98,7 @@ class STRAMesh(object):
             # no initial stratigraphy file is provided. The 1e6 m sentinel
             # cancels out in erodeStrat (cumThick / eroVal share the offset)
             # so it does not contaminate eroded volumes.
-            self.stratH[:, 0] = 1.0e6
+            self.stratH[:, 0] = BEDROCK_SENTINEL
             self.phiS[:, 0] = self.phi0s
             self.bedrockLay = 1          # layer 0 is the infinite-bedrock sentinel
 
@@ -191,7 +193,7 @@ class STRAMesh(object):
             return
 
         # Cumulative thickness for each node
-        self.stratH[nids, 0] += 1.0e6
+        self.stratH[nids, 0] += BEDROCK_SENTINEL
         cumThick = np.cumsum(self.stratH[nids, self.stratStep :: -1], axis=1)[:, ::-1]
         boolMask = cumThick < -ero[nids].reshape((len(nids), 1))
         mask = boolMask.astype(int)
@@ -214,7 +216,7 @@ class STRAMesh(object):
         self.thCoarse = np.zeros(self.lpoints)
         # From sand thickness extract the solid phase that is eroded from this last layer
         tmp = self.stratH[nids, eroLayNb] - eroVal
-        tmp[tmp < 1.0e-8] = 0.0
+        tmp[tmp < 1.0e-8] = 0.0  # TODO-REFACTOR: value matches DISCHARGE_FLOOR but distinct role (thickness numerical-noise floor); do not replace
         # Define the uncompacted sand thickness that will be deposited dowstream
         thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
         self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
@@ -222,7 +224,7 @@ class STRAMesh(object):
 
         # Update thickness of top stratigraphic layer
         self.stratH[nids, eroLayNb] = eroVal
-        self.stratH[nids, 0] -= 1.0e6
+        self.stratH[nids, 0] -= BEDROCK_SENTINEL
         neg = self.stratH < 0
         self.stratH[neg] = 0.0
         self.phiS[neg] = 0.0
