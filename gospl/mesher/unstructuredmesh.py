@@ -665,7 +665,7 @@ class UnstMesh(object):
 
         nb = self.rainNb
         if nb < len(self.raindata) - 1:
-            if self.raindata.iloc[nb + 1, 0] <= self.tNow:  # + self.dt:
+            if self.raindata.at[nb + 1, "start"] <= self.tNow:  # + self.dt:
                 nb += 1
 
         if nb > self.rainNb or nb == -1:
@@ -675,18 +675,18 @@ class UnstMesh(object):
             self.rainNb = nb
             if pd.isnull(self.raindata["rUni"][nb]):
                 if pd.isnull(self.raindata["rzA"][nb]):
-                    loadData = np.load(self.raindata.iloc[nb, 4])
-                    rainVal = loadData[self.raindata.iloc[nb, 5]]
+                    loadData = np.load(self.raindata.at[nb, "rMap"])
+                    rainVal = loadData[self.raindata.at[nb, "rKey"]]
                     self.rainA = None
                     self.rainB = None
                     del loadData
                 else:
-                    self.rainA = self.raindata.iloc[nb, 2]
-                    self.rainB = self.raindata.iloc[nb, 3]
+                    self.rainA = self.raindata.at[nb, "rzA"]
+                    self.rainB = self.raindata.at[nb, "rzB"]
             else:
                 self.rainA = None
                 self.rainB = None
-                rainVal = np.full(self.mpoints, self.raindata.iloc[nb, 1])
+                rainVal = np.full(self.mpoints, self.raindata.at[nb, "rUni"])
             
             if self.rainA is None:
                 rainVal[rainVal < 0] = 0.0
@@ -715,7 +715,7 @@ class UnstMesh(object):
 
         nb = self.sedfactNb
         if nb < len(self.sedfacdata) - 1:
-            if self.sedfacdata.iloc[nb + 1, 0] <= self.tNow:  # + self.dt:
+            if self.sedfacdata.at[nb + 1, "start"] <= self.tNow:  # + self.dt:
                 nb += 1
 
         if nb > self.sedfactNb or nb == -1:
@@ -724,11 +724,11 @@ class UnstMesh(object):
 
             self.sedfactNb = nb
             if pd.isnull(self.sedfacdata["sUni"][nb]):
-                loadData = np.load(self.sedfacdata.iloc[nb, 2])
-                sedfacVal = loadData[self.sedfacdata.iloc[nb, 3]]
+                loadData = np.load(self.sedfacdata.at[nb, "sMap"])
+                sedfacVal = loadData[self.sedfacdata.at[nb, "sKey"]]
                 del loadData
             else:
-                sedfacVal = np.full(self.mpoints, self.sedfacdata.iloc[nb, 1])
+                sedfacVal = np.full(self.mpoints, self.sedfacdata.at[nb, "sUni"])
             sedfacVal[sedfacVal < 0.1] = 0.1
             self.sedFacMesh = sedfacVal
 

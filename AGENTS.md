@@ -19,11 +19,63 @@ Both sides hold physical units; the boundary is about **who owns halo synchronis
 
 **PETSc initialisation happens exactly once**, in `gospl/__init__.py` (`petsc4py.init(sys.argv)`, line 25). Python guarantees the package `__init__` runs before any submodule, so module-level code in submodules (e.g. `MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()` at import time) can rely on PETSc being live. **Do NOT re-introduce `petsc4py.init` in any submodule** — until 2026-06 every submodule called it at import time (15 sites); the call is idempotent so duplicates were harmless but obscured where state was created. Submodules still `import petsc4py` to access `petsc4py.PETSc.X` symbols; that's a separate concern from `init()`.
 
-Two communicator patterns coexist (until unified):
-- `MPIcomm = petsc4py.PETSc.COMM_WORLD` — `flow/*`, `sed/*`, `eroder/*` (10 files).
-- `MPIcomm = MPI.COMM_WORLD` — `tools/addprocess.py`, `tools/outmesh.py`, `mesher/unstructuredmesh.py`, `mesher/tectonics.py` (4 files).
+`MPIcomm` is defined locally in 5 active files. 9 dead-code assignments were removed 2026-06. Active sites already follow the rule below.
+
+| File | `MPIcomm =` | Used for |
+|---|---|---|
+| `flow/flowplex.py` | `petsc4py.PETSc.COMM_WORLD` | `Mat().create(comm=MPIcomm)` |
+| `sed/seaplex.py` | `petsc4py.PETSc.COMM_WORLD` | `Mat/Vec().createNest(comm=MPIcomm)` |
+| `eroder/SPL.py` | `petsc4py.PETSc.COMM_WORLD` | `Mat/Vec().createNest(comm=MPIcomm)` |
+| `mesher/unstructuredmesh.py` | `MPI.COMM_WORLD` | `bcast`, `Barrier` |
+| `tools/outmesh.py` | `MPI.COMM_WORLD` | `bcast`, `gather`, `Barrier` |
 
 Rule: use `MPI.COMM_WORLD` for raw collectives (Allreduce/bcast/Allgatherv); use `petsc4py.PETSc.COMM_WORLD` only when creating PETSc objects (`KSP().create(comm=...)`, `Mat().create(comm=...)`). They wrap the same handle but go through different paths inside PETSc.
+
+## KSP / SNES / TS lifecycle contract
+PETSc solvers in goSPL follow two intentional patterns. **Use the right one for new code.**
+
+### CACHED — hot-path solvers (8 sites)
+Solvers that run **every timestep** are created lazily on first use, stored as `self._X`, and reused across the entire simulation. Avoids the ~5-10 ms create+destroy churn per call, which compounds over thousands of timesteps. Each site's inline docstring confirms the rationale.
+
+| File | Method | Cached attribute | Solver |
+|---|---|---|---|
+| `flow/flowplex.py` | `_solve_KSP` | `self._ksp_main` | KSP (main: richardson+bjacobi) |
+| `flow/flowplex.py` | `_solve_KSP2` | `self._ksp_fallback` | KSP (fallback: fgmres+asm) |
+| `eroder/nlSPL.py` | `_solveNL_ed` | `self._snes_ed` | SNES (transport-limited non-linear SPL) |
+| `eroder/nlSPL.py` | `_solveNL` | `self._snes_nl` | SNES (detachment-limited non-linear SPL) |
+| `eroder/soilSPL.py` | `_solveSoil` | `self._snes_soil` | SNES (soil-aware SPL) |
+| `eroder/soilSPL.py` | `diffuseSoil` | `self._ts_soil` | TS (rosw soil diffusion) |
+| `sed/hillslope.py` | `_hillSlopeNL` | `self._snes_hill` | SNES (non-linear hillslope) |
+| `sed/hillslope.py` | `_diffuseImplicit` | `self._ts_marine` | TS (rosw marine + lake diffusion) |
+
+**Lifecycle**:
+```python
+if self._snes_x is None:
+    snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+    # ...configure...
+    self._snes_x = snes
+snes = self._snes_x
+# ...solve...
+# Do NOT call snes.destroy() — destroy_DMPlex handles it at simulation end.
+```
+
+**CRITICAL**: any new cached solver MUST be added to the `destroy_DMPlex` loop in `mesher/unstructuredmesh.py:738-799`. The loop iterates over a hardcoded list of attribute names; forgetting to add yours leaks the PETSc object at simulation end. Same applies to cached helper Vecs (`self._snes_X_f`, `self._snes_X_x`, `self._snes_X_J`, etc.).
+
+### AD-HOC — nested-matrix fieldsplit solves (2 sites)
+Solvers that build a `Mat().createNest(...)` whose sub-matrices change every call AND configure `pc.setType("fieldsplit")` with IS sets derived from the nested-mat structure. The fieldsplit PC's IS configuration is tied to the specific sysMat instance, so re-using a cached KSP via `setOperators(new_sysMat)` does NOT automatically re-derive the splits. Caching is theoretically possible but requires careful experimentation with `pc.reset()` and the nested-mat lifecycle.
+
+| File | Method | Condition |
+|---|---|---|
+| `eroder/SPL.py` | `_coupledEDSystem` | `self.fDepa != 0` (transport-limited branch with non-zero `G`) |
+| `sed/seaplex.py` | `_depMarineSystem` | `not flatModel AND self.Gmar > 0`, AND only inside the second `_distOcean` pass |
+
+**Lifecycle**: create at the top of the method, configure, solve, then explicitly destroy everything (KSP, sub-KSPs, sub-ISes, PC, sysMat, RHS/solution vectors) at the end. See `SPL.py:191-243` for the canonical pattern. Both sites are COLD-path (conditional, not every step), so the cumulative create+destroy overhead is small.
+
+If a future contributor wants to convert one of these to CACHED, the obstacle is the fieldsplit-PC + nested-mat IS lifecycle, not the KSP object itself. Do it on a focused branch with full regression run.
+
+### Common rules
+- All comm arguments use `petsc4py.PETSc.COMM_WORLD` (never `MPI.COMM_WORLD`). Matches the MPI contract above.
+- Positional (`KSP().create(PETSc.COMM_WORLD)`) vs keyword (`SNES().create(comm=PETSc.COMM_WORLD)`) is purely cosmetic; both work identically.
 
 ## The Model god-class
 `gospl/model.py:93-110` declares `Model` as multi-inheritance of 16 mixins. `model.py:126-198` calls each parent's `__init__` **by name, not via `super()`**. The init order is load-bearing and differs from the MRO declaration order — adding `super().__init__()` will break the chain.
@@ -127,16 +179,18 @@ Both replace the old `try: self.x = dict[key]; except KeyError: self.x = default
 All 33 such sites carry a `# TODO-REFACTOR: complex except, needs manual review` comment with the specific reason.
 
 ## Forcing DataFrame layout contract
-Consumers use `iloc[nb, k]` positional access. **Column order is part of the API. New columns MUST be appended at the END.**
+Consumers use `df.at[nb, col]` named access. **Column names are part of the API.** New columns may be appended in any order; existing consumers reference columns by name, not position, so adding a column no longer breaks anything silently.
 
-| DataFrame | Built in | Columns (in order) | Positional consumers |
+| DataFrame | Built in | Columns | Consumers |
 |---|---|---|---|
-| `self.tecdata` | `_storeTectonics` (inputparser.py:788) | `start, end, tMap, zMap, hMap` | tectonics.py:73,78,102,112,116 |
-| `self.raindata` | `_defineRain` (inputparser.py:1239) | `start, rUni, rzA, rzB, rMap, rKey` | unstructuredmesh.py:677-688 |
-| `self.sedfacdata` | `_defineErofactor` (inputparser.py:929) | `start, sUni, sMap, sKey` | unstructuredmesh.py:725-730 |
-| `self.tedata` | `_getTe` (inputparser.py:1079) | `start, tUni, tMap, tKey` | addprocess.py:160-174 |
+| `self.tecdata` | `_storeTectonics` (inputparser.py) | `start, end, tMap, zMap, hMap` | tectonics.py |
+| `self.raindata` | `_defineRain` (inputparser.py) | `start, rUni, rzA, rzB, rMap, rKey` | unstructuredmesh.py |
+| `self.sedfacdata` | `_defineErofactor` (inputparser.py) | `start, sUni, sMap, sKey` | unstructuredmesh.py |
+| `self.tedata` | `_getTe` (inputparser.py) | `start, tUni, tMap, tKey` | addprocess.py |
 
-`tectonics.py:78` reads `iloc[nb, -1]` (== `hMap` today). Appending a column to `tecdata` breaks this line silently.
+The previous `iloc[nb, k]` positional pattern was replaced in 2026-06 (30 sites across the 3 consumer files). **Do NOT re-introduce `iloc[nb, k]` on these DataFrames** — it makes the column-order a load-bearing API, and any append silently breaks every consumer.
+
+Out-of-scope iloc uses (kept intact): `pitfilling.py` uses `df["col"].iloc[k]` on a local pit-id DataFrame (not one of the four forcing DataFrames); `inputparser.py` uses `seadata[1].iloc[0]` and `icedata[N].iloc[0]` for first/last-row access on CSV-loaded series (also not forcing DataFrames). Different shape, different objects.
 
 ## Magic numbers
 All sentinels and threshold values are defined in `gospl/tools/constants.py` and imported by name. **These literal values MUST NOT be reintroduced inline.** If you add a new constant, add an entry to both this section AND `gospl/tools/constants.py` so the two stay in sync.
@@ -178,6 +232,7 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.
 2. Did you run the regression tests, including the uniform `sedfactor` case (see Known bugs)?
-3. If you touched a forcing DataFrame, did you append columns at the END (not in the middle)?
+3. If you added a column to a forcing DataFrame, did you use named access (df.at[nb, col]) not iloc?
 4. If you used a scratch Vec, did you document which ones in the method's docstring?
 5. If you changed a method called by `Model.runProcesses` (`model.py:217-286`), did you check every caller AND the mixin init order (`model.py:126-198`)?
+6. If you added a new KSP/SNES/TS solver, did you pick the right lifecycle (CACHED for hot-path solvers, AD-HOC for nested-fieldsplit) AND, if cached, add the attribute to the `destroy_DMPlex` list in `unstructuredmesh.py`?

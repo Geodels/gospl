@@ -18,7 +18,6 @@ if "READTHEDOCS" not in os.environ:
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
-MPIcomm = MPI.COMM_WORLD
 
 
 class GridProcess(object):
@@ -150,7 +149,7 @@ class GridProcess(object):
 
         nb = self.teNb
         if nb < len(self.tedata) - 1:
-            if self.tedata.iloc[nb + 1, 0] <= self.tNow:
+            if self.tedata.at[nb + 1, "start"] <= self.tNow:
                 nb += 1
 
         if nb > self.teNb or nb == -1:
@@ -158,21 +157,21 @@ class GridProcess(object):
                 nb = 0
             self.teNb = nb
             if self.flex_method == 'global':
-                loadData = np.load(self.tedata.iloc[nb, 2])
-                self.flexTe = loadData[self.tedata.iloc[nb, 3]]
+                loadData = np.load(self.tedata.at[nb, "tMap"])
+                self.flexTe = loadData[self.tedata.at[nb, "tKey"]]
                 del loadData
                 if MPIrank == 0:
                     self.flexTe_dh = self._unstr2dh(self.flexTe)
             elif self.tedata["tUni"][nb] == 0.:
-                loadData = np.load(self.tedata.iloc[nb, 2])
-                teVal = loadData[self.tedata.iloc[nb, 3]]
+                loadData = np.load(self.tedata.at[nb, "tMap"])
+                teVal = loadData[self.tedata.at[nb, "tKey"]]
                 del loadData
                 self.flexTe = np.sum(self.regWeights * teVal[self.regIDs][:, :], axis=1) / self.regSumWeights
                 if len(self.regOnIDs) > 0:
                     self.flexTe[self.regOnIDs] = teVal[self.regIDs[self.regOnIDs, 0]]
                 self.flexTe = self.flexTe.reshape(self.reg_ny, self.reg_nx)
             else:
-                self.flexTe = self.tedata.iloc[nb, 1] * np.ones((self.reg_ny, self.reg_nx))
+                self.flexTe = self.tedata.at[nb, "tUni"] * np.ones((self.reg_ny, self.reg_nx))
 
         return
 

@@ -16,7 +16,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import epsfill
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
-MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 
 class IceMesh(object):

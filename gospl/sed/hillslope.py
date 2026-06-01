@@ -14,7 +14,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fctcoeff
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
-MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 
 class hillSLP(object):

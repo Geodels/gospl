@@ -20,7 +20,6 @@ if "READTHEDOCS" not in os.environ:
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
-MPIcomm = MPI.COMM_WORLD
 
 
 class Tectonics(object):
@@ -62,7 +61,7 @@ class Tectonics(object):
 
         nb = self.tecNb
         if nb < len(self.tecdata) - 1:
-            if self.tecdata.iloc[nb + 1, 0] < self.tNow + self.dt:
+            if self.tecdata.at[nb + 1, "start"] < self.tNow + self.dt:
                 nb += 1
 
         if nb > self.tecNb or nb == -1:
@@ -71,21 +70,23 @@ class Tectonics(object):
 
             self.tecNb = nb
             if nb < len(self.tecdata.index) - 1:
-                timer = self.tecdata.iloc[nb, 1] - self.tecdata.iloc[nb, 0]
+                timer = self.tecdata.at[nb, "end"] - self.tecdata.at[nb, "start"]
             else:
-                timer = self.tEnd - self.tecdata.iloc[nb, 0]
+                timer = self.tEnd - self.tecdata.at[nb, "start"]
 
             # Horizontal displacements
-            if self.tecdata.iloc[nb, -1] != "empty":
-                fname = self.tecdata.iloc[nb, -1][0] + ".npz"
+            # was iloc[nb, -1]; named access is safer — see AGENTS.md
+            # Forcing DataFrame layout contract
+            if self.tecdata.at[nb, "hMap"] != "empty":
+                fname = self.tecdata.at[nb, "hMap"][0] + ".npz"
                 mdata = np.load(fname)
-                key = self.tecdata.iloc[nb, -1][1]
+                key = self.tecdata.at[nb, "hMap"][1]
                 self.hdisp = mdata[key][self.locIDs, :]
                 # In case of advection based on interpolation from plate position
                 if self.advscheme == 0:
                     self._readAdvectionData(mdata[key], timer)
                     self.plateStep = True
-                    self.plateTimer = self.tecdata.iloc[nb, 1]
+                    self.plateTimer = self.tecdata.at[nb, "end"]
                 else:
                     # Get the velocity from the input file.
                     nodeVel = np.zeros((self.lpoints, 3))
@@ -100,21 +101,21 @@ class Tectonics(object):
                 self.hdisp = None
 
             # Vertical displacements
-            if self.tecdata.iloc[nb, 2] != "empty":
-                fname = self.tecdata.iloc[nb, 2][0] + ".npz"
+            if self.tecdata.at[nb, "tMap"] != "empty":
+                fname = self.tecdata.at[nb, "tMap"][0] + ".npz"
                 mdata = np.load(fname)
-                key = self.tecdata.iloc[nb, 2][1]
+                key = self.tecdata.at[nb, "tMap"][1]
                 self.upsub = mdata[key][self.locIDs]
             else:
                 self.upsub = None
 
             # Paleo-elevation fitting
             self.paleoZ = None
-            if self.tecdata.iloc[nb, 3] != "empty":
-                fname = self.tecdata.iloc[nb, 3][0] + ".npz"
+            if self.tecdata.at[nb, "zMap"] != "empty":
+                fname = self.tecdata.at[nb, "zMap"][0] + ".npz"
                 mdata = np.load(fname)
-                key = self.tecdata.iloc[nb, 3][1]
-                if len(self.tecdata.iloc[nb, 3]) == 3:
+                key = self.tecdata.at[nb, "zMap"][1]
+                if len(self.tecdata.at[nb, "zMap"]) == 3:
                     self.paleoZ = mdata[key][self.locIDs]
 
             del mdata

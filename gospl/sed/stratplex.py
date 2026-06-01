@@ -14,7 +14,6 @@ if "READTHEDOCS" not in os.environ:
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
-MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 
 class STRAMesh(object):
