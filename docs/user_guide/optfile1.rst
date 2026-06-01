@@ -75,6 +75,51 @@ Climatic (rainfall) forcing conditions
     Negative values of :math:`\mathrm{P_i}` (which can occur for low ``B`` and sub-sea-level nodes) are clamped to zero before being routed through the flow accumulation, so coastal depressions do not act as moisture sinks.
 
 
+Evaporation (optional)
+^^^^^^^^^^^^^^^^^^^^^^
+
+Each climate event may additionally declare an **evaporation rate** that is subtracted from runoff before river flow accumulation and from lake-surface inflow before pit overflow. Evaporation is opt-in per event — any row that omits both keys contributes zero evaporation for the corresponding interval, so existing input files are unaffected.
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+
+        **Declaration example**:
+
+        .. code:: yaml
+
+            climate:
+                - start: 0.
+                  uniform: 1.0
+                  evap_uniform: 0.3
+                - start: 50000.
+                  map: ['rain_map', 'r']
+                  evap_map: ['evap_map', 'e']
+                - start: 100000.
+                  uniform: 0.5
+                  # no evap_* key — evaporation is zero for this interval
+
+        Two source types are supported:
+
+        a. ``evap_uniform`` — a single evaporation rate (m/yr) applied at every land node.
+        b. ``evap_map`` — a path-and-key pair pointing at a per-vertex evaporation grid stored in an ``.npz`` file, matching the same convention as the ``map`` rainfall source.
+
+        Elevation-banded evaporation (an analogue of ``zscale``) is not yet supported.
+
+.. note::
+
+    Evaporation is applied as a **single rate**, used identically over channels and over lake surfaces. Cells with ``evap > rain`` produce zero runoff (the excess evaporative capacity is dropped — groundwater is out of scope). Lakes whose lake-surface evaporation budget exceeds their inflow simply do not form; ``waterFill`` stays at the bare-topography level in those depressions.
+
+    The lake-evaporation budget per depression is computed using the **maximum-fill surface area** (the full extent the lake would occupy at spillover) rather than the actual fill area. This is intentionally conservative: it over-estimates lake evaporation at partial-fill levels, which biases the model towards drier basins — the physically appropriate direction when potential evaporation is the limiting term.
+
+    Channels and lakes share the same per-cell rate; users who need a higher lake-surface rate (e.g. to capture open-water evaporation over endorheic basins) should encode the spatial pattern directly in ``evap_map``.
+
+.. important::
+
+    The ``Evap`` per-node field is written to the HDF5/XDMF output whenever the YAML declares any evaporation; it can be visualised in Paraview alongside ``Rain`` to verify the input pattern. The reduced flow accumulation ``FA``, the reduced lake levels in ``waterFill``, and the lake-erosion proxy ``fillFA`` all propagate the evaporation losses automatically.
+
+
 Orographic precipitation definition
 ------------------------------------
 

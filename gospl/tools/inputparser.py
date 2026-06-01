@@ -1188,12 +1188,68 @@ class ReadYaml(object):
 
         return raindata
 
+    def _defineEvap(self, k, eStart, eMap, eUniform, evapdata):
+        """
+        Define evaporation conditions for one climate event.
+
+        Mirrors `_defineRain` but for evaporation. Evaporation is opt-in
+        per-row: if both `eMap` and `eUniform` are None for this event,
+        `evapdata` is returned unchanged (no row appended).
+
+        :arg k: climate event number
+        :arg eStart: event start time
+        :arg eMap: evaporation map (tuple of path+key) or None
+        :arg eUniform: evaporation uniform scalar (m/yr) or None
+        :arg evapdata: pandas dataframe storing each evaporation event (or None on first call)
+        :return: appended evapdata (or unchanged if this row has no evap)
+        """
+
+        if eMap is None and eUniform is None:
+            return evapdata
+
+        tmpEvap = []
+        if eMap is None:
+            tmpEvap.insert(
+                0,
+                {"start": eStart, "eUni": eUniform, "eMap": None, "eKey": None},
+            )
+        else:
+            tmpEvap.insert(
+                0,
+                {
+                    "start": eStart,
+                    "eUni": None,
+                    "eMap": eMap[0] + ".npz",
+                    "eKey": eMap[1],
+                },
+            )
+
+        if evapdata is None:
+            evapdata = pd.DataFrame(tmpEvap, columns=["start", "eUni", "eMap", "eKey"])
+        else:
+            evapdata = pd.concat(
+                [
+                    evapdata,
+                    pd.DataFrame(tmpEvap, columns=["start", "eUni", "eMap", "eKey"]),
+                ],
+                ignore_index=True,
+            )
+
+        return evapdata
+
     def _readRain(self):
         """
-        Parse rain forcing conditions.
+        Parse rain and evaporation forcing conditions.
+
+        Both share the same `[climate]` YAML block. Each climate event row
+        may declare rainfall (`uniform`/`map`/`zscale`) and, optionally,
+        evaporation (`evap_uniform`/`evap_map`). Evaporation is opt-in: if
+        no row has an evap field, `self.evapdata` ends up as None and the
+        downstream solver bypasses both evap hooks.
         """
 
         raindata = None
+        evapdata = None
         # TODO-REFACTOR: complex except, needs manual review (outer-section: sets self.raindata = None on missing "climate")
         try:
             rainDict = self.input["climate"]
@@ -1216,6 +1272,8 @@ class ReadYaml(object):
                 rUniform = rainSort[k].get("uniform")
                 rZscale = rainSort[k].get("zscale")
                 rMap = rainSort[k].get("map")
+                eUniform = rainSort[k].get("evap_uniform")
+                eMap = rainSort[k].get("evap_map")
 
                 if rMap is not None:
                     if self.meshFile != rMap[0] + ".npz":
@@ -1259,7 +1317,44 @@ class ReadYaml(object):
                             "Field name for rainfall is not defined correctly or does not exist!"
                         )
 
+                if eMap is not None:
+                    if self.meshFile != eMap[0] + ".npz":
+                        try:
+                            with open(eMap[0] + ".npz") as evapfile:
+                                evapfile.close()
+                        except IOError:
+                            print(
+                                "Unable to open evaporation file: {}.npz".format(eMap[0]),
+                                flush=True,
+                            )
+                            raise IOError(
+                                "The evaporation file {} is not found for climatic event {}.".format(
+                                    eMap[0] + ".npz", k
+                                )
+                            )
+                        edata = np.load(eMap[0] + ".npz")
+                        evapSet = edata.files
+                    else:
+                        edata = np.load(self.meshFile)
+                        evapSet = edata.files
+                    if eMap[1] not in evapSet:
+                        print(
+                            "Field name {} is missing from evaporation file {}.npz".format(
+                                eMap[1], eMap[0]
+                            ),
+                            flush=True,
+                        )
+                        print(
+                            "The following fields are available: {}".format(evapSet),
+                            flush=True,
+                        )
+                        print("Check your evaporation file fields definition...", flush=True)
+                        raise KeyError(
+                            "Field name for evaporation is not defined correctly or does not exist!"
+                        )
+
                 raindata = self._defineRain(k, rStart, rMap, rUniform, rZscale, raindata)
+                evapdata = self._defineEvap(k, rStart, eMap, eUniform, evapdata)
 
             if raindata["start"][0] > self.tStart:
                 tmpRain = []
@@ -1279,8 +1374,30 @@ class ReadYaml(object):
             self.raindata.reset_index(drop=True, inplace=True)
             self.rainNb = len(self.raindata)
 
+            if evapdata is not None:
+                # Prepend a zero-evap row at tStart if the first declared event
+                # is later, so _updateEvap has a defined value from the start.
+                if evapdata["start"][0] > self.tStart:
+                    tmpEvap = [
+                        {"start": self.tStart, "eUni": 0.0, "eMap": None, "eKey": None}
+                    ]
+                    evapdata = pd.concat(
+                        [
+                            pd.DataFrame(
+                                tmpEvap, columns=["start", "eUni", "eMap", "eKey"]
+                            ),
+                            evapdata,
+                        ],
+                        ignore_index=True,
+                    )
+                self.evapdata = evapdata.copy()
+                self.evapdata.reset_index(drop=True, inplace=True)
+            else:
+                self.evapdata = None
+
         except KeyError:
             self.raindata = None
+            self.evapdata = None
 
         return
 

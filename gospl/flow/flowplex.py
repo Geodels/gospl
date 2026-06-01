@@ -295,6 +295,36 @@ class FAMesh(object):
 
         return
 
+    def _potentialLakeEvap(self):
+        """
+        Per-pit max evaporation volume (m^3) for one timestep, assuming
+        the lake fills to the spillover (= max-fill surface).
+
+        Surface = Σ larea over cells with pitIDs >= 0 (the lake's potential
+        extent at spillover). The `inIDs == 1` mask prevents MPI halo
+        double-counting; the per-pit total is then Allreduce-summed across
+        ranks so every rank ends up with the same evap budget array.
+
+        See DESIGN_EVAPORATION.md §1 D3 for the design rationale (we use
+        max-fill rather than current-fill to avoid the circular dependency
+        between fill level and evap rate).
+
+        :return: numpy array of shape (nbpits,) with per-pit evap m^3
+        """
+        out = np.zeros(len(self.pitParams), dtype=np.float64)
+        if self.evapVal is None:
+            return out
+        isPitCell = (self.pitIDs >= 0) & (self.inIDs == 1)
+        if isPitCell.any():
+            cellEvap = self.evapVal * self.larea * self.dt
+            grp = npi.group_by(self.pitIDs[isPitCell])
+            uIDs = grp.unique
+            _, vol = grp.sum(cellEvap[isPitCell])
+            ids = uIDs > -1
+            out[uIDs[ids]] = vol[ids]
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, out, op=MPI.SUM)
+        return out
+
     def _distributeDownstream(self, pitVol, FA, hl, step, ice=False):
         """
         In cases where rivers flow in depressions, they might fill the sink completely and overspill or remain within the depression, forming a lake. This function computes the excess of water (if any) able to flow dowstream.
@@ -328,6 +358,19 @@ class FAMesh(object):
         # Combine incoming volume globally
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)
 
+        # Lake-surface evaporation (DESIGN_EVAPORATION.md §2.2). Subtract
+        # the per-pit max-fill evap budget from inflow exactly once per
+        # outer step (step==0). Cascading spillover iterations (step>0)
+        # carry already-net-of-evap water and must NOT be debited again.
+        # When the evap budget exceeds inflow, lakeLoss is clamped at inV
+        # so the pit ends with zero net inflow — the partial-fill branch
+        # below skips it via the inV>0 mask, leaving waterFilled at hl.
+        if self.evapVal is not None and step == 0:
+            evapBudget = self._potentialLakeEvap()
+            lakeLoss = np.minimum(inV, evapBudget)
+            inV = inV - lakeLoss
+            self.evapLoss += lakeLoss.sum()
+
         # Get excess volume to distribute downstream
         eV = inV - pitVol
         if (eV > 0.0).any():
@@ -342,8 +385,12 @@ class FAMesh(object):
             self.waterFilled[ids] = self.lFill[ids]
 
         # Update unfilled depressions volumes and assign water level in depressions
+        # NOTE: the (inV > 0.0) clause excludes pits where lake-evap fully
+        # consumed the inflow (inV becomes 0 after the subtraction above).
+        # Without it, eV = -pitVol drives pitVol → 0 here, incorrectly
+        # marking a "dry" depression as filled-to-spillover.
         if (eV < 0.0).any():
-            eIDs = np.where(eV < 0.0)[0]
+            eIDs = np.where((eV < 0.0) & (inV > 0.0))[0]
             pitVol[eIDs] += eV[eIDs]
             nid = np.absolute(self.filled_vol[eIDs] - pitVol[eIDs][:, None]).argmin(
                 axis=1
@@ -427,6 +474,15 @@ class FAMesh(object):
         # Get amount of water or ice
         rainA = self.bL.getArray().copy()
         rainA[self.seaID] = 0.
+        # Channel evaporation (DESIGN_EVAPORATION.md §2.1). evapVal is m/yr,
+        # larea is m^2, rainA is m^3/yr — same units. channelLoss is clamped
+        # at the available rain so an arid cell cannot produce negative
+        # runoff; the unused evap capacity is silently dropped (the
+        # groundwater path is out of scope).
+        if self.evapVal is not None:
+            channelLoss = np.minimum(rainA, self.evapVal * self.larea)
+            rainA = rainA - channelLoss
+            self.evapLoss += channelLoss.sum() * self.dt
         if self.iceOn:
             elaH = self.elaH(self.tNow)
             iceH = self.iceH(self.tNow)

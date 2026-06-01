@@ -185,8 +185,11 @@ Consumers use `df.at[nb, col]` named access. **Column names are part of the API.
 |---|---|---|---|
 | `self.tecdata` | `_storeTectonics` (inputparser.py) | `start, end, tMap, zMap, hMap` | tectonics.py |
 | `self.raindata` | `_defineRain` (inputparser.py) | `start, rUni, rzA, rzB, rMap, rKey` | unstructuredmesh.py |
+| `self.evapdata` | `_defineEvap` (inputparser.py) | `start, eUni, eMap, eKey` | unstructuredmesh.py, flowplex.py |
 | `self.sedfacdata` | `_defineErofactor` (inputparser.py) | `start, sUni, sMap, sKey` | unstructuredmesh.py |
 | `self.tedata` | `_getTe` (inputparser.py) | `start, tUni, tMap, tKey` | addprocess.py |
+
+`evapdata` is parsed from the same `climate:` YAML block as `raindata` (per-row `evap_uniform`/`evap_map` are opt-in extensions to each climate event); it is `None` if no row declares evap. The lake-evap budget is computed in `flowplex._potentialLakeEvap` and applied at `step==0` only inside `_distributeDownstream` so spillover-cascade iterations do NOT debit the same pit twice. Both hooks (channel and lake) accumulate into `self.evapLoss` (m³, running total used by water-balance regression tests).
 
 The previous `iloc[nb, k]` positional pattern was replaced in 2026-06 (30 sites across the 3 consumer files). **Do NOT re-introduce `iloc[nb, k]` on these DataFrames** — it makes the column-order a load-bearing API, and any append silently breaks every consumer.
 

@@ -373,6 +373,14 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["rain"][:, 0] = self.rainVal
+            if self.evapdata is not None and self.evapVal is not None:
+                f.create_dataset(
+                    "evap",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["evap"][:, 0] = self.evapVal
             if self.memclear:
                 del data
                 gc.collect()
@@ -657,6 +665,17 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/rain</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+            if self.evapdata is not None and self.evapVal is not None:
+                f.write(
+                    '         <Attribute Type="Scalar" Center="Node" Name="Evap">\n'
+                )
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/evap</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

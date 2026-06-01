@@ -58,6 +58,8 @@ class UnstMesh(object):
 
         self.upsub = None
         self.rainVal = None
+        self.evapVal = None
+        self.evapLoss = 0.0
         self.sedfacVal = None
         self.memclear = False
         self.southPts = None
@@ -480,6 +482,7 @@ class UnstMesh(object):
         self.bG = self.hGlobal.duplicate()
         self.bL = self.hLocal.duplicate()
         self.rainNb = -1
+        self.evapNb = -1
         self.flexNb = -1
         self.teNb = -1
         self.sedfactNb = -1
@@ -595,6 +598,11 @@ class UnstMesh(object):
         else:
             self._updateRain()
 
+        # Evaporation forcing (independent of orographic vs uniform rain;
+        # populates self.evapVal which the flow solver consumes downstream).
+        if self.evapdata is not None:
+            self._updateEvap()
+
         # Erodibility factor information
         if self.sedfacdata is not None:
             self._updateEroFactor()
@@ -693,13 +701,60 @@ class UnstMesh(object):
                 self.rainMesh = rainVal
 
         if self.rainA is None:
-            self.rainVal = self.rainMesh[self.locIDs]    
+            self.rainVal = self.rainMesh[self.locIDs]
         else:
             tmp = self.hLocal.getArray().copy()
             self.rainVal = tmp  * self.rainA + self.rainB
             self.rainVal[self.rainVal < 0] = 0.0
         self.bL.setArray(self.rainVal * self.larea)
         self.dm.localToGlobal(self.bL, self.bG)
+
+        return
+
+    def _updateEvap(self):
+        """
+        Finds current evaporation values for the considered time interval
+        and stores them as a per-node m/yr numpy array on `self.evapVal`.
+
+        Mirrors `_updateRain` but only supports two source types:
+        a `eUniform` scalar (m/yr) or an `eMap`+`eKey` pair pointing to a
+        per-node array in an .npz file. Elevation-banded evaporation is
+        intentionally not supported in v1 (see DESIGN_EVAPORATION.md D4).
+
+        .. note::
+
+            Evaporation is treated as a within-step sink at two points in
+            the flow solver: (i) subtracted from rainfall before the IDA
+            solve (channel runoff), and (ii) subtracted from per-pit inflow
+            inside `_distributeDownstream` before the spillover decision
+            (lake-surface evap). Lakes that cannot sustain themselves
+            against the local evap budget simply do not form. The same
+            cell-area assumption is used on land and over lake surfaces;
+            users who need a stronger lake-surface rate should encode the
+            spatial pattern directly in `eMap`.
+        """
+
+        nb = self.evapNb
+        if nb < len(self.evapdata) - 1:
+            if self.evapdata.at[nb + 1, "start"] <= self.tNow:
+                nb += 1
+
+        if nb > self.evapNb or nb == -1:
+            if nb == -1:
+                nb = 0
+
+            self.evapNb = nb
+            if pd.isnull(self.evapdata["eUni"][nb]):
+                loadData = np.load(self.evapdata.at[nb, "eMap"])
+                evapVal = loadData[self.evapdata.at[nb, "eKey"]]
+                del loadData
+            else:
+                evapVal = np.full(self.mpoints, self.evapdata.at[nb, "eUni"])
+
+            evapVal[evapVal < 0] = 0.0
+            self.evapMesh = evapVal
+
+        self.evapVal = self.evapMesh[self.locIDs]
 
         return
 

@@ -184,6 +184,280 @@ def test_forcing_column_order():
 
 
 # ---------------------------------------------------------------------------
+# TEST 2b - evaporation parser smoke test
+# ---------------------------------------------------------------------------
+
+
+def test_evap_parser_opt_in():
+    """
+    Protects: DESIGN_EVAPORATION.md D1, D4 — evaporation is an opt-in
+    forcing parsed alongside rainfall from the same `[climate]` YAML block.
+
+    Silent failure prevented: a future refactor that drops the
+    `_defineEvap` call from `_readRain` would leave `self.evapdata`
+    permanently None even when the YAML declares evap, silently disabling
+    the entire feature with no error raised.
+
+    Three assertions:
+      1. evapdata is None when no row declares evap (back-compat).
+      2. evapdata columns match the contract `[start, eUni, eMap, eKey]`.
+      3. evap_uniform values land in the eUni column (not silently
+         dropped by a typo in the YAML key name).
+    """
+    # ---- Case A: rainfall only, no evap → evapdata stays None ----
+    parser = _bare_parser()
+    parser.input = {"climate": [{"start": 0.0, "uniform": 1.0}]}
+    parser._readRain()
+    assert parser.raindata is not None
+    assert parser.evapdata is None, (
+        "evapdata should be None when no climate row declares "
+        "evap_uniform or evap_map. Got: "
+        f"{parser.evapdata!r}"
+    )
+
+    # ---- Case B: rainfall + evap_uniform → evapdata populated ----
+    parser = _bare_parser()
+    parser.input = {
+        "climate": [{"start": 0.0, "uniform": 1.0, "evap_uniform": 0.3}]
+    }
+    parser._readRain()
+    assert parser.evapdata is not None, (
+        "evapdata should be a DataFrame when at least one climate row "
+        "declares evap_uniform"
+    )
+    assert list(parser.evapdata.columns) == [
+        "start", "eUni", "eMap", "eKey",
+    ], (
+        "evapdata column order drift. DESIGN_EVAPORATION.md D4 says: "
+        "start, eUni, eMap, eKey."
+    )
+    assert parser.evapdata.at[0, "eUni"] == 0.3, (
+        "evap_uniform value not propagated into eUni column"
+    )
+
+
+# ---------------------------------------------------------------------------
+# TEST 2c - channel-evap hook reduces FA (DESIGN_EVAPORATION.md §4 T1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_evap_reduces_FA(minimal_model, minimal_model_with_evap):
+    """
+    Protects: DESIGN_EVAPORATION.md §2.1 — channel-evap hook subtracts
+    evap from rainA at flowplex.py:429 before the IDA solve. Because FA
+    is linear in the IDA right-hand side, halving rainfall via evap
+    should roughly halve FA.
+
+    Silent failure prevented: a future refactor that drops the
+    flowplex.py hook, or reverses its sign, would leave FA unchanged
+    when evap is enabled. evapLoss would also stay at zero, no error.
+
+    The two model fixtures load the same `minimal.yml`; only the second
+    has uniform evap injected = 50% of the uniform rain rate (so the
+    expected reduction is ~50%, allowing tolerance for the IDA solver
+    and any non-linearities introduced by pit filling).
+    """
+    # Baseline run — no evap.
+    minimal_model.runProcesses()
+    fa_baseline = float(minimal_model.FAG.sum())
+    assert minimal_model.evapLoss == 0.0, (
+        "evapLoss should be zero when evapdata is None"
+    )
+    assert fa_baseline > 0, "Baseline FA should be positive"
+
+    # With-evap run — same YAML + injected uniform evap.
+    minimal_model_with_evap.runProcesses()
+    fa_with_evap = float(minimal_model_with_evap.FAG.sum())
+    assert minimal_model_with_evap.evapLoss > 0, (
+        "evapLoss should accumulate when channel-evap hook fires; got "
+        f"{minimal_model_with_evap.evapLoss}"
+    )
+    # Generous bound: 50% evap should drop FA below 70% of baseline.
+    assert fa_with_evap < 0.7 * fa_baseline, (
+        f"channel-evap did not meaningfully reduce FA. "
+        f"baseline={fa_baseline:.3e}, with_evap={fa_with_evap:.3e}, "
+        f"ratio={fa_with_evap / fa_baseline:.3f}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# TEST 2d - lake-evap dominates → no lake forms (DESIGN_EVAPORATION.md §4 T2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_lake_not_formed_when_evap_dominates(minimal_model):
+    """
+    Protects: DESIGN_EVAPORATION.md §2.2 — lake-evap hook in
+    `_distributeDownstream` AND the partial-fill mask refinement at
+    flowplex.py:346 (the `(inV > 0)` clause).
+
+    With evap = 100x rain, the combined effect of channel-evap and
+    lake-evap hooks must prevent every lake from forming. `waterFilled`
+    is "depth above hl" after `flowAccumulation` (line 486), so a missing
+    lake means waterFilled == 0 everywhere.
+
+    Two silent failures this guards against:
+      1. The lake-evap hook is missing — water would reach pits, eV < 0,
+         partial-fill branch would raise waterFilled to a positive value.
+      2. The mask refinement at line 346 is missing — pits with
+         inV=0-after-evap would erroneously go through the partial-fill
+         branch and end up with waterFilled bumped by the epsilon nudge
+         from pitfilling.py:567 (~1e-3 m).
+    """
+    import pandas as pd
+
+    if minimal_model.raindata is None:
+        pytest.skip("minimal.yml has no rainfall")
+    rUni = minimal_model.raindata.at[0, "rUni"]
+    if pd.isnull(rUni):
+        pytest.skip("minimal.yml rain is not uniform")
+
+    # Massive evap: 100x rain. Channel-evap consumes most cells'
+    # rainfall; whatever survives meets lake-evap's max-fill budget.
+    minimal_model.evapdata = pd.DataFrame(
+        [{"start": 0.0, "eUni": 100.0 * float(rUni),
+          "eMap": None, "eKey": None}]
+    )
+    minimal_model.evapNb = -1
+    minimal_model.evapVal = None
+    minimal_model.evapMesh = None
+    minimal_model.evapLoss = 0.0
+
+    minimal_model.runProcesses()
+
+    # The hooks fired (evapLoss accumulated).
+    assert minimal_model.evapLoss > 0, (
+        "evapLoss should be > 0 with massive evap; got "
+        f"{minimal_model.evapLoss}"
+    )
+
+    # No lake anywhere. Tolerance 1e-6 m is well below the 1e-3 m
+    # epsilon nudge that the partial-fill bug would produce.
+    max_depth = float(np.max(minimal_model.waterFilled))
+    assert max_depth < 1e-6, (
+        "Lakes should not form with massive evap. Max waterFilled "
+        f"depth = {max_depth:.3e} m. If close to 1e-3, the "
+        "(inV > 0) mask refinement at flowplex.py:346 may be missing."
+    )
+
+
+# ---------------------------------------------------------------------------
+# TEST 2e - water balance with evap (DESIGN_EVAPORATION.md §4 T3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_water_balance_with_evap(minimal_model):
+    """
+    Protects: water-mass conservation through the evap accumulator.
+
+    Strategy: with evap = 100x rain, the channel-evap clamp at
+    `min(rainA, evapVal * larea)` consumes every cell's runoff exactly
+    once (lake-evap then sees inV == 0 and contributes nothing). So
+    `self.evapLoss` after the run must equal the total water that
+    entered the system, accurate to floating-point.
+
+    Total input = (rainVal × larea, summed over owned land cells) ×
+    (tEnd − tStart). The fixture must use uniform rain (constant in
+    space) and a steady time-series (constant in time over the run) for
+    this prediction to hold; the test skips otherwise.
+
+    Silent failure prevented: an off-by-one in the `self.dt` multiplier
+    inside the channel-evap hook (e.g. multiplying twice or forgetting
+    altogether) would skew `evapLoss` by a factor of `dt` or `1/dt`
+    relative to input. A wrong sign on `channelLoss` would underflow
+    to zero. Both would fail this assertion immediately.
+
+    Edge cases NOT covered:
+      - Mixed channel + lake evap under moderate rates — requires a
+        fixture with a known closed depression and tuned rates to
+        guarantee the lake-evap hook fires. Out of scope for v1.
+      - Time-varying evap (multiple climate rows). Requires per-step
+        bookkeeping the current accumulator does not expose.
+    """
+    import pandas as pd
+    from mpi4py import MPI
+
+    if minimal_model.raindata is None:
+        pytest.skip("minimal.yml has no rainfall")
+    rUni = minimal_model.raindata.at[0, "rUni"]
+    if pd.isnull(rUni):
+        pytest.skip("minimal.yml rain is not uniform; need scalar rain for budget")
+    if len(minimal_model.raindata) > 1:
+        pytest.skip("minimal.yml has time-varying rain; T3 needs steady forcing")
+
+    # Massive evap: channel-evap clamp consumes all rain at every cell
+    # every step. Lake-evap never fires (inV = 0 after subtraction).
+    minimal_model.evapdata = pd.DataFrame(
+        [{"start": 0.0, "eUni": 100.0 * float(rUni),
+          "eMap": None, "eKey": None}]
+    )
+    minimal_model.evapNb = -1
+    minimal_model.evapVal = None
+    minimal_model.evapMesh = None
+    minimal_model.evapLoss = 0.0
+
+    # Drive a single flowAccumulation call directly. We avoid runProcesses
+    # because (a) model.py:240 and 255 call flowAccumulation TWICE per
+    # step (pre-SPL and pre-sedChange), each firing the evap hook with a
+    # different mid-step seaID — the integrated budget over both calls
+    # isn't predictable from a single final-state seaID snapshot; (b)
+    # applyForces fires at the END of each iteration (model.py:273-274),
+    # so the FIRST step's flowAcc would skip the hook entirely on
+    # un-primed forcing. Calling these two methods explicitly accumulates
+    # exactly one step's worth of evap against a stable seaID, which is
+    # the smallest case that proves the unit-conversion and accumulator
+    # math is sound.
+    minimal_model.applyForces()       # populate rainVal, evapVal, sealevel
+    minimal_model.flowAccumulation()  # accumulate evap once; set seaID
+
+    # Total water input (m^3) over the run = ∫∫ rainVal × dA × dt.
+    # Constant uniform rain → factor out: rainVal × land_area × duration.
+    rainVal = minimal_model.rainVal
+    larea = minimal_model.larea
+    owned = minimal_model.inIDs == 1
+    is_land = np.ones(len(rainVal), dtype=bool)
+    is_land[minimal_model.seaID] = False
+
+    # One flowAcc call accumulates evap over exactly one dt.
+    duration = float(minimal_model.dt)
+    rain_rate_local = float(np.sum((rainVal * larea)[owned & is_land]))
+    input_local = rain_rate_local * duration
+    input_total = MPI.COMM_WORLD.allreduce(input_local, op=MPI.SUM)
+    rain_rate_total = MPI.COMM_WORLD.allreduce(rain_rate_local, op=MPI.SUM)
+
+    if input_total < 1.0:
+        pytest.skip(
+            f"Total water input {input_total:.3e} m^3 below 1 m^3 — "
+            f"fixture too small for a meaningful balance check"
+        )
+
+    # evapLoss is rank-local (each rank accumulates its own cells).
+    evap_total = MPI.COMM_WORLD.allreduce(
+        float(minimal_model.evapLoss), op=MPI.SUM
+    )
+
+    rel_error = abs(evap_total - input_total) / input_total
+    diagnostic = (
+        f"\n  dt          = {minimal_model.dt}"
+        f"\n  duration    = {duration} (one flowAcc call)"
+        f"\n  rain_rate   = {rain_rate_total:.6e} m^3/yr (global)"
+        f"\n  input_total = {input_total:.6e} m^3"
+        f"\n  evap_total  = {evap_total:.6e} m^3"
+        f"\n  rel_error   = {rel_error:.3e}"
+        f"\n  evap/input  = {evap_total / input_total:.6f}"
+    )
+    assert rel_error < 1.0e-4, (
+        "Water mass not conserved through evap accumulator." + diagnostic
+        + "\nCheck the channel-evap hook's `* self.dt` factor at "
+        + "flowplex.py and the lakeLoss accumulation in "
+        + "_distributeDownstream."
+    )
+
+
+# ---------------------------------------------------------------------------
 # TEST 3 - rcvIDi must be a snapshot, not an alias
 # ---------------------------------------------------------------------------
 
@@ -575,4 +849,142 @@ def test_mass_conservation(minimal_model):
         f"hGlobal without a matching cumED update, OR the sediment "
         f"kernels are not internally mass-conserving."
         + diagnostic
+    )
+
+
+# ---------------------------------------------------------------------------
+# TEST 7 - Sediment conservation must hold under evaporation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_sediment_balance_with_evap(minimal_model_with_evap):
+    """
+    Protects: DESIGN_EVAPORATION.md §2.5 — the evap feature couples to
+    sediment ONLY one-way (reduced FA → reduced erosion → reduced
+    sediment flux). The sediment pit-fill machinery in sedplex.py uses
+    its own pitVol state read fresh at sedplex.py:648, which is
+    invariant under whatever the water-side `_distributeDownstream`
+    did with its local `pitVol`. This test verifies that decoupling
+    still holds when evap is active.
+
+    Silent failures prevented:
+      1. A future refactor that promotes `pitVol` from a local var to
+         `self.pitVol` inside flowplex.py would corrupt sediment's view
+         of the pit (sedplex reads `self.pitParams[:, 0]` at line 648,
+         but if the water side has already modified it, sediment over-
+         or under-deposits).
+      2. A future "improvement" that subtracts `self.evapLoss` from the
+         sediment budget (mistakenly trying to balance water leaks
+         against sediment) would create or destroy sediment mass.
+      3. A future refactor that makes lake-removal write to `cumED`
+         (treating "removed lake water" as if it deposited sediment)
+         would create mass from nothing.
+
+    Strategy: identical to test_mass_conservation, but with evap injected
+    via the `minimal_model_with_evap` fixture (uniform evap = 0.5 × rUni).
+    If sediment closure remains within 1e-4 relative, the decoupling is
+    intact.
+    """
+    model = minimal_model_with_evap
+
+    # ---- Same gate as test_mass_conservation: closed-sphere only ----
+    reasons = []
+    if getattr(model, "flatModel", True):
+        reasons.append("flatModel=True (2D plane, has boundary outflux)")
+    if getattr(model, "tecdata", None) is not None:
+        reasons.append("tectonics is active (upsub adds/removes mass without cumED)")
+    if getattr(model, "flexOn", False):
+        reasons.append("flexure is active (hGlobal moves without cumED)")
+    if getattr(model, "stratNb", 0) > 0:
+        reasons.append("stratigraphy is active (compaction shrinks h without cumED)")
+    if getattr(model, "paleoZ", None) is not None:
+        reasons.append("paleoZ reset is active (overwrites h below sea level)")
+    if reasons:
+        pytest.skip(
+            "Strong mass conservation requires a closed sphere with no "
+            "non-sediment h-writers. This fixture has: "
+            + "; ".join(reasons)
+        )
+
+    # ---- Run and capture state ----
+    h_before = model.hLocal.getArray().copy()
+    cumED_before = model.cumEDLocal.getArray().copy()
+    larea = model.larea
+    owned = model.inIDs == 1
+
+    model.runProcesses()
+
+    h_after = model.hLocal.getArray().copy()
+    cumED_after = model.cumEDLocal.getArray().copy()
+
+    dh = h_after - h_before
+    dED = cumED_after - cumED_before
+
+    from mpi4py import MPI
+    dV_surface_local = float(np.sum((dh * larea)[owned]))
+    dV_cumED_local = float(np.sum((dED * larea)[owned]))
+    activity_local = float(np.sum((np.abs(dED) * larea)[owned]))
+
+    dV_surface = MPI.COMM_WORLD.allreduce(dV_surface_local, op=MPI.SUM)
+    dV_cumED = MPI.COMM_WORLD.allreduce(dV_cumED_local, op=MPI.SUM)
+    total_activity = MPI.COMM_WORLD.allreduce(activity_local, op=MPI.SUM)
+
+    if total_activity < 1.0:
+        pytest.skip(
+            f"Sediment activity {total_activity:.3e} m^3 too small for a "
+            f"meaningful check. With 50% evap reducing erosion, this can "
+            f"happen on fixtures where the no-evap version barely cleared "
+            f"the threshold. NEEDS_HUMAN_REVIEW: lower the fixture evap "
+            f"rate in conftest.py::minimal_model_with_evap, or use a "
+            f"steeper-gradient fixture."
+        )
+
+    # Same tolerance as test_mass_conservation — see that test for the
+    # rationale (KSP rtol=1e-10 but DEPOSIT_FLOOR and pit-routing residue
+    # dominate the gap).
+    TOLERANCE = 1.0e-4
+
+    rel_cumED = abs(dV_cumED) / total_activity
+    rel_surface = abs(dV_surface) / total_activity
+
+    # Sanity: with evap enabled, evapLoss should be > 0.
+    evap_total = MPI.COMM_WORLD.allreduce(float(model.evapLoss), op=MPI.SUM)
+
+    diagnostic = (
+        f"\n  evap_total     = {evap_total:.3e} m^3 (sanity > 0)"
+        f"\n  total_activity = {total_activity:.3e} m^3 "
+        f"(sediment redistributed)"
+        f"\n  dV_cumED       = {dV_cumED:+.3e} m^3  "
+        f"(relative {rel_cumED:.3e})"
+        f"\n  dV_surface     = {dV_surface:+.3e} m^3  "
+        f"(relative {rel_surface:.3e})"
+        f"\n  tolerance      = {TOLERANCE:.0e}"
+    )
+
+    # Sanity check: the fixture is supposed to have evap on. If evapLoss
+    # is zero, the fixture is broken and the test below is meaningless.
+    assert evap_total > 0.0, (
+        "Fixture minimal_model_with_evap did not accumulate any evap "
+        "this run. The fixture or applyForces wiring may be broken; "
+        "test_sediment_balance_with_evap cannot prove the decoupling "
+        "if evap never fires." + diagnostic
+    )
+
+    assert rel_cumED < TOLERANCE, (
+        "Sediment mass is being created or destroyed when evap is "
+        "active. The evap feature has leaked into the sediment side. "
+        "Check that:\n"
+        "  (a) flowplex.py:_distributeDownstream still modifies the "
+        "LOCAL `pitVol` var (not `self.pitParams[:, 0]`).\n"
+        "  (b) sedplex.py:648 still re-initialises sediment's pitVol "
+        "from `self.pitParams[:, 0]` (water-side hasn't touched it).\n"
+        "  (c) No new caller has added `self.evapLoss` into a cumED "
+        "or hGlobal axpy."
+        + diagnostic
+    )
+
+    assert rel_surface < TOLERANCE, (
+        "Surface volume drifting on closed sphere with evap. Same "
+        "diagnosis as the cumED case." + diagnostic
     )

@@ -105,3 +105,33 @@ def incising_model():
     look like.
     """
     return _instantiate("incising.yml")
+
+
+@pytest.fixture
+def minimal_model_with_evap():
+    """
+    Minimal model with uniform evaporation injected post-construction
+    (= half of the YAML uniform rain rate). Skips if the backing YAML
+    does not declare uniform rainfall (the test it serves cannot reason
+    about the FA reduction otherwise).
+
+    See DESIGN_EVAPORATION.md §4 T1.
+    """
+    import pandas as pd
+
+    model = _instantiate("minimal.yml")
+    if model.raindata is None:
+        pytest.skip("minimal.yml has no rainfall; evap-reduces-FA test needs rain")
+    rUni = model.raindata.at[0, "rUni"]
+    if pd.isnull(rUni):
+        pytest.skip("minimal.yml rain is not uniform; evap test needs scalar rain")
+    model.evapdata = pd.DataFrame(
+        [{"start": 0.0, "eUni": 0.5 * float(rUni), "eMap": None, "eKey": None}]
+    )
+    # Reset evap counters / per-node fields so the first applyForces call
+    # in runProcesses populates them from the injected evapdata.
+    model.evapNb = -1
+    model.evapVal = None
+    model.evapMesh = None
+    model.evapLoss = 0.0
+    return model
