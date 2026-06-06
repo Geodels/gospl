@@ -1,7 +1,6 @@
 name: gospl
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - python>=3.11,<3.13
   - meson-python>=0.15.0
