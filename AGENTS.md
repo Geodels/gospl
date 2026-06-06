@@ -238,6 +238,10 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 - Conda setup: `miniforge-version: latest` + `use-mamba: true` (explicit mamba binary on PATH; libmamba solver active by default); `channels: conda-forge` with `channel-priority: strict` and `conda-remove-defaults: true`.
 - Hard timeout: 240 minutes per `tests-slow.yml` job (benchmarks dominate wall-clock). Fast tier uses the default (no explicit cap).
 - goSPL is installed with `pip install --no-deps --no-build-isolation -e . -v`. `--no-deps` because the conda env already supplies every runtime dependency; `--no-build-isolation` because pyshtools rebuilds from source under pip's isolated env and fails on CI runners.
+- `environment.yml` conventions — do NOT revert any of these (each one cost a CI iteration to discover):
+  - **Python pinned as `python>=3.11,<3.13`, not `=3.11`.** A strict pin conflicts with the workflow's `python-version` matrix override on py3.12 cells, producing `Could not solve for environment specs: python =3.11 vs =3.12` and failing the entire job before any tests run.
+  - **`channels:` lists `conda-forge` only — no `defaults`.** With `defaults` in the list, conda pulls older variants of `build` and other packages from `repo.anaconda.com` that don't support newer Pythons, even with `channel-priority: strict` set workflow-side. Also produces libmamba warnings about Anaconda's commercial-channel ToS.
+  - **No `pip: - git+...gospl.git` section.** goSPL is installed exclusively by the workflow's `pip install -e .` step. A previous in-env duplicate caused ~30-min CI env builds (full goSPL clone + Fortran rebuild inside the conda phase, then the same build a second time in the workflow's pip step). Local-dev impact: `mamba env create -f environment.yml` now provides deps only; follow with `pip install -e .` as the standard editable-install pattern.
 - **On every PR + push to `master`/`release-candidate`** (`tests-pr.yml`):
     `pytest tests/ -m 'not slow'`
 - **On nightly cron (04:00 UTC), tag push (`v*`), workflow_dispatch, or push to `master`/`release-candidate`** (`tests-slow.yml`):
