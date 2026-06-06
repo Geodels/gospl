@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.11
+  - python>=3.11,<3.13
   - meson-python>=0.15.0
   - setuptools>=61.0
   - pkg-config
@@ -23,5 +23,8 @@ dependencies:
   - cython
   - compilers
   - pytest
-  - pip:
-    - git+https://github.com/Geodels/gospl.git
+# goSPL itself is installed by `pip install --no-deps --no-build-isolation -e .`
+# in the workflow (and the equivalent command for local dev). Don't add it
+# here — having conda's pip-subsection clone+build goSPL during env creation
+# was the cause of ~30-min CI env builds (the workflow's pip step then did
+# the same install a second time).
