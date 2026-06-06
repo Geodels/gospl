@@ -19,7 +19,9 @@ dependencies:
   - mpi4py
   - pyshtools
   - cython
-  - compilers
+  - c-compiler
+  - cxx-compiler
+  - fortran-compiler
   - pytest
 # goSPL itself is installed by `pip install --no-deps --no-build-isolation -e .`
 # in the workflow (and the equivalent command for local dev). Don't add it

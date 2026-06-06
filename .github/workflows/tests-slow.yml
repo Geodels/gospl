@@ -47,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         # Slow-tier tests need the mesh fixtures under tests/fixtures/.
         # Make sure those are committed (text YAML + .npz). If the mesh
         # files are too large to commit, store them under Git LFS or
