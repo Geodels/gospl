@@ -16,6 +16,9 @@ tests/output/forward
 tests/output/backward
 output
 results/
+# Regenerated goSPL test outputs (created when tests/fixtures/{minimal,incising}.yml runs)
+tests/fixtures/minimal/
+tests/fixtures/incising/
 *.so
 .eggs
 MANIFEST
