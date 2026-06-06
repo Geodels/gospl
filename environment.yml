@@ -6,7 +6,6 @@ dependencies:
   - meson-python>=0.15.0
   - setuptools>=61.0
   - pkg-config
-  - build
   - numpy
   - petsc4py
   - scipy
