@@ -235,7 +235,8 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 ## CI contract
 - Workflows: `.github/workflows/tests-pr.yml` (fast tier), `tests-slow.yml` (slow regression + analytical benchmarks), `conda-build.yml` (package build/publish on tag push).
 - Matrix in every workflow: `ubuntu-latest + macos-14 × Python 3.11 + 3.12`.
-- Conda setup: `miniforge-version: latest` + `use-mamba: true` (explicit mamba binary on PATH; libmamba solver active by default); `channels: conda-forge` with `channel-priority: strict` and `conda-remove-defaults: true`.
+- Conda setup: `miniforge-version: latest` (libmamba is the default solver in modern Miniforge3 — no `use-mamba: true` needed). `channels: conda-forge` with `channel-priority: strict` and `conda-remove-defaults: true`. **No `auto-update-conda: true`** (latest miniforge already gives us latest conda; the extra update step costs minutes for nothing).
+- Conda env caching: `actions/cache@v4` step keyed on `runner.os + runner.arch + python + hashFiles('environment.yml')` runs immediately before `setup-miniconda` in `tests-pr.yml` and `tests-slow.yml`. First run after any `environment.yml` change is a full ~5-10 min build (or ~60 min on ubuntu-latest if conda-forge's CDN is throttling); subsequent runs restore the cached env dir and skip most of the install. Bump the `-v1-` segment in the cache key to manually flush.
 - Hard timeout: 240 minutes per `tests-slow.yml` job (benchmarks dominate wall-clock). Fast tier uses the default (no explicit cap).
 - goSPL is installed with `pip install --no-deps --no-build-isolation -e . -v`. `--no-deps` because the conda env already supplies every runtime dependency; `--no-build-isolation` because pyshtools rebuilds from source under pip's isolated env and fails on CI runners.
 - `environment.yml` conventions — do NOT revert any of these (each one cost a CI iteration to discover):

@@ -47,8 +47,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Cache conda environment
+        # First run for a given (OS, arch, python, env-file-hash) tuple is
+        # the full ~5-10 min env build. Subsequent runs with the same tuple
+        # restore the env dir from cache and skip most of the install.
+        # The env-file hash key makes the cache invalidate automatically
+        # whenever environment.yml changes. Bump the `-v1-` segment to
+        # force a manual flush.
+        id: cache-env
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONDA }}/envs/gospl
+          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-${{ hashFiles('environment.yml') }}
+          restore-keys: |
+            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-
+
       - name: Set up conda env from environment.yml
-        uses: conda-incubator/setup-miniconda@v3
+        # setup-miniconda installs Miniforge3 + libmamba solver by default;
+        # `use-mamba: true` is intentionally absent (it would install the
+        # mamba binary on top, which is redundant since libmamba is already
+        # the solver). `auto-update-conda` is dropped because miniforge-
+        # version: latest already gives us latest conda; the extra update
+        # step costs minutes on cold runs and offers nothing.
+        uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           channels: conda-forge
@@ -57,7 +78,6 @@ jobs:
           environment-file: environment.yml
           activate-environment: gospl
           python-version: ${{ matrix.python }}
-          auto-update-conda: true
 
       - name: Install goSPL (editable, builds the Fortran extension)
         # The fast tier in principle does not need the Fortran extension,

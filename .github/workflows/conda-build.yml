@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up conda (miniforge, conda-forge default)
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           channels: conda-forge
@@ -50,7 +50,6 @@ jobs:
           # conda-forge resolving deps for the build.
           conda-remove-defaults: true
           activate-environment: ""
-          auto-update-conda: true
 
       - name: Install conda-build + anaconda-client
         run: conda install -n base -y conda-build anaconda-client

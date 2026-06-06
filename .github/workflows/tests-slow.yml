@@ -55,18 +55,35 @@ jobs:
         with:
           lfs: true
 
+      - name: Cache conda environment
+        # First run for a given (OS, arch, python, env-file-hash) tuple is
+        # the full env build (~5-10 min on macOS-arm64; sometimes much
+        # longer on ubuntu-latest due to conda-forge CDN throttling).
+        # Subsequent runs with the same tuple restore the env dir from
+        # cache and skip most of the install. Bump the `-v1-` segment to
+        # force a manual flush.
+        id: cache-env
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONDA }}/envs/gospl
+          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-${{ hashFiles('environment.yml') }}
+          restore-keys: |
+            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-
+
       - name: Set up conda env from environment.yml
-        uses: conda-incubator/setup-miniconda@v3
+        # `use-mamba: true` removed: miniforge-version: latest already
+        # ships libmamba as the default solver, and the explicit `mamba`
+        # binary install on top was redundant. `auto-update-conda`
+        # removed: latest miniforge already gives us latest conda.
+        uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
-          use-mamba: true                       # explicit mamba binary on PATH
           channels: conda-forge
           channel-priority: strict
           conda-remove-defaults: true
           environment-file: environment.yml
           activate-environment: gospl
           python-version: ${{ matrix.python }}
-          auto-update-conda: true
 
       - name: Install goSPL (editable, builds Fortran extension)
         # `--no-deps`: conda env already supplies every runtime dep.
