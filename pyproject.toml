@@ -70,6 +70,15 @@ packages = [
 [project.optional-dependencies]
 dev = ["pip-tools", "pytest"]
 
+[tool.pytest.ini_options]
+# Marker registry — discovered no matter which directory pytest is
+# invoked from (tests/ or benchmarks/). Mirrored in tests/conftest.py
+# for backward compatibility but pyproject is the authoritative source.
+markers = [
+    "slow: requires a full goSPL Model instantiation (mesh + PETSc DMPlex + MPI). Skipped when fixture inputs are absent.",
+    "benchmark: analytical benchmark against exact solutions — requires scipy, matplotlib, pandas; skipped automatically if dependencies unavailable.",
+]
+
 [project.urls]
 Homepage = "https://github.com/Geodels/gospl"
 Documentation = "https://gospl.readthedocs.io"

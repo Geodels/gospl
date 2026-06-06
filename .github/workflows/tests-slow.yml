@@ -1,23 +1,25 @@
 name: tests-slow
 
-# Slow-tier regression tests: the full suite (parser tier + Model-based
-# tests 3-6). Runs at 04:00 UTC nightly, when a release tag is pushed, and
-# on manual dispatch from the Actions tab. Each Model-based test spins up
-# a real PETSc DMPlex from a committed mesh fixture, so wall-clock is in
-# the minute range per matrix cell (most of it is the env build).
+# Slow-tier regression tests + analytical benchmarks. Runs at 04:00 UTC
+# nightly (drift detection), when a release tag is pushed, on push to
+# master/release-candidate (so merge events catch regressions before they
+# accumulate), and on manual dispatch.
 #
-# If a test fixture is missing the relevant test skips cleanly rather than
-# failing — see tests/conftest.py.
+# The slow regression tier (tests/ -m 'slow and not benchmark') runs on
+# all triggers. The analytical benchmark tier (benchmarks/ -m benchmark)
+# is HEAVY (multiple hours wall-clock across 7+ goSPL models) so it
+# only runs on push events to a release branch — the if-gate skips it
+# on nightly cron, tag pushes, and manual dispatch.
 
 on:
-  # Nightly. Adjust the cron to match team timezones if needed.
   schedule:
     - cron: '0 4 * * *'
-  # On any version tag (matches conda-build.yml).
   push:
+    branches:
+      - master
+      - release-candidate
     tags:
       - 'v*'
-  # Manual run from the Actions tab.
   workflow_dispatch:
 
 env:
@@ -31,6 +33,8 @@ jobs:
   slow:
     name: full suite / ${{ matrix.os }} / py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 240         # 4 h cap — benchmarks dominate
+
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +59,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
+          use-mamba: true                       # explicit mamba binary on PATH
           channels: conda-forge
           channel-priority: strict
           conda-remove-defaults: true
@@ -63,14 +68,38 @@ jobs:
           python-version: ${{ matrix.python }}
           auto-update-conda: true
 
-      - name: Install goSPL (editable)
-        # `--no-deps` skips pip's runtime-dep resolution; the conda env
-        # already supplies everything from conda-forge (including
-        # pyshtools, whose from-source build fails on CI runners).
+      - name: Install goSPL (editable, builds Fortran extension)
+        # `--no-deps`: conda env already supplies every runtime dep.
+        # `--no-build-isolation`: pip would otherwise try to rebuild
+        # pyshtools from source, which fails on CI.
         run: pip install --no-deps --no-build-isolation -e . -v
 
-      - name: Run full suite
-        run: pytest tests/ -v --tb=short --durations=10
+      - name: Run slow regression tier (tests/)
+        # `slow and not benchmark` excludes the heavy benchmark suite,
+        # which has its own dedicated step below.
+        run: pytest tests/ -m 'slow and not benchmark' -v --tb=short --durations=10
+
+      - name: Run analytical benchmark suite (benchmarks/)
+        # Gated to push events on master/release-candidate. Skipped
+        # on nightly cron, tag pushes (so release tagging is not
+        # blocked), and on workflow_dispatch.
+        if: |
+          github.event_name == 'push' &&
+          (github.ref_name == 'master' || github.ref_name == 'release-candidate')
+        run: |
+          mkdir -p results
+          pytest benchmarks/ -m 'benchmark' -v --tb=short \
+            --junitxml=results/benchmark-results.xml
+        continue-on-error: false
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            results/
+          if-no-files-found: ignore
 
       - name: Upload pytest cache on failure (helps re-run locally)
         if: failure()

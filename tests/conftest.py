@@ -39,11 +39,18 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def pytest_configure(config):
-    """Register the `slow` marker so pytest -m 'not slow' works."""
+    """Register the `slow` and `benchmark` markers so the pytest
+    `-m 'not slow'` and `-m 'not benchmark'` selectors work."""
     config.addinivalue_line(
         "markers",
         "slow: requires a full goSPL Model instantiation "
         "(mesh + PETSc DMPlex + MPI). Skipped when fixture inputs are absent.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "benchmark: analytical benchmark against exact solutions — "
+        "requires scipy, matplotlib, pandas; skipped automatically "
+        "if dependencies unavailable.",
     )
 
 

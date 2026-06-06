@@ -15,6 +15,7 @@ tests/output/normal
 tests/output/forward
 tests/output/backward
 output
+results/
 *.so
 .eggs
 MANIFEST

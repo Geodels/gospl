@@ -226,11 +226,45 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 
 ## Fixed (regression-guarded)
 - **`rUni`/`sUni` key/column mismatch** — fixed 2026-06 at `inputparser.py:915` (dict key `'rUni'` → `'sUni'` in the uniform branch of `_defineErofactor`). Before the fix, a YAML with a uniform `sedfactor` event landed `NaN` in `sedfacdata['sUni']`, then crashed `unstructuredmesh._updateEroFactor` on `np.load(None)`. Guarded by `tests/test_regression.py::test_uniform_sedfactor_populates_sUni`.
-- **Marine sediment leak at terminal ocean sinks** — fixed 2026-06 at `seaplex._distOcean`. `_matOcean` constructs `dMat1` with a zero column at every terminal sink (cells whose every flow direction is self-referential, typically deep-ocean basin floors); the first `dMat1.mult` therefore annihilated any `sedflux` that landed directly at a sink. `vSed` upstream-integration naturally accumulates large flux at these sinks, so this was the dominant mass-loss path. Diagnostic: 9.748e12 m³ marine sediment supply per step → 4.107e12 m³ landing at sinks (42% of input) → 0 m³ deposited via the routing loop → silently dropped. The fix adds a pre-drain step at the top of `_distOcean` that deposits any sinkVol at terminal sinks directly into `vdep` before the first `dMat1.mult`. The in-loop force-deposit and exit-residual drain (added alongside) handle any sediment that subsequently arrives at sinks during multi-step routing. Guarded by `tests/test_regression.py::test_mass_conservation`. The corresponding `is_sink_local` mask is computed in `_matOcean` once per call.
+- **Marine sediment leak at terminal ocean sinks** — fixed 2026-06 at `seaplex._distOcean`. `_matOcean` constructs `dMat1` with a zero column at every terminal sink (cells whose every flow direction is self-referential, typically deep-ocean basin floors); the first `dMat1.mult` therefore annihilated any `sedflux` that landed directly at a sink. `vSed` upstream-integration naturally accumulates large flux at these sinks, so this was the dominant mass-loss path. Diagnostic: 9.748e12 m³ marine sediment supply per step → 4.107e12 m³ landing at sinks (42% of input) → 0 m³ deposited via the routing loop → silently dropped. The fix adds a pre-drain step at the top of `_distOcean` that deposits any sinkVol at terminal sinks directly into `vdep` before the first `dMat1.mult`. The in-loop force-deposit and exit-residual drain (added alongside) handle any sediment that subsequently arrives at sinks during multi-step routing. Guarded by `tests/test_regression.py::test_mass_conservation`, which runs on the `minimal_model` fixture — a **global-sphere mesh** (`flatModel=False`, `len(idBorders)==0`), so the domain is closed by construction with no boundary outflux possible; the test asserts `|dV_surface|/activity < 1e-4` AND `|dV_cumED|/activity < 1e-4`, i.e. that deposited volume equals eroded volume to within ~6e-5 relative (the floor-effect budget from `DEPOSIT_FLOOR=1e-3` and pit-routing residue, both documented in the test's tolerance rationale). The corresponding `is_sink_local` mask is computed in `_matOcean` once per call.
 - **`Eb` vs `EbLocal` sign-convention divergence** — fixed 2026-06 by adopting the thickness-rate convention (positive deposition, negative incision) for both fields. Changes: drop the leading minus in `E = -tmp.getArray()` inside `_getEroDepRate` (SPL.py), `_getEroDepRateNL` (nlSPL.py), `_getEroDepRateSoil` (soilSPL.py); drop the minus in `tmp.setArray(-Eb * dt)` inside the three matching `erodepSPL*` wrappers; negate `Eb` inside `sedplex._getSedFlux` (sedplex.py:63) where the upstream-integration solve still wants an erosion-positive source. Before the fix, `Eb` was incision-positive while `EbLocal` (after the wrapper's `add_rate = tmp/dt` overwrite) was deposition-positive, so the two fields disagreed in sign by end-of-step; the on-disk `EDrate` field was always deposition-positive (because it's written from `EbLocal`), and the restart loader at `outmesh.py:439-440` restored `Eb` in deposition-positive convention from `EDrate` — so fresh-run state and restart-state were inconsistent before this fix. Guarded by `tests/test_regression.py::test_erosion_sign_conventions` (which asserts `EbLocal <= 0` at incising nodes; `Eb` follows the same convention now).
 
 ## Intentional surprises (do NOT "fix")
 - **N/S boundary swap in gFlex**. `addprocess.py:221-222` deliberately assigns `simflex.BC_S = self.flex_bcN` and `simflex.BC_N = self.flex_bcS` to compensate for a coordinate-convention mismatch with gFlex. Verified intentional in project memory.
+
+## CI contract
+- Workflows: `.github/workflows/tests-pr.yml` (fast tier), `tests-slow.yml` (slow regression + analytical benchmarks), `conda-build.yml` (package build/publish on tag push).
+- Matrix in every workflow: `ubuntu-latest + macos-14 × Python 3.11 + 3.12`.
+- Conda setup: `miniforge-version: latest` + `use-mamba: true` (explicit mamba binary on PATH; libmamba solver active by default); `channels: conda-forge` with `channel-priority: strict` and `conda-remove-defaults: true`.
+- Hard timeout: 240 minutes per `tests-slow.yml` job (benchmarks dominate wall-clock). Fast tier uses the default (no explicit cap).
+- goSPL is installed with `pip install --no-deps --no-build-isolation -e . -v`. `--no-deps` because the conda env already supplies every runtime dependency; `--no-build-isolation` because pyshtools rebuilds from source under pip's isolated env and fails on CI runners.
+- **On every PR + push to `master`/`release-candidate`** (`tests-pr.yml`):
+    `pytest tests/ -m 'not slow'`
+- **On nightly cron (04:00 UTC), tag push (`v*`), workflow_dispatch, or push to `master`/`release-candidate`** (`tests-slow.yml`):
+    `pytest tests/ -m 'slow and not benchmark'`
+- **On push to `master`/`release-candidate` only** (gated step inside `tests-slow.yml`):
+    `pytest benchmarks/ -m 'benchmark'`
+  Skipped on cron / tag / dispatch so release-tagging is not blocked by hours-long benchmark wall-clock.
+- Benchmark artifacts (junit XML, Markdown reports, PDF figures under `results/`) uploaded to GitHub on every slow+benchmark run, including failures (`if: always()`). The artefacts land at `<repo_root>/results/<benchmark_name>/` via the teardown copy in `benchmarks/conftest.py`, not directly from `tmp_path`.
+- Benchmark failures block merge (`continue-on-error: false`).
+- Concurrency: `tests-pr.yml` cancels in-flight runs on the same ref (`cancel-in-progress: true`); `tests-slow.yml` does not (`cancel-in-progress: false`) — slow runs are expensive enough that killing them mid-flight is more wasteful than letting them finish.
+
+## Analytical benchmark suite
+Tests in `benchmarks/` validate goSPL physics against exact analytical solutions. They require `scipy` and `matplotlib` and are silently skipped via `pytest.importorskip` in environments without these packages. `matplotlib` is in `environment.yml` for CI; it is NOT a goSPL runtime dependency (intentional — `pyproject.toml` does not list it).
+
+The `benchmark` and `slow` marker names are registered in `pyproject.toml` under `[tool.pytest.ini_options].markers` (authoritative) and mirrored in `tests/conftest.py::pytest_configure` for the existing tests/ tree. Don't expect new markers to work without registering them in pyproject — pytest does not walk sideways into `tests/conftest.py` when invoked from `benchmarks/`.
+
+Each benchmark fixture (`spl_tmp_path`, `hillslope_tmp_path`, `knickpoint_tmp_path` in `benchmarks/conftest.py`) copies the benchmark's input files into a per-test tmp directory and chdirs there. goSPL intermediate output (`sim_output/`, `sims_outputs/`) stays inside `tmp_path` and is reaped by pytest's cleanup. Report artefacts (`*.pdf`, `*.md`, hillslope `*.png`) are copied out on teardown into `<repo_root>/results/<benchmark_name>/` so they survive pytest cleanup AND are picked up by the GitHub Actions `upload-artifact@v4` step in `tests-slow.yml`. `results/` is in `.gitignore` — never commit it.
+
+Mesh `.npz` files under each benchmark's `boundary_condition[s]/` subfolder are working-tree artefacts (currently untracked in git — see `git status`). `knickpoint/boundary_condition/drop_baselevel.npz` is regenerated by the test itself during phase 2 of the knickpoint workflow.
+
+`benchmarks/test_hillslope.py` delegates to `scripts/analysis.py` (imported as `anlys` after `hillslope_tmp_path` prepends the copied folder to `sys.path`). The other two benchmarks inline all logic in their `test_*.py` files. `analysis.runFullBenchmark` does NOT expose an `overall_pass` key; use `analysis.print_summary(results)` for the pass/fail bool.
+
+| Test file | Process | Analytical basis | Pass criteria |
+|---|---|---|---|
+| `test_spl.py` | SPL steady state | Braun & Willett 2013; Perron & Royden 2013 | 6/6 sub-tests |
+| `test_hillslope.py` | Hillslope diffusion | `z=(U/2κ)x(L-x)`; Roering, Kirchner & Dietrich 1999 | All `TOL_*` constants met |
+| `test_knickpoint.py` | Knickpoint propagation | `c=K·A^m`; Royden & Perron 2013; Tucker & Whipple 2002 | 4/4 sub-tests |
 
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.
@@ -241,3 +275,5 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 6. If you added a new KSP/SNES/TS solver, did you pick the right lifecycle (CACHED for hot-path solvers, AD-HOC for nested-fieldsplit) AND, if cached, add the attribute to the `destroy_DMPlex` list in `unstructuredmesh.py`?
 7. If you added a new forcing type, did you follow `docs/HOW_TO_ADD_FORCING.md` including the `destroy_DMPlex` registration?
 8. If you added a new output field, did you follow `docs/HOW_TO_ADD_OUTPUT.md` including the `destroy_DMPlex` registration and XDMF entry?
+9. If you added a benchmark test, did you apply `pytest.importorskip` for scipy/matplotlib AND mark `@pytest.mark.benchmark @pytest.mark.slow`?
+10. If you added a goSPL `Model` init in a test (regression OR benchmark), is `model.destroy()` in a `try/finally` block per AGENTS.md > KSP/SNES/TS lifecycle contract?
