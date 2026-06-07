@@ -77,7 +77,7 @@ mpirun -n 2 python -c "from mpi4py import MPI; print(MPI.COMM_WORLD.Get_rank())"
 
 ## Notes
 
-- The version string in `meta.yaml` (`2026.05.21.rc`) is **hard-coded** to match `meson.build` at the time of writing. If you bump the version in `meson.build`, update `meta.yaml` to match — there is no automatic syncing in this local recipe.
+- The version string in `meta.yaml` (currently `2026.06.08`) is **hard-coded** to match `meson.build` at the time of writing. If you bump the version in `meson.build`, update `meta.yaml` AND `docs/conf.py` to match — there is no automatic syncing across these files.
 - `gflex` is pinned to `>=1.1.0` to match what conda-forge currently ships; goSPL only uses the stable `gflex.f2d.F2D` API.
 - `pyshtools` is required because the flexure backend was migrated off `isoFlex` to a spherical-harmonic implementation. `meshio` and `pyproj` are no longer dependencies.
 - The recipe builds against the `petsc4py` package on conda-forge; if you have a custom PETSc build you want to link against instead, build goSPL from source via `pip install --no-build-isolation -e .` rather than through this recipe.

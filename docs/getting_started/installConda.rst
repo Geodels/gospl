@@ -17,7 +17,53 @@ Installation via Conda
 
 .. warning::
 
-    For **Windows users**, first install **Linux on Windows** with `WSL <https://learn.microsoft.com/en-us/windows/wsl/install>`_. This should work with most recent versions of Windows (from Windows 10 to 11). 
+    For **Windows users**, first install **Linux on Windows** with `WSL <https://learn.microsoft.com/en-us/windows/wsl/install>`_. This should work with most recent versions of Windows (from Windows 10 to 11).
+
+
+.. _install.geodels-channel:
+
+
+Quick install from the ``geodels`` conda channel
+--------------------------------------------------
+
+The simplest way to install goSPL is from the pre-built conda package
+published on the ``geodels`` channel on `anaconda.org <https://anaconda.org/geodels/gospl>`_.
+This avoids building goSPL's Fortran extension locally and pulls every
+runtime dependency from ``conda-forge`` in one step.
+
+Create a fresh environment and install ``gospl`` (and the
+``conda-forge`` stack it needs) in one command::
+
+    mamba create -n gospl -c geodels -c conda-forge gospl
+
+or with classic ``conda``::
+
+    conda create -n gospl -c geodels -c conda-forge gospl
+
+Then activate the environment::
+
+    mamba activate gospl     # or: conda activate gospl
+
+and verify the install::
+
+    python -c "from gospl.model import Model; print('goSPL ready')"
+
+.. note::
+
+    ``-c conda-forge`` is required alongside ``-c geodels`` so that
+    ``petsc4py``, ``mpi4py``, ``pyshtools``, ``vtk`` and the other
+    scientific stack resolve from ``conda-forge``. Without it, conda
+    falls back to the ``defaults`` channel which does not carry
+    compatible builds of these packages.
+
+To install a specific version (e.g. for reproducibility)::
+
+    mamba create -n gospl -c geodels -c conda-forge gospl=2026.06.08
+
+The two sections below cover the alternative ``environment.yml``
+approach, which is useful if you want to add extra packages to the
+environment in the same step, work from an editable source checkout, or
+track the ``master`` branch between releases.
 
 
 Installing Anaconda
@@ -81,16 +127,15 @@ This will save the file locally under the same name as it was on github: ``envir
     name: gospl
     channels:
         - conda-forge
-        - defaults
     dependencies:
-        - python=3.11
+        - python>=3.11,<3.13
         - meson-python>=0.15.0
         - setuptools>=61.0
         - pkg-config
-        - build
         - numpy
         - petsc4py
         - scipy
+        - matplotlib
         - numpy-indexed
         - pandas
         - h5py
@@ -100,9 +145,10 @@ This will save the file locally under the same name as it was on github: ``envir
         - mpi4py
         - pyshtools
         - cython
-        - compilers
-        - pip:
-            - git+https://github.com/Geodels/gospl.git
+        - c-compiler
+        - cxx-compiler
+        - fortran-compiler
+        - pytest
 
 
 Alternatively you can get it from your preferred web browser by clicking on the following link: `environment.yml <https://raw.githubusercontent.com/Geodels/gospl/master/environment.yml>`_ and saving it under the following name ``environment.yml``.
@@ -113,7 +159,12 @@ Alternatively you can get it from your preferred web browser by clicking on the 
 
 .. note::
 
-  goSPL is not directly packaged as a `Conda <https://conda.pydata.org/docs/>`__ library because some of its dependencies are not available via this installation. The use of the environment file however provides an easy installation approach.
+  goSPL is now also available as a pre-built Conda package on the
+  ``geodels`` channel — see :ref:`install.geodels-channel` above for the
+  one-line install. The ``environment.yml`` approach below remains
+  useful when you want to follow the ``master`` branch directly, work
+  from an editable source checkout, or extend the environment with
+  additional packages in one step.
 
 Once the `environment.yml <https://raw.githubusercontent.com/Geodels/gospl/master/environment.yml>`_ file has been downloaded on your system. The following directives provide a step-by-step guide to create a local conda environment for goSPL.
 
@@ -176,17 +227,16 @@ The full stack environment contains not only the libraries used for running goSP
     name: gospl
     channels:
         - conda-forge
-        - defaults
     dependencies:
-        - python=3.11
+        - python>=3.11,<3.13
         - meson-python>=0.15.0
         - setuptools>=61.0
         - pkg-config
-        - build
         - numpy
         - petsc4py
         - pip
         - scipy
+        - matplotlib
         - numpy-indexed
         - pandas
         - h5py
@@ -196,7 +246,9 @@ The full stack environment contains not only the libraries used for running goSP
         - ruamel.yaml
         - mpi4py
         - cython
-        - compilers
+        - c-compiler
+        - cxx-compiler
+        - fortran-compiler
         - meshplex
         - gflex
         - netcdf4
@@ -217,9 +269,10 @@ The full stack environment contains not only the libraries used for running goSP
         - numba
         - shapely
         - pyvista
-        - pyproj 
+        - pyproj
         - triangle
+        - pytest
         - pip:
             - git+https://github.com/Geodels/gospl.git
 
-This conda environment will allow you to run all the examples provided in this `repository <https://github.com/Geodels/goSPL-examples>`_. 
+This conda environment will allow you to run all the examples provided in this `repository <https://github.com/Geodels/goSPL-examples>`_.

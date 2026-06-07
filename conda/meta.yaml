@@ -1,5 +1,5 @@
 {% set name = "gospl" %}
-{% set version = "2026.05.21.rc" %}
+{% set version = "2026.06.08" %}
 
 package:
   name: {{ name|lower }}
