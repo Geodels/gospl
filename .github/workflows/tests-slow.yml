@@ -60,15 +60,22 @@ jobs:
         # the full env build (~5-10 min on macOS-arm64; sometimes much
         # longer on ubuntu-latest due to conda-forge CDN throttling).
         # Subsequent runs with the same tuple restore the env dir from
-        # cache and skip most of the install. Bump the `-v1-` segment to
+        # cache and skip most of the install. Bump the `-v` segment to
         # force a manual flush.
+        #
+        # IMPORTANT: setup-miniconda installs Miniforge to a path that
+        # does NOT match `env.CONDA` on Linux (env.CONDA defaults to
+        # `/usr/share/miniconda` from the pre-installed conda, but
+        # Miniforge3 lands in `/home/runner/miniconda3`). Hardcode the
+        # actual install location per OS so the cache covers the env
+        # setup-miniconda creates, not a stale system-wide one.
         id: cache-env
         uses: actions/cache@v4
         with:
-          path: ${{ env.CONDA }}/envs/gospl
-          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-${{ hashFiles('environment.yml') }}
+          path: ${{ runner.os == 'Linux' && '/home/runner/miniconda3/envs/gospl' || '/Users/runner/miniconda3/envs/gospl' }}
+          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v2-${{ hashFiles('environment.yml') }}
           restore-keys: |
-            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-
+            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v2-
 
       - name: Set up conda env from environment.yml
         # `use-mamba: true` removed: miniforge-version: latest already
@@ -92,8 +99,14 @@ jobs:
         run: pip install --no-deps --no-build-isolation -e . -v
 
       - name: Run slow regression tier (tests/)
+        # Gated to non-push triggers (nightly cron, tag push, workflow_
+        # dispatch). On push events the same tests already run in
+        # `tests-pr.yml` (which dropped its `-m 'not slow'` filter), so
+        # re-running them here would just double CI minutes. The cron
+        # run still catches upstream-package drift.
         # `slow and not benchmark` excludes the heavy benchmark suite,
         # which has its own dedicated step below.
+        if: github.event_name != 'push'
         run: pytest tests/ -m 'slow and not benchmark' -v --tb=short --durations=10
 
       - name: Run analytical benchmark suite (benchmarks/)

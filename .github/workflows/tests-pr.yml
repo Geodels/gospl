@@ -49,18 +49,26 @@ jobs:
 
       - name: Cache conda environment
         # First run for a given (OS, arch, python, env-file-hash) tuple is
-        # the full ~5-10 min env build. Subsequent runs with the same tuple
-        # restore the env dir from cache and skip most of the install.
-        # The env-file hash key makes the cache invalidate automatically
-        # whenever environment.yml changes. Bump the `-v1-` segment to
-        # force a manual flush.
+        # the full env build. Subsequent runs with the same tuple restore
+        # the env dir from cache and skip most of the install. The env-file
+        # hash key makes the cache invalidate automatically whenever
+        # environment.yml changes. Bump the `-v` segment to force a flush.
+        #
+        # IMPORTANT: setup-miniconda installs Miniforge to a path that
+        # does NOT match `env.CONDA` on Linux (env.CONDA defaults to
+        # `/usr/share/miniconda` from the pre-installed conda, but
+        # Miniforge3 lands in `/home/runner/miniconda3`). Hardcode the
+        # actual install location per OS so the cache covers the env
+        # setup-miniconda creates, not a stale system-wide one. macOS
+        # works either way (the two paths coincide); the conditional is
+        # the load-bearing piece for Linux.
         id: cache-env
         uses: actions/cache@v4
         with:
-          path: ${{ env.CONDA }}/envs/gospl
-          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-${{ hashFiles('environment.yml') }}
+          path: ${{ runner.os == 'Linux' && '/home/runner/miniconda3/envs/gospl' || '/Users/runner/miniconda3/envs/gospl' }}
+          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v2-${{ hashFiles('environment.yml') }}
           restore-keys: |
-            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v1-
+            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v2-
 
       - name: Set up conda env from environment.yml
         # setup-miniconda installs Miniforge3 + libmamba solver by default;
@@ -93,9 +101,15 @@ jobs:
         # checkout.
         run: pip install --no-deps --no-build-isolation -e . -v
 
-      - name: Run fast tier
-        run: pytest tests/ -m 'not slow' -v --tb=short
+      - name: Run regression tests (all 13: fast parser + slow Model tier)
+        # No marker filter — runs every test in tests/ on every PR + push
+        # to master/release-candidate. Benchmark tests live in
+        # `benchmarks/` (not picked up by `pytest tests/`) and stay
+        # restricted to `tests-slow.yml`. PR wall-clock goes from ~17s
+        # (fast tier only) to ~5-10 min (all 13) — acceptable because
+        # the env cache amortises the heavy phase across runs.
+        run: pytest tests/ -v --tb=short
 
       - name: Show pytest summary on failure
         if: failure()
-        run: pytest tests/ -m 'not slow' -v --tb=long --no-header || true
+        run: pytest tests/ -v --tb=long --no-header || true
