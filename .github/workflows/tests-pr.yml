@@ -101,7 +101,7 @@ jobs:
         # checkout.
         run: pip install --no-deps --no-build-isolation -e . -v
 
-      - name: Run regression tests (all 13: fast parser + slow Model tier)
+      - name: Run regression tests (all 13 — fast parser + slow Model tier)
         # No marker filter — runs every test in tests/ on every PR + push
         # to master/release-candidate. Benchmark tests live in
         # `benchmarks/` (not picked up by `pytest tests/`) and stay
