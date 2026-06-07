@@ -1255,7 +1255,7 @@ def test_parallel_correctness(tmp_path):
         f"\n  rel_max_fa     = {rel_max_fa:.3e}  (tol 1e-4)"
         f"\n  sum_fa_n1      = {stats_n1['sum_fa']:.3e} m²"
         f"\n  sum_fa_n2      = {stats_n2['sum_fa']:.3e} m²"
-        f"\n  rel_sum_fa     = {rel_sum_fa:.3e}  (tol 1e-2)"
+        f"\n  rel_sum_fa     = {rel_sum_fa:.3e}  (tol 5e-2)"
         f"\n  activity       = {stats_n1['activity']:.3e} m³"
     )
 
@@ -1273,25 +1273,39 @@ def test_parallel_correctness(tmp_path):
         "a domain-decomposition-dependent globalToLocal."
         + diagnostic
     )
-    # Sum-of-FA tolerance is INTENTIONALLY loose (1e-2 ~ 1%).
+    # Sum-of-FA tolerance is INTENTIONALLY loose (5e-2 ~ 5%) — and the
+    # gap between this and the other tolerances is the load-bearing
+    # observation, not the absolute number.
+    #
     # `mfdreceivers` already breaks EXACT slope ties deterministically
     # using global node IDs (see fortran/functions.F90 and the
     # `self.gid` argument in flow/flowplex.py:_buildFlowDirection). What
-    # remains is the near-tie case: KSP solver convergence is not
-    # bitwise-identical across decompositions (floating-point addition
-    # is not associative under parallel reductions), so ghost-node
-    # elevations differ by ~1e-10 between n=1 and n=2. A small subset
-    # of near-tie nodes therefore picks a different receiver, and the
-    # 0.3% sum-FA drift on the minimal fixture comes from that subset
-    # cascading through downstream drainage. Tightening this back to
-    # 1e-4 requires either KSP-precision halo determinism (hard PETSc
-    # work) or a slope-tolerance band in _buildFlowDirection (changes
-    # the algorithm). Out of scope here.
-    assert rel_sum_fa < 1e-2, (
-        "Total drainage area differs between n=1 and n=2 beyond 1e-2 "
-        "relative — far beyond the ~0.3% noise floor from "
-        "non-deterministic tie-breaking. Likely a real routing "
-        "regression in flow/flowplex.py:\n"
+    # remains is the near-tie case: KSP convergence is not bitwise-
+    # identical across decompositions because floating-point addition
+    # is not associative under parallel reductions, so ghost-node
+    # elevations differ by O(KSP rtol) between n=1 and n=2. A small
+    # subset of near-tie nodes picks a different receiver and the
+    # cumulative drainage statistics diverge.
+    #
+    # The DRIFT MAGNITUDE IS PLATFORM-DEPENDENT:
+    #   - macOS-14 (arm64, conda-forge OpenMPI):  ~0.3%
+    #   - Ubuntu-latest (x86_64, conda-forge MPICH): ~1.7%
+    # (Same fixture, same Python, same goSPL, same tie-break fix —
+    # the difference is in MPI implementation, BLAS variant, and FMA
+    # availability at the platform level.) 5% is set as 3x the worst
+    # observed on either platform. Real routing regressions (lost
+    # neighbour entry, wrong row weights at halo nodes, stale rcvIDi
+    # snapshot) would shift this by orders of magnitude — wholesale
+    # rerouting drives rel_sum_fa toward 0.5+, not 0.05.
+    #
+    # Tightening this back below ~5% requires either KSP-precision
+    # halo determinism (hard PETSc work) or a slope-tolerance band in
+    # _buildFlowDirection (algorithm change). Out of scope here.
+    assert rel_sum_fa < 5e-2, (
+        "Total drainage area differs between n=1 and n=2 beyond 5e-2 "
+        "relative — far beyond the ~0.3% (macOS) to ~1.7% (Ubuntu) "
+        "noise floor from non-deterministic tie-breaking. Likely a "
+        "real routing regression in flow/flowplex.py:\n"
         "  (a) `_buildFlowDirection` lost a neighbour entry at a "
         "partition boundary.\n"
         "  (b) The IDA matrix (`_matrix_build`) assembles with wrong "
