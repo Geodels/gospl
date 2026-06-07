@@ -988,3 +988,599 @@ def test_sediment_balance_with_evap(minimal_model_with_evap):
         "Surface volume drifting on closed sphere with evap. Same "
         "diagnosis as the cumED case." + diagnostic
     )
+
+
+# ---------------------------------------------------------------------------
+# TEST 8 - Parallel decomposition must not alter the physical solution
+# ---------------------------------------------------------------------------
+#
+# MPI's COMM_WORLD.size is fixed at process launch (`mpirun -n N`), so a
+# single pytest invocation can only see ONE rank count. To compare n=1 vs
+# n=N runs of the same model, this test spawns TWO subprocesses (`mpirun
+# -n 1` and `mpirun -n 2`), each writing a JSON summary of global state,
+# then asserts the summaries agree across decompositions.
+#
+# Why n=2 (not n=4) for the parallel case: GitHub's macos-14 runners only
+# have 3 cores; OpenMPI refuses to oversubscribe by default. n=2 exposes
+# exactly one partition boundary, which is sufficient to catch every
+# decomposition-related bug class this test is designed to surface.
+# ---------------------------------------------------------------------------
+
+_PARALLEL_DUMP_SCRIPT = '''\
+"""
+Subprocess entry point for test_parallel_correctness.
+
+Runs `gospl.model.Model(<yml>)`, performs MPI-reduced summary stats over
+owned (non-ghost) nodes, and writes a JSON file on rank 0. Designed to be
+invoked via `mpirun -n N python <this script> <yml> <out_json>` from the
+test body — the test then loads two such JSON dumps (n=1 and n=2) and
+asserts the global quantities match within tight tolerances.
+"""
+import json
+import sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+fixture_yml = sys.argv[1]
+output_json = sys.argv[2]
+
+comm = MPI.COMM_WORLD
+model = Model(fixture_yml, verbose=False, showlog=False)
+try:
+    model.runProcesses()
+
+    # Owned-node mask: ghost nodes must never enter a reduction (they are
+    # halo copies owned by a neighbouring rank). Same pattern as Tests 6-7.
+    owned = model.inIDs == 1
+    h_owned     = model.hLocal.getArray()[owned]
+    cumED_owned = model.cumEDLocal.getArray()[owned]
+    fa_owned    = model.FAL.getArray()[owned]
+    larea_owned = model.larea[owned]
+
+    # Per-rank local scalars; MPI.SUM/MAX-reduced to globals below.
+    wmean_h_local  = float((h_owned * larea_owned).sum())
+    area_local     = float(larea_owned.sum())
+    flux_local     = float((cumED_owned * larea_owned).sum())
+    activity_local = float((np.abs(cumED_owned) * larea_owned).sum())
+    max_fa_local      = float(fa_owned.max()) if len(fa_owned) > 0 else 0.0
+    sum_fa_local      = float(fa_owned.sum())
+    # Owned-node count per rank. After allreduce(SUM) this is the total
+    # number of nodes uniquely owned across the comm. Should equal the
+    # mesh's global vertex count regardless of decomposition. If it
+    # doesn't, there's a partition-ownership gap (a node owned by zero
+    # ranks, or — less likely — double-counted by inIDs).
+    owned_count_local = int(owned.sum())
+
+    wmean_h_num = comm.allreduce(wmean_h_local, op=MPI.SUM)
+    area_total  = comm.allreduce(area_local,    op=MPI.SUM)
+    flux        = comm.allreduce(flux_local,    op=MPI.SUM)
+    activity    = comm.allreduce(activity_local, op=MPI.SUM)
+    max_fa      = comm.allreduce(max_fa_local,  op=MPI.MAX)
+    sum_fa      = comm.allreduce(sum_fa_local,  op=MPI.SUM)
+    owned_count = comm.allreduce(owned_count_local, op=MPI.SUM)
+    wmean_h     = wmean_h_num / area_total
+
+    if comm.Get_rank() == 0:
+        with open(output_json, "w") as f:
+            json.dump({
+                "size":        comm.Get_size(),
+                "wmean_h":     wmean_h,
+                "flux":        flux,
+                "activity":    activity,
+                "max_fa":      max_fa,
+                "sum_fa":      sum_fa,
+                "owned_count": owned_count,
+            }, f)
+finally:
+    model.destroy()
+'''
+
+
+@pytest.mark.slow
+def test_parallel_correctness(tmp_path):
+    """
+    Protects: AGENTS.md > MPI contract — collective operations must yield
+    physically identical results regardless of how the domain is partitioned
+    across ranks.
+
+    Silent failures prevented:
+
+      1. Halo-exchange bug in `dm.localToGlobal` / `dm.globalToLocal`
+         (mesher/unstructuredmesh.py:738-799): a ghost node written by the
+         wrong rank would corrupt the elevation field in a thin ring at each
+         subdomain boundary.
+
+      2. Flow-routing inconsistency across partition boundaries: the
+         donor-receiver graph in `flowplex._buildFlowDirection` depends on
+         which rank owns each node. A bug in the boundary-node hand-off
+         would produce divergent rcvID arrays, which cascade into divergent
+         drainage area and elevation.
+
+      3. Incorrect `inIDs` mask causing a rank to count ghost-node
+         contributions in its local reduction (anywhere `inIDs == 1` is
+         used to select owned nodes). With n=2 this would over-count
+         boundary nodes by ~2x and shift global statistics.
+
+      4. Non-deterministic KSP convergence across decompositions. PETSc
+         parallel reductions (dot products, norms) are NOT guaranteed
+         bitwise-identical because floating-point addition is not
+         associative. We therefore assert STATISTICAL equivalence with
+         tight relative tolerances rather than bitwise identity.
+
+    Implementation: MPI.COMM_WORLD.size is fixed at process launch, so we
+    cannot run n=1 and n=N in the same pytest process. Two subprocesses
+    via `mpirun -n N python <dump_script>` each emit a JSON dump on rank
+    0; this test reads both and compares.
+
+    Tier 1A — drainage area (1e-4 relative, checked FIRST because routing
+    bugs cascade into elevation bugs but not vice versa). Both the max
+    and the sum of FAL over owned nodes must agree.
+
+    Tier 1B — area-weighted mean elevation (1e-10 relative). Catches
+    rank-doubling of ghost-node contributions in any reduction.
+
+    Tier 1C — total cumED×area flux (1e-10 relative). Catches sediment
+    created or destroyed at subdomain boundaries via incorrect axpy
+    in SPL.py:352, nlSPL.py:404, or soilSPL.py:326.
+
+    Non-applicability gates:
+      - skip if `mpirun` is not on PATH (no MPI runtime to spawn);
+      - skip if minimal.yml / mesh.npz are missing (consistent with the
+        other Model-based regression tests);
+      - skip if activity < 1.0 m³ (vacuous comparison on a fixture that
+        moves negligible sediment — same gate as Tests 6-7).
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # ---- Non-applicability gates ---------------------------------------
+    if shutil.which("mpirun") is None:
+        pytest.skip(
+            "mpirun not on PATH; cannot exercise MPI decomposition. "
+            "On CI this means the conda env lacks an MPI runtime (mpi4py "
+            "package missing or broken). Locally, install via "
+            "`mamba env create -f environment.yml`."
+        )
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    yml_src = fixtures_dir / "minimal.yml"
+    mesh_src = fixtures_dir / "mesh.npz"
+    if not yml_src.exists() or not mesh_src.exists():
+        pytest.skip(
+            f"{yml_src} or {mesh_src} not present. Same fixture as the "
+            f"other Model-based regression tests."
+        )
+
+    # ---- Write the per-subprocess dump script once ---------------------
+    # Stored as a real .py file (not -c "string") so tracebacks point at
+    # readable lines if anything inside fails.
+    dump_py = tmp_path / "_parallel_dump.py"
+    dump_py.write_text(_PARALLEL_DUMP_SCRIPT)
+
+    # ---- Run the model under mpirun -n N -------------------------------
+    def run_at_rank(n):
+        """
+        Spawn `mpirun -n {n} python <dump_py> minimal.yml stats.json`
+        in an isolated cwd. Each cwd has its own copies of the YAML and
+        mesh so the goSPL output directory (`<cwd>/minimal/`) does not
+        collide between the two runs.
+        """
+        out_dir = tmp_path / f"n{n}"
+        out_dir.mkdir()
+        shutil.copy(yml_src,  out_dir / "minimal.yml")
+        shutil.copy(mesh_src, out_dir / "mesh.npz")
+        stats_json = out_dir / "stats.json"
+
+        cmd = [
+            "mpirun", "-n", str(n),
+            sys.executable, str(dump_py),
+            "minimal.yml", str(stats_json),
+        ]
+        result = subprocess.run(
+            cmd, cwd=out_dir, timeout=600,
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 or not stats_json.exists():
+            pytest.fail(
+                f"`mpirun -n {n}` subprocess failed "
+                f"(rc={result.returncode}).\n"
+                f"--- stdout ---\n{result.stdout}\n"
+                f"--- stderr ---\n{result.stderr}"
+            )
+        return json.loads(stats_json.read_text())
+
+    stats_n1 = run_at_rank(1)
+    stats_n2 = run_at_rank(2)
+
+    # ---- Sanity: the two subprocesses really did run at the requested
+    #      rank counts (catches MPI implementation quirks, e.g. OpenMPI
+    #      silently downgrading to 1 rank under oversubscription policy).
+    assert stats_n1["size"] == 1, f"n=1 ran with size={stats_n1['size']}"
+    assert stats_n2["size"] == 2, f"n=2 ran with size={stats_n2['size']}"
+
+    # ---- Sanity: same total owned-node count across decompositions.
+    # Every mesh vertex must be owned by EXACTLY one rank; the sum of
+    # owned-node counts over the comm must therefore equal the mesh's
+    # global vertex count regardless of decomposition. If this differs
+    # between n=1 and n=2, there is a partition-ownership gap — bug in
+    # `inIDs` setup (unstructuredmesh.py) or in PETSc DMPlex's vertex
+    # partitioning. This is the FIRST thing to check if the cumulative
+    # sums below diverge unexpectedly.
+    assert stats_n1["owned_count"] == stats_n2["owned_count"], (
+        f"n=1 and n=2 see different total owned-node counts "
+        f"(n=1={stats_n1['owned_count']}, n=2={stats_n2['owned_count']}). "
+        "Every mesh vertex must be owned by exactly one rank; this "
+        "assertion failing means a node is owned by zero ranks (gap) "
+        "or — less likely — double-counted (inIDs == 1 on two ranks). "
+        "Suspect: mesher/unstructuredmesh.py's vIS-based `inIDs` "
+        "assignment, or PETSc DMPlex partitioner setup."
+    )
+
+    # ---- Activity gate -------------------------------------------------
+    if stats_n1["activity"] < 1.0:
+        pytest.skip(
+            f"Activity {stats_n1['activity']:.3e} m³ too small for "
+            f"meaningful parallel-correctness check. NEEDS_HUMAN_REVIEW: "
+            f"lengthen the run or steepen the gradient in minimal.yml."
+        )
+
+    # ---- Compute relative diffs ---------------------------------------
+    def rel(a, b, denom):
+        return abs(a - b) / max(abs(denom), 1e-30)
+
+    rel_mean_h = rel(stats_n1["wmean_h"], stats_n2["wmean_h"],
+                     stats_n1["wmean_h"])
+    rel_flux   = rel(stats_n1["flux"], stats_n2["flux"],
+                     stats_n1["activity"])
+    rel_max_fa = rel(stats_n1["max_fa"], stats_n2["max_fa"],
+                     stats_n1["max_fa"])
+    rel_sum_fa = rel(stats_n1["sum_fa"], stats_n2["sum_fa"],
+                     stats_n1["sum_fa"])
+
+    diagnostic = (
+        f"\n  owned_n1       = {stats_n1['owned_count']}"
+        f"\n  owned_n2       = {stats_n2['owned_count']}"
+        f"\n  wmean_h_n1     = {stats_n1['wmean_h']:.6e} m"
+        f"\n  wmean_h_n2     = {stats_n2['wmean_h']:.6e} m"
+        f"\n  rel_mean_h     = {rel_mean_h:.3e}  (tol 1e-10)"
+        f"\n  flux_n1        = {stats_n1['flux']:+.3e} m³"
+        f"\n  flux_n2        = {stats_n2['flux']:+.3e} m³"
+        f"\n  rel_flux       = {rel_flux:.3e}  (tol 1e-5)"
+        f"\n  max_fa_n1      = {stats_n1['max_fa']:.3e} m²"
+        f"\n  max_fa_n2      = {stats_n2['max_fa']:.3e} m²"
+        f"\n  rel_max_fa     = {rel_max_fa:.3e}  (tol 1e-4)"
+        f"\n  sum_fa_n1      = {stats_n1['sum_fa']:.3e} m²"
+        f"\n  sum_fa_n2      = {stats_n2['sum_fa']:.3e} m²"
+        f"\n  rel_sum_fa     = {rel_sum_fa:.3e}  (tol 1e-2)"
+        f"\n  activity       = {stats_n1['activity']:.3e} m³"
+    )
+
+    # ---- Tier 1A: drainage area (routing bugs cascade — check first) ----
+    assert rel_max_fa < 1e-4, (
+        "Max drainage area differs between n=1 and n=2 beyond 1e-4 "
+        "relative. Likely a partition-boundary bug in "
+        "flow/flowplex.py:\n"
+        "  (a) `_buildFlowDirection` assigns a boundary node's receiver "
+        "to the wrong rank's local index.\n"
+        "  (b) `_matrix_build` inserts a wrong off-diagonal entry at a "
+        "halo node, so the IDA solve distributes water incorrectly "
+        "across the partition boundary.\n"
+        "  (c) The rcvIDi snapshot (flowplex.py:421-426) is taken AFTER "
+        "a domain-decomposition-dependent globalToLocal."
+        + diagnostic
+    )
+    # Sum-of-FA tolerance is INTENTIONALLY loose (1e-2 ~ 1%).
+    # `mfdreceivers` already breaks EXACT slope ties deterministically
+    # using global node IDs (see fortran/functions.F90 and the
+    # `self.gid` argument in flow/flowplex.py:_buildFlowDirection). What
+    # remains is the near-tie case: KSP solver convergence is not
+    # bitwise-identical across decompositions (floating-point addition
+    # is not associative under parallel reductions), so ghost-node
+    # elevations differ by ~1e-10 between n=1 and n=2. A small subset
+    # of near-tie nodes therefore picks a different receiver, and the
+    # 0.3% sum-FA drift on the minimal fixture comes from that subset
+    # cascading through downstream drainage. Tightening this back to
+    # 1e-4 requires either KSP-precision halo determinism (hard PETSc
+    # work) or a slope-tolerance band in _buildFlowDirection (changes
+    # the algorithm). Out of scope here.
+    assert rel_sum_fa < 1e-2, (
+        "Total drainage area differs between n=1 and n=2 beyond 1e-2 "
+        "relative — far beyond the ~0.3% noise floor from "
+        "non-deterministic tie-breaking. Likely a real routing "
+        "regression in flow/flowplex.py:\n"
+        "  (a) `_buildFlowDirection` lost a neighbour entry at a "
+        "partition boundary.\n"
+        "  (b) The IDA matrix (`_matrix_build`) assembles with wrong "
+        "row weights on halo nodes.\n"
+        "  (c) The rcvIDi snapshot (flowplex.py:421-426) was taken from "
+        "a stale (post-fill) topology."
+        + diagnostic
+    )
+
+    # ---- Tier 1B: global mean elevation -------------------------------
+    assert rel_mean_h < 1e-10, (
+        "Area-weighted mean elevation differs between n=1 and n=2 "
+        "beyond 1e-10 relative. Likely causes:\n"
+        "  (a) Ghost nodes included in a rank-local reduction before "
+        "allreduce — every sum must use `inIDs == 1` as the owned-node "
+        "mask.\n"
+        "  (b) A `localToGlobal` call is missing after `hLocal.setArray`, "
+        "so a rank is solving with a stale halo on the next KSP step.\n"
+        "  (c) The KSP RHS double-counts a ghost-node contribution on "
+        "ranks that own a boundary."
+        + diagnostic
+    )
+
+    # ---- Tier 1C: total erosion / deposition flux ---------------------
+    # Flux tolerance is intentionally loose (1e-5) because the residual
+    # KSP-near-tie non-determinism described above shifts WHICH nodes
+    # erode how much (a few near-tie nodes drain different basins →
+    # different local incision). Observed 2.4e-7 on the minimal fixture
+    # AFTER the exact-tie-break fix landed; 1e-5 gives ~40x headroom for
+    # real mass-conservation regressions to trip the assert. Mean
+    # elevation is unaffected (algorithm is mass-conserving regardless
+    # of which path sediment takes) so Tier 1B remains at 1e-10.
+    assert rel_flux < 1e-5, (
+        "Total cumED × area flux differs between n=1 and n=2 beyond "
+        "1e-5 relative — well beyond the ~1e-7 floor expected from "
+        "routing tie-break non-determinism. Sediment is being created "
+        "or destroyed at subdomain boundaries:\n"
+        "  (a) An axpy in SPL.py:352, nlSPL.py:404, or soilSPL.py:326 "
+        "uses the wrong scale factor on boundary nodes.\n"
+        "  (b) sedplex._getSedFlux integrates an erosion source that "
+        "has already been localToGlobal'd and therefore contains halo "
+        "copies of boundary-node values."
+        + diagnostic
+    )
+
+
+# ---------------------------------------------------------------------------
+# TEST 9 - Stratigraphy: deposition + compaction physics
+# ---------------------------------------------------------------------------
+#
+# Pure-numpy test (no Model, no PETSc DMPlex) — instantiates the STRAMesh
+# class via `__new__` to bypass the heavy init, sets minimal state, and
+# exercises `deposeStrat` + `_depthPorosity` directly with mocked PETSc
+# Vec / DM objects. Lives in the fast tier alongside TESTs 1-2; runs in
+# well under a second on any platform.
+# ---------------------------------------------------------------------------
+
+
+def test_stratigraphy_deposition_and_compaction():
+    """
+    Protects: stratplex.deposeStrat + stratplex._depthPorosity — the
+    deposition and compaction physics that update underlying stratal
+    thickness and porosity when surface deposition events accumulate
+    over time.
+
+    Constructs a fictive 3-layer stratigraphy (5 nodes × 3 layers,
+    each 50 m thick at phi=0.5) and runs two phases:
+
+      Phase 1 — deposeStrat: add a 10 m deposition to the top layer.
+      Asserts:
+        - stratH[top] grows by exactly the deposition amount;
+        - phiS[top] is set to phi0s (fresh deposit's surface porosity);
+        - stratK[top] is reset to 1.0 (default erodibility multiplier);
+        - lower layers are untouched.
+
+      Phase 2 — _depthPorosity: apply Athy's-law compaction
+      (phi = phi0 * exp(depth/z0)) at synthetic layer mid-depths.
+      Asserts:
+        - porosity decreases monotonically with depth (deeper compacts
+          more);
+        - layer thickness decreases (compaction shrinks layers);
+        - solid-phase volume is conserved per layer to float-noise
+          precision: h_new * (1 - phi_new) == h_old * (1 - phi_old).
+
+    Silent failures prevented:
+      1. deposeStrat lays down sediment but forgets to set phiS to phi0s
+         on the new layer → downstream code reads NaN porosity from the
+         forward-fill in `_fillZeroPorosity`.
+      2. _depthPorosity inverts the depth sign convention → porosity
+         INCREASES with depth, the column unrealistically inflates.
+      3. Compaction's solid-phase bookkeeping (stratplex.py:268-278)
+         loses or creates mass: `newH = solidPhase / (1 - phi_new)` must
+         exactly preserve `h * (1 - phi)`. Any algebraic refactor that
+         changes the order of operations is checked here.
+      4. The bedrock-sentinel freeze (stratplex.py:283-286) is silently
+         removed: bedrockLay > 0 should keep layer indices < bedrockLay
+         from changing in either thickness or porosity. Tested in a
+         second assertion block below.
+    """
+    # Late import — STRAMesh's module triggers `from gospl._fortran import
+    # strataonesed`, which fails at collection if the Fortran extension
+    # is not built. `importorskip` lets the test skip cleanly in that
+    # environment instead of failing the whole file.
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+    STRAMesh = stratplex.STRAMesh
+
+    # ---- Mocks for the PETSc-side interface ----------------------------
+    # deposeStrat calls `self.dm.globalToLocal(self.tmp, self.tmpL)` then
+    # reads `self.tmpL.getArray()`. We pre-populate tmpL with a fake
+    # object whose getArray() returns the desired deposition vector;
+    # the globalToLocal call becomes a no-op (tmpL is already correct).
+    class _MockLocalVec:
+        def __init__(self, arr):
+            self._arr = np.asarray(arr, dtype=np.float64)
+        def getArray(self):
+            return self._arr
+
+    class _MockDM:
+        def globalToLocal(self, src, dst):
+            pass  # tmpL pre-populated by the test
+
+    # ---- Build the fictive STRAMesh state ------------------------------
+    # __new__ bypasses __init__; STRAMesh.__init__ only sets all four
+    # state arrays to None and returns, so we replace that with explicit
+    # synthetic state. No PETSc / mesh allocations involved.
+    s = STRAMesh.__new__(STRAMesh)
+    s.lpoints   = 5
+    s.stratNb   = 3
+    s.stratStep = 2        # 3 layers indexed 0..2; layer 2 is the top
+    s.phi0s     = 0.5      # surface porosity
+    s.z0s       = 100.0    # e-folding compaction depth (m)
+    s.bedrockLay = 0       # no infinite-bedrock sentinel layer
+    s.memclear  = False
+
+    s.stratH = np.full((5, 3), 50.0, dtype=np.float64)
+    s.phiS   = np.full((5, 3),  0.5, dtype=np.float64)
+    s.stratK = np.full((5, 3),  0.7, dtype=np.float64)
+
+    s.tmp  = None
+    s.tmpL = _MockLocalVec(np.full(5, 10.0))   # 10 m deposition at every node
+    s.dm   = _MockDM()
+
+    # ==== Phase 1: deposition ===========================================
+    H_before  = s.stratH.copy()
+    phi_before = s.phiS.copy()
+    K_before  = s.stratK.copy()
+
+    s.deposeStrat()
+
+    # Top layer thickness grew by exactly the deposition amount
+    np.testing.assert_array_almost_equal(
+        s.stratH[:, s.stratStep] - H_before[:, s.stratStep],
+        np.full(5, 10.0),
+        err_msg=(
+            "deposeStrat did not add the deposition to the top layer "
+            "thickness. Check stratplex.py:157 — `self.stratH[:, "
+            "self.stratStep] += depo`."
+        ),
+    )
+
+    # Top layer porosity reset to phi0s
+    np.testing.assert_array_equal(
+        s.phiS[:, s.stratStep],
+        np.full(5, s.phi0s),
+        err_msg=(
+            "deposeStrat did not reset the top layer's porosity to "
+            "phi0s after deposition (stratplex.py:159). Downstream "
+            "code that forward-fills zero porosity will inherit the "
+            "wrong value from below."
+        ),
+    )
+
+    # Top layer K multiplier reset to 1.0
+    np.testing.assert_array_equal(
+        s.stratK[:, s.stratStep],
+        np.ones(5),
+        err_msg=(
+            "deposeStrat did not reset the top layer's erodibility "
+            "multiplier to 1.0 (stratplex.py:163). Freshly deposited "
+            "sediment should always carry the default K."
+        ),
+    )
+
+    # Lower layers (indices 0, 1) untouched
+    np.testing.assert_array_equal(s.stratH[:, :s.stratStep], H_before[:, :s.stratStep])
+    np.testing.assert_array_equal(s.phiS[:, :s.stratStep],   phi_before[:, :s.stratStep])
+    np.testing.assert_array_equal(s.stratK[:, :s.stratStep], K_before[:, :s.stratStep])
+
+    # ==== Phase 2: compaction ===========================================
+    # Layer geometry after Phase 1 (per node):
+    #   layer 0: H=50,  phi=0.5,  bottom of column
+    #   layer 1: H=50,  phi=0.5
+    #   layer 2: H=60,  phi=0.5,  top of column (50 + 10 m deposit)
+    # Mid-point depths below the post-deposition surface (z=0):
+    #   layer 2 mid-depth = -30   (60/2 below surface)
+    #   layer 1 mid-depth = -85   (60 + 50/2)
+    #   layer 0 mid-depth = -135  (60 + 50 + 50/2)
+    # _depthPorosity expects depth as (lpoints, stratStep+1) with the
+    # column ordered [bottom, ..., top] — same layout as stratH.
+    depth = np.tile(np.array([-135.0, -85.0, -30.0]), (5, 1))
+
+    H_pre   = s.stratH.copy()
+    phi_pre = s.phiS.copy()
+
+    # Snapshot solid-phase volume per layer BEFORE compaction.
+    # The conservation law: h * (1 - phi) is invariant across compaction
+    # (compaction only changes void volume, never solid mass).
+    solid_before = H_pre * (1.0 - phi_pre)
+
+    newH = s._depthPorosity(depth)
+
+    # 1. Porosity strictly decreases with depth
+    assert (s.phiS[:, 0] < s.phiS[:, 1]).all(), (
+        "Bottom layer porosity should be less than middle layer after "
+        f"compaction. Got phi[bottom]={s.phiS[:, 0]}, "
+        f"phi[middle]={s.phiS[:, 1]}. Check the sign of `depth/z0s` in "
+        "stratplex.py:265."
+    )
+    assert (s.phiS[:, 1] < s.phiS[:, 2]).all(), (
+        "Middle layer porosity should be less than top layer after "
+        f"compaction. Got phi[middle]={s.phiS[:, 1]}, "
+        f"phi[top]={s.phiS[:, 2]}."
+    )
+
+    # 2. Layer thickness strictly decreases (compaction shrinks layers)
+    assert (newH[:, 0] < H_pre[:, 0]).all(), (
+        f"Bottom layer should compact. Got newH={newH[:, 0]}, "
+        f"H_pre={H_pre[:, 0]}."
+    )
+    assert (newH[:, 1] < H_pre[:, 1]).all(), (
+        f"Middle layer should compact. Got newH={newH[:, 1]}, "
+        f"H_pre={H_pre[:, 1]}."
+    )
+    assert (newH[:, 2] < H_pre[:, 2]).all(), (
+        f"Top layer should compact (its phi went from 0.5 to "
+        f"{s.phiS[0, 2]:.4f}). Got newH={newH[:, 2]}, "
+        f"H_pre={H_pre[:, 2]}."
+    )
+
+    # 3. Solid-phase volume conservation per layer
+    solid_after = newH * (1.0 - s.phiS)
+    np.testing.assert_allclose(
+        solid_after, solid_before, rtol=1e-12, atol=1e-12,
+        err_msg=(
+            "Solid-phase volume not conserved across compaction. "
+            "_depthPorosity must change phi and H in lockstep so "
+            "h*(1-phi) is invariant — check the construction "
+            "`newH = solidPhase / tot` at stratplex.py:278."
+        ),
+    )
+
+    # ==== Phase 3: bedrock sentinel freeze ==============================
+    # Re-run the compaction with bedrockLay = 1 (layer 0 is the infinite-
+    # bedrock sentinel). The bedrock layer's thickness and porosity must
+    # NOT change even though `depth` would otherwise drive compaction
+    # there. Catches regressions of the freeze logic at stratplex.py:283.
+    s2 = STRAMesh.__new__(STRAMesh)
+    s2.lpoints   = 5
+    s2.stratNb   = 3
+    s2.stratStep = 2
+    s2.phi0s     = 0.5
+    s2.z0s       = 100.0
+    s2.bedrockLay = 1      # layer 0 is bedrock
+    s2.memclear  = False
+
+    # Layer 0 holds the BEDROCK_SENTINEL thickness (1e6) — never compact it.
+    s2.stratH = np.array([[1.0e6, 50.0, 50.0]] * 5, dtype=np.float64)
+    s2.phiS   = np.array([[0.0,    0.5,  0.5]] * 5, dtype=np.float64)
+    s2.stratK = np.full((5, 3), 1.0, dtype=np.float64)
+
+    depth2 = np.tile(np.array([-1.0e6 - 25.0, -75.0, -25.0]), (5, 1))
+    H_bedrock_before   = s2.stratH[:, 0].copy()
+    phi_bedrock_before = s2.phiS[:, 0].copy()
+
+    newH2 = s2._depthPorosity(depth2)
+
+    np.testing.assert_array_equal(
+        newH2[:, 0], H_bedrock_before,
+        err_msg=(
+            "Bedrock sentinel layer (index < bedrockLay) was compacted. "
+            "The freeze at stratplex.py:285 should preserve `stratH` "
+            "exactly on bedrock indices."
+        ),
+    )
+    np.testing.assert_array_equal(
+        s2.phiS[:, 0], phi_bedrock_before,
+        err_msg=(
+            "Bedrock sentinel porosity was modified. The freeze at "
+            "stratplex.py:286 should preserve `phiS` exactly on "
+            "bedrock indices."
+        ),
+    )

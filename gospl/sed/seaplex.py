@@ -168,7 +168,11 @@ class SEAMesh(object):
         fillz = fillEPS[self.locIDs]
         if not self.flatModel:
             fillz[self.coastDist > self.offshore] = hl[self.coastDist > self.offshore]
-        rcv, _, wght = mfdrcvrs(12, self.flowExp, fillz, BOUNDARY_FLOW_SENTINEL)
+        # Pass `self.gid` for deterministic exact-tie-break on slope —
+        # see fortran/functions.F90:mfdrcvrs.
+        rcv, _, wght = mfdrcvrs(
+            12, self.flowExp, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
+        )
 
         # Set borders nodes
         if self.flatModel:

@@ -1607,13 +1607,21 @@ subroutine local_spl_coeff(nRcv, elev, rcv, dist, wgt, slp, coeffs, nb)
 
 end subroutine local_spl_coeff
 
-subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
+subroutine mfdreceivers(nRcv, exp, elev, sl, gid, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction algorithm.
 ! The exponent is referred to as the flow‐partition exponent following: Quin et al., 2007
 ! An adaptive approach to selecting a flow‐partition exponent for a multiple‐flow‐direction algorithm
 ! The larger the value of the exponent, the more similar MFD is to SFD.
 ! The smaller the value of the exponent, the more spread is the distribution of water across downstream nodes.
+!
+! The `gid` input is the per-node global ID (consistent across MPI
+! decompositions). It is used only to deterministically break EXACT
+! ties between equal-slope receivers: the stored slope is perturbed by
+! a magnitude-1e-15 multiplicative offset keyed on gid so that quicksort
+! produces a reproducible order regardless of how PETSc partitioned
+! the mesh. The perturbation is well below KSP-solver precision and
+! does not affect physical results. See AGENTS.md > CI contract.
 
   use meshparams
   implicit none
@@ -1632,6 +1640,7 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
   double precision, intent(in) :: exp
   double precision,intent(in) :: sl
   double precision, intent(in) :: elev(nb)
+  integer, intent(in) :: gid(nb)
 
   integer, intent(out) :: rcv(nb,nRcv)
   double precision, intent(out) :: dist(nb,nRcv)
@@ -1675,7 +1684,15 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
           val = (elev(k) - elev(n))**fexp/FVeLgt(k,p)
           if(val>0.)then
             kk = kk + 1
-            slp(kk) = val
+            ! Deterministic exact-tie break for parallel reproducibility:
+            ! perturb val by a magnitude-1e-15 multiplicative offset keyed
+            ! on the neighbour's GLOBAL id (consistent across decompositions).
+            ! Lower gid -> larger stored slope, so the lower-gid neighbour
+            ! wins when two slopes are exactly equal. The relative magnitude
+            ! is well below KSP precision so real slope differences still
+            ! dominate the ordering. Fixes EXACT ties only; near-ties from
+            ! KSP-solver noise remain a separate question (see AGENTS.md).
+            slp(kk) = val * (1.0d0 - 1.0d-15 * dble(gid(n)))
             id(kk) = n-1
             dst(kk) = FVeLgt(k,p)
           endif
@@ -1719,13 +1736,16 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
 
 end subroutine mfdreceivers
 
-subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
+subroutine mfdrcvrs(nRcv, exp, elev, sl, gid, rcv, dist, wgt, nb)
 !*****************************************************************************
 ! Compute receiver characteristics based on multiple flow direction algorithm for marine environment.
 ! The exponent is referred to as the flow‐partition exponent following: Quin et al., 2007
 ! An adaptive approach to selecting a flow‐partition exponent for a multiple‐flow‐direction algorithm
 ! The larger the value of the exponent, the more similar MFD is to SFD.
 ! The smaller the value of the exponent, the more spread is the distribution of water across downstream nodes.
+!
+! The `gid` input is the per-node global ID (consistent across MPI
+! decompositions). See `mfdreceivers` above for the exact-tie-break rationale.
 
   use meshparams
   implicit none
@@ -1744,6 +1764,7 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
   double precision, intent(in) :: exp
   double precision,intent(in) :: sl
   double precision, intent(in) :: elev(nb)
+  integer, intent(in) :: gid(nb)
 
   integer, intent(out) :: rcv(nb,12)
   double precision, intent(out) :: dist(nb,12)
@@ -1775,7 +1796,8 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
         val = (elev(k) - elev(n))**fexp/FVeLgt(k,p)
         if(val>0.)then
           kk = kk + 1
-          slp(kk) = val
+          ! Deterministic exact-tie break — see `mfdreceivers` for rationale.
+          slp(kk) = val * (1.0d0 - 1.0d-15 * dble(gid(n)))
           id(kk) = n-1
           dst(kk) = FVeLgt(k,p)
         endif

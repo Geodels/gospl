@@ -57,7 +57,7 @@ def spl_tmp_path(tmp_path, monkeypatch, request):
     yield dest
 
     artefacts = Path(request.config.rootpath) / "results" / "spl"
-    _copy_artefacts(dest, artefacts, ("spl_benchmark.pdf", "spl_benchmark.md"))
+    _copy_artefacts(dest, artefacts, ("spl_benchmark*.pdf", "spl_benchmark*.md"))
 
 
 @pytest.fixture(scope="function")

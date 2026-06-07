@@ -250,9 +250,12 @@ class FAMesh(object):
         # Get open marine regions
         self.seaID = np.where(self.lFill <= self.sealevel)[0]
 
-        # Define multiple flow directions for unfilled elevation
+        # Define multiple flow directions for unfilled elevation.
+        # `self.gid` is the per-node global ID; passed in to make the
+        # slope-tie-break in mfdreceivers deterministic across MPI
+        # decompositions (see fortran/functions.F90 and AGENTS.md).
         self.donRcvs, self.distRcv, self.wghtVal = mfdreceivers(
-            self.flowDir, self.flowExp, h, self.sealevel
+            self.flowDir, self.flowExp, h, self.sealevel, self.gid
         )
 
         self.rcvID = self.donRcvs.copy()

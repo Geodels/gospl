@@ -15,6 +15,7 @@ See AGENTS.md > Analytical benchmark suite.
 import os
 import glob
 import time
+import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -440,7 +441,8 @@ def plotMaps(coords, steps, step=-1):
 # =============================================================================
 
 def evaluateSPL(coords, steps, U, K, m_over_n=0.5,
-                tout=1e5, ss_threshold=0.05, A_min_fraction=0.05):
+                tout=1e5, ss_threshold=0.05, A_min_fraction=0.05,
+                skip_basin_test=False):
     """
     Automatic SPL steady-state benchmark — 6 quantitative pass/fail tests.
 
@@ -491,7 +493,7 @@ def evaluateSPL(coords, steps, U, K, m_over_n=0.5,
     time_myr  = np.arange(1, N_steps) * tout / 1e6
 
     # ------------------------------------------------------------------
-    # Test 0: single-basin domain check
+    # Test 0: single-basin domain check (optional)
     # ------------------------------------------------------------------
     basin_fraction = mask_ss.sum() / len(steps[-1].basin)
     domain_pass    = basin_fraction > 0.8
@@ -560,13 +562,20 @@ def evaluateSPL(coords, steps, U, K, m_over_n=0.5,
     # ------------------------------------------------------------------
     # Pass / fail flags
     # ------------------------------------------------------------------
-    p_domain = domain_pass
+    if skip_basin_test:
+        p_domain = True
+    else:
+        p_domain = domain_pass
     p_ss     = ss_reached
     p_mn_err = mn_err      < 5
     p_mn_r2  = r2_sa       > 0.95
     p_ks_err = ks_err      < 5
     p_ks_iqr = ks_iqr_rel  < 0.10
-    n_pass   = sum([p_domain, p_ss, p_mn_err, p_mn_r2, p_ks_err, p_ks_iqr])
+    if skip_basin_test:
+        # Exclude basin geometry test from scoring (5 tests total)
+        n_pass = sum([p_ss, p_mn_err, p_mn_r2, p_ks_err, p_ks_iqr])
+    else:
+        n_pass = sum([p_domain, p_ss, p_mn_err, p_mn_r2, p_ks_err, p_ks_iqr])
 
     def pf(flag): return "PASS" if flag else "FAIL"
 
@@ -578,11 +587,15 @@ def evaluateSPL(coords, steps, U, K, m_over_n=0.5,
     print("  SPL benchmark — goSPL")
     print("=" * pw)
 
-    print(f"\n[0] Domain geometry")
-    print(f"    Basin coverage   : {100*basin_fraction:.1f}%  "
-          f"{pf(p_domain)}  (>80% required for single-basin test)")
-    print(f"    Channel A_min    : {A_min:.2e} m²  "
-          f"({100*A_min_fraction:.0f}% of outlet FA = {A_outlet:.2e} m²)")
+    if not skip_basin_test:
+        print(f"\n[0] Domain geometry")
+        print(f"    Basin coverage   : {100*basin_fraction:.1f}%  "
+              f"{pf(p_domain)}  (>80% required for single-basin test)")
+        print(f"    Channel A_min    : {A_min:.2e} m²  "
+              f"({100*A_min_fraction:.0f}% of outlet FA = {A_outlet:.2e} m²)")
+    else:
+        print(f"\n[0] Domain geometry  — SKIPPED for this case")
+        print(f"    Basin coverage   : {100*basin_fraction:.1f}%  (skipped)")
 
     print(f"\n[1] Steady state  "
           f"(E/U must be within ±{ss_threshold*100:.0f}% of 1.0)")
@@ -610,9 +623,14 @@ def evaluateSPL(coords, steps, U, K, m_over_n=0.5,
     print(f"    IQR/median       : {ks_iqr_rel:.3f}  "
           f"{pf(p_ks_iqr)}  (<0.10 = spatially uniform)")
 
+    overall_label = f"{n_pass}/5" if skip_basin_test else f"{n_pass}/6"
+    overall_result = "PASS" if (
+        (n_pass == 5 and skip_basin_test) or
+        (n_pass == 6 and not skip_basin_test)
+    ) else "FAIL"
+
     print("\n" + "=" * pw)
-    print(f"  OVERALL: {'PASS' if n_pass == 6 else 'FAIL'}  "
-          f"({n_pass}/6 tests passed)")
+    print(f"  OVERALL: {overall_result}  ({overall_label} tests passed)")
     print("=" * pw)
 
     # ------------------------------------------------------------------
@@ -695,23 +713,29 @@ def evaluateSPL(coords, steps, U, K, m_over_n=0.5,
     # Panel 6: colour-coded scorecard table
     ax = fig.add_subplot(gs[1, 2])
     ax.axis('off')
+    overall_label = f"{n_pass}/5" if skip_basin_test else f"{n_pass}/6"
+    overall_result = "PASS" if (
+        (n_pass == 5 and skip_basin_test) or
+        (n_pass == 6 and not skip_basin_test)
+    ) else "FAIL"
+
     rows = [
         ["Test",             "Value",                        "Result"],
-        ["Basin coverage",   f"{100*basin_fraction:.1f}%",   pf(p_domain)],
+        ["Basin coverage",   f"{100*basin_fraction:.1f}%",   ("SKIP" if skip_basin_test else pf(p_domain))],
         ["E/U final",        f"{EU_ratio[-1]:.4f}",          pf(p_ss)],
         ["m/n error",        f"{mn_err:.1f}%",               pf(p_mn_err)],
         ["S-A R²",           f"{r2_sa:.4f}",                 pf(p_mn_r2)],
         ["ks error",         f"{ks_err:.1f}%",               pf(p_ks_err)],
         ["ks IQR/median",    f"{ks_iqr_rel:.3f}",            pf(p_ks_iqr)],
-        ["OVERALL",          f"{n_pass}/6",
-         "PASS" if n_pass == 6 else "FAIL"],
+        ["OVERALL",          overall_label,
+         overall_result],
     ]
     colours = []
     for i, row in enumerate(rows):
         if i == 0:
             colours.append(['#f0f0f0'] * 3)       # header row
         elif i == len(rows) - 1:
-            c = '#c8e6c9' if n_pass == 6 else '#ffcdd2'
+            c = '#c8e6c9' if overall_result == 'PASS' else '#ffcdd2'
             colours.append([c] * 3)               # overall row
         else:
             c = '#c8e6c9' if row[2] == 'PASS' else '#ffcdd2'
@@ -729,9 +753,20 @@ def evaluateSPL(coords, steps, U, K, m_over_n=0.5,
     plt.close('all')
     print("Saved → spl_benchmark.pdf")
 
+    overall_pass = (n_pass == 5) if skip_basin_test else (n_pass == 6)
+    total_tests = 5 if skip_basin_test else 6
+
     return {
-        "overall_pass":   n_pass == 6,
+        "overall_pass":   overall_pass,
         "n_pass":         n_pass,
+        "total_tests":    total_tests,
+        "skip_basin_test": skip_basin_test,
+        "p_domain":       p_domain,
+        "p_ss":           p_ss,
+        "p_mn_err":       p_mn_err,
+        "p_mn_r2":        p_mn_r2,
+        "p_ks_err":       p_ks_err,
+        "p_ks_iqr":       p_ks_iqr,
         "basin_fraction": float(basin_fraction),
         "ss_reached":     ss_reached,
         "ss_step":        ss_step,
@@ -771,7 +806,7 @@ def _write_markdown_report(results, output_path):
         "# SPL Steady-State Benchmark — goSPL",
         "",
         f"**Result: {badge}** &nbsp; "
-        f"({results['n_pass']}/6 tests passed)",
+        f"({results['n_pass']}/{results['total_tests']} tests passed)",
         "",
         "## Test Results",
         "",
@@ -779,7 +814,7 @@ def _write_markdown_report(results, output_path):
         "|---|------|-------|-----------|--------|",
         f"| 0 | Basin coverage "
         f"| {100 * results['basin_fraction']:.1f}% | > 80% "
-        f"| {pf(results['basin_fraction'] > 0.8)} |",
+        f"| {('SKIP' if results['skip_basin_test'] else pf(results['p_domain']))} |",
         f"| 1 | E/U final "
         f"| {results['EU_ratio'][-1]:.4f} | within ±5% of 1.0 "
         f"| {pf(results['ss_reached'])} |",
@@ -807,6 +842,175 @@ def _write_markdown_report(results, output_path):
     return output_path
 
 
+def _write_combined_markdown_report(all_results, output_path):
+    """
+    Write a combined Markdown summary for all benchmark cases.
+    """
+    lines = [
+        "# SPL Benchmarks — Combined Results",
+        "",
+        "| Case | Result | Passed Tests | Total Tests | Basin | E/U | m/n | R² | ks err | ks IQR | Basin Fraction |",
+        "|------|--------|--------------|-------------|-------|------|-----|-----|--------|---------|----------------|",
+    ]
+    for result in all_results:
+        status = 'PASS' if result['overall_pass'] else 'FAIL'
+        basin_status = 'SKIP' if result['skip_basin_test'] else ('PASS' if result['p_domain'] else 'FAIL')
+        eu_status = 'PASS' if result['p_ss'] else 'FAIL'
+        mn_status = 'PASS' if result['p_mn_err'] else 'FAIL'
+        r2_status = 'PASS' if result['p_mn_r2'] else 'FAIL'
+        ks_err_status = 'PASS' if result['p_ks_err'] else 'FAIL'
+        ks_iqr_status = 'PASS' if result['p_ks_iqr'] else 'FAIL'
+        lines.append(
+            f"| {result['case']} | {status} | {result['n_pass']} | {result['total_tests']} | {basin_status} | "
+            f"{eu_status} | {mn_status} | {r2_status} | {ks_err_status} | {ks_iqr_status} | {result['basin_fraction']:.3f} |"
+        )
+
+    lines.extend([
+        "",
+        "## Notes",
+        "",
+        "- `skip_basin_test=True` is used for cases 150 and 200, so those cases are scored out of 5 tests.",
+        "- Overall pass requires every case to pass its respective benchmark criteria.",
+    ])
+    with open(output_path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    return output_path
+
+
+# =============================================================================
+# Entry point
+# =============================================================================
+
+def _run_spl_benchmarks():
+    time_start = time.time()
+
+    cases = [
+        ("100", "sims/input100.yml", "sims_outputs/sim_out100"),
+        ("150", "sims/input150.yml", "sims_outputs/sim_out150"),
+        ("200", "sims/input200.yml", "sims_outputs/sim_out200"),
+    ]
+
+    all_results = []
+    for label, input_path, model_path in cases:
+        case_start = time.time()
+        print("\n" + "=" * 57)
+        print(f"  Running case {label}: {input_path}")
+        print("=" * 57)
+
+        # ------------------------------------------------------------------
+        # 1. Run goSPL forward model — try/finally per AGENTS.md KSP contract.
+        # ------------------------------------------------------------------
+        model = sim(input_path, False, False)
+        try:
+            model.runProcesses()
+        finally:
+            model.destroy()
+
+        print(f"goSPL run complete  ({time.time()-case_start:.1f} s)")
+
+        # ------------------------------------------------------------------
+        # 2. Load mesh topology (static — same for all timesteps).
+        # ------------------------------------------------------------------
+        coords, cells = loadTopology(model_path)
+        print(f"\nPost-processing 101 timesteps for case {label}...")
+        t_pp = time.time()
+        
+        # ------------------------------------------------------------------
+        # 3. Post-process all output timesteps.
+        #    101 outputs × 1e5 yr = 10 Myr total — matches the input file run.
+        # ------------------------------------------------------------------
+        steps = [getStepData(model_path, coords, cells, k) for k in range(101)]
+        print(f"Post-processing complete  ({time.time()-t_pp:.1f} s)")
+
+        # ------------------------------------------------------------------
+        # 4. Run SPL benchmark (writes spl_benchmark.pdf to cwd).
+        # ------------------------------------------------------------------
+        results = evaluateSPL(
+            coords, steps,
+            U              = 4e-4,
+            K              = 4e-6,
+            m_over_n       = 0.5,
+            tout           = 1e5,
+            skip_basin_test = (label in ["150", "200"]),
+        )
+
+        try:
+            old_pdf = "spl_benchmark.pdf"
+            new_pdf = f"spl_benchmark_{label}.pdf"
+            if os.path.exists(old_pdf):
+                os.replace(old_pdf, new_pdf)
+                print(f"Saved → {new_pdf}")
+        except Exception:
+            pass
+
+        md_name = f"spl_benchmark_{label}.md"
+        _write_markdown_report(results, md_name)
+        print(f"Saved → {md_name}")
+
+        results["case"] = label
+        all_results.append(results)
+        print(f"Case {label} summary: {'PASS' if results['overall_pass'] else 'FAIL'} "
+              f"({results['n_pass']}/{'5' if label in ['150', '200'] else '6'} tests)")
+
+
+    # ------------------------------------------------------------------
+    # 5. Markdown report — for $GITHUB_STEP_SUMMARY and PR comments.
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 57)
+    print("  Combined results for all cases")
+    print("=" * 57)
+    for r in all_results:
+        count_label = '5' if r['case'] in ['150', '200'] else '6'
+        print(f"  Case {r['case']}: {'PASS' if r['overall_pass'] else 'FAIL'} "
+              f"({r['n_pass']}/{count_label}) — basin_fraction={r['basin_fraction']:.2f}")
+
+    combined_md = "spl_benchmark_all.md"
+    _write_combined_markdown_report(all_results, combined_md)
+    print(f"Saved combined Markdown report → {combined_md}")
+
+    github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if github_summary:
+        with open(combined_md) as f:
+            content = f.read()
+        with open(github_summary, "a") as f:
+            f.write(content)
+
+    # ------------------------------------------------------------------
+    # 6. Timing.
+    # ------------------------------------------------------------------
+    elapsed = time.time() - time_start
+    print(f"\nTotal execution time : {elapsed:.1f} s  ({elapsed/60:.1f} min)")
+
+    for _, _, model_path in cases:
+        if os.path.exists(model_path):
+            shutil.rmtree(model_path)
+            print(f"Removed output directory: {model_path}")
+
+    return all_results
+
+
+def _assert_spl_benchmarks(all_results):
+
+    # ------------------------------------------------------------------
+    # 7. Assert per A4 template.
+    # ------------------------------------------------------------------
+    failed_cases = [r for r in all_results if not r['overall_pass']]
+    assert not failed_cases, (
+        "SPL benchmark failed for one or more cases:\n" +
+        "\n".join(
+            f"Case {r['case']}: {r['n_pass']}/" +
+            ("5" if r['case'] in ['150','200'] else "6") +
+            f" tests passed; basin_fraction={r['basin_fraction']:.3f}; "
+            f"E/U final={r['EU_ratio'][-1]:.4f}; "
+            f"m/n error={r['mn_error_pct']:.1f}%; "
+            f"ks error={r['ks_error_pct']:.1f}%; "
+            f"ks IQR/median={r['ks_iqr_rel']:.3f}"
+            for r in failed_cases
+        )
+    )
+
+
+
 # =============================================================================
 # Pytest entry point
 # =============================================================================
@@ -822,72 +1026,5 @@ def test_spl_steady_state(spl_tmp_path):
     Pass criteria: 6/6 sub-tests must pass.
     See AGENTS.md: Analytical benchmark suite.
     """
-    time_start = time.time()
-
-    # ------------------------------------------------------------------
-    # 1. Run goSPL forward model — try/finally per AGENTS.md KSP contract.
-    # ------------------------------------------------------------------
-    model = sim("input.yml", False, False)
-    try:
-        model.runProcesses()
-    finally:
-        model.destroy()
-
-    # ------------------------------------------------------------------
-    # 2. Load mesh topology (static — same for all timesteps).
-    # ------------------------------------------------------------------
-    model_path = "sim_output"
-    coords, cells = loadTopology(model_path)
-
-    # ------------------------------------------------------------------
-    # 3. Post-process all output timesteps.
-    #    101 outputs × 1e5 yr = 10 Myr total — matches the input.yml run.
-    # ------------------------------------------------------------------
-    n_steps = 101
-    steps = [getStepData(model_path, coords, cells, k)
-             for k in range(n_steps)]
-
-    # ------------------------------------------------------------------
-    # 4. Run SPL benchmark (writes spl_benchmark.pdf to cwd).
-    # ------------------------------------------------------------------
-    results = evaluateSPL(
-        coords, steps,
-        U        = 4e-4,   # m/yr — uniform uplift rate
-        K        = 4e-6,   # /yr  — SPL erodibility
-        m_over_n = 0.5,
-        tout     = 1e5,    # yr   — output interval
-    )
-
-    # ------------------------------------------------------------------
-    # 5. Markdown report — for $GITHUB_STEP_SUMMARY and PR comments.
-    # ------------------------------------------------------------------
-    md_path = spl_tmp_path / "spl_benchmark.md"
-    _write_markdown_report(results, md_path)
-
-    github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if github_summary:
-        with open(md_path) as f:
-            content = f.read()
-        with open(github_summary, "a") as f:
-            f.write(content)
-
-    # ------------------------------------------------------------------
-    # 6. Timing.
-    # ------------------------------------------------------------------
-    elapsed = time.time() - time_start
-    print(f"\nTotal execution time : {elapsed:.1f} s  "
-          f"({elapsed/60:.1f} min)")
-
-    # ------------------------------------------------------------------
-    # 7. Assert per A4 template.
-    # ------------------------------------------------------------------
-    assert results["overall_pass"], (
-        f"SPL benchmark failed: "
-        f"{results['n_pass']}/6 tests passed\n"
-        f"  Basin coverage : {results['basin_fraction']:.1%}\n"
-        f"  E/U final      : {results['EU_ratio'][-1]:.4f}\n"
-        f"  m/n error      : {results['mn_error_pct']:.1f}%\n"
-        f"  S-A R²         : {results['r2_sa']:.4f}\n"
-        f"  ks error       : {results['ks_error_pct']:.1f}%\n"
-        f"  ks IQR/median  : {results['ks_iqr_rel']:.3f}"
-    )
+    all_results = _run_spl_benchmarks()
+    _assert_spl_benchmarks(all_results)

@@ -405,6 +405,15 @@ class UnstMesh(object):
         self.lgmap_col = petsc4py.PETSc.LGMap().create(
             l2g, comm=petsc4py.PETSc.COMM_WORLD
         )
+        # Per-local-node global vertex ID, consistent across MPI
+        # decompositions (PETSc DMPlex guarantees a node's global ID is
+        # the same on every rank that has it as either owned or ghost).
+        # Used by `mfdreceivers` / `mfdrcvrs` to break exact slope ties
+        # deterministically — without this, quicksort can pick a different
+        # receiver on different ranks for the same global node and
+        # cascade into divergent drainage statistics under partitioning.
+        # int32 because f2py declares the Fortran arg as default integer.
+        self.gid = l2g.astype(np.int32)
 
         # Vertex part of an unique partition
         vIS = self.dm.getVertexNumbering()

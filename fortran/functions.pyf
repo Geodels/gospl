@@ -133,11 +133,12 @@ python module _fortran
             integer, optional,check(len(dat)>=nb),depend(dat) :: nb=len(dat)
         end subroutine donorsmax
 
-        subroutine mfdrcvrs(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
+        subroutine mfdrcvrs(nrcv,exp,elev,sl,gid,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
             double precision intent(in) :: exp
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb),intent(in),depend(nb) :: gid
             integer dimension(nb,12),intent(out),depend(nb) :: rcv
             double precision dimension(nb,12),intent(out),depend(nb) :: dist
             double precision dimension(nb,12),intent(out),depend(nb) :: wgt
@@ -165,11 +166,12 @@ python module _fortran
             integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
         end subroutine local_spl_coeff
 
-        subroutine mfdreceivers(nrcv,exp,elev,sl,rcv,dist,wgt,nb)
+        subroutine mfdreceivers(nrcv,exp,elev,sl,gid,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
             double precision intent(in) :: exp
             double precision intent(in) :: sl
             double precision dimension(nb),intent(in) :: elev
+            integer dimension(nb),intent(in),depend(nb) :: gid
             integer dimension(nb,nrcv),intent(out),depend(nb,nrcv) :: rcv
             double precision dimension(nb,nrcv),intent(out),depend(nb) :: dist
             double precision dimension(nb,nrcv),intent(out),depend(nb) :: wgt

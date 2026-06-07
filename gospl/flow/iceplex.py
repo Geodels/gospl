@@ -83,8 +83,12 @@ class IceMesh(object):
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
         fillz = fillEPS[self.locIDs]
 
-        # Calculate receivers and weights for the flow direction matrix
-        rcv, _, wght = mfdreceivers(dir_ice, 1.0, fillz, BOUNDARY_FLOW_SENTINEL)
+        # Calculate receivers and weights for the flow direction matrix.
+        # `self.gid` is the per-node global ID, passed in for deterministic
+        # exact-tie-break on slope (see fortran/functions.F90:mfdreceivers).
+        rcv, _, wght = mfdreceivers(
+            dir_ice, 1.0, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
+        )
 
         # Handle borders for flat models
         if self.flatModel:
