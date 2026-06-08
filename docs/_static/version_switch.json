@@ -1,9 +1,9 @@
 [
     {
-        "name": "release-candidate (latest)",
-        "version": "release-candidate",
+        "name": "stable (latest)",
+        "version": "v2026.06.01",
         "preferred": true,
-        "url": "https://gospl.readthedocs.io/en/release-candidate/"
+        "url": "https://gospl.readthedocs.io/en/stable/"
     },
     {
         "name": "development",
@@ -11,12 +11,7 @@
         "url": "https://gospl.readthedocs.io/en/dev/"
     },
     {
-        "name": "24.9.1 (stable)",
-        "version": "v2024.09.01",
-        "url": "https://gospl.readthedocs.io/en/stable/"
-    },
-    {
-        "name": "24.9.1",
+        "name": "v2024.09.01",
         "version": "v2024.09.01",
         "url": "https://gospl.readthedocs.io/en/v2024.09.01/"
     }
