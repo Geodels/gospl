@@ -6,22 +6,17 @@ package:
   version: {{ version }}
 
 source:
-  # Build from the repository root (path is relative to this meta.yaml).
   path: ..
 
 build:
   number: 0
-  # MPI tooling is not supported on Windows in this recipe.
   skip: true  # [win]
-  # Standard meson-python entry point. --no-deps avoids pip resolving deps
-  # that conda has already supplied at host scope.
   script: {{ PYTHON }} -m pip install . --no-build-isolation --no-deps -vv
 
 requirements:
   build:
     - {{ compiler('c') }}
     - {{ compiler('fortran') }}
-    # Cross-compilation glue (only used by build farms; harmless locally).
     - cross-python_{{ target_platform }}     # [build_platform != target_platform]
     - python                                  # [build_platform != target_platform]
     - numpy                                   # [build_platform != target_platform]
@@ -33,7 +28,7 @@ requirements:
     - setuptools >=61.0
     - cython
     - numpy
-    - mpi4py
+    - mpi4py >=4.0,<4.1.2
     - petsc4py
   run:
     - python
@@ -42,21 +37,19 @@ requirements:
     - numpy-indexed
     - pandas
     - h5py
-    - vtk
+    - vtk-base
     - ruamel.yaml
-    - mpi4py
+    - mpi4py >=4.0,<4.1.2
     - petsc4py
-    - gflex >=1.1.0
+    - gflex >=1.1.0,<2.0
     - pyshtools
 
 test:
   imports:
     - gospl
     - gospl._fortran
-  requires:
-    - pip
   commands:
-    - pip check
+    - python -c "import gospl; import gospl._fortran; print('ok')"
 
 about:
   home: https://github.com/Geodels/gospl

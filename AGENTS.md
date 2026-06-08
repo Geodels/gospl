@@ -281,6 +281,55 @@ Mesh `.npz` files under each benchmark's `boundary_condition[s]/` subfolder are 
 | `test_hillslope.py` | Hillslope diffusion | `z=(U/2κ)x(L-x)`; Roering, Kirchner & Dietrich 1999 | All `TOL_*` constants met |
 | `test_knickpoint.py` | Knickpoint propagation | `c=K·A^m`; Royden & Perron 2013; Tucker & Whipple 2002 | 4/4 sub-tests |
 
+## Conda Package Validation
+
+### Local build and smoke-test procedure (osx-arm64)
+Run this sequence from the repository root before pushing a release tag to
+`geodels`. It validates the conda recipe, builds the package, and exercises
+the full fast test suite against the *installed* package (not the source tree).
+```bash
+mamba install -n base -y conda-build        # one-time; skip if already present
+conda build purge                           # clear stale build cache
+conda build conda/ \
+  -c conda-forge \
+  --override-channels \
+  --python 3.11 \
+  --variants '{"python": ["3.11"]}' \
+  2>&1 | tee build.log
+mamba create -n gospl-smoke python=3.11 -c conda-forge -y
+mamba install -n gospl-smoke \
+   $PKG.conda \
+  -c local -c conda-forge -y
+mamba install -n gospl-smoke pytest -c conda-forge -y
+cd /tmp
+mamba run -n gospl-smoke python -c \
+  "from gospl.model import Model; print('ok')"
+mamba run -n gospl-smoke python -m pytest \
+  /path/to/gospl/tests/ \
+  -v --tb=short \
+  --import-mode=importlib
+cd -
+mamba env remove -n gospl-smoke -y
+```
+
+### Known platform constraints (osx-arm64)
+- **vtk → vtk-base**: the full `vtk` package on osx-arm64 pulls in `gtk3` /
+  `gdk-pixbuf`, whose post-link script fails inside the conda-build sandbox.
+  The recipe uses `vtk-base` (headless subset) instead. goSPL only uses VTK
+  for unstructured mesh I/O, not rendering.
+- **petsc4py ABI mismatch**: conda-forge does not yet publish a `py311`
+  osx-arm64 build of `petsc4py`. The `np2py310` build is installed and works
+  for all computation, but causes a segfault during MPI finalization when
+  spawned as a subprocess via `mpirun`. `test_parallel_correctness` detects
+  this at runtime via `_petsc4py_abi_mismatch()` and skips rather than
+  failing. The test runs correctly on linux-64 (which has proper `py311`
+  builds) and in `gosplenv` (where the mismatch is masked by the environment
+  history).
+- **Multi-version render**: pass `--variants '{"python": ["3.11"]}'` to
+  conda-build to prevent it rendering the recipe for all Python versions in
+  the conda-forge global pinnings file (which includes 3.13, incompatible
+  with `numpy=1.26`).
+
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.
 2. Did you run the regression tests, including the uniform `sedfactor` case (see Known bugs)?

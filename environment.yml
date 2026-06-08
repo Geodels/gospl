@@ -15,7 +15,7 @@ dependencies:
   - h5py
   - vtk
   - ruamel.yaml
-  - gflex
+  - gflex>=1.1.0,<2.0
   - mpi4py
   - pyshtools
   - cython
