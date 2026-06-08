@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last reviewed 2026-06-01 against `release-candidate`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
+Last reviewed 2026-06-08 against `v2026.06.08`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
 
 ## What goSPL does
 goSPL is a parallel landscape-evolution model that integrates the stream-power law (river incision), linear and non-linear hillslope diffusion, marine sediment transport, glacial accumulation, flexural isostasy, and horizontal/vertical tectonics on an unstructured Voronoi/Delaunay finite-volume mesh. The mesh is either a 2D flat plane (`self.flatModel == True`) or a global sphere; partitioning, halo exchange, and all linear/non-linear solves run on PETSc DMPlex via petsc4py. Time integration is an explicit outer Euler loop in `Model.runProcesses` with implicit KSP/SNES/TS inner solves for diffusion, flow accumulation, and sediment routing.
@@ -283,6 +283,11 @@ Mesh `.npz` files under each benchmark's `boundary_condition[s]/` subfolder are 
 
 ## Conda Package Validation
 
+### Released packages
+| Version | Date | Channel | Install |
+|---|---|---|---|
+| `v2026.06.08` | 2026-06-08 | `geodels` | `mamba install -c geodels -c conda-forge gospl` |
+
 ### Local build and smoke-test procedure (osx-arm64)
 Run this sequence from the repository root before pushing a release tag to
 `geodels`. It validates the conda recipe, builds the package, and exercises
@@ -330,9 +335,17 @@ mamba env remove -n gospl-smoke -y
   the conda-forge global pinnings file (which includes 3.13, incompatible
   with `numpy=1.26`).
 
+## Milestones
+
+| Date | Tag | Description |
+|---|---|---|
+| 2026-06-08 | `refactor-baseline-2026-06` | Tier 2 AI-readability refactor complete. AGENTS.md written, 6 regression tests passing, 3 scientific bugs fixed (rUni/sUni, marine sediment leak, Eb sign convention), constants.py, _get_param, named DataFrame access, KSP lifecycle documented, HOW_TO_ADD_FORCING.md and HOW_TO_ADD_OUTPUT.md written. |
+| 2026-06-08 | `v2026.06.08` | First release from refactored codebase. Analytical benchmark suite integrated and green on all CI cells (ubuntu-latest + macos-14 × Python 3.11 + 3.12). Published to `geodels` conda channel. |
+
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.
-2. Did you run the regression tests, including the uniform `sedfactor` case (see Known bugs)?
+2. Did you run the full regression test suite
+   (pytest tests/ -v)?
 3. If you added a column to a forcing DataFrame, did you use named access (df.at[nb, col]) not iloc?
 4. If you used a scratch Vec, did you document which ones in the method's docstring?
 5. If you changed a method called by `Model.runProcesses` (`model.py:217-286`), did you check every caller AND the mixin init order (`model.py:126-198`)?
