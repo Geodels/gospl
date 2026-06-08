@@ -79,16 +79,20 @@ jobs:
           path: ${{ steps.locate.outputs.package }}
           if-no-files-found: error
 
+      # Only on tag pushes, and only when the secret is configured.
+      # Publishes to the default `main` label so `mamba install
+      # -c geodels gospl` resolves to the latest tag without an
+      # explicit label suffix. (Previously was `--label rc`; dropped
+      # when release-candidate was promoted to stable on 2026-06-08.)
       - name: Publish to anaconda.org (main label)
-        # Only on tag pushes, and only when the secret is configured.
-        # Publishes to the default `main` label so `mamba install
-        # -c geodels gospl` resolves to the latest tag without an
-        # explicit label suffix. (Previously was `--label rc`; dropped
-        # when release-candidate was promoted to stable on 2026-06-08.)
-        if: github.event_name == 'push' && secrets.ANACONDA_GEODELS_TOKEN != ''
+        if: github.event_name == 'push'
         env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_GEODELS_TOKEN }}
         run: |
+          if [ -z "$ANACONDA_API_TOKEN" ]; then
+            echo "ANACONDA_GEODELS_TOKEN not set — skipping upload."
+            exit 0
+          fi
           anaconda -t "$ANACONDA_API_TOKEN" upload \
             --user geodels --skip-existing \
             "${{ steps.locate.outputs.package }}"
