@@ -1,7 +1,7 @@
 [
     {
         "name": "stable (latest)",
-        "version": "v2026.06.01",
+        "version": "v2026.06.08",
         "preferred": true,
         "url": "https://gospl.readthedocs.io/en/stable/"
     },
