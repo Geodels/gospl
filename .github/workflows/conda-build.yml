@@ -85,11 +85,11 @@ jobs:
         # -c geodels gospl` resolves to the latest tag without an
         # explicit label suffix. (Previously was `--label rc`; dropped
         # when release-candidate was promoted to stable on 2026-06-08.)
-        if: github.event_name == 'push' && env.ANACONDA_GEODELS_TOKEN != ''
+        if: github.event_name == 'push' && secrets.ANACONDA_GEODELS_TOKEN != ''
         env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_GEODELS_TOKEN }}
         run: |
-          anaconda -t "$ANACONDA_GEODELS_TOKEN" upload \
+          anaconda -t "$ANACONDA_API_TOKEN" upload \
             --user geodels --skip-existing \
             "${{ steps.locate.outputs.package }}"
             
