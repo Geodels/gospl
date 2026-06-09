@@ -18,7 +18,7 @@ from github.GithubException import GithubException
 # Config
 # ---------------------------------------------------------------------------
 
-ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 1024
 AGENTS_MD_PATH = "AGENTS.md"  # relative to repo root
 
