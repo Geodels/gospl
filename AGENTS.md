@@ -258,6 +258,7 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
   Skipped on cron / tag / dispatch so release-tagging is not blocked by hours-long benchmark wall-clock.
 - Benchmark artifacts (junit XML, Markdown reports, PDF figures under `results/`) uploaded to GitHub on every slow+benchmark run, including failures (`if: always()`). The artefacts land at `<repo_root>/results/<benchmark_name>/` via the teardown copy in `benchmarks/conftest.py`, not directly from `tmp_path`.
 - Benchmark failures block merge (`continue-on-error: false`).
+- The issue triage automation is designed to be transparent and idempotent: before posting a new automated response, the bot checks for an identical existing triage comment and skips duplicates when a workflow retry would otherwise repeat the same reply.
 - Concurrency: `tests-pr.yml` cancels in-flight runs on the same ref (`cancel-in-progress: true`); `tests-slow.yml` does not (`cancel-in-progress: false`) — slow runs are expensive enough that killing them mid-flight is more wasteful than letting them finish.
 
 ## Analytical benchmark suite
