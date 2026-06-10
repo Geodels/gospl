@@ -23,3 +23,10 @@ import sys
 import petsc4py
 
 petsc4py.init(sys.argv)
+
+# --- version ---
+try:
+    from importlib.metadata import version, PackageNotFoundError
+    __version__ = version("gospl")
+except PackageNotFoundError:
+    __version__ = "unknown"
