@@ -1,8 +1,8 @@
 name: conda-build
 
-# Builds goSPL conda packages for linux-64 + osx-arm64 and, on tag pushes,
-# publishes them to anaconda.org under the `rc` label when the
-# ANACONDA_GEODELS_TOKEN secret is configured.
+# Builds goSPL conda packages for linux-64 + linux-aarch64 + osx-arm64 and,
+# on tag pushes, publishes them to anaconda.org under the `geodels` channel when
+# the ANACONDA_GEODELS_TOKEN secret is configured.
 #
 # Triggers:
 #   - push of any tag matching v*           -> build + publish
@@ -27,8 +27,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-latest -> linux-64, macos-14 -> osx-arm64
-        os: [ubuntu-latest, macos-14]
+        # ubuntu-latest     -> linux-64
+        # ubuntu-24.04-arm  -> linux-aarch64 (native arm64, no QEMU)
+        # macos-14          -> osx-arm64
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14]
         python: ['3.11', '3.12']
 
     defaults:
@@ -91,4 +93,3 @@ jobs:
           anaconda -t "$ANACONDA_API_TOKEN" upload \
             --user geodels --skip-existing \
             "${{ steps.locate.outputs.package }}"
-            
