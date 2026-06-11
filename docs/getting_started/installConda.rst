@@ -259,73 +259,57 @@ and compiler toolchain already present in the conda environment rather than
 fetching a fresh isolated build environment.
 
 
-Building the goSPL full-stack environment
-------------------------------------------
+Pre- and post-processing environment (goSPL-examples)
+------------------------------------------------------
 
-The full-stack environment adds pre- and post-processing libraries on top of
-the runtime dependencies. It is used to run all of the
-`goSPL-examples <https://github.com/Geodels/goSPL-examples>`_ notebooks.
+To run goSPL together with its **pre- and post-processing workflows** — the
+notebooks in the `goSPL-examples <https://github.com/Geodels/goSPL-examples>`_
+repository — you need a fuller environment than the runtime stack above.
 
-.. code-block:: yaml
+The next step consists in downloading the conda environment for goSPL. A conda
+environment is like a virtualenv that allows you to install a specific flavour
+of Python and a set of libraries. For the latest version (``master`` branch) of
+goSPL, this is done by downloading the ``environment.yml`` file from the
+``goSPL-examples`` repository. To do this you can use ``curl``::
 
-    name: gospl-smoke
-    channels:
-        - conda-forge
-    dependencies:
-        - python>=3.11,<3.13
-        - meson-python>=0.15.0
-        - setuptools>=61.0
-        - pkg-config
-        - numpy
-        - petsc>=3.21,<3.22
-        - petsc4py>=3.21,<3.22
-        - openmpi>=4.0,<5.0
-        - mpi4py>=4.0
-        - pip
-        - scipy
-        - matplotlib
-        - numpy-indexed
-        - pandas
-        - h5py * mpi_openmpi*
-        - hdf5 * mpi_openmpi*
-        - meshio
-        - vtk-base
-        - pre-commit
-        - ruamel.yaml
-        - cython
-        - c-compiler
-        - cxx-compiler
-        - fortran-compiler
-        - meshplex
-        - gflex
-        - netcdf4
-        - xarray
-        - pyshtools
-        - uxarray
-        - pyinterp
-        - jigsawpy
-        - stripy
-        - xesmf
-        - mpas_tools
-        - pygmt
-        - rasterio
-        - pysheds
-        - seaborn
-        - pyevtk
-        - numba
-        - shapely
-        - pyvista
-        - pyproj
-        - triangle
-        - pytest
+    curl https://raw.githubusercontent.com/Geodels/goSPL-examples/master/environment.yml --output environment.yml
 
-Install with::
+or the ``wget`` command::
 
-    mamba env create -f environment.yml
+    wget https://raw.githubusercontent.com/Geodels/goSPL-examples/master/environment.yml
 
-followed by::
+This will save the file locally under the same name as it was on GitHub:
+``environment.yml``.
 
-    pip install --no-build-isolation -e /path/to/gospl
+Alternatively, you can get it from your preferred web browser by clicking on the
+following link:
+`environment.yml <https://raw.githubusercontent.com/Geodels/goSPL-examples/master/environment.yml>`_
+and saving it under the name ``environment.yml``.
 
-This environment allows you to run all examples provided in the
-`goSPL-examples repository <https://github.com/Geodels/goSPL-examples>`_.
+While goSPL itself is available from the ``geodels`` conda channel (see
+:ref:`install.geodels-channel` above), the **examples** additionally rely on pre-
+and post-processing libraries — some only available via ``pip`` — so the example
+environment is built from this environment file rather than installed as a
+single conda package. The use of the environment file provides an easy
+installation approach.
+
+Once the ``environment.yml`` file has been downloaded on your system, the
+following directives provide a step-by-step guide to create a local conda
+environment for goSPL. Navigate to the directory containing the
+``environment.yml`` file and run the following command from a terminal window::
+
+    conda env create -f environment.yml
+
+This will create an environment with the dependencies and packages required to
+run ``goSPL-examples``.
+
+To put yourself inside this environment run::
+
+    conda activate gospl-smoke
+
+To install other packages, ``jupyter`` for example::
+
+    conda install jupyter
+
+After your environment has been activated, you can use either **VS Code** or
+**JupyterLab** to run those examples on your local computer.
