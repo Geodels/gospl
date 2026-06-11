@@ -1,0 +1,149 @@
+name: pypi-publish
+
+# Builds the goSPL source distribution (sdist) and publishes it to PyPI.
+#
+# No binary wheels: goSPL depends on petsc4py / mpi4py / parallel-HDF5 +
+# h5py, which need to be linked against the user's MPI stack. A wheel
+# would lock those bindings to a specific MPI ABI; the sdist defers the
+# build to install time so it can pick up whatever MPI the user already
+# has. See `## Conda Package Validation > Known platform constraints` in
+# AGENTS.md for the constraints that motivate this.
+#
+# Triggers:
+#   - push of any tag matching v*       -> build + publish to PyPI
+#   - manual run from the Actions tab   -> build + publish to TestPyPI
+#                                          (dry-run path, safe to repeat)
+#
+# Trusted publishing:
+#   Both uploads use PyPI / TestPyPI Trusted Publishing (OIDC) instead of
+#   long-lived API tokens. Configure each project on PyPI under
+#   "Publishing" -> "Add a pending publisher" with:
+#     repository: Geodels/gospl
+#     workflow:   pypi-publish.yml
+#     environment: pypi   (for prod) / testpypi (for dispatch)
+#   The `id-token: write` permission below is what lets the OIDC handshake
+#   succeed; no secrets are read.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    outputs:
+      sdist: ${{ steps.locate.outputs.sdist }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          # meson-python's sdist embeds the version from meson.build, but
+          # fetch-depth: 0 keeps tag metadata available for any future
+          # version-from-vcs switch.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build frontend
+        run: python -m pip install --upgrade build
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - name: Locate sdist
+        id: locate
+        run: |
+          SDIST=$(ls dist/gospl-*.tar.gz | head -1)
+          if [ -z "$SDIST" ]; then
+            echo "No sdist produced under dist/" >&2
+            exit 1
+          fi
+          echo "sdist=$SDIST" >> "$GITHUB_OUTPUT"
+          echo "Built: $SDIST"
+
+      - name: Inspect sdist contents
+        # Sanity-check that meson-python included the Fortran sources and
+        # meson.build. A silently-broken sdist (missing fortran/*.F90 or
+        # meson.build) will still upload but no user can install it.
+        run: |
+          SDIST="${{ steps.locate.outputs.sdist }}"
+          tar tzf "$SDIST" | sort > sdist-listing.txt
+          echo "--- sdist contents ---"
+          cat sdist-listing.txt
+          echo "----------------------"
+          for required in \
+            "meson.build" \
+            "pyproject.toml" \
+            "fortran/functions.F90" \
+            "fortran/functions.pyf" \
+            "gospl/__init__.py" \
+            "gospl/model.py"
+          do
+            if ! grep -q "/$required\$" sdist-listing.txt; then
+              echo "Missing from sdist: $required" >&2
+              exit 1
+            fi
+          done
+          echo "All required files present."
+
+      - name: Upload sdist as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gospl-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: Publish to TestPyPI (dry-run)
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/gospl
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gospl-sdist
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/gospl
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gospl-sdist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

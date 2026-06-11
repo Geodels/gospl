@@ -27,7 +27,9 @@ try:
 except PackageNotFoundError:
     __version__ = "unknown"
 ```
-The metadata version is driven by `meson.build` line 4 (`version: '2026.06.08'`). **There is no version string anywhere else.** To bump the version, change `meson.build` only — `__init__.py` never needs to change. The `PackageNotFoundError` fallback covers the case where the package is cloned but not installed (e.g. bare `git clone` without `pip install -e .`).
+The metadata version is driven by `meson.build` line 4 (`version: '2026.6.12'`). **There is no version string anywhere else.** To bump the version, change `meson.build` only — `__init__.py` never needs to change. The `PackageNotFoundError` fallback covers the case where the package is cloned but not installed (e.g. bare `git clone` without `pip install -e .`).
+
+**Version spelling convention (adopted 2026-06-12): no leading zeros on month or day** — e.g. `2026.6.12`, not `2026.06.12`. PyPI auto-normalizes per PEP 440 (strips leading zeros for display and in the wheel/sdist filename), so a `2026.06.12` `meson.build` would show up on PyPI as `2026.6.12` while conda artifacts retained the `2026.06.12` spelling — the two channels would visually diverge for the same release. Writing the no-zero form everywhere keeps PyPI display, conda display, `.conda` filename, `.tar.gz` sdist filename, git tag (`v2026.6.12`), and `gospl.__version__` all bitwise-identical. Past tags (`v2026.06.08`, `v2026.06.11`) stay as historical record; do NOT retroactively re-spell them.
 
 `MPIcomm` is defined locally in 5 active files. 9 dead-code assignments were removed 2026-06. Active sites already follow the rule below.
 
