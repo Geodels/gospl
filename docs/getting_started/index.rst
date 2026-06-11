@@ -64,7 +64,7 @@ Setonix) are also provided.
 
 
     .. grid-item-card::
-        :img-top: ../_static/python.svg
+        :img-top: ../_static/pypi.svg
         :text-align: center
 
         **Install from PyPI**
