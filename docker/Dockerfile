@@ -148,15 +148,14 @@ ENV VIRTUAL_ENV=/opt/venv
 # pinned globally — petsc4py 3.21.x needs an OLD setuptools (<74, for the classic
 # distutils.util.execute(dry_run=...) signature) but h5py needs a NEW one
 # (>=77.0.1), so the two can't share a global pin. We resolve this per-package:
-# the venv ships setuptools<74 and petsc4py builds --no-build-isolation against
-# it, while h5py keeps build isolation and pulls its own setuptools>=77.
+# petsc4py gets a dedicated build-constraint file pinning setuptools<74 (below),
+# while h5py keeps build isolation and pulls its own setuptools>=77.
 # PIP_CONSTRAINT covers current pip; PIP_BUILD_CONSTRAINT covers pip >=26.2.
 ENV PIP_CONSTRAINT=/opt/pip-constraints.txt \
     PIP_BUILD_CONSTRAINT=/opt/pip-constraints.txt
 RUN python3 -m venv "${VIRTUAL_ENV}" \
     && printf 'numpy==%s\ncython<3.1\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt \
-    # venv setuptools held <74 for petsc4py's --no-build-isolation build below.
-    && pip install --no-cache-dir --upgrade pip "setuptools<74" wheel \
+    && pip install --no-cache-dir --upgrade pip setuptools wheel \
     # numpy/cython for petsc4py & mpi4py builds; meson-python+ninja are the
     # goSPL build backend, needed because we install it --no-build-isolation.
     && pip install --no-cache-dir "numpy==${NUMPY_VERSION}" "cython<3.1" "meson-python>=0.15.0" ninja
@@ -166,10 +165,13 @@ RUN MPICC=/opt/mpich/bin/mpicc \
     pip install --no-cache-dir --no-binary=mpi4py "mpi4py>=4.0"
 
 # --- petsc4py from SOURCE against /opt/petsc (version matched to PETSc) ---
-# --no-build-isolation so it builds against the venv's setuptools<74 (its
-# confpetsc.py is incompatible with setuptools >=74).
-RUN PETSC_DIR=/opt/petsc \
-    pip install --no-cache-dir --no-build-isolation --no-binary=petsc4py "petsc4py==${PETSC_VERSION}"
+# petsc4py 3.21.x's confpetsc.py is incompatible with setuptools >=74 (the
+# classic distutils.util.execute(dry_run=...) was dropped). Pin setuptools<74
+# via a petsc4py-ONLY build constraint, so h5py below still gets its required
+# setuptools>=77 from the global (setuptools-free) build constraint.
+RUN printf 'numpy==%s\ncython<3.1\nsetuptools<74\n' "${NUMPY_VERSION}" > /opt/petsc4py-bc.txt \
+    && PETSC_DIR=/opt/petsc PIP_BUILD_CONSTRAINT=/opt/petsc4py-bc.txt \
+       pip install --no-cache-dir --no-binary=petsc4py "petsc4py==${PETSC_VERSION}"
 
 # --- MPI-linked h5py against the HDF5 built in the hdf5-build stage ---
 # (build isolation pulls h5py's own setuptools>=77; NOT the nompi variant.)

@@ -515,10 +515,13 @@ petsc4py 3.21.x cannot be cythonized by Cython ≥3.1 (`cyautodoc`
 have *opposite* requirements: petsc4py's `confpetsc.py` needs the classic
 `distutils.util.execute(dry_run=...)` that setuptools ≥74 dropped (py3.12 has no
 stdlib distutils), while h5py's build requires setuptools ≥77.0.1. They're
-resolved per-package: the venv ships `setuptools<74` and **petsc4py builds
-`--no-build-isolation`** against it; **h5py keeps build isolation** and pulls its
-own ≥77. These build-toolchain contortions are a consequence of building the
-older petsc4py 3.21.x from source; a future PETSc bump may let them be relaxed.
+resolved per-package: **petsc4py gets a dedicated build-constraint file** pinning
+`setuptools<74` (passed as `PIP_BUILD_CONSTRAINT` for just that `pip install`),
+while **h5py keeps build isolation** under the global (setuptools-free) constraint
+and pulls its own ≥77. (Note: `PIP_BUILD_CONSTRAINT`/`--build-constraint` cannot
+be combined with `--no-build-isolation` — pip rejects it — so petsc4py stays in
+build isolation.) These build-toolchain contortions are a consequence of building
+the older petsc4py 3.21.x from source; a future PETSc bump may let them be relaxed.
 
 The base layers are split into cached stages — `mpich-build` → `petsc-build` →
 `hdf5-build` (HDF5 chained `FROM petsc-build`). `docker-build.yml` warms them
