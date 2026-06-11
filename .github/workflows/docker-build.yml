@@ -58,7 +58,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Build + cache ONLY the slow base stages (MPICH + PETSc) first. These
+      # succeed even when the later python layers fail, so the gha cache is
+      # always populated — without this, a failure in the python layers means
+      # cache-to never runs and the next run rebuilds MPICH+PETSc cold (~35 min).
+      # The base layers don't depend on GOSPL_VERSION, so they cache across tags.
+      - name: Warm base-stage cache (MPICH + PETSc)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: petsc-build
+          platforms: linux/amd64
+          cache-from: type=gha,scope=hpc-base
+          cache-to: type=gha,scope=hpc-base,mode=max
+
       # Build and load into the local daemon so we can smoke-test before push.
+      # Reuses the base layers from the warm step's cache; only the python
+      # layers (re)build here.
       - name: Build image (load locally)
         uses: docker/build-push-action@v6
         with:
@@ -71,8 +88,10 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ steps.ver.outputs.tag }}
             ${{ env.IMAGE }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=hpc-base
+            type=gha,scope=hpc-full
+          cache-to: type=gha,scope=hpc-full,mode=max
 
       - name: Smoke test
         run: |
