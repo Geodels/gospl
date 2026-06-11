@@ -1164,6 +1164,7 @@ def test_parallel_correctness(tmp_path):
         moves negligible sediment — same gate as Tests 6-7).
     """
     import json
+    import os
     import shutil
     import subprocess
     import sys
@@ -1212,9 +1213,22 @@ def test_parallel_correctness(tmp_path):
             sys.executable, str(dump_py),
             "minimal.yml", str(stats_json),
         ]
+        # Scrub inherited MPI-runtime env vars before spawning a nested mpirun.
+        # pytest imported gospl (-> petsc4py.init -> MPI_Init), which under
+        # OpenMPI exports OMPI_*/PMIX_*/PRTE_* into this process; if they leak
+        # into the child `mpirun` it thinks it is already inside an MPI job and
+        # silently refuses to launch (rc=1, empty output). MPICH is unaffected,
+        # but the conda package and HPC container both use OpenMPI. OPAL_PREFIX
+        # is preserved so mpirun can still locate its own libraries.
+        child_env = {
+            k: v for k, v in os.environ.items()
+            if not k.startswith(("OMPI_", "PMIX_", "PRTE_", "OPAL_"))
+        }
+        if "OPAL_PREFIX" in os.environ:
+            child_env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
         result = subprocess.run(
             cmd, cwd=out_dir, timeout=600,
-            capture_output=True, text=True,
+            capture_output=True, text=True, env=child_env,
         )
         if result.returncode != 0 or not stats_json.exists():
             pytest.fail(

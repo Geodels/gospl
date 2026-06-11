@@ -344,19 +344,19 @@ mamba env remove -n gospl-smoke -y
   openmpi-linked `petsc4py 3.21.2` builds (`py311h196a43b_0`,
   `py312ha15fc32_0`), which the recipe now pins — so the ABI-mismatch skip no
   longer fires on osx-arm64 and the test actually runs.
-- **`test_parallel_correctness` nested-mpirun env leak (osx-arm64)**: with the
-  py311/py312 petsc4py now resolving, the smoke run executes this test for the
-  first time on osx-arm64 and it **fails** (`mpirun -n 1` subprocess rc=1,
-  empty output) — NOT a package defect. Root cause: `import gospl` runs
-  `petsc4py.init()` → `MPI_Init` in the pytest parent process, which exports
-  `OMPI_*`/`PMIX_*`/`PRTE_*` env vars; the test's `subprocess.run(["mpirun",
-  ...])` inherits them, and macOS OpenMPI 4.x then silently refuses to launch
-  the nested job. Scrubbing those vars before the subprocess (or running the
-  dump script under `mamba run … mpirun` from a clean parent) makes it pass —
-  verified: goSPL runs to completion with correct output under `mpirun -n 1`.
-  The real fix is a test-harness env scrub in `run_at_rank` (out of scope for
-  a packaging-only change); until then the package is sound and the other
-  12/13 fast tests pass against the installed package.
+- **`test_parallel_correctness` nested-mpirun env leak (FIXED, regression-guarded)**:
+  under OpenMPI, `import gospl` → `petsc4py.init()` → `MPI_Init` in the pytest
+  parent exports `OMPI_*`/`PMIX_*`/`PRTE_*` env vars; the test's
+  `subprocess.run(["mpirun", ...])` inherited them, so OpenMPI thought it was
+  already inside an MPI job and silently refused to launch the nested run
+  (`rc=1`, empty output). This was masked in CI until 2026-06 (ubuntu used
+  MPICH, which is immune; osx-arm64 *skipped* the test on the old py310-only
+  petsc4py). It surfaced on all cells once `environment.yml` pinned OpenMPI 4.x
+  + petsc4py 3.21.x (real py311/py312 builds → no skip). **Fix:** `run_at_rank`
+  now scrubs `OMPI_*`/`PMIX_*`/`PRTE_*`/`OPAL_*` from the child env (preserving
+  `OPAL_PREFIX`) before spawning `mpirun`. Harmless under MPICH. The same leak
+  affects the published conda package and HPC container (both OpenMPI), so this
+  is a real fix, not just a CI patch.
 - **Multi-version render**: pass `--variants '{"python": ["3.11"]}'` to
   conda-build to prevent it rendering the recipe for all Python versions in
   the conda-forge global pinnings file (which includes 3.13, incompatible
