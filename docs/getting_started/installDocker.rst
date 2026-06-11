@@ -6,125 +6,188 @@ Installation via Docker
 =========================
 
 
-Getting Docker application
---------------------------
+Getting Docker
+--------------
 
-Docker is an open platform for developing, shipping, and running applications. You can install it from:
+Docker is an open platform for developing, shipping, and running applications.
+Install it for your operating system from:
 
 +  `https://docs.docker.com/get-docker/ <https://docs.docker.com/get-docker/>`_
 
-Once you have installed Docker Desktop for your operating system then enable the docker comand line (`Docker CLI`).
+Once Docker Desktop is installed, the Docker CLI is available in your terminal.
 
 
-`Docker containers <https://hub.docker.com/r/geodels/gospl>`_ provide an easy-way to set up and distribute applications. They are also safe and consistent environments which
-facilitate debugging and reproducibility of models / simulations.
-
-goSPL on DockerHub
-^^^^^^^^^^^^^^^^^^
-
-The goSPL image contains all the dependencies and configuration files required to run models. Users can start running model as soon as they have downloaded the image, independently of the underlying operating system available on their machine.
-
-.. important::
-  
-  The goSPL docker image is an easy-to-use approach for running our code especially if you have limited experience with Anaconda environments. 
-
-Different flavors could be pulled using a tag and the recommended one is the ``gospl:latest`` that points to goSPL version ``v2024.09.01`` and uses the latest release of the code.
-
-.. note::
-  
-  Depending on your operating system, you will be able to configure the docker application to set your resources: CPUs, memory, swap, or Disk image size.
-
-On top of the libraries required for goSPL, additional ones have been included for pre- and post-processing.
-Amongst then, you will find:
-
-- xarray, rioxarray, xarray-spatial
-- pygmt, cartopy, pyproj
-- xesmf, maps, uxarray
-- stripy, triangle,jigsawpy
-- vtk, hdf5, netCDF4
-
-
-Docker Dashboard
+goSPL on Docker Hub
 -------------------
 
-To download and run goSPL from Docker, you might want to use the Docker **Dashboard** and define the Docker settings from there.
+The `geodels/gospl-examples <https://hub.docker.com/r/geodels/gospl-examples>`_
+image packages the full ``gospl-smoke`` conda environment — goSPL, PETSc, MPI,
+GMT, VTK and JupyterLab — and is the recommended way to run the examples without
+a local conda install.
 
 .. important::
-  
-  More specifically, you will need in the *Docker Settings Resources* to setup your CPU, Memory and Swap limits, and this is going to be important to ensure that your simulations do not run out of memory.
 
-When starting your image for the first time, you will need to specify the container settings:
+  The ``geodels/gospl-examples`` image ships the runtime environment only
+  (no notebooks). You run it against a local clone of the
+  `goSPL-examples <https://github.com/Geodels/goSPL-examples>`_ repository
+  mounted at ``/work`` inside the container.
 
-- **Ports**: Enter `0` to assign randomly generated host ports.
-- **Volumes** *Host Path*: set a local directory that will be your workspace for running the simulations (it could be the folder containing the examples provided in this `repository <https://github.com/Geodels/goSPL-examples>`_). 
-- **Volumes** *Container Path*: set it to `/notebooks`, this will be the folder in the Jupyter container that will be connected to the local directory specified above. 
+The image is built automatically from ``environment.yml`` (via ``mamba``) by the
+``Build and push Docker image`` GitHub Actions workflow on every release tag. It
+targets goSPL ``v2026.06.11`` and is published as a **multi-arch manifest**
+(``linux/amd64`` + ``linux/arm64``).
+
+.. note::
+
+  **Apple Silicon (M1/M2/M3/M4) users.** A plain ``docker pull`` automatically
+  selects the native ``linux/arm64`` image on Apple Silicon — no ``--platform``
+  flag and no Rosetta emulation needed. Running the native arm64 image is
+  **significantly faster** than forcing amd64 emulation. Confirm you got the
+  native build with::
+
+    docker run --rm geodels/gospl-examples:latest \
+      python -c "import platform; print(platform.machine())"
+    # expect: aarch64 on Apple Silicon, x86_64 on Intel
+
+
+Included packages
+^^^^^^^^^^^^^^^^^
+
+On top of the goSPL runtime dependencies, the image includes:
+
+- **MPI / HPC**: ``mpi4py``, ``petsc4py``, ``h5py`` (MPI-linked), ``netCDF4``
+- **Mesh / geometry**: ``stripy``, ``meshplex``, ``jigsawpy``, ``triangle``, ``uxarray``
+- **Geoscience**: ``pygmt``, ``cartopy``, ``pyproj``, ``xesmf``, ``rasterio``
+- **Visualisation**: ``vtk``, ``pyvista``, ``pyevtk``, ``xarray``, ``seaborn``
+- **Notebooks**: JupyterLab
+
+.. note::
+
+  Depending on your operating system, configure Docker Desktop's resource
+  allocation (CPUs, memory, swap, disk image size) to match the size of the
+  simulations you want to run.
 
 
 Main command lines
--------------------
-
-Alternatively, you can use the Terminal to pull and run the goSPL Docker image based on the command lines below.
+------------------
 
 Pulling the image
 ^^^^^^^^^^^^^^^^^
 
-Once you have installed Docker on your system, you can ``pull`` the
-`goSPL official image <https://hub.docker.com/u/geodels>`_ as follow::
+Clone the examples repository, then pull the image::
 
-  docker pull geodels/gospl:latest
+  git clone https://github.com/Geodels/goSPL-examples.git
+  cd goSPL-examples
+  docker pull geodels/gospl-examples:latest
 
-
-You can list all the images available on your system as follow::
+You can list all images on your system::
 
   docker images
 
+An image can be removed::
 
-An image can be deleted as follow::
-
-  docker rmi geodels/gospl:latest
+  docker rmi geodels/gospl-examples:latest
 
 
 Starting the container from a terminal
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You can then start a docker container (an instance of an image)::
+Mount the cloned repository at ``/work`` and start JupyterLab::
 
-  docker run -it geodels/gospl:latest -p 8888:8888 -d -v localDIR:/notebooks
+  docker run -it --rm -p 8888:8888 -v "$PWD":/work geodels/gospl-examples:latest
 
-where ``localDIR`` is the directory that contains the Jupyter Notebooks for your simulation or the examples provided in this `repository <https://github.com/Geodels/goSPL-examples>`_.
-
-Once Docker is running, you could open the Jupyter notebooks on a web browser at the following address: `http://localhost:8888 <http://localhost:8888>`_. Going into the `/notebooks` folder you will access your ``localDIR`` directory.
-
-You can list the containers currently existing on your machine by running::
-
-  docker ps -a
-
-
-The ``-a`` means "all container". The ``docker ps`` command only list
-running containers.
-
-
-Docker containers can be stop (so that they do not use CPU or RAM resource)::
-
-  docker stop geodels/gospl:latest
-
-
-They can also be deleted::
-
-  docker rm geodels/gospl:latest
-
-
-.. important::
-
-  It's a good idea to keep track of how many containers have been created as
-  they can rapidly take a lot of space on your machine.
-
-
-To run goSPL from Docker, it is also recommended to use the terminal from the Jupyter interface. To activate the goSPL environment where all the libraries are installed you will have to run the following command::
-
-  conda activate gospl
-
+JupyterLab will start and print a ``http://127.0.0.1:8888/lab?token=…`` URL —
+open it in your browser. The full repository is visible under ``/work`` and the
+``gospl-smoke`` environment is already active (no ``conda activate`` needed).
 
 .. note::
 
-  If you need additional libraries you could install them from the image Jupyter terminal by using either the `conda install` command or `pip install` command. You will need to first activate the conda environment in the terminal `conda activate gospl`.
+  **Apple Silicon users**: no ``--platform`` flag is needed — Docker selects the
+  native ``linux/arm64`` image automatically.
+
+.. important::
+
+  In the Docker Desktop *Settings → Resources* panel, increase the CPU count,
+  memory and swap limits to ensure simulations do not run out of resources.
+
+You can list all containers on your machine::
+
+  docker ps -a
+
+Stop a running container (releases CPU/RAM)::
+
+  docker stop <container-id>
+
+Remove a stopped container::
+
+  docker rm <container-id>
+
+.. important::
+
+  Keep track of how many containers have been created — they accumulate and can
+  consume significant disk space. Use ``docker ps -a`` and ``docker rm`` to clean
+  up containers you no longer need.
+
+
+Running the examples
+--------------------
+
+Each example in the repository follows a three-stage workflow:
+
+1. **Build inputs** — run all cells of ``build_inputs.ipynb`` /
+   ``model_setup.ipynb`` to generate the mesh and forcing files.
+2. **Run the model** — open a terminal in JupyterLab (*File ▸ New ▸ Terminal*)
+   and launch goSPL under MPI.
+3. **Analyse outputs** — run all cells of ``sims-analysis.ipynb`` /
+   ``extract_strata.ipynb`` to remap and visualise the results.
+
+Example — running the ``stratigraphic_record`` example inside the container::
+
+  cd /work/Local-examples/stratigraphic_record
+  mpirun -np 4 python runModel.py -i input-strati.yml
+
+Replace ``-np 4`` with the number of MPI ranks you want to use.
+
+.. note::
+
+  **Performance — threading.** The image sets ``OMP_NUM_THREADS``,
+  ``OPENBLAS_NUM_THREADS``, ``MKL_NUM_THREADS`` and ``NUMEXPR_NUM_THREADS``
+  to ``1`` by default. goSPL gets its parallelism from MPI ranks (``mpirun
+  -np N``), so single-threaded BLAS per rank avoids CPU oversubscription.
+  Set ``-np`` to the number of physical cores you want to use. For a
+  non-MPI workload you can re-enable threading with
+  ``docker run -e OMP_NUM_THREADS=8 …``.
+
+
+Quick end-to-end test (headless)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``stratigraphic_record`` example ships pre-built inputs so you can verify
+the full stack without opening a notebook::
+
+  docker run -it --rm -v "$PWD":/work geodels/gospl-examples:latest \
+    bash -lc "cd /work/Local-examples/stratigraphic_record && \
+              mpirun -np 4 python runModel.py -i input-strati.yml"
+
+A successful run prints goSPL's per-step progress and writes HDF5 outputs into
+the example folder, ready for post-processing with ``extract_strata.ipynb``.
+
+
+Using Docker Desktop Dashboard
+--------------------------------
+
+As an alternative to the terminal, you can use the Docker Desktop Dashboard to
+pull and start the ``geodels/gospl-examples`` image. When starting the container
+from the Dashboard:
+
+- **Ports**: map host port ``8888`` to container port ``8888``.
+- **Volumes** *Host Path*: set to your local clone of ``goSPL-examples``.
+- **Volumes** *Container Path*: set to ``/work``.
+
+Then open ``http://localhost:8888`` in your browser to access JupyterLab.
+
+.. note::
+
+  If you need additional Python packages, install them from the JupyterLab
+  terminal — the ``gospl-smoke`` environment is already active, so
+  ``pip install <package>`` or ``conda install <package>`` will work directly.

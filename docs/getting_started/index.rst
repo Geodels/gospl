@@ -8,14 +8,16 @@ Getting started
 Python version support
 ----------------------
 
-goSPL supports versions :mod:`3.9` to :mod:`3.12` of Python.
+goSPL supports Python :mod:`3.11` and :mod:`3.12`.
 
 Installation instructions
 -------------------------
 
-The easiest way to start using goSPL is to install it from its Docker image, a cross platform distribution for data analysis and scientific computing. This is the recommended installation method for most users.
-
-Instructions for installing it via Anaconda or from source are also provided.
+The easiest way to start using goSPL is to install it from the pre-built
+``geodels`` conda package or from its Docker image. Both approaches avoid
+building goSPL's Fortran/Cython extensions locally. Instructions for
+installing from source and deploying on HPC systems (NCI Gadi, Pawsey
+Setonix) are also provided.
 
 
 .. grid:: 1 1 2 2
@@ -28,7 +30,10 @@ Instructions for installing it via Anaconda or from source are also provided.
         **Docker image**
         ^^^
 
-        Virtualisation with `Docker container <https://hub.docker.com/r/geodels/gospl>`_ provides a simple approach for running goSPL simulation.
+        The `geodels/gospl-examples <https://hub.docker.com/r/geodels/gospl-examples>`_
+        image packages the full ``gospl-smoke`` conda environment (goSPL, PETSc,
+        GMT, VTK, JupyterLab) and is the recommended way to run the examples
+        without a local conda install.
 
         +++
 
@@ -45,7 +50,9 @@ Instructions for installing it via Anaconda or from source are also provided.
         **Conda environment**
         ^^^
 
-        For Anaconda users, an environment with specific collection of conda packages and goSPL dependencies is available.
+        Install goSPL from the pre-built ``geodels`` conda channel in one
+        command, or build a full environment from ``environment.yml`` for
+        editable/source installs.
 
         +++
 
@@ -63,7 +70,9 @@ Instructions for installing it via Anaconda or from source are also provided.
         **Install from source**
         ^^^
 
-        goSPL can also be installed directly from source but this requires installation of all other dependencies. 
+        Build goSPL from the git source tree. Requires MPICH, PETSc ≥ 3.21,
+        and the full scientific Python stack. Recommended for experienced users
+        on Linux.
 
         +++
 
@@ -80,7 +89,9 @@ Instructions for installing it via Anaconda or from source are also provided.
         **Install on HPC**
         ^^^
 
-        goSPL installation on High Performance computers. 
+        Deploy goSPL on NCI Gadi (PBS) or Pawsey Setonix (Slurm) — either
+        as a virtual-environment native install or inside a Singularity/
+        Apptainer container.
 
         +++
 
