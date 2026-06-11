@@ -504,17 +504,26 @@ slow (~30-60 min cold); the workflow uses the gha build cache.
 or — once the image is on Docker Hub — `singularity pull docker://geodels/gospl-hpc:v2026.06.11`
 on a login node (a conversion, not a root build).
 
-numpy (`1.26.4`), cython (`<3.1`) and setuptools (`<74`) are pinned for the
-whole venv via a constraints file wired to both `PIP_CONSTRAINT` and
-`PIP_BUILD_CONSTRAINT`. Rationale: numpy stays on the conda/CI baseline (no
-transitive drift to 2.x); petsc4py 3.21.x cannot be cythonized by Cython ≥3.1
-(`cyautodoc` "ExpressionWriter" crash); and its `confpetsc.py` calls the classic
-`distutils.util.execute(dry_run=...)` that setuptools ≥74's bundled distutils
-dropped (py3.12 has no stdlib distutils fallback), so setuptools is held <74
-(still ≥70.1, which bundles `bdist_wheel`). Both env vars are set because pip
-≥26.2 stops honouring `PIP_CONSTRAINT` for build deps. These build-toolchain
-pins are a consequence of building the older petsc4py 3.21.x from source; a
-future PETSc bump may let them be relaxed.
+numpy (`1.26.4`) and cython (`<3.1`) are pinned for the whole venv via a
+constraints file wired to both `PIP_CONSTRAINT` and `PIP_BUILD_CONSTRAINT`
+(both env vars because pip ≥26.2 stops honouring `PIP_CONSTRAINT` for build
+deps): numpy stays on the conda/CI baseline (no transitive drift to 2.x), and
+petsc4py 3.21.x cannot be cythonized by Cython ≥3.1 (`cyautodoc`
+"ExpressionWriter" crash; h5py is fine with <3.1 too).
+
+**setuptools is deliberately NOT pinned globally** — petsc4py 3.21.x and h5py
+have *opposite* requirements: petsc4py's `confpetsc.py` needs the classic
+`distutils.util.execute(dry_run=...)` that setuptools ≥74 dropped (py3.12 has no
+stdlib distutils), while h5py's build requires setuptools ≥77.0.1. They're
+resolved per-package: the venv ships `setuptools<74` and **petsc4py builds
+`--no-build-isolation`** against it; **h5py keeps build isolation** and pulls its
+own ≥77. These build-toolchain contortions are a consequence of building the
+older petsc4py 3.21.x from source; a future PETSc bump may let them be relaxed.
+
+The base layers are split into cached stages — `mpich-build` → `petsc-build` →
+`hdf5-build` (HDF5 chained `FROM petsc-build`). `docker-build.yml` warms them
+with `--target hdf5-build` into a dedicated gha cache scope so a failure in the
+python layers never triggers a cold ~45-min base rebuild.
 
 ### Version bumping
 When bumping the goSPL version in the container, change **only** the

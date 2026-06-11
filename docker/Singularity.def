@@ -84,20 +84,23 @@ From: ubuntu:24.04
     # --- python venv + build tooling ---
     python3 -m venv /opt/venv
     export PATH=/opt/venv/bin:$PATH
-    # Pin numpy, cython AND setuptools for the whole venv (see Dockerfile/
-    # AGENTS.md): a constraints file honoured by every later pip install (incl.
-    # build isolation) so nothing pulls numpy 2.x, cython stays <3.1 (petsc4py
-    # 3.21.x cyautodoc), and setuptools <74 (petsc4py confpetsc.py needs the
-    # classic distutils.util.execute(dry_run=...) signature).
-    printf 'numpy==%s\ncython<3.1\nsetuptools<74\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt
+    # Pin numpy and cython for the whole venv (see Dockerfile/AGENTS.md): a
+    # constraints file honoured by every later pip install (incl. build
+    # isolation) so nothing pulls numpy 2.x and cython stays <3.1 (petsc4py
+    # 3.21.x cyautodoc). setuptools is NOT pinned globally: petsc4py needs <74
+    # but h5py needs >=77, so the venv ships setuptools<74 and petsc4py builds
+    # --no-build-isolation against it while h5py keeps isolation (own >=77).
+    printf 'numpy==%s\ncython<3.1\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt
     export PIP_CONSTRAINT=/opt/pip-constraints.txt
     export PIP_BUILD_CONSTRAINT=/opt/pip-constraints.txt
     pip install --no-cache-dir --upgrade pip "setuptools<74" wheel
     pip install --no-cache-dir "numpy==${NUMPY_VERSION}" "cython<3.1" "meson-python>=0.15.0" ninja
 
     # --- mpi4py + petsc4py FROM SOURCE against MPICH / PETSc ---
+    # petsc4py builds --no-build-isolation against the venv setuptools<74 (its
+    # confpetsc.py is incompatible with setuptools >=74).
     MPICC=/opt/mpich/bin/mpicc pip install --no-cache-dir --no-binary=mpi4py "mpi4py>=4.0"
-    PETSC_DIR=/opt/petsc pip install --no-cache-dir --no-binary=petsc4py "petsc4py==${PETSC_VERSION}"
+    PETSC_DIR=/opt/petsc pip install --no-cache-dir --no-build-isolation --no-binary=petsc4py "petsc4py==${PETSC_VERSION}"
 
     # --- parallel HDF5 against MPICH, then MPI-linked h5py (NOT nompi) ---
     cd /tmp/build

@@ -86,7 +86,27 @@ RUN wget -q "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/
     && cd / && rm -rf /tmp/build
 
 ###############################################################################
-# Stage 3 — goSPL runtime venv
+# Stage 3 — parallel HDF5 against the container MPICH
+# (chained FROM petsc-build so one `--target hdf5-build` warms the whole base:
+#  MPICH + PETSc + HDF5. NOT the nompi variant — goSPL needs collective I/O.)
+###############################################################################
+FROM petsc-build AS hdf5-build
+ARG HDF5_VERSION
+ARG HDF5_URL
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp/build
+RUN wget -q "${HDF5_URL}" -O hdf5.tar.gz \
+    && tar xf hdf5.tar.gz \
+    && cd "hdf5-${HDF5_VERSION}" \
+    && CC=/opt/mpich/bin/mpicc ./configure \
+        --prefix=/opt/hdf5 --enable-parallel --enable-shared \
+    && make -j"$(nproc)" && make install \
+    && cd / && rm -rf /tmp/build
+
+###############################################################################
+# Stage 4 — goSPL runtime venv
 ###############################################################################
 FROM ${BASE_IMAGE} AS runtime
 ARG PETSC_VERSION
@@ -104,9 +124,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libopenblas-dev liblapack-dev libfftw3-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Bring in the MPICH + PETSc trees built above.
+# Bring in the MPICH + PETSc + HDF5 trees built above.
 COPY --from=mpich-build /opt/mpich /opt/mpich
 COPY --from=petsc-build /opt/petsc /opt/petsc
+COPY --from=hdf5-build  /opt/hdf5  /opt/hdf5
 
 ENV PETSC_DIR=/opt/petsc \
     PATH=/opt/mpich/bin:/opt/venv/bin:${PATH} \
@@ -120,19 +141,21 @@ ENV OMP_NUM_THREADS=1 \
 
 # Python venv (PATH already prepends /opt/venv/bin above).
 ENV VIRTUAL_ENV=/opt/venv
-# Pin numpy, cython AND setuptools for the whole venv, including build-isolation
-# envs, via a constraints file. numpy stays at 1.26.x (scipy/pandas/vtk/pyshtools
-# can't pull 2.x); cython is held <3.1 (petsc4py 3.21.x cyautodoc cannot be
-# cythonized by Cython >=3.1); setuptools is held <74 because petsc4py 3.21.x's
-# confpetsc.py calls distutils.util.execute(dry_run=...) which newer setuptools'
-# bundled distutils dropped (and py3.12 has no stdlib distutils fallback) — <74
-# keeps the classic signature while still bundling bdist_wheel (>=70.1).
-# PIP_CONSTRAINT covers current pip; PIP_BUILD_CONSTRAINT covers pip >=26.2
-# (where PIP_CONSTRAINT no longer affects build deps).
+# Pin numpy and cython for the whole venv, including build-isolation envs, via a
+# constraints file. numpy stays at 1.26.x (scipy/pandas/vtk/pyshtools can't pull
+# 2.x); cython is held <3.1 because petsc4py 3.21.x's cyautodoc cannot be
+# cythonized by Cython >=3.1 (h5py is fine with <3.1 too). setuptools is NOT
+# pinned globally — petsc4py 3.21.x needs an OLD setuptools (<74, for the classic
+# distutils.util.execute(dry_run=...) signature) but h5py needs a NEW one
+# (>=77.0.1), so the two can't share a global pin. We resolve this per-package:
+# the venv ships setuptools<74 and petsc4py builds --no-build-isolation against
+# it, while h5py keeps build isolation and pulls its own setuptools>=77.
+# PIP_CONSTRAINT covers current pip; PIP_BUILD_CONSTRAINT covers pip >=26.2.
 ENV PIP_CONSTRAINT=/opt/pip-constraints.txt \
     PIP_BUILD_CONSTRAINT=/opt/pip-constraints.txt
 RUN python3 -m venv "${VIRTUAL_ENV}" \
-    && printf 'numpy==%s\ncython<3.1\nsetuptools<74\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt \
+    && printf 'numpy==%s\ncython<3.1\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt \
+    # venv setuptools held <74 for petsc4py's --no-build-isolation build below.
     && pip install --no-cache-dir --upgrade pip "setuptools<74" wheel \
     # numpy/cython for petsc4py & mpi4py builds; meson-python+ninja are the
     # goSPL build backend, needed because we install it --no-build-isolation.
@@ -143,19 +166,13 @@ RUN MPICC=/opt/mpich/bin/mpicc \
     pip install --no-cache-dir --no-binary=mpi4py "mpi4py>=4.0"
 
 # --- petsc4py from SOURCE against /opt/petsc (version matched to PETSc) ---
+# --no-build-isolation so it builds against the venv's setuptools<74 (its
+# confpetsc.py is incompatible with setuptools >=74).
 RUN PETSC_DIR=/opt/petsc \
-    pip install --no-cache-dir --no-binary=petsc4py "petsc4py==${PETSC_VERSION}"
+    pip install --no-cache-dir --no-build-isolation --no-binary=petsc4py "petsc4py==${PETSC_VERSION}"
 
-# --- parallel HDF5 against MPICH, then MPI-linked h5py against it ---
-# (NOT the nompi variant — goSPL needs collective HDF5 writes.)
-WORKDIR /tmp/build
-RUN wget -q "${HDF5_URL}" -O hdf5.tar.gz \
-    && tar xf hdf5.tar.gz \
-    && cd "hdf5-${HDF5_VERSION}" \
-    && CC=/opt/mpich/bin/mpicc ./configure \
-        --prefix=/opt/hdf5 --enable-parallel --enable-shared \
-    && make -j"$(nproc)" && make install \
-    && cd / && rm -rf /tmp/build
+# --- MPI-linked h5py against the HDF5 built in the hdf5-build stage ---
+# (build isolation pulls h5py's own setuptools>=77; NOT the nompi variant.)
 RUN CC=/opt/mpich/bin/mpicc HDF5_MPI=ON HDF5_DIR=/opt/hdf5 \
     pip install --no-cache-dir --no-binary=h5py h5py
 

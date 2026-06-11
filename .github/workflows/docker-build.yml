@@ -58,17 +58,17 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build + cache ONLY the slow base stages (MPICH + PETSc) first. These
-      # succeed even when the later python layers fail, so the gha cache is
-      # always populated — without this, a failure in the python layers means
-      # cache-to never runs and the next run rebuilds MPICH+PETSc cold (~35 min).
+      # Build + cache ONLY the slow base stages (MPICH + PETSc + HDF5) first.
+      # These succeed even when the later python layers fail, so the gha cache
+      # is always populated — without this, a failure in the python layers means
+      # cache-to never runs and the next run rebuilds the ~45 min base cold.
       # The base layers don't depend on GOSPL_VERSION, so they cache across tags.
-      - name: Warm base-stage cache (MPICH + PETSc)
+      - name: Warm base-stage cache (MPICH + PETSc + HDF5)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
-          target: petsc-build
+          target: hdf5-build
           platforms: linux/amd64
           cache-from: type=gha,scope=hpc-base
           cache-to: type=gha,scope=hpc-base,mode=max
