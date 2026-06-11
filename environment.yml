@@ -7,16 +7,19 @@ dependencies:
   - setuptools>=61.0
   - pkg-config
   - numpy
-  - petsc4py
+  - petsc>=3.21,<3.22
+  - petsc4py>=3.21,<3.22
+  - openmpi>=4.0,<5.0
+  - mpi4py>=4.0
   - scipy
   - matplotlib
   - numpy-indexed
   - pandas
-  - h5py
-  - vtk
+  - h5py * mpi_openmpi*
+  - hdf5 * mpi_openmpi*
+  - vtk-base
   - ruamel.yaml
   - gflex>=1.1.0,<2.0
-  - mpi4py
   - pyshtools
   - cython
   - c-compiler
