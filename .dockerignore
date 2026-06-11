@@ -1,0 +1,13 @@
+# Keep the goSPL HPC build context (docker/Dockerfile) lean.
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+build
+dist
+results
+*.sif
+*.log
+.venv
+docs/_build

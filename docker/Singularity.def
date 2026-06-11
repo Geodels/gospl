@@ -1,0 +1,136 @@
+###############################################################################
+# goSPL HPC container — native Apptainer/Singularity build (alternative to the
+# Docker multi-stage build in docker/Dockerfile). Produces an equivalent image:
+# MPICH from source -> PETSc against it -> goSPL venv with mpi4py / petsc4py /
+# parallel-HDF5 + h5py all compiled FROM SOURCE against the container's MPICH.
+#
+# See AGENTS.md > "Docker / HPC Container" for the full contract. At runtime the
+# cluster's native MPI (Cray on Setonix, Intel MPI on Gadi — both MPICH-ABI-
+# compatible) is bind-mounted over /opt/mpich by the `-mpi` Singularity module.
+# DO NOT swap MPICH for OpenMPI (not MPICH-ABI-compatible). h5py is built
+# against the container MPICH, NOT the conda `mpi_openmpi*` build.
+#
+# Build (on a local Linux box with root/fakeroot — NOT on Gadi/Setonix):
+#   apptainer build --build-arg GOSPL_VERSION=2026.06.11 \
+#       gospl-hpc-v2026.06.11.sif docker/Singularity.def
+# The goSPL source must be staged next to this file: the %files section copies
+# the repo root, so run the build from the repo root.
+###############################################################################
+Bootstrap: docker
+From: ubuntu:24.04
+
+%arguments
+    MPICH_VERSION=4.2.3
+    PETSC_VERSION=3.21.6
+    HDF5_VERSION=1.14.6
+    HDF5_URL=https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz
+    NUMPY_VERSION=1.26.4
+    GOSPL_VERSION=
+
+%files
+    # Repo root -> /opt/gospl-src (run the build from the repo root).
+    . /opt/gospl-src
+
+%environment
+    export PETSC_DIR=/opt/petsc
+    export VIRTUAL_ENV=/opt/venv
+    export PATH=/opt/mpich/bin:/opt/venv/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/mpich/lib:/opt/petsc/lib:/opt/hdf5/lib:$LD_LIBRARY_PATH
+    # One thread per MPI rank — AGENTS.md container invariant 2.
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+
+%post
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    MPICH_VERSION="{{ MPICH_VERSION }}"
+    PETSC_VERSION="{{ PETSC_VERSION }}"
+    HDF5_VERSION="{{ HDF5_VERSION }}"
+    HDF5_URL="{{ HDF5_URL }}"
+    NUMPY_VERSION="{{ NUMPY_VERSION }}"
+    GOSPL_VERSION="{{ GOSPL_VERSION }}"
+
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-dev python3-venv python3-pip \
+        build-essential gfortran pkg-config wget ca-certificates \
+        libopenblas-dev liblapack-dev libfftw3-dev zlib1g-dev
+    rm -rf /var/lib/apt/lists/*
+
+    mkdir -p /tmp/build && cd /tmp/build
+
+    # --- MPICH from source (ch4:ofi — the Cray/Intel MPI ABI device) ---
+    wget -q "https://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz"
+    tar xf "mpich-${MPICH_VERSION}.tar.gz"
+    cd "mpich-${MPICH_VERSION}"
+    ./configure --prefix=/opt/mpich --with-device=ch4:ofi \
+        FFLAGS=-fallow-argument-mismatch FCFLAGS=-fallow-argument-mismatch
+    make -j"$(nproc)" && make install
+    cd /tmp/build && rm -rf "mpich-${MPICH_VERSION}"*
+    export PATH=/opt/mpich/bin:$PATH
+
+    # --- PETSc against the container MPICH ---
+    wget -q "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-${PETSC_VERSION}.tar.gz"
+    tar xf "petsc-${PETSC_VERSION}.tar.gz"
+    cd "petsc-${PETSC_VERSION}"
+    ./configure --prefix=/opt/petsc --with-mpi-dir=/opt/mpich \
+        --with-debugging=0 --with-fortran-bindings=0 --with-shared-libraries=1 \
+        COPTFLAGS="-O3" CXXOPTFLAGS="-O3" FOPTFLAGS="-O3"
+    make PETSC_DIR="$(pwd)" PETSC_ARCH=arch-linux-c-opt all
+    make PETSC_DIR="$(pwd)" PETSC_ARCH=arch-linux-c-opt install
+    cd /tmp/build && rm -rf "petsc-${PETSC_VERSION}"*
+    export PETSC_DIR=/opt/petsc
+
+    # --- python venv + build tooling ---
+    python3 -m venv /opt/venv
+    export PATH=/opt/venv/bin:$PATH
+    # Pin numpy for the whole venv (see Dockerfile/AGENTS.md): a constraints
+    # file honoured by every later pip install so nothing pulls numpy 2.x.
+    echo "numpy==${NUMPY_VERSION}" > /opt/pip-constraints.txt
+    export PIP_CONSTRAINT=/opt/pip-constraints.txt
+    pip install --no-cache-dir --upgrade pip setuptools wheel
+    pip install --no-cache-dir "numpy==${NUMPY_VERSION}" cython "meson-python>=0.15.0" ninja
+
+    # --- mpi4py + petsc4py FROM SOURCE against MPICH / PETSc ---
+    MPICC=/opt/mpich/bin/mpicc pip install --no-cache-dir --no-binary=mpi4py "mpi4py>=4.0"
+    PETSC_DIR=/opt/petsc pip install --no-cache-dir --no-binary=petsc4py "petsc4py==${PETSC_VERSION}"
+
+    # --- parallel HDF5 against MPICH, then MPI-linked h5py (NOT nompi) ---
+    cd /tmp/build
+    wget -q "${HDF5_URL}" -O hdf5.tar.gz
+    tar xf hdf5.tar.gz
+    cd "hdf5-${HDF5_VERSION}"
+    CC=/opt/mpich/bin/mpicc ./configure --prefix=/opt/hdf5 --enable-parallel --enable-shared
+    make -j"$(nproc)" && make install
+    cd /tmp/build && rm -rf "hdf5-${HDF5_VERSION}"* hdf5.tar.gz
+    export LD_LIBRARY_PATH=/opt/hdf5/lib:${LD_LIBRARY_PATH:-}
+    CC=/opt/mpich/bin/mpicc HDF5_MPI=ON HDF5_DIR=/opt/hdf5 \
+        pip install --no-cache-dir --no-binary=h5py h5py
+
+    # --- remaining pure/wheel deps ---
+    pip install --no-cache-dir scipy pandas numpy-indexed "ruamel.yaml" \
+        "gflex>=1.1.0,<2.0" pyshtools vtk
+
+    # --- install goSPL (deps already present; never pull binary MPI wheels) ---
+    cd /opt/gospl-src
+    pip install --no-cache-dir --no-build-isolation --no-deps .
+
+    # Version comes solely from meson.build line 4; assert it matches the arg.
+    BUILT="$(python -c 'import gospl; print(gospl.__version__)')"
+    if [ -n "${GOSPL_VERSION}" ] && [ "${BUILT}" != "${GOSPL_VERSION}" ]; then
+        echo "ERROR: container goSPL ${BUILT} != ${GOSPL_VERSION}" >&2
+        exit 1
+    fi
+    rm -rf /tmp/build
+
+%test
+    . /opt/venv/bin/activate 2>/dev/null || export PATH=/opt/venv/bin:$PATH
+    python -c "import gospl, petsc4py, mpi4py; print('goSPL container build OK')"
+
+%runscript
+    exec python "$@"
+
+%labels
+    Title gospl-hpc
+    Source https://github.com/Geodels/gospl
+    Description goSPL hybrid-MPI (MPICH ABI) HPC container for NCI Gadi / Pawsey Setonix

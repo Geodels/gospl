@@ -1,0 +1,92 @@
+name: docker-build
+
+# Builds the goSPL HPC container (docker/Dockerfile — hybrid-MPI MPICH-ABI
+# image for NCI Gadi / Pawsey Setonix) for linux/amd64 and, on tag pushes,
+# publishes it to Docker Hub at docker.io/geodels/gospl-hpc when the
+# DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets are configured.
+#
+# Triggers:
+#   - push of any tag matching v*       -> build + smoke-test + push
+#   - manual run from the Actions tab   -> build + smoke-test only (no push)
+#
+# Note: the from-source MPICH + PETSc + parallel-HDF5 build is slow (~30-60 min
+# cold). The gha build cache makes subsequent runs much faster.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Opt the v3/v4 actions into the Node.js 24 runtime (matches the other
+# workflows). Remove once the actions ship Node 24 natively.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  IMAGE: docker.io/geodels/gospl-hpc
+
+jobs:
+  build-push:
+    name: build + push HPC image (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Derive version + tags
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"                 # e.g. v2026.06.11
+          else
+            # workflow_dispatch: derive from meson.build line 4.
+            V="$(grep -E "version: '" meson.build | head -1 | sed -E "s/.*'([^']+)'.*/\1/")"
+            TAG="v${V}"
+          fi
+          echo "tag=${TAG}"            >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}"      >> "$GITHUB_OUTPUT"
+          echo "Building ${IMAGE}:${TAG} (GOSPL_VERSION=${TAG#v})"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build and load into the local daemon so we can smoke-test before push.
+      - name: Build image (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          build-args: |
+            GOSPL_VERSION=${{ steps.ver.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.ver.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run --rm "${IMAGE}:${{ steps.ver.outputs.tag }}" \
+            python -c "import gospl, petsc4py, mpi4py; print('goSPL container build OK')"
+          BUILT="$(docker run --rm "${IMAGE}:${{ steps.ver.outputs.tag }}" \
+            python -c 'import gospl; print(gospl.__version__)')"
+          if [ "${BUILT}" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "ERROR: container goSPL ${BUILT} != ${{ steps.ver.outputs.version }}" >&2
+            exit 1
+          fi
+
+      - name: Push to Docker Hub
+        if: github.event_name == 'push'
+        run: |
+          docker push "${IMAGE}:${{ steps.ver.outputs.tag }}"
+          docker push "${IMAGE}:latest"

@@ -1,0 +1,37 @@
+#!/bin/bash
+###############################################################################
+# NCI Gadi (PBS) job script for goSPL inside a Singularity container.
+# Hybrid MPI: Gadi's Intel MPI (MPICH ABI) is bind-mounted over the container's
+# MPICH. See AGENTS.md > "Docker / HPC Container".
+#
+# Edit the #PBS -P project code, the resource requests, and CONTAINER/INPUT
+# before submitting:  qsub docker/slurm/gadi.pbs
+###############################################################################
+#PBS -P <project>
+#PBS -q normal
+#PBS -l ncpus=48
+#PBS -l mem=190GB
+#PBS -l walltime=02:00:00
+#PBS -l wd
+#PBS -l storage=scratch/<project>+gdata/<project>
+#PBS -N gospl
+
+set -euo pipefail
+
+module load singularity
+
+# One thread per MPI rank — AGENTS.md container invariant 2.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+# Path to the .sif (scp'd from your local build) and the goSPL input YAML.
+CONTAINER="${CONTAINER:-/scratch/<project>/gospl-hpc-v2026.06.11.sif}"
+INPUT="${INPUT:-input.yml}"
+
+# Run goSPL. model.destroy() is required for clean PETSc finalization
+# (AGENTS.md container invariant 4) — replace the -c driver with your own
+# script if it already calls runProcesses() + destroy().
+mpirun -np "${PBS_NCPUS}" \
+    singularity exec "${CONTAINER}" \
+        python -c "from gospl.model import Model; m = Model('${INPUT}'); m.runProcesses(); m.destroy()"
