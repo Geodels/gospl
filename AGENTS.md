@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last reviewed 2026-06-11 against `v2026.06.08`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
+Last reviewed 2026-06-11 against `v2026.06.11`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
 
 ## What goSPL does
 goSPL is a parallel landscape-evolution model that integrates the stream-power law (river incision), linear and non-linear hillslope diffusion, marine sediment transport, glacial accumulation, flexural isostasy, and horizontal/vertical tectonics on an unstructured Voronoi/Delaunay finite-volume mesh. The mesh is either a 2D flat plane (`self.flatModel == True`) or a global sphere; partitioning, halo exchange, and all linear/non-linear solves run on PETSc DMPlex via petsc4py. Time integration is an explicit outer Euler loop in `Model.runProcesses` with implicit KSP/SNES/TS inner solves for diffusion, flow accumulation, and sediment routing.
@@ -298,6 +298,7 @@ Mesh `.npz` files under each benchmark's `boundary_condition[s]/` subfolder are 
 | Version | Date | Channel | Install |
 |---|---|---|---|
 | `v2026.06.08` | 2026-06-08 | `geodels` | `mamba install -c geodels -c conda-forge gospl` |
+| `v2026.06.11` | 2026-06-11 | `geodels` | `mamba install -c geodels -c conda-forge gospl` |
 
 ### Local build and smoke-test procedure (osx-arm64)
 Run this sequence from the repository root before pushing a release tag to
@@ -386,7 +387,7 @@ mamba env remove -n gospl-smoke -y
 | 2026-06-08 | `refactor-baseline-2026-06` | Tier 2 AI-readability refactor complete. AGENTS.md written, 6 regression tests passing, 3 scientific bugs fixed (rUni/sUni, marine sediment leak, Eb sign convention), constants.py, _get_param, named DataFrame access, KSP lifecycle documented, HOW_TO_ADD_FORCING.md and HOW_TO_ADD_OUTPUT.md written. |
 | 2026-06-08 | `v2026.06.08` | First release from refactored codebase. Analytical benchmark suite integrated and green on all CI cells (ubuntu-latest + macos-14 × Python 3.11 + 3.12). Published to `geodels` conda channel. |
 | 2026-06-11 | — | `gospl.__version__` added via `importlib.metadata`; single source of truth is `meson.build`. |
-| 2026-06-11 | — | Conda recipe (`build: 1`) fixes osx-arm64 OpenMPI 5.x `MPI_Init` failure: explicit `openmpi >=4.0,<5.0`, `petsc`/`petsc4py >=3.21,<3.22` (last openmpi-linked builds), `h5py`/`hdf5 * mpi_openmpi*`, relaxed `mpi4py >=4.0`. |
+| 2026-06-11 | `v2026.06.11` | Conda recipe fixes osx-arm64 OpenMPI 5.x `MPI_Init` failure: explicit `openmpi >=4.0,<5.0`, `petsc`/`petsc4py >=3.21,<3.22` (last openmpi-linked builds), `h5py`/`hdf5 * mpi_openmpi*`, relaxed `mpi4py >=4.0`. Version bumped 2026.06.08 → 2026.06.11 for the re-publish. |
 
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.
