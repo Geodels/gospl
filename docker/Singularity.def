@@ -121,6 +121,9 @@ From: ubuntu:24.04
 
     # --- install goSPL (deps already present; never pull binary MPI wheels) ---
     cd /opt/gospl-src
+    # pip forbids --build-constraint with --no-build-isolation; goSPL builds
+    # (meson) against the venv's already-pinned numpy/cython anyway.
+    unset PIP_BUILD_CONSTRAINT
     pip install --no-cache-dir --no-build-isolation --no-deps .
 
     # Version comes solely from meson.build line 4; assert it matches the arg.

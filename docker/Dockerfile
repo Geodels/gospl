@@ -186,7 +186,10 @@ RUN pip install --no-cache-dir \
 # --- install goSPL from the build context (repo root) ---
 WORKDIR /opt/gospl-src
 COPY . /opt/gospl-src
-RUN pip install --no-cache-dir --no-build-isolation --no-deps .
+# Unset PIP_BUILD_CONSTRAINT for this command: pip forbids --build-constraint
+# with --no-build-isolation, and goSPL builds (meson) against the venv's
+# already-pinned numpy/cython anyway.
+RUN env -u PIP_BUILD_CONSTRAINT pip install --no-cache-dir --no-build-isolation --no-deps .
 # Version is driven solely by meson.build line 4; assert it matches the tag.
 RUN test "$(python -c 'import gospl; print(gospl.__version__)')" = "${GOSPL_VERSION}" \
     || { echo "ERROR: container goSPL != ${GOSPL_VERSION}" >&2; exit 1; }
