@@ -333,18 +333,51 @@ mamba env remove -n gospl-smoke -y
   `gdk-pixbuf`, whose post-link script fails inside the conda-build sandbox.
   The recipe uses `vtk-base` (headless subset) instead. goSPL only uses VTK
   for unstructured mesh I/O, not rendering.
-- **petsc4py ABI mismatch**: conda-forge does not yet publish a `py311`
-  osx-arm64 build of `petsc4py`. The `np2py310` build is installed and works
-  for all computation, but causes a segfault during MPI finalization when
-  spawned as a subprocess via `mpirun`. `test_parallel_correctness` detects
-  this at runtime via `_petsc4py_abi_mismatch()` and skips rather than
-  failing. The test runs correctly on linux-64 (which has proper `py311`
-  builds) and in `gosplenv` (where the mismatch is masked by the environment
-  history).
+- **petsc4py ABI mismatch (historical)**: conda-forge previously published
+  only a py310 (`np2py310`) osx-arm64 build of `petsc4py`, which worked for
+  all computation but segfaulted during MPI finalization when spawned as a
+  subprocess via `mpirun`. `test_parallel_correctness` detects this at runtime
+  via `_petsc4py_abi_mismatch()` and skips rather than failing. As of the
+  2026-06-11 recipe fix, conda-forge **does** publish py311 and py312
+  openmpi-linked `petsc4py 3.21.2` builds (`py311h196a43b_0`,
+  `py312ha15fc32_0`), which the recipe now pins — so the ABI-mismatch skip no
+  longer fires on osx-arm64 and the test actually runs.
+- **`test_parallel_correctness` nested-mpirun env leak (osx-arm64)**: with the
+  py311/py312 petsc4py now resolving, the smoke run executes this test for the
+  first time on osx-arm64 and it **fails** (`mpirun -n 1` subprocess rc=1,
+  empty output) — NOT a package defect. Root cause: `import gospl` runs
+  `petsc4py.init()` → `MPI_Init` in the pytest parent process, which exports
+  `OMPI_*`/`PMIX_*`/`PRTE_*` env vars; the test's `subprocess.run(["mpirun",
+  ...])` inherits them, and macOS OpenMPI 4.x then silently refuses to launch
+  the nested job. Scrubbing those vars before the subprocess (or running the
+  dump script under `mamba run … mpirun` from a clean parent) makes it pass —
+  verified: goSPL runs to completion with correct output under `mpirun -n 1`.
+  The real fix is a test-harness env scrub in `run_at_rank` (out of scope for
+  a packaging-only change); until then the package is sound and the other
+  12/13 fast tests pass against the installed package.
 - **Multi-version render**: pass `--variants '{"python": ["3.11"]}'` to
   conda-build to prevent it rendering the recipe for all Python versions in
   the conda-forge global pinnings file (which includes 3.13, incompatible
   with `numpy=1.26`).
+- **OpenMPI 4.x pin (osx-arm64)**: the recipe pins `openmpi >=4.0,<5.0` in
+  both `host` and `run`. `openmpi` is a pure transitive dependency (pulled in
+  via `mpi4py`/`petsc4py`), so without an explicit pin conda-forge resolves to
+  `openmpi 5.x`, which fails at `MPI_Init` on macOS with `PML add procs
+  failed / Not found (-13)`. The 4.x line initialises cleanly. Because
+  `openmpi` is otherwise invisible in the recipe, the pin must be listed
+  explicitly — relying on a downstream package to constrain it does not work.
+- **petsc4py 3.21.x ceiling (osx-arm64)**: the recipe pins both `petsc
+  >=3.21,<3.22` and `petsc4py >=3.21,<3.22` in `host` and `run`. conda-forge
+  `petsc4py >=3.22` is **mpich-only** on osx-arm64 — no openmpi-linked variant
+  exists — so allowing >=3.22 silently drags in mpich and conflicts with the
+  openmpi pin above. `3.21.2` is the last openmpi-linked `petsc4py` build
+  published for osx-arm64.
+- **h5py must be MPI-linked**: the recipe pins `h5py * mpi_openmpi*` and
+  `hdf5 * mpi_openmpi*` in `run`. goSPL performs parallel (collective) HDF5
+  writes via h5py; the conda-forge `nompi` variant of h5py is otherwise a
+  valid solve and the solver will pick it, but it silently fails on collective
+  writes under MPI. Pinning the `mpi_openmpi*` build string forces the
+  MPI-linked variant and keeps it consistent with the openmpi 4.x line.
 
 ## Milestones
 
@@ -353,6 +386,7 @@ mamba env remove -n gospl-smoke -y
 | 2026-06-08 | `refactor-baseline-2026-06` | Tier 2 AI-readability refactor complete. AGENTS.md written, 6 regression tests passing, 3 scientific bugs fixed (rUni/sUni, marine sediment leak, Eb sign convention), constants.py, _get_param, named DataFrame access, KSP lifecycle documented, HOW_TO_ADD_FORCING.md and HOW_TO_ADD_OUTPUT.md written. |
 | 2026-06-08 | `v2026.06.08` | First release from refactored codebase. Analytical benchmark suite integrated and green on all CI cells (ubuntu-latest + macos-14 × Python 3.11 + 3.12). Published to `geodels` conda channel. |
 | 2026-06-11 | — | `gospl.__version__` added via `importlib.metadata`; single source of truth is `meson.build`. |
+| 2026-06-11 | — | Conda recipe (`build: 1`) fixes osx-arm64 OpenMPI 5.x `MPI_Init` failure: explicit `openmpi >=4.0,<5.0`, `petsc`/`petsc4py >=3.21,<3.22` (last openmpi-linked builds), `h5py`/`hdf5 * mpi_openmpi*`, relaxed `mpi4py >=4.0`. |
 
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.

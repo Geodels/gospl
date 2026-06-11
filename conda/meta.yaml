@@ -9,7 +9,7 @@ source:
   path: ..
 
 build:
-  number: 0
+  number: 1
   skip: true  # [win]
   script: {{ PYTHON }} -m pip install . --no-build-isolation --no-deps -vv
 
@@ -28,19 +28,24 @@ requirements:
     - setuptools >=61.0
     - cython
     - numpy
-    - mpi4py >=4.0,<4.1.2
-    - petsc4py
+    - openmpi >=4.0,<5.0
+    - mpi4py >=4.0
+    - petsc >=3.21,<3.22
+    - petsc4py >=3.21,<3.22
   run:
     - python
     - {{ pin_compatible('numpy') }}
     - scipy
     - numpy-indexed
     - pandas
-    - h5py
+    - h5py * mpi_openmpi*
+    - hdf5 * mpi_openmpi*
     - vtk-base
     - ruamel.yaml
-    - mpi4py >=4.0,<4.1.2
-    - petsc4py
+    - openmpi >=4.0,<5.0
+    - mpi4py >=4.0
+    - petsc >=3.21,<3.22
+    - petsc4py >=3.21,<3.22
     - gflex >=1.1.0,<2.0
     - pyshtools
 
