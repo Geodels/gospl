@@ -54,6 +54,16 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Fortran toolchain
+        # meson-python runs `meson setup` during sdist construction (it uses
+        # meson introspection to know which files to include), and the
+        # project declares `add_languages('fortran')` at meson.build:9, so
+        # gfortran must be on PATH at sdist-build time. ubuntu-latest's
+        # preinstalled gfortran covers this today, but pinning it
+        # explicitly stops a future runner image change from breaking the
+        # build silently.
+        run: sudo apt-get update && sudo apt-get install -y gfortran
+
       - name: Install build frontend
         run: python -m pip install --upgrade build
 
