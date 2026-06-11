@@ -143,10 +143,10 @@ A helper script handles the full build and conversion to ``.sif``:
     cd gospl/docker/
 
     # Build from the latest release tag and convert to .sif
-    ./build.sh v2026.06.11
+    ./build.sh v2026.6.13
 
     # Build + push to Docker Hub + convert (needed for singularity pull on cluster)
-    ./build.sh v2026.06.11 --push
+    ./build.sh v2026.6.13 --push
 
 The script runs ``docker build --platform linux/amd64``, smoke-tests the image,
 and converts it to ``.sif`` via ``apptainer build`` (or ``singularity build``).
@@ -154,8 +154,8 @@ It requires Docker and either ``apptainer`` or ``singularity`` on the build mach
 
 After the build completes, upload the ``.sif`` to the cluster::
 
-    scp gospl-hpc-v2026.06.11.sif <user>@gadi.nci.org.au:/scratch/<PRJ>/<user>/containers/
-    scp gospl-hpc-v2026.06.11.sif <user>@setonix.pawsey.org.au:/scratch/<PRJ>/<user>/containers/
+    scp gospl-hpc-v2026.6.13.sif <user>@gadi.nci.org.au:/scratch/<PRJ>/<user>/containers/
+    scp gospl-hpc-v2026.6.13.sif <user>@setonix.pawsey.org.au:/scratch/<PRJ>/<user>/containers/
 
 Alternatively, since the image is published on Docker Hub
 (`geodels/gospl-hpc <https://hub.docker.com/r/geodels/gospl-hpc>`_), pull it
@@ -164,7 +164,7 @@ a login node::
 
     # On Setonix
     module load singularity/4.1.0-mpi
-    singularity pull gospl-hpc-v2026.06.11.sif docker://geodels/gospl-hpc:v2026.06.11
+    singularity pull gospl-hpc-v2026.6.13.sif docker://geodels/gospl-hpc:v2026.6.13
 
 
 Running on Gadi with Singularity
@@ -185,7 +185,7 @@ Example PBS job script:
     #PBS -l wd
     #PBS -j oe
 
-    CONTAINER=/scratch/${PBS_PROJECT}/${USER}/containers/gospl-hpc-v2026.06.11.sif
+    CONTAINER=/scratch/${PBS_PROJECT}/${USER}/containers/gospl-hpc-v2026.6.13.sif
     INPUT_YML=/scratch/${PBS_PROJECT}/${USER}/runs/my_gospl_input.yml
 
     module purge
@@ -225,7 +225,7 @@ Example Slurm job script:
     #SBATCH --time=10:00:00
     #SBATCH --output=gospl_%j.log
 
-    CONTAINER=/scratch/${PAWSEY_PROJECT}/${USER}/containers/gospl-hpc-v2026.06.11.sif
+    CONTAINER=/scratch/${PAWSEY_PROJECT}/${USER}/containers/gospl-hpc-v2026.6.13.sif
     INPUT_YML=/scratch/${PAWSEY_PROJECT}/${USER}/runs/my_gospl_input.yml
 
     module purge

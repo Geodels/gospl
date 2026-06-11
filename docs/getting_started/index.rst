@@ -67,6 +67,25 @@ Setonix) are also provided.
         :img-top: ../_static/python.svg
         :text-align: center
 
+        **Install from PyPI**
+        ^^^
+
+        Drop goSPL into a conda environment (or any env that already supplies
+        MPI / PETSc / parallel HDF5) via ``pip install gospl``. No binary
+        wheel — the Fortran extension is compiled at install time.
+
+        +++
+
+        .. button-ref:: installPip
+            :color: secondary
+            :click-parent:
+
+            Install via PyPI
+
+    .. grid-item-card::
+        :img-top: ../_static/python.svg
+        :text-align: center
+
         **Install from source**
         ^^^
 
@@ -107,5 +126,6 @@ Setonix) are also provided.
 
     installDocker
     installConda
+    installPip
     installSrc
     installHPC

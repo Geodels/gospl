@@ -56,7 +56,7 @@ and verify the install::
 
 To install a specific version (e.g. for reproducibility)::
 
-    mamba create -n gospl -c geodels -c conda-forge gospl=2026.06.11
+    mamba create -n gospl -c geodels -c conda-forge gospl=2026.6.13
 
 .. note::
 
@@ -65,9 +65,15 @@ To install a specific version (e.g. for reproducibility)::
     ========================= ============= ========================================
     Version                   Date          Install command
     ========================= ============= ========================================
-    ``v2026.06.11``           2026-06-11    ``mamba install -c geodels -c conda-forge gospl``
+    ``v2026.6.13``            2026-06-12    ``mamba install -c geodels -c conda-forge gospl``
+    ``v2026.06.11``           2026-06-11    ``mamba install -c geodels -c conda-forge gospl=2026.06.11``
     ``v2026.06.08``           2026-06-08    ``mamba install -c geodels -c conda-forge gospl=2026.06.08``
     ========================= ============= ========================================
+
+    From ``v2026.6.13`` onwards the project follows the **no-leading-zero**
+    version-spelling convention (e.g. ``2026.6.13``, not ``2026.06.13``) so
+    the conda artefact filename matches the PyPI sdist filename and
+    ``gospl.__version__``. Earlier tags retain their original spelling.
 
 The two sections below cover the alternative ``environment.yml`` approach, which
 is useful if you want to add extra packages to the environment in the same step,
@@ -245,7 +251,7 @@ To try another branch or version of goSPL, activate the environment and run::
 
     pip install git+https://github.com/Geodels/gospl.git@NAME
 
-where ``NAME`` is the branch name or version tag (e.g. ``v2026.06.11``,
+where ``NAME`` is the branch name or version tag (e.g. ``v2026.6.13``,
 ``master``).
 
 Alternatively, clone the repository and install in editable mode::

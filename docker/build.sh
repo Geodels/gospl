@@ -5,13 +5,13 @@
 # cannot build on Gadi or Setonix (root is required). See AGENTS.md >
 # "Docker / HPC Container".
 #
-#   ./build.sh v2026.06.11           # build + smoke-test + convert to .sif
-#   ./build.sh v2026.06.11 --push    # also push to docker.io/geodels/gospl-hpc
+#   ./build.sh v2026.6.13            # build + smoke-test + convert to .sif
+#   ./build.sh v2026.6.13 --push     # also push to docker.io/geodels/gospl-hpc
 ###############################################################################
 set -euo pipefail
 
 usage() {
-    echo "Usage: $0 <tag> [--push]    e.g. $0 v2026.06.11 --push" >&2
+    echo "Usage: $0 <tag> [--push]    e.g. $0 v2026.6.13 --push" >&2
     exit 1
 }
 [ "$#" -ge 1 ] || usage

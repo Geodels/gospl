@@ -11,8 +11,8 @@
 # against the container MPICH, NOT the conda `mpi_openmpi*` build.
 #
 # Build (on a local Linux box with root/fakeroot — NOT on Gadi/Setonix):
-#   apptainer build --build-arg GOSPL_VERSION=2026.06.11 \
-#       gospl-hpc-v2026.06.11.sif docker/Singularity.def
+#   apptainer build --build-arg GOSPL_VERSION=2026.6.13 \
+#       gospl-hpc-v2026.6.13.sif docker/Singularity.def
 # The goSPL source must be staged next to this file: the %files section copies
 # the repo root, so run the build from the repo root.
 ###############################################################################

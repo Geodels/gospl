@@ -34,7 +34,7 @@ a local conda install.
 
 The image is built automatically from ``environment.yml`` (via ``mamba``) by the
 ``Build and push Docker image`` GitHub Actions workflow on every release tag. It
-targets goSPL ``v2026.06.11`` and is published as a **multi-arch manifest**
+targets goSPL ``v2026.6.13`` and is published as a **multi-arch manifest**
 (``linux/amd64`` + ``linux/arm64``).
 
 .. note::

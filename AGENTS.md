@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last reviewed 2026-06-11 against `v2026.06.11`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
+Last reviewed 2026-06-12 against `v2026.6.13`. Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
 
 ## What goSPL does
 goSPL is a parallel landscape-evolution model that integrates the stream-power law (river incision), linear and non-linear hillslope diffusion, marine sediment transport, glacial accumulation, flexural isostasy, and horizontal/vertical tectonics on an unstructured Voronoi/Delaunay finite-volume mesh. The mesh is either a 2D flat plane (`self.flatModel == True`) or a global sphere; partitioning, halo exchange, and all linear/non-linear solves run on PETSc DMPlex via petsc4py. Time integration is an explicit outer Euler loop in `Model.runProcesses` with implicit KSP/SNES/TS inner solves for diffusion, flow accumulation, and sediment routing.
@@ -27,9 +27,11 @@ try:
 except PackageNotFoundError:
     __version__ = "unknown"
 ```
-The metadata version is driven by `meson.build` line 4 (`version: '2026.6.12'`). **There is no version string anywhere else.** To bump the version, change `meson.build` only — `__init__.py` never needs to change. The `PackageNotFoundError` fallback covers the case where the package is cloned but not installed (e.g. bare `git clone` without `pip install -e .`).
+The metadata version is driven by `meson.build` line 4 (`version: '2026.6.13'`). `gospl.__version__` derives from it via `importlib.metadata` — never hardcode the version in `__init__.py`. The `PackageNotFoundError` fallback covers the case where the package is cloned but not installed (e.g. bare `git clone` without `pip install -e .`).
 
-**Version spelling convention (adopted 2026-06-12): no leading zeros on month or day** — e.g. `2026.6.12`, not `2026.06.12`. PyPI auto-normalizes per PEP 440 (strips leading zeros for display and in the wheel/sdist filename), so a `2026.06.12` `meson.build` would show up on PyPI as `2026.6.12` while conda artifacts retained the `2026.06.12` spelling — the two channels would visually diverge for the same release. Writing the no-zero form everywhere keeps PyPI display, conda display, `.conda` filename, `.tar.gz` sdist filename, git tag (`v2026.6.12`), and `gospl.__version__` all bitwise-identical. Past tags (`v2026.06.08`, `v2026.06.11`) stay as historical record; do NOT retroactively re-spell them.
+**There is one other version literal that MUST be kept in sync** with `meson.build` at every bump: `conda/meta.yaml` line 2 (`{% set version = "..." %}`). conda-build does NOT introspect `meson.build`; it resolves the jinja `version` literally and embeds it in the `.conda` artefact filename. A drift between the two means the conda channel publishes a different version number than the installed `gospl.__version__`, and the workflow's `anaconda upload --skip-existing` silently no-ops if the conda value matches an already-published release. This bit us once between `v2026.6.12` (PyPI+Docker only) and `v2026.6.13`; the inline comment in `conda/meta.yaml` flags it for future contributors. **Bump checklist: change `meson.build:4` AND `conda/meta.yaml:2` together, always.**
+
+**Version spelling convention (adopted 2026-06-12): no leading zeros on month or day** — e.g. `2026.6.13`, not `2026.06.13`. PyPI auto-normalizes per PEP 440 (strips leading zeros for display and in the wheel/sdist filename), so a `2026.06.13` `meson.build` would show up on PyPI as `2026.6.13` while conda artifacts retained the `2026.06.13` spelling — the two channels would visually diverge for the same release. Writing the no-zero form everywhere keeps PyPI display, conda display, `.conda` filename, `.tar.gz` sdist filename, git tag (`v2026.6.13`), and `gospl.__version__` all bitwise-identical. Past tags (`v2026.06.08`, `v2026.06.11`) stay as historical record; do NOT retroactively re-spell them.
 
 `MPIcomm` is defined locally in 5 active files. 9 dead-code assignments were removed 2026-06. Active sites already follow the rule below.
 
@@ -300,8 +302,11 @@ Mesh `.npz` files under each benchmark's `boundary_condition[s]/` subfolder are 
 ### Released packages
 | Version | Date | Channel | Install |
 |---|---|---|---|
-| `v2026.06.08` | 2026-06-08 | `geodels` | `mamba install -c geodels -c conda-forge gospl` |
-| `v2026.06.11` | 2026-06-11 | `geodels` | `mamba install -c geodels -c conda-forge gospl` |
+| `v2026.06.08` | 2026-06-08 | `geodels` | `mamba install -c geodels -c conda-forge gospl=2026.06.08` |
+| `v2026.06.11` | 2026-06-11 | `geodels` | `mamba install -c geodels -c conda-forge gospl=2026.06.11` |
+| `v2026.6.13` | 2026-06-12 | `geodels` | `mamba install -c geodels -c conda-forge gospl` |
+
+`v2026.6.12` is intentionally absent from this table: that tag fired `pypi-publish` and `docker-build` correctly, but `conda/meta.yaml:2` had not yet been bumped from `2026.06.11`, so the conda-build run on the `v2026.6.12` tag produced a `gospl-2026.06.11-*.conda` artefact, which `anaconda upload --skip-existing` silently no-op'd against the already-published 2026-06-11 release. The recovery was `v2026.6.13` with `meson.build` + `conda/meta.yaml` synced. PyPI users on `gospl==2026.6.12` are functionally equivalent to `2026.6.13` (the only diff is the AGENTS.md / docs sweep below); conda users went straight from `2026.06.11` to `2026.6.13`.
 
 ### Local build and smoke-test procedure (osx-arm64)
 Run this sequence from the repository root before pushing a release tag to
@@ -483,8 +488,8 @@ the MPI contract above). If you hit this on Setonix:
 ### Build workflow (local Linux machine)
 ```bash
 cd docker/
-./build.sh v2026.06.11          # build + smoke-test + convert to .sif (no push)
-./build.sh v2026.06.11 --push   # build + push Docker Hub + convert to .sif
+./build.sh v2026.6.13           # build + smoke-test + convert to .sif (no push)
+./build.sh v2026.6.13 --push    # build + push Docker Hub + convert to .sif
 ```
 The `build.sh` script:
 1. Runs `docker build --platform linux/amd64` from the repo root with
@@ -504,7 +509,7 @@ builds + smoke-tests only (no push). The from-source MPICH/PETSc/HDF5 build is
 slow (~30-60 min cold); the workflow uses the gha build cache.
 
 **You cannot build on Gadi or Setonix.** Build the `.sif` locally and `scp` it,
-or — once the image is on Docker Hub — `singularity pull docker://geodels/gospl-hpc:v2026.06.11`
+or — once the image is on Docker Hub — `singularity pull docker://geodels/gospl-hpc:v2026.6.13`
 on a login node (a conversion, not a root build).
 
 numpy (`1.26.4`) and cython (`<3.1`) are pinned for the whole venv via a
@@ -547,7 +552,7 @@ installed `gospl.__version__` equals `GOSPL_VERSION`, so the build arg and
    on both Gadi and Setonix.
 3. `OMP_NUM_THREADS=1` / `OPENBLAS_NUM_THREADS=1` are exported in both job
    scripts.
-4. The `.sif` filename includes the version tag (e.g. `gospl-hpc-v2026.06.11.sif`).
+4. The `.sif` filename includes the version tag (e.g. `gospl-hpc-v2026.6.13.sif`).
 5. Update the `## Milestones` table in this file with the new tag and `.sif`
    publication date.
 6. The `docker/slurm/gadi.pbs` and `docker/slurm/setonix.slurm` `CONTAINER=`
@@ -562,6 +567,8 @@ installed `gospl.__version__` equals `GOSPL_VERSION`, so the build arg and
 | 2026-06-11 | — | `gospl.__version__` added via `importlib.metadata`; single source of truth is `meson.build`. |
 | 2026-06-11 | `v2026.06.11` | Conda recipe fixes osx-arm64 OpenMPI 5.x `MPI_Init` failure: explicit `openmpi >=4.0,<5.0`, `petsc`/`petsc4py >=3.21,<3.22` (last openmpi-linked builds), `h5py`/`hdf5 * mpi_openmpi*`, relaxed `mpi4py >=4.0`. Version bumped 2026.06.08 → 2026.06.11 for the re-publish. |
 | 2026-06-11 | — | `docker/` HPC container added (Dockerfile, Singularity.def, build.sh, slurm/gadi.pbs, slurm/setonix.slurm) for NCI Gadi + Pawsey Setonix: hybrid-MPI MPICH-ABI build with mpi4py/petsc4py/parallel-HDF5+h5py compiled from source. Not yet built/published (`.sif` TBD — build is local-Linux only). |
+| 2026-06-12 | `v2026.6.12` | First PyPI sdist release via `.github/workflows/pypi-publish.yml` (Trusted Publishing / OIDC, sdist-only, no wheels). No-leading-zero version-spelling convention adopted (`2026.6.12` not `2026.06.12`) for PyPI ↔ conda artefact-name parity. **conda channel not bumped on this tag** — `conda/meta.yaml:2` still referenced `2026.06.11`, so the conda-build job silently skipped the upload (`anaconda upload --skip-existing` matched the existing 2026-06-11 release). PyPI + Docker Hub `:v2026.6.12` published correctly. |
+| 2026-06-12 | `v2026.6.13` | Sync release: bumped `conda/meta.yaml:2` to track `meson.build:4`; added inline cross-reference comment; AGENTS.md > `__version__` corrected to acknowledge `conda/meta.yaml` as a second version literal that must be bumped in lockstep. Docs sweep: every `v2026.06.11` example in `docs/getting_started/install{HPC,Conda,Docker}.rst`, `docker/build.sh`, `docker/Singularity.def`, and AGENTS.md (example commands + `.sif` filename + Released-packages table) bumped to `v2026.6.13`. New `docs/getting_started/installPip.rst` documents the PyPI-sdist install path; wired into the `getting_started/index.rst` grid + toctree. |
 
 ## Checklist before any commit
 1. Did you read this file? If invariants here changed, update them.
@@ -575,4 +582,4 @@ installed `gospl.__version__` equals `GOSPL_VERSION`, so the build arg and
 8. If you added a new output field, did you follow `docs/HOW_TO_ADD_OUTPUT.md` including the `destroy_DMPlex` registration and XDMF entry?
 9. If you added a benchmark test, did you apply `pytest.importorskip` for scipy/matplotlib AND mark `@pytest.mark.benchmark @pytest.mark.slow`?
 10. If you added a goSPL `Model` init in a test (regression OR benchmark), is `model.destroy()` in a `try/finally` block per AGENTS.md > KSP/SNES/TS lifecycle contract?
-11. If you bumped the version, did you change **only** `meson.build` line 4? (`gospl/__init__.py` and `pyproject.toml` derive from it — do not hardcode the version string anywhere else.)
+11. If you bumped the version, did you change **both** `meson.build:4` AND `conda/meta.yaml:2` in the same commit, with the same no-leading-zero spelling (e.g. `2026.6.13`, not `2026.06.13`)? (`gospl/__init__.py`, `pyproject.toml`, and `gospl.__version__` derive from `meson.build` via `importlib.metadata`; conda-build does NOT — it reads the literal in `meta.yaml`. A drift between the two causes a silent no-op on `anaconda upload --skip-existing`. See AGENTS.md > `__version__`.)
