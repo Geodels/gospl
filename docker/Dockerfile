@@ -194,7 +194,10 @@ RUN env -u PIP_BUILD_CONSTRAINT pip install --no-cache-dir --no-build-isolation 
 # forms: meson '2026.06.11' installs as gospl.__version__ == '2026.6.11'
 # (leading zeros stripped from numeric segments), so normalize GOSPL_VERSION the
 # same way before comparing.
-RUN GOT="$(python -c 'import gospl; print(gospl.__version__)')"; \
+# Read the version via importlib.metadata (NOT `import gospl`, which runs
+# petsc4py.init and prints a PETSc "Option left" warning to stdout that would
+# pollute the captured value).
+RUN GOT="$(python -c "from importlib.metadata import version; print(version('gospl'))")"; \
     WANT="$(python -c "print('.'.join(str(int(p)) if p.isdigit() else p for p in '${GOSPL_VERSION}'.split('.')))")"; \
     [ "$GOT" = "$WANT" ] || { echo "ERROR: container goSPL $GOT != $WANT (requested ${GOSPL_VERSION})" >&2; exit 1; }
 
