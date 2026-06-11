@@ -40,8 +40,9 @@ ARG HDF5_URL=https://github.com/HDFGroup/hdf5/releases/download/hdf5_${HDF5_VERS
 FROM ${BASE_IMAGE} AS mpich-build
 ARG MPICH_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
+# python3 is required by MPICH configure to generate the F90 bindings.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential gfortran wget ca-certificates \
+        build-essential gfortran wget ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/build
