@@ -120,17 +120,20 @@ ENV OMP_NUM_THREADS=1 \
 
 # Python venv (PATH already prepends /opt/venv/bin above).
 ENV VIRTUAL_ENV=/opt/venv
-# Pin numpy AND cython for the whole venv, including build-isolation envs, via
-# a constraints file. numpy stays at 1.26.x (scipy/pandas/vtk/pyshtools can't
-# pull 2.x); cython is held <3.1 because petsc4py 3.21.x cannot be cythonized
-# by Cython >=3.1 (cyautodoc "ExpressionWriter" crash). PIP_CONSTRAINT covers
-# current pip; PIP_BUILD_CONSTRAINT covers pip >=26.2 (where PIP_CONSTRAINT no
-# longer affects build deps).
+# Pin numpy, cython AND setuptools for the whole venv, including build-isolation
+# envs, via a constraints file. numpy stays at 1.26.x (scipy/pandas/vtk/pyshtools
+# can't pull 2.x); cython is held <3.1 (petsc4py 3.21.x cyautodoc cannot be
+# cythonized by Cython >=3.1); setuptools is held <74 because petsc4py 3.21.x's
+# confpetsc.py calls distutils.util.execute(dry_run=...) which newer setuptools'
+# bundled distutils dropped (and py3.12 has no stdlib distutils fallback) — <74
+# keeps the classic signature while still bundling bdist_wheel (>=70.1).
+# PIP_CONSTRAINT covers current pip; PIP_BUILD_CONSTRAINT covers pip >=26.2
+# (where PIP_CONSTRAINT no longer affects build deps).
 ENV PIP_CONSTRAINT=/opt/pip-constraints.txt \
     PIP_BUILD_CONSTRAINT=/opt/pip-constraints.txt
 RUN python3 -m venv "${VIRTUAL_ENV}" \
-    && printf 'numpy==%s\ncython<3.1\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt \
-    && pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && printf 'numpy==%s\ncython<3.1\nsetuptools<74\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt \
+    && pip install --no-cache-dir --upgrade pip "setuptools<74" wheel \
     # numpy/cython for petsc4py & mpi4py builds; meson-python+ninja are the
     # goSPL build backend, needed because we install it --no-build-isolation.
     && pip install --no-cache-dir "numpy==${NUMPY_VERSION}" "cython<3.1" "meson-python>=0.15.0" ninja

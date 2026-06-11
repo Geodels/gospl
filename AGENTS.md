@@ -504,12 +504,17 @@ slow (~30-60 min cold); the workflow uses the gha build cache.
 or — once the image is on Docker Hub — `singularity pull docker://geodels/gospl-hpc:v2026.06.11`
 on a login node (a conversion, not a root build).
 
-numpy is pinned to `1.26.4` (`ARG NUMPY_VERSION`) and cython to `<3.1` via a
-constraints file wired to both `PIP_CONSTRAINT` and `PIP_BUILD_CONSTRAINT` — so
-no transitive dep drifts the venv to numpy 2.x (matches the conda/CI baseline),
-and petsc4py 3.21.x builds (it cannot be cythonized by Cython ≥3.1 — the
-`cyautodoc` "ExpressionWriter" crash). Both env vars are set because pip ≥26.2
-stops honouring `PIP_CONSTRAINT` for build deps.
+numpy (`1.26.4`), cython (`<3.1`) and setuptools (`<74`) are pinned for the
+whole venv via a constraints file wired to both `PIP_CONSTRAINT` and
+`PIP_BUILD_CONSTRAINT`. Rationale: numpy stays on the conda/CI baseline (no
+transitive drift to 2.x); petsc4py 3.21.x cannot be cythonized by Cython ≥3.1
+(`cyautodoc` "ExpressionWriter" crash); and its `confpetsc.py` calls the classic
+`distutils.util.execute(dry_run=...)` that setuptools ≥74's bundled distutils
+dropped (py3.12 has no stdlib distutils fallback), so setuptools is held <74
+(still ≥70.1, which bundles `bdist_wheel`). Both env vars are set because pip
+≥26.2 stops honouring `PIP_CONSTRAINT` for build deps. These build-toolchain
+pins are a consequence of building the older petsc4py 3.21.x from source; a
+future PETSc bump may let them be relaxed.
 
 ### Version bumping
 When bumping the goSPL version in the container, change **only** the
