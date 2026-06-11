@@ -84,12 +84,15 @@ From: ubuntu:24.04
     # --- python venv + build tooling ---
     python3 -m venv /opt/venv
     export PATH=/opt/venv/bin:$PATH
-    # Pin numpy for the whole venv (see Dockerfile/AGENTS.md): a constraints
-    # file honoured by every later pip install so nothing pulls numpy 2.x.
-    echo "numpy==${NUMPY_VERSION}" > /opt/pip-constraints.txt
+    # Pin numpy AND cython for the whole venv (see Dockerfile/AGENTS.md): a
+    # constraints file honoured by every later pip install (incl. build
+    # isolation) so nothing pulls numpy 2.x, and cython stays <3.1 (petsc4py
+    # 3.21.x cannot be cythonized by Cython >=3.1).
+    printf 'numpy==%s\ncython<3.1\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt
     export PIP_CONSTRAINT=/opt/pip-constraints.txt
+    export PIP_BUILD_CONSTRAINT=/opt/pip-constraints.txt
     pip install --no-cache-dir --upgrade pip setuptools wheel
-    pip install --no-cache-dir "numpy==${NUMPY_VERSION}" cython "meson-python>=0.15.0" ninja
+    pip install --no-cache-dir "numpy==${NUMPY_VERSION}" "cython<3.1" "meson-python>=0.15.0" ninja
 
     # --- mpi4py + petsc4py FROM SOURCE against MPICH / PETSc ---
     MPICC=/opt/mpich/bin/mpicc pip install --no-cache-dir --no-binary=mpi4py "mpi4py>=4.0"

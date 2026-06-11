@@ -504,8 +504,12 @@ slow (~30-60 min cold); the workflow uses the gha build cache.
 or — once the image is on Docker Hub — `singularity pull docker://geodels/gospl-hpc:v2026.06.11`
 on a login node (a conversion, not a root build).
 
-numpy is pinned to `1.26.4` (`ARG NUMPY_VERSION`) via a `PIP_CONSTRAINT` file so
-no transitive dep drifts the venv to numpy 2.x — matches the conda/CI baseline.
+numpy is pinned to `1.26.4` (`ARG NUMPY_VERSION`) and cython to `<3.1` via a
+constraints file wired to both `PIP_CONSTRAINT` and `PIP_BUILD_CONSTRAINT` — so
+no transitive dep drifts the venv to numpy 2.x (matches the conda/CI baseline),
+and petsc4py 3.21.x builds (it cannot be cythonized by Cython ≥3.1 — the
+`cyautodoc` "ExpressionWriter" crash). Both env vars are set because pip ≥26.2
+stops honouring `PIP_CONSTRAINT` for build deps.
 
 ### Version bumping
 When bumping the goSPL version in the container, change **only** the

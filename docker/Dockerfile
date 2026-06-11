@@ -120,16 +120,20 @@ ENV OMP_NUM_THREADS=1 \
 
 # Python venv (PATH already prepends /opt/venv/bin above).
 ENV VIRTUAL_ENV=/opt/venv
-# Pin numpy for the whole venv: a constraints file honoured by every later pip
-# install (incl. build-isolation envs) so scipy/pandas/vtk/pyshtools can't pull
-# numpy 2.x. PIP_CONSTRAINT is read by pip automatically.
-ENV PIP_CONSTRAINT=/opt/pip-constraints.txt
+# Pin numpy AND cython for the whole venv, including build-isolation envs, via
+# a constraints file. numpy stays at 1.26.x (scipy/pandas/vtk/pyshtools can't
+# pull 2.x); cython is held <3.1 because petsc4py 3.21.x cannot be cythonized
+# by Cython >=3.1 (cyautodoc "ExpressionWriter" crash). PIP_CONSTRAINT covers
+# current pip; PIP_BUILD_CONSTRAINT covers pip >=26.2 (where PIP_CONSTRAINT no
+# longer affects build deps).
+ENV PIP_CONSTRAINT=/opt/pip-constraints.txt \
+    PIP_BUILD_CONSTRAINT=/opt/pip-constraints.txt
 RUN python3 -m venv "${VIRTUAL_ENV}" \
-    && echo "numpy==${NUMPY_VERSION}" > "${PIP_CONSTRAINT}" \
+    && printf 'numpy==%s\ncython<3.1\n' "${NUMPY_VERSION}" > /opt/pip-constraints.txt \
     && pip install --no-cache-dir --upgrade pip setuptools wheel \
     # numpy/cython for petsc4py & mpi4py builds; meson-python+ninja are the
     # goSPL build backend, needed because we install it --no-build-isolation.
-    && pip install --no-cache-dir "numpy==${NUMPY_VERSION}" cython "meson-python>=0.15.0" ninja
+    && pip install --no-cache-dir "numpy==${NUMPY_VERSION}" "cython<3.1" "meson-python>=0.15.0" ninja
 
 # --- mpi4py from SOURCE against the container MPICH (never a binary wheel) ---
 RUN MPICC=/opt/mpich/bin/mpicc \
