@@ -99,8 +99,11 @@ jobs:
             python -c "import gospl, petsc4py, mpi4py; print('goSPL container build OK')"
           BUILT="$(docker run --rm "${IMAGE}:${{ steps.ver.outputs.tag }}" \
             python -c 'import gospl; print(gospl.__version__)')"
-          if [ "${BUILT}" != "${{ steps.ver.outputs.version }}" ]; then
-            echo "ERROR: container goSPL ${BUILT} != ${{ steps.ver.outputs.version }}" >&2
+          # gospl.__version__ is PEP 440-normalized (2026.06.11 -> 2026.6.11);
+          # normalize the requested version the same way before comparing.
+          WANT="$(python3 -c "print('.'.join(str(int(p)) if p.isdigit() else p for p in '${{ steps.ver.outputs.version }}'.split('.')))")"
+          if [ "${BUILT}" != "${WANT}" ]; then
+            echo "ERROR: container goSPL ${BUILT} != ${WANT}" >&2
             exit 1
           fi
 

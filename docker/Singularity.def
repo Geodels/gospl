@@ -127,9 +127,12 @@ From: ubuntu:24.04
     pip install --no-cache-dir --no-build-isolation --no-deps .
 
     # Version comes solely from meson.build line 4; assert it matches the arg.
+    # gospl.__version__ is PEP 440-normalized (2026.06.11 -> 2026.6.11), so
+    # normalize GOSPL_VERSION the same way before comparing.
     BUILT="$(python -c 'import gospl; print(gospl.__version__)')"
-    if [ -n "${GOSPL_VERSION}" ] && [ "${BUILT}" != "${GOSPL_VERSION}" ]; then
-        echo "ERROR: container goSPL ${BUILT} != ${GOSPL_VERSION}" >&2
+    WANT="$(python -c "print('.'.join(str(int(p)) if p.isdigit() else p for p in '${GOSPL_VERSION}'.split('.')))")"
+    if [ -n "${GOSPL_VERSION}" ] && [ "${BUILT}" != "${WANT}" ]; then
+        echo "ERROR: container goSPL ${BUILT} != ${WANT}" >&2
         exit 1
     fi
     rm -rf /tmp/build

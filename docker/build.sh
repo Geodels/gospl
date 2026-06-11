@@ -48,8 +48,11 @@ docker run --rm --platform linux/amd64 "${IMAGE}" \
 echo ">>> Verifying built version matches ${GOSPL_VERSION}"
 BUILT_VER="$(docker run --rm --platform linux/amd64 "${IMAGE}" \
     python -c 'import gospl; print(gospl.__version__)')"
-if [ "${BUILT_VER}" != "${GOSPL_VERSION}" ]; then
-    echo "ERROR: container goSPL ${BUILT_VER} != requested ${GOSPL_VERSION}" >&2
+# gospl.__version__ is PEP 440-normalized (2026.06.11 -> 2026.6.11); normalize
+# the requested version the same way before comparing.
+WANT_VER="$(python3 -c "print('.'.join(str(int(p)) if p.isdigit() else p for p in '${GOSPL_VERSION}'.split('.')))")"
+if [ "${BUILT_VER}" != "${WANT_VER}" ]; then
+    echo "ERROR: container goSPL ${BUILT_VER} != ${WANT_VER} (requested ${GOSPL_VERSION})" >&2
     exit 1
 fi
 

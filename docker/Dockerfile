@@ -190,9 +190,13 @@ COPY . /opt/gospl-src
 # with --no-build-isolation, and goSPL builds (meson) against the venv's
 # already-pinned numpy/cython anyway.
 RUN env -u PIP_BUILD_CONSTRAINT pip install --no-cache-dir --no-build-isolation --no-deps .
-# Version is driven solely by meson.build line 4; assert it matches the tag.
-RUN test "$(python -c 'import gospl; print(gospl.__version__)')" = "${GOSPL_VERSION}" \
-    || { echo "ERROR: container goSPL != ${GOSPL_VERSION}" >&2; exit 1; }
+# Version is driven solely by meson.build line 4. Compare PEP 440-normalized
+# forms: meson '2026.06.11' installs as gospl.__version__ == '2026.6.11'
+# (leading zeros stripped from numeric segments), so normalize GOSPL_VERSION the
+# same way before comparing.
+RUN GOT="$(python -c 'import gospl; print(gospl.__version__)')"; \
+    WANT="$(python -c "print('.'.join(str(int(p)) if p.isdigit() else p for p in '${GOSPL_VERSION}'.split('.')))")"; \
+    [ "$GOT" = "$WANT" ] || { echo "ERROR: container goSPL $GOT != $WANT (requested ${GOSPL_VERSION})" >&2; exit 1; }
 
 # Build-time smoke test (build.sh repeats this at runtime).
 RUN python -c "import gospl, petsc4py, mpi4py; print('goSPL container build OK')"
