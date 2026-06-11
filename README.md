@@ -28,7 +28,9 @@ All contributions should go through our GitHub repository. Bug reports, ideas or
 
 If you decide to contribute to the codebase, ensure that you are using an up-to-date master branch. The latest development version will always be there, including the documentation (powered by sphinx).
 
-Details are available in the [documentation](https://gospl.readthedocs.io).
+[![Docs](https://readthedocs.org/projects/gospl/badge/?version=latest)](https://gospl.readthedocs.io/en/latest/)
+
+Full docs are available at: https://gospl.readthedocs.io/en/latest/
 
 ## License
 
