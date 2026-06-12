@@ -486,6 +486,55 @@ class SEAMesh(object):
 
         return vdep
 
+    def _marineFineFraction(self, hl, sedFlux):
+        """
+        Dual-lithology (3c): set the per-node fine fraction of the marine
+        deposit so fine concentrates in deep / distal water and coarse stays
+        proximal (near the coast), conserving the marine fine volume.
+
+        Composition only — the marine deposit geometry (already in ``self.tmp``
+        after ``_distOcean``/``_depMarineSystem``/``_diffuseOcean``) is NOT
+        modified, so elevations/flow are untouched. This is the subaqueous
+        analogue of ``sedplex._pitFineFraction``: the lower-Gmar "fines deposit
+        less readily / travel farther" behaviour is expressed as fine biased
+        toward the deeper deposits rather than re-routed.
+
+        Mechanism:
+          - Domain marine fine fraction ``ff_mar = Σ(fineFrac·sedFlux) /
+            Σ(sedFlux)`` — flux-weighted composition of sediment entering the
+            sea (``sedFlux`` is the marine input volume, zero outside sinks).
+          - Water depth ``d = max(sealevel − hl, 0)`` is the distal/deep proxy.
+          - Fine fraction biased ∝ d, renormalised to the deposit-weighted mean
+            depth, so ``Σ(mdep·larea·ffrac) == ff_mar·Σ(mdep·larea)``.
+
+        :arg hl: pre-deposition local elevation
+        :arg sedFlux: marine input sediment volume per node (m^3)
+        """
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        mdep = self.tmpL.getArray().copy()
+        owned = self.inIDs == 1
+
+        # Flux-weighted fine fraction of sediment entering the marine domain.
+        fineNum = float(np.sum((self.fineFrac * sedFlux)[owned]))
+        den = float(np.sum(sedFlux[owned]))
+        fineNum = MPI.COMM_WORLD.allreduce(fineNum, op=MPI.SUM)
+        den = MPI.COMM_WORLD.allreduce(den, op=MPI.SUM)
+        ff_mar = fineNum / den if den > 0.0 else 0.0
+
+        # Deposit-weighted mean water depth.
+        depth = np.maximum(self.sealevel - hl, 0.0)
+        mvol = mdep * self.larea
+        dw = MPI.COMM_WORLD.allreduce(float(np.sum(mvol[owned])), op=MPI.SUM)
+        dwd = MPI.COMM_WORLD.allreduce(float(np.sum((mvol * depth)[owned])), op=MPI.SUM)
+        depthbar = dwd / dw if dw > 0.0 else 0.0
+
+        if depthbar > 0.0:
+            ffrac = np.clip(ff_mar * depth / max(depthbar, 1.0e-30), 0.0, 1.0)
+            marine = mdep > 0.0
+            self.depoFineFrac[marine] = ffrac[marine]
+
+        return
+
     def seaChange(self):
         """
         This function is the main entry point to perform marine river-induced deposition. It calls the private functions:
@@ -557,6 +606,8 @@ class SEAMesh(object):
 
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
+            if self.stratLith:
+                self._marineFineFraction(hl, sedFlux)
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:

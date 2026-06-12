@@ -655,6 +655,60 @@ def test_dual_lithology_pit_fine_bias():
     )
 
 
+def test_dual_lithology_marine_fine_bias():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 3c — _marineFineFraction biases
+    the marine deposit composition so fine concentrates in deep / distal water
+    and coarse stays proximal (shallow), conserving the marine fine volume.
+    Subaqueous analogue of the pit-fine bias.
+
+    Four marine nodes at increasing water depth, uniform deposit and area,
+    uniform arriving composition (ff_mar = 0.3). The per-node fine fraction
+    must increase with depth and conserve fine volume.
+    """
+    seaplex = pytest.importorskip("gospl.sed.seaplex")
+    n = 4
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = np.asarray(arr, dtype=np.float64)
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def globalToLocal(self, g, l):
+            l.setArray(g.getArray().copy())
+
+    m = seaplex.SEAMesh.__new__(seaplex.SEAMesh)
+    m.lpoints = n
+    m.sealevel = 0.0
+    m.inIDs = np.ones(n, dtype=int)
+    m.larea = np.ones(n)
+    m.fineFrac = np.full(n, 0.3)
+    m.depoFineFrac = np.zeros(n)
+    mdep = np.ones(n)                        # uniform marine deposit
+    m.tmp = _StubVec(mdep)
+    m.tmpL = _StubVec(np.zeros(n))
+    m.dm = _StubDM()
+    hl = np.array([-1.0, -3.0, -6.0, -8.0])  # depth = 1, 3, 6, 8
+    sedFlux = np.ones(n)                     # uniform marine input
+
+    m._marineFineFraction(hl, sedFlux)
+
+    depth = m.sealevel - hl
+    ff = m.depoFineFrac
+    order = np.argsort(depth)
+    assert np.all(np.diff(ff[order]) > 0), (
+        f"Marine fine fraction must increase with depth; got {ff}."
+    )
+    fine_vol = float(np.sum(mdep * m.larea * ff))
+    assert np.isclose(fine_vol, 0.3 * n, rtol=1e-9), (
+        f"Marine fine volume not conserved: {fine_vol} != {0.3 * n}"
+    )
+
+
 @pytest.mark.slow
 def test_dual_model_runs_and_invariants(minimal_dual_model):
     """
