@@ -500,7 +500,7 @@ def test_dual_lithology_deposit_and_compaction():
     m.stratLith = True
     m.memclear = False
     m.phi0c, m.phi0f = 0.49, 0.63
-    m.fineFrac = np.array([0.25])   # spatially-resolved fine fraction (Phase 3a)
+    m.depoFineFrac = np.array([0.25])   # per-node deposit fine fraction (Phase 3a/3b)
     m.stratH = np.zeros((1, 2))
     m.stratHf = np.zeros((1, 2))
     m.phiS = np.zeros((1, 2))
@@ -609,6 +609,50 @@ def test_dual_lithology_advection_fine_pile():
     # Coarse/total pile still correct (regression on the original behaviour).
     assert np.allclose(m.stratH[:, s], H0[:, s])
     assert np.allclose(m.phiS[:, s], phiS0[:, s])
+
+
+def test_dual_lithology_pit_fine_bias():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 3b — _pitFineFraction biases the
+    pit/lake deposit composition so fine concentrates toward the depocenter
+    (deep) and coarse toward the inlet/margins (shallow), while conserving the
+    per-pit incoming fine volume.
+
+    Single pit, 4 nodes at increasing bathymetric depth, uniform deposit and
+    area, uniform arriving composition (ff_pit = 0.3). The resulting per-node
+    fine fraction must (a) increase monotonically with depth and (b) conserve
+    the fine volume: Σ(delta·larea·ffrac) == ff_pit·Σ(delta·larea).
+    """
+    sedplex = pytest.importorskip("gospl.sed.sedplex")
+    n = 4
+    m = sedplex.SEDMesh.__new__(sedplex.SEDMesh)
+    m.lpoints = n
+    m.stratLith = True
+    m.pitParams = np.zeros((1, 3))          # one pit
+    m.pitIDs = np.zeros(n, dtype=int)        # all nodes in pit 0
+    m.inIDs = np.ones(n, dtype=int)
+    m.larea = np.ones(n)
+    m.lFill = np.full(n, 10.0)               # rim at 10 m
+    hl = np.array([9.0, 7.0, 4.0, 8.0])      # depth = 1, 3, 6, 2
+    delta = np.ones(n)                       # uniform deposit thickness
+    m.fineFrac = np.full(n, 0.3)
+    m._totFlux = np.ones(n)
+    m.depoFineFrac = np.zeros(n)
+
+    m._pitFineFraction(hl, delta)
+
+    depth = m.lFill - hl
+    ff = m.depoFineFrac
+    # (a) fine fraction increases with depth (depocenter is fine-rich).
+    order = np.argsort(depth)
+    assert np.all(np.diff(ff[order]) > 0), (
+        f"Fine fraction must increase with depth; got {ff} for depth {depth}."
+    )
+    # (b) per-pit fine volume conserved (ff_pit = 0.3, Σ delta*larea = 4).
+    fine_vol = float(np.sum(delta * m.larea * ff))
+    assert np.isclose(fine_vol, 0.3 * 4.0, rtol=1e-9), (
+        f"Pit fine volume not conserved: {fine_vol} != 1.2"
+    )
 
 
 @pytest.mark.slow

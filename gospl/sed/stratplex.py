@@ -230,12 +230,11 @@ class STRAMesh(object):
         - porosity of sediment `phiS` in each stratigraphic layer computed at center of each layer.
 
         In dual-lithology mode the deposit is split into a coarse and a fine
-        fraction using the **per-node fine fraction** ``self.fineFrac`` — the
-        composition of the routed (upstream-integrated) sediment arriving at
-        each node, snapshotted in ``sedplex._getSedFlux``. This is the
-        spatially-resolved replacement for the earlier global-composition
-        placeholder. (3b/3c add differential coarse/fine deposition so the
-        arriving fine fraction itself reflects "fines travel farther".)
+        fraction using the **per-node deposit fine fraction** ``self.depoFineFrac``.
+        It starts each step as ``self.fineFrac`` (the composition of the routed
+        sediment arriving at each node, from ``sedplex._getSedFlux``) and is
+        refined inside continental depressions by ``_pitFineFraction`` (3b:
+        fine biased to the depocenter, coarse to the inlet/margins).
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -244,7 +243,7 @@ class STRAMesh(object):
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         if self.stratLith:
-            self.stratHf[:, self.stratStep] += depo * self.fineFrac
+            self.stratHf[:, self.stratStep] += depo * self.depoFineFrac
             # Fresh deposit carries each lithology's surface porosity.
             self.phiS[ids, self.stratStep] = self.phi0c
             self.phiF[ids, self.stratStep] = self.phi0f
