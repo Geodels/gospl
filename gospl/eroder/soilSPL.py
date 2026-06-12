@@ -466,6 +466,11 @@ class soilSPL(object):
         # Get diffusion soil coefficient
         self.Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
         self.Cd[self.seaID] = self.Cdm
+        # Dual-lithology (Phase 7): scale soil diffusivity by the surface
+        # composition so fine-rich soil diffuses faster (neutral when single-
+        # fraction / no contrast).
+        if self.stratLith:
+            self.Cd = self.Cd * self._surfaceLithoD()
 
         # Remove the soil thickness from the elevation
         self.hLocal.copy(result=self.hl)
