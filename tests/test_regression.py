@@ -494,15 +494,13 @@ def test_dual_lithology_deposit_and_compaction():
         def globalToLocal(self, g, l):
             l.setArray(g.getArray().copy())
 
-    # ---- Deposition: 4 m deposit, global eroded fine fraction = 1/(3+1) ----
+    # ---- Deposition: 4 m deposit, per-node fine fraction (fineFrac) = 0.25 ----
     m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
     m.lpoints, m.stratNb, m.stratStep = 1, 2, 1
     m.stratLith = True
     m.memclear = False
     m.phi0c, m.phi0f = 0.49, 0.63
-    m.larea = np.array([1.0])
-    m.thCoarse = np.array([3.0])
-    m.thFine = np.array([1.0])
+    m.fineFrac = np.array([0.25])   # spatially-resolved fine fraction (Phase 3a)
     m.stratH = np.zeros((1, 2))
     m.stratHf = np.zeros((1, 2))
     m.phiS = np.zeros((1, 2))
@@ -514,7 +512,7 @@ def test_dual_lithology_deposit_and_compaction():
     m.deposeStrat()
     assert np.isclose(m.stratH[0, 1], 4.0)
     assert np.isclose(m.stratHf[0, 1], 4.0 * 0.25), (
-        "Fine deposit must equal depo * global eroded fine fraction."
+        "Fine deposit must equal depo * per-node fineFrac."
     )
     assert np.isclose(m.phiF[0, 1], 0.63) and np.isclose(m.phiS[0, 1], 0.49)
 

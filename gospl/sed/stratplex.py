@@ -230,11 +230,12 @@ class STRAMesh(object):
         - porosity of sediment `phiS` in each stratigraphic layer computed at center of each layer.
 
         In dual-lithology mode the deposit is split into a coarse and a fine
-        fraction. The fine fraction is the step's **global eroded composition**
-        (``Σ thFine / Σ (thCoarse + thFine)`` over the domain) — a co-transport
-        placeholder: fines are assumed to travel with coarse so a deposit
-        carries the bulk source composition. Phase 3 (separate transport)
-        replaces this scalar with a spatially-resolved routed fine deposit.
+        fraction using the **per-node fine fraction** ``self.fineFrac`` — the
+        composition of the routed (upstream-integrated) sediment arriving at
+        each node, snapshotted in ``sedplex._getSedFlux``. This is the
+        spatially-resolved replacement for the earlier global-composition
+        placeholder. (3b/3c add differential coarse/fine deposition so the
+        arriving fine fraction itself reflects "fines travel farther".)
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -243,14 +244,7 @@ class STRAMesh(object):
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         if self.stratLith:
-            # Area-weighted global eroded fine fraction (collective: every
-            # rank participates, matching the MPI contract).
-            cV = float(np.sum(self.thCoarse * self.larea))
-            fV = float(np.sum(self.thFine * self.larea))
-            cV = MPI.COMM_WORLD.allreduce(cV, op=MPI.SUM)
-            fV = MPI.COMM_WORLD.allreduce(fV, op=MPI.SUM)
-            ff_dep = fV / (cV + fV) if (cV + fV) > 0.0 else 0.0
-            self.stratHf[:, self.stratStep] += depo * ff_dep
+            self.stratHf[:, self.stratStep] += depo * self.fineFrac
             # Fresh deposit carries each lithology's surface porosity.
             self.phiS[ids, self.stratStep] = self.phi0c
             self.phiF[ids, self.stratStep] = self.phi0f

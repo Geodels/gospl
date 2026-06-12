@@ -35,6 +35,16 @@ class SEDMesh(object):
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
 
+        # Dual-lithology fine sediment flux (m3/yr). vSed carries the TOTAL
+        # (coarse+fine) sediment; vSedF carries the fine sub-flux, both routed
+        # by the same upstream-integration operator. fineFrac is the per-node
+        # fine fraction of the routed flux (= arriving-sediment composition at
+        # sinks), used by deposeStrat. Allocated unconditionally (negligible)
+        # and registered in destroy_DMPlex; only populated when stratLith.
+        self.vSedF = self.hGlobal.duplicate()
+        self.vSedFLocal = self.hLocal.duplicate()
+        self.fineFrac = np.zeros(self.lpoints, dtype=np.float64)
+
         # Get the maximum number of neighbours on the mesh
         maxnb = np.zeros(1, dtype=np.int64)
         maxnb[0] = setmaxnb(self.lpoints)
@@ -54,8 +64,13 @@ class SEDMesh(object):
         # Stratigraphic layers exist
         if self.stratNb > 0:
             # thCoarse is already an erosion-positive rate (m/yr) from
-            # stratplex.erodeStrat; use as-is.
-            self.tmpL.setArray(self.thCoarse)
+            # stratplex.erodeStrat; use as-is. In dual-lithology mode the
+            # transported sediment is the TOTAL (coarse + fine) so the
+            # deposition machinery handles all eroded volume.
+            if self.stratLith:
+                self.tmpL.setArray(self.thCoarse + self.thFine)
+            else:
+                self.tmpL.setArray(self.thCoarse)
             self.dm.localToGlobal(self.tmpL, self.tmp)
         else:
             # Eb is in the thickness-rate convention (positive deposition,
@@ -68,6 +83,25 @@ class SEDMesh(object):
         # Get the volume of sediment transported in m3/yr
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
+
+        # Dual lithology: route the fine sub-flux through the SAME operator
+        # (linear, so this is exact), then snapshot the per-node fine fraction
+        # of the routed (upstream-integrated) flux — i.e. the composition of
+        # sediment arriving at each node. Done before fMati is destroyed.
+        if self.stratNb > 0 and self.stratLith:
+            self.tmpL.setArray(self.thFine)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            self._solve_KSP(False, self.fMati, self.tmp, self.vSedF)
+            self.dm.globalToLocal(self.vSed, self.vSedLocal)
+            self.dm.globalToLocal(self.vSedF, self.vSedFLocal)
+            vtot = self.vSedLocal.getArray()
+            vfin = self.vSedFLocal.getArray()
+            self.fineFrac = np.divide(
+                vfin, vtot, out=np.zeros_like(vtot), where=vtot > 0.0
+            )
+            np.clip(self.fineFrac, 0.0, 1.0, out=self.fineFrac)
+
         self.fMati.destroy()
 
         # Update local vector
