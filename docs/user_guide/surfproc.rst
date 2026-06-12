@@ -255,5 +255,53 @@ Compaction & porosity variables definition
         b. e-folding depth ``z0s`` (in metres), default value is set to 3700.       
 
         .. note::
-    
+
             See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/strat.html>`_ for more information.
+
+
+Dual-lithology (coarse/fine) variables definition
+--------------------------------------------------
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+
+        **Declaration example**:
+
+        .. code:: yaml
+
+            strata:
+                dual: True
+                coarse: {phi0: 0.49, z0: 3700.}
+                fine:   {phi0: 0.63, z0: 1960., k_factor: 1.5}
+                bedrock_coarse_frac: 0.6
+                fine_diff_factor: 2.0
+                pitInletBias: {coarse: 0.5, fine: 0.0}
+
+        Optional. When stratigraphy is enabled (a positive ``strat`` interval in
+        the ``time`` block), set ``dual: True`` to track coarse (sand) and fine
+        (silt/clay) sediment separately. **Omitting the block — or ``dual:
+        False`` — reproduces the single-fraction behaviour exactly.** The keys:
+
+        a. ``coarse`` / ``fine`` — per-lithology depth-porosity curves
+           (``phi0`` surface porosity, ``z0`` e-folding depth in metres). The
+           coarse curve defaults to the ``compaction`` ``phis``/``z0s`` values.
+        b. ``fine.k_factor`` — fine erodibility relative to coarse
+           (``K_fine = K_coarse * k_factor``); ``1.0`` (default) = no contrast.
+        c. ``fine_diff_factor`` — fine hillslope/soil diffusivity relative to
+           coarse; a **multiplier** on the existing ``hillslopeKa`` /
+           ``hillslopeKm`` / ``nonlinKm`` coefficients (it does not replace
+           them). ``> 1`` makes fines diffuse (and so travel) farther.
+        d. ``bedrock_coarse_frac`` — coarse fraction of the underlying bedrock
+           (default 0.5), i.e. the composition of material eroded from bedrock.
+        e. ``pitInletBias`` — per-fraction lake-deposition bias (coarse builds
+           inlet deltas, fine settles in the depocenter).
+
+        Fines preferentially reach the **distal** parts of the system: the
+        depocenter of lakes/depressions and the deeper/distal marine shelf,
+        while coarse stays proximal.
+
+        .. note::
+
+            See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/strat.html>`_ (Dual lithology section) for the physics and current limitations.

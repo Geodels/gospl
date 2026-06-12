@@ -112,4 +112,58 @@ The lookup of the surface multiplier is a vectorised search for the highest non-
 
 .. note::
 
-   The per-layer multiplier is currently a **single value per layer** and applies only to the bedrock SPL coefficient. It is not available in the dual coarse/fine sediment configuration, and it does not scale the soil-layer erodibility ``Ksoil`` in the soil-coupled SPL flavour.
+   The per-layer multiplier is a **single value per layer** and applies only to the bedrock SPL coefficient. It does not scale the soil-layer erodibility ``Ksoil`` in the soil-coupled SPL flavour. In the dual coarse/fine configuration it composes multiplicatively with the lithology-blended erodibility ``K * surfK * (fc + ff * fine_k_factor)`` (see :ref:`Dual lithology <dual-litho>` below).
+
+.. _dual-litho:
+
+Dual lithology (coarse / fine)
+------------------------------
+
+When stratigraphy is enabled, goSPL can optionally track **two sediment
+lithologies** — coarse (sand) and fine (silt/clay) — separately through
+erosion, transport, deposition, compaction and advection. It is an opt-in
+feature: with it off (the default) the model is identical to the
+single-fraction behaviour described above.
+
+Enable it with a ``strata`` block in the input file:
+
+.. code-block:: yaml
+
+   strata:
+       dual: True
+       coarse: {phi0: 0.49, z0: 3700.}              # coarse porosity-depth curve
+       fine:   {phi0: 0.63, z0: 1960., k_factor: 1.5}  # fine curve + erodibility ratio
+       bedrock_coarse_frac: 0.6                      # coarse fraction of bedrock
+       fine_diff_factor: 2.0                         # fine diffuses 2x faster
+       pitInletBias: {coarse: 0.5, fine: 0.0}        # lake delta vs depocenter
+
+Each stratigraphic layer stores a total thickness and a fine-fraction
+thickness, plus a porosity for each lithology. The two fractions are governed
+by independent physical parameters:
+
+- **Porosity / compaction**: each lithology compacts on its own
+  depth-porosity curve (``coarse``/``fine`` ``phi0``, ``z0``). Because fines
+  are more porous and compact more, the same solid load yields a different
+  preserved thickness depending on the grain mix.
+- **Erodibility**: the surface SPL coefficient is blended by the exposed
+  composition, ``K_eff = K · (f_c + f_f · fine_k_factor)``, so fine-rich
+  surfaces can be more (or less) erodible than coarse.
+- **Diffusivity**: the hillslope/soil diffusion coefficient is blended the
+  same way, ``Cd_eff = Cd · (f_c + f_f · fine_diff_factor)`` (a multiplier on
+  the existing ``hillslopeKa``/``hillslopeKm``/``nonlinKm`` coefficients — it
+  does **not** replace them), so fines diffuse faster.
+
+"Fines travel farther" is realised at the deposition stage: within lakes and
+depressions the fine fraction is biased toward the **depocenter** while coarse
+builds the **inlet/margins**, and in the marine domain fine concentrates in
+**deeper/distal** water while coarse stays proximal. The per-fraction deposited
+volume is conserved by this re-partition; the deposit geometry (and therefore
+the elevation evolution) is unchanged relative to the total-sediment result.
+
+.. note::
+
+   *Fine-enriched overspill* — preferential trapping of coarse in a filled
+   depression with fine-enriched sediment continuing downstream — is **not yet
+   implemented**: sediment overspilling a filled pit currently carries the
+   incoming composition. This is a known limitation; see the design notes for
+   details.
