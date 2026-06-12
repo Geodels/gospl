@@ -1458,8 +1458,10 @@ class ReadYaml(object):
         self.fine_efficiency = 0.5
         self.pit_inlet_bias_coarse = 0.50
         self.pit_inlet_bias_fine = 0.0
-        self.Dc = None
-        self.Df = None
+        # Fine diffusivity relative to coarse: a multiplier on the existing
+        # hillslope coefficients (Cda/Cdm/nlK), NOT an absolute coefficient.
+        # Cd_eff = Cd_base * (fc + ff * fine_diff_factor). 1.0 = no contrast.
+        self.fine_diff_factor = 1.0
 
         # TODO-REFACTOR: complex except, needs manual review (outer-section: sets stratLith=False on missing "strata")
         try:
@@ -1487,8 +1489,9 @@ class ReadYaml(object):
                 )
                 self.pit_inlet_bias_fine = biasDict.get("fine", self.pit_inlet_bias_fine)
 
-            self.Dc = strataDict.get("Dc", None)
-            self.Df = strataDict.get("Df", None)
+            self.fine_diff_factor = strataDict.get(
+                "fine_diff_factor", self.fine_diff_factor
+            )
 
         except KeyError:
             self.stratLith = False

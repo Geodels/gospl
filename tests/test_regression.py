@@ -287,23 +287,23 @@ def test_dual_lithology_opt_in():
         "strata": {
             "dual": True,
             "coarse": {"phi0": 0.45, "z0": 3000.0},
-            "fine": {"phi0": 0.65, "z0": 1500.0},
+            "fine": {"phi0": 0.65, "z0": 1500.0, "k_factor": 1.5},
             "bedrock_coarse_frac": 0.7,
             "fine_efficiency": 0.3,
             "pitInletBias": {"coarse": 0.8, "fine": 0.1},
-            "Dc": 0.01,
-            "Df": 0.05,
+            "fine_diff_factor": 2.0,
         }
     }
     parser._extraStrata()
     assert parser.stratLith is True
     assert parser.phi0c == 0.45 and parser.z0c == 3000.0
     assert parser.phi0f == 0.65 and parser.z0f == 1500.0
+    assert parser.fine_k_factor == 1.5
     assert parser.bedrock_coarse_frac == 0.7
     assert parser.fine_efficiency == 0.3
     assert parser.pit_inlet_bias_coarse == 0.8
     assert parser.pit_inlet_bias_fine == 0.1
-    assert parser.Dc == 0.01 and parser.Df == 0.05
+    assert parser.fine_diff_factor == 2.0
 
     # ---- Case 3: dual requested but stratigraphy off → forced False
     parser = _strata_parser(stratNb=0)

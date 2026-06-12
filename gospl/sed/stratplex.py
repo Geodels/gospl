@@ -222,6 +222,22 @@ class STRAMesh(object):
         fc = self._surfaceComposition()
         return fc + (1.0 - fc) * self.fine_k_factor
 
+    def _surfaceLithoD(self):
+        """
+        Per-node diffusivity multiplier from the exposed surface composition:
+        ``fc + (1 - fc) * fine_diff_factor``.
+
+        Equals 1.0 everywhere when dual lithology is off (or
+        ``fine_diff_factor == 1``, i.e. no contrast), so it composes
+        multiplicatively with the base hillslope coefficients (``Cda``/``Cdm``)
+        without altering single-fraction behaviour. Fines diffuse faster when
+        ``fine_diff_factor > 1`` (see DESIGN_DUAL_LITHOLOGY.md Section 7).
+        """
+        if not self.stratLith:
+            return np.ones(self.lpoints, dtype=np.float64)
+        fc = self._surfaceComposition()
+        return fc + (1.0 - fc) * self.fine_diff_factor
+
     def deposeStrat(self):
         """
         Add deposition on top of an existing stratigraphic layer. The following variables will be recorded:

@@ -170,7 +170,7 @@ NOT optional parsers. Each sets attributes required by other modules. Never dele
 - `_extraDomain` (inputparser.py:189) → `seaDepo`, `overlap`, `dataFile`, `nodep`, `strataFile`; calls `_extraDomain2`.
 - `_extraDomain2` (:229) → `advscheme`, `radius`, `gravity`.
 - `_extraHillslope` (:475) → `nlK`, `clinSlp`, `tsStep`, `Gmar`, `offshore`, `nl_pit_volume/depth/K/inlet_bias`.
-- `_extraStrata` (called from `_readCompaction`) → `stratLith` (dual-lithology master opt-in), `phi0c/z0c` (coarse porosity curve, defaults to compaction `phi0s/z0s`), `phi0f/z0f` (fine), `bedrock_coarse_frac`, `fine_efficiency`, `pit_inlet_bias_coarse/fine`, `Dc/Df`. All inert while `stratLith` is False; forced False if `stratNb == 0`. See `docs/DESIGN_DUAL_LITHOLOGY.md`.
+- `_extraStrata` (called from `_readCompaction`) → `stratLith` (dual-lithology master opt-in), `phi0c/z0c` (coarse porosity curve, defaults to compaction `phi0s/z0s`), `phi0f/z0f` (fine), `fine_k_factor` (fine erodibility multiplier), `bedrock_coarse_frac`, `fine_efficiency`, `pit_inlet_bias_coarse/fine`, `fine_diff_factor` (fine diffusivity multiplier). All inert while `stratLith` is False; forced False if `stratNb == 0`. See `docs/DESIGN_DUAL_LITHOLOGY.md`.
 - `_extraFlex` (:1430) → `nu`, `flex_res_deg`, `flex_bcN/S/E/W`.
 - `_extraOrography` (:1517) → `oro_cw`, `oro_conv_time`, `oro_fall_time`, `oro_precip_*`, `rainfall_frequency`.
 - `_extraIce` (:1621) → `iceT`, `elaH`, `iceH` interpolators.
