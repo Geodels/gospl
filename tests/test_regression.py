@@ -237,6 +237,383 @@ def test_evap_parser_opt_in():
 
 
 # ---------------------------------------------------------------------------
+# TEST 2b - dual-lithology opt-in flag (DESIGN_DUAL_LITHOLOGY.md Phase 0)
+# ---------------------------------------------------------------------------
+
+
+def _strata_parser(stratNb):
+    """
+    Bare parser primed for `_extraStrata`: it reads `self.input`,
+    `self.phi0s`/`self.z0s` (set by `_readCompaction` upstream), and
+    `self.stratNb` (set by `_readTime` upstream). See `_bare_parser`.
+    """
+    parser = inputparser.ReadYaml.__new__(inputparser.ReadYaml)
+    parser.input = {}
+    parser.phi0s = 0.49
+    parser.z0s = 3700.0
+    parser.stratNb = stratNb
+    return parser
+
+
+def test_dual_lithology_opt_in():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 0 — dual lithology is an
+    opt-in parsed in `_extraStrata` (continuation of `_readCompaction`).
+
+    Silent failure prevented: a refactor dropping the `_extraStrata` call
+    from `_readCompaction`, or flipping the default, would silently change
+    the sediment model for every existing input file.
+
+    Invariants:
+      1. No `strata` block  → stratLith False; coarse curve == compaction
+         curve (the dual-off path must stay bitwise-identical).
+      2. `strata: dual: True` with stratigraphy on → stratLith True and the
+         per-lithology parameters are parsed.
+      3. `strata: dual: True` with stratigraphy OFF (stratNb == 0) → flag
+         forced back to False (dual requires stratigraphy).
+    """
+    # ---- Case 1: no strata block → single-fraction, defaults mirror compaction
+    parser = _strata_parser(stratNb=5)
+    parser._extraStrata()
+    assert parser.stratLith is False
+    assert parser.phi0c == parser.phi0s and parser.z0c == parser.z0s, (
+        "Dual-off coarse porosity curve must default to the single-fraction "
+        "compaction curve so behaviour is unchanged."
+    )
+
+    # ---- Case 2: dual on with stratigraphy enabled → parsed
+    parser = _strata_parser(stratNb=5)
+    parser.input = {
+        "strata": {
+            "dual": True,
+            "coarse": {"phi0": 0.45, "z0": 3000.0},
+            "fine": {"phi0": 0.65, "z0": 1500.0},
+            "bedrock_coarse_frac": 0.7,
+            "fine_efficiency": 0.3,
+            "pitInletBias": {"coarse": 0.8, "fine": 0.1},
+            "Dc": 0.01,
+            "Df": 0.05,
+        }
+    }
+    parser._extraStrata()
+    assert parser.stratLith is True
+    assert parser.phi0c == 0.45 and parser.z0c == 3000.0
+    assert parser.phi0f == 0.65 and parser.z0f == 1500.0
+    assert parser.bedrock_coarse_frac == 0.7
+    assert parser.fine_efficiency == 0.3
+    assert parser.pit_inlet_bias_coarse == 0.8
+    assert parser.pit_inlet_bias_fine == 0.1
+    assert parser.Dc == 0.01 and parser.Df == 0.05
+
+    # ---- Case 3: dual requested but stratigraphy off → forced False
+    parser = _strata_parser(stratNb=0)
+    parser.input = {"strata": {"dual": True}}
+    parser._extraStrata()
+    assert parser.stratLith is False, (
+        "Dual lithology must require stratigraphy (stratNb > 0); with strat "
+        "disabled the flag has to fall back to single-fraction."
+    )
+
+
+def test_dual_lithology_layer_allocation():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 1 — the fine-fraction layer
+    fields (stratHf, phiF) are allocated by readStratLayers only when
+    dual lithology is enabled, and stay None otherwise.
+
+    Silent failure prevented: allocating the fields unconditionally would
+    change the single-fraction memory footprint and (via _outputStrat)
+    write extra HDF5 datasets into every existing single-fraction run.
+
+    Exercises the no-file branch of readStratLayers directly via __new__,
+    which only needs lpoints/stratNb/phi0s/stratLith/memclear/strataFile.
+    """
+    from gospl.sed import stratplex
+
+    from gospl.tools.constants import BEDROCK_SENTINEL
+
+    def _strata_mesh(stratLith):
+        m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+        m.strataFile = None
+        m.lpoints = 8
+        m.stratNb = 3
+        m.phi0s = 0.49
+        m.phi0f = 0.63
+        m.bedrock_coarse_frac = 0.5
+        m.memclear = False
+        m.stratLith = stratLith
+        m.stratHf = None
+        m.phiF = None
+        return m
+
+    # Single-fraction: fine fields stay None.
+    m = _strata_mesh(stratLith=False)
+    m.readStratLayers()
+    assert m.stratHf is None and m.phiF is None, (
+        "Single-fraction run must not allocate stratHf/phiF."
+    )
+
+    # Dual: fine fields allocated with stratH's shape. The bedrock sentinel
+    # layer (layer 0) carries the bedrock fine fraction; layers above are 0.
+    m = _strata_mesh(stratLith=True)
+    m.readStratLayers()
+    assert m.stratHf is not None and m.phiF is not None
+    assert m.stratHf.shape == m.stratH.shape == (m.lpoints, m.stratNb)
+    assert m.phiF.shape == (m.lpoints, m.stratNb)
+    assert np.allclose(m.stratHf[:, 0], BEDROCK_SENTINEL * (1.0 - 0.5)), (
+        "Bedrock-sentinel layer must carry the (1 - bedrock_coarse_frac) fine split."
+    )
+    assert (m.stratHf[:, 1:] == 0.0).all(), "Layers above bedrock start coarse-empty."
+
+
+def test_dual_lithology_erosion_split():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 2 — erodeStrat splits the
+    eroded solid into thCoarse/thFine by the consumed layers' composition,
+    and stays mass-consistent. K-blend / composition helpers also tested.
+
+    Builds a tiny single-node column by hand and drives erodeStrat through
+    a stubbed PETSc boundary (tmpL/globalToLocal), so the split arithmetic
+    is exercised without a full model.
+
+    Invariants:
+      1. All-coarse column -> thFine == 0 and thCoarse matches what the
+         single-fraction branch would produce (parity).
+      2. Mixed column -> the deposited (uncompacted) split reconstructs the
+         eroded solid: thCoarse*(1-phi0c) + thFine*(1-phi0f) == solid removed.
+      3. _surfaceComposition / _surfaceLithoK reflect the exposed layer and
+         the fine_k_factor; both are neutral (1.0) when dual is off.
+    """
+    from gospl.sed import stratplex
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = arr
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def globalToLocal(self, g, l):
+            l.setArray(g.getArray().copy())
+
+    def _mesh(stratLith, ero, stratH, stratHf=None, phiS=None, phiF=None):
+        m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+        lp, nb = stratH.shape
+        m.lpoints, m.stratNb, m.stratStep = lp, nb, nb - 1
+        m.dt = 1.0
+        m.memclear = False
+        m.phi0s = m.phi0c = 0.49
+        m.phi0f = 0.63
+        m.bedrock_coarse_frac = 0.5
+        m.fine_k_factor = 1.0
+        m.stratLith = stratLith
+        m.stratH = stratH.astype(np.float64).copy()
+        m.phiS = (phiS if phiS is not None else np.full_like(stratH, 0.49)).copy()
+        m.stratK = np.ones_like(m.stratH)
+        m.stratHf = stratHf.copy() if stratHf is not None else None
+        m.phiF = phiF.copy() if phiF is not None else None
+        # PETSc boundary stub: tmp carries -ero (erosion is negative).
+        m.tmp = _StubVec(np.array(ero, dtype=np.float64))
+        m.tmpL = _StubVec(np.zeros(lp))
+        m.dm = _StubDM()
+        return m
+
+    # ---- Case 1: all-coarse parity (single vs dual must agree on thCoarse)
+    stratH = np.array([[2.0, 3.0]])          # two layers, total 5 m
+    single = _mesh(False, ero=[-4.0], stratH=stratH)
+    single.erodeStrat()
+    dual = _mesh(
+        True, ero=[-4.0], stratH=stratH,
+        stratHf=np.zeros_like(stratH), phiF=np.full_like(stratH, 0.63),
+    )
+    dual.erodeStrat()
+    assert np.allclose(dual.thFine, 0.0), "All-coarse column must erode no fine."
+    assert np.allclose(dual.thCoarse, single.thCoarse), (
+        "All-coarse dual erosion must match the single-fraction thCoarse."
+    )
+
+    # ---- Case 2: mixed column -> per-fraction solid reconstruction
+    stratH = np.array([[2.0, 3.0]])
+    stratHf = np.array([[1.0, 1.2]])         # fine bulk per layer
+    phiS = np.full_like(stratH, 0.49)
+    phiF = np.full_like(stratH, 0.63)
+    dual = _mesh(True, ero=[-4.0], stratH=stratH, stratHf=stratHf,
+                 phiS=phiS, phiF=phiF)
+    dual.erodeStrat()
+    # Solid removed by erosion of 4 m: fully erode top layer (3 m) + 1 m of
+    # the lower (well-mixed) layer.
+    # top layer (idx1): coarse (3-1.2)*(1-.49) + fine 1.2*(1-.63)
+    # lower (idx0): remove 1 m of 2 m -> half: coarse (2-1)/2*(1-.49)*1 ... compute generically:
+    coarse_solid = (3 - 1.2) * (1 - 0.49) + ((2 - 1.0) * 0.5) * (1 - 0.49)
+    fine_solid = 1.2 * (1 - 0.63) + (1.0 * 0.5) * (1 - 0.63)
+    got = dual.thCoarse[0] * (1 - dual.phi0c) + dual.thFine[0] * (1 - dual.phi0f)
+    assert np.isclose(got, coarse_solid + fine_solid, rtol=1e-9), (
+        f"Per-fraction solid reconstruction failed: got {got}, "
+        f"expected {coarse_solid + fine_solid}"
+    )
+    assert dual.thFine[0] > 0 and dual.thCoarse[0] > 0
+
+    # ---- Case 3: composition + K-blend helpers
+    m = _mesh(True, ero=[0.0], stratH=np.array([[2.0, 2.0]]),
+              stratHf=np.array([[0.0, 0.5]]), phiF=np.full((1, 2), 0.63))
+    fc = m._surfaceComposition()
+    assert np.isclose(fc[0], 1.0 - 0.5 / 2.0), "Surface coarse fraction wrong."
+    m.fine_k_factor = 2.0
+    litK = m._surfaceLithoK()
+    assert np.isclose(litK[0], fc[0] + (1 - fc[0]) * 2.0)
+    m.stratLith = False
+    assert np.allclose(m._surfaceLithoK(), 1.0), "K-blend must be neutral when off."
+
+
+def test_dual_lithology_deposit_and_compaction():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 4 — per-fraction deposition
+    (deposeStrat) and per-fraction compaction (_depthPorosityDual).
+
+    Deposition: the fresh layer accumulates a fine fraction equal to the
+    step's global eroded composition, with each lithology's surface porosity.
+
+    Compaction (the headline physics): each fraction compacts on its own
+    porosity-depth curve, conserving its solid phase while fines lose more
+    bulk thickness than coarse at the same burial depth.
+    """
+    from gospl.sed import stratplex
+    from mpi4py import MPI
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = np.asarray(arr, dtype=np.float64)
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def globalToLocal(self, g, l):
+            l.setArray(g.getArray().copy())
+
+    # ---- Deposition: 4 m deposit, global eroded fine fraction = 1/(3+1) ----
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.lpoints, m.stratNb, m.stratStep = 1, 2, 1
+    m.stratLith = True
+    m.memclear = False
+    m.phi0c, m.phi0f = 0.49, 0.63
+    m.larea = np.array([1.0])
+    m.thCoarse = np.array([3.0])
+    m.thFine = np.array([1.0])
+    m.stratH = np.zeros((1, 2))
+    m.stratHf = np.zeros((1, 2))
+    m.phiS = np.zeros((1, 2))
+    m.phiF = np.zeros((1, 2))
+    m.stratK = np.ones((1, 2))
+    m.tmp = _StubVec([4.0])
+    m.tmpL = _StubVec([0.0])
+    m.dm = _StubDM()
+    m.deposeStrat()
+    assert np.isclose(m.stratH[0, 1], 4.0)
+    assert np.isclose(m.stratHf[0, 1], 4.0 * 0.25), (
+        "Fine deposit must equal depo * global eroded fine fraction."
+    )
+    assert np.isclose(m.phiF[0, 1], 0.63) and np.isclose(m.phiS[0, 1], 0.49)
+
+    # ---- Compaction: one mixed layer buried 2 km ----
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.stratStep = 0
+    m.stratLith = True
+    m.memclear = False
+    m.bedrockLay = 0
+    m.phi0c, m.z0c = 0.49, 3700.0
+    m.phi0f, m.z0f = 0.63, 1960.0
+    Hc0, Hf0 = 6.0, 4.0
+    m.stratH = np.array([[Hc0 + Hf0]])
+    m.stratHf = np.array([[Hf0]])
+    m.phiS = np.array([[0.49]])
+    m.phiF = np.array([[0.63]])
+    depth = np.array([[-2000.0]])
+    newH = m._depthPorosity(depth)
+
+    phiS_new = 0.49 * np.exp(-2000.0 / 3700.0)
+    phiF_new = 0.63 * np.exp(-2000.0 / 1960.0)
+    # Per-fraction solid is conserved through compaction.
+    Hc_new = newH[0, 0] - m.stratHf[0, 0]
+    Hf_new = m.stratHf[0, 0]
+    assert np.isclose(Hc_new * (1 - phiS_new), Hc0 * (1 - 0.49), rtol=1e-9), (
+        "Coarse solid must be conserved through compaction."
+    )
+    assert np.isclose(Hf_new * (1 - phiF_new), Hf0 * (1 - 0.63), rtol=1e-9), (
+        "Fine solid must be conserved through compaction."
+    )
+    assert newH[0, 0] < Hc0 + Hf0, "Compaction must reduce total thickness."
+    # Fines lose proportionally more bulk than coarse at the same depth.
+    assert (Hf_new / Hf0) < (Hc_new / Hc0), (
+        "Fines must compact more than coarse for these curves."
+    )
+
+
+def test_dual_lithology_advection_fine_pile():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 5 — stratalRecord advects the
+    fine pile (stratHf, phiF) alongside the total/coarse pile via a second
+    strataonesed call (NOT stratathreesed, whose extra fields are 0-1
+    fractions and renormalised — wrong for the bulk-thickness representation).
+
+    Uses an identity advection (each node maps to itself with weight 1) so
+    the records must come back unchanged, confirming the fine fields are
+    actually routed through the interpolation and written back.
+    """
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+
+    class _MockVec:
+        def __init__(self, n):
+            self._a = np.zeros(n)
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64).copy()
+        def getArray(self):
+            return self._a
+
+    class _MockDM:
+        def globalToLocal(self, src, dst):
+            dst.setArray(src.getArray())  # identity halo exchange
+
+    n = 4
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.lpoints = n
+    m.stratStep = 2          # advect layers 0..1
+    m.stratLith = True
+    m.stratH = np.array([[5.0, 7.0, 0.0]] * n)
+    m.stratHf = np.array([[2.0, 3.0, 0.0]] * n)
+    m.stratZ = np.array([[-10.0, -3.0, 0.0]] * n)
+    m.phiS = np.array([[0.45, 0.48, 0.0]] * n)
+    m.phiF = np.array([[0.60, 0.62, 0.0]] * n)
+    m.tmp = _MockVec(n)
+    m.tmpL = _MockVec(n)
+    m.dm = _MockDM()
+
+    # Identity interpolation: 3 neighbours all = self, weights summing to 1.
+    indices = np.repeat(np.arange(n)[:, None], 3, axis=1)
+    weights = np.full((n, 3), 1.0 / 3.0)
+    onIDs = np.array([], dtype=int)
+
+    H0, Hf0 = m.stratH.copy(), m.stratHf.copy()
+    phiS0, phiF0 = m.phiS.copy(), m.phiF.copy()
+    m.stratalRecord(indices, weights, onIDs)
+
+    # Advected layers (0..stratStep-1) must be preserved by identity mapping.
+    s = slice(0, m.stratStep)
+    assert np.allclose(m.stratHf[:, s], Hf0[:, s]), (
+        "Fine pile thickness must round-trip through identity advection."
+    )
+    assert np.allclose(m.phiF[:, s], phiF0[:, s]), (
+        "Fine porosity must round-trip through identity advection."
+    )
+    # Coarse/total pile still correct (regression on the original behaviour).
+    assert np.allclose(m.stratH[:, s], H0[:, s])
+    assert np.allclose(m.phiS[:, s], phiS0[:, s])
+
+
+# ---------------------------------------------------------------------------
 # TEST 2c - channel-evap hook reduces FA (DESIGN_EVAPORATION.md §4 T1)
 # ---------------------------------------------------------------------------
 
@@ -1485,6 +1862,7 @@ def test_stratigraphy_deposition_and_compaction():
     s.z0s       = 100.0    # e-folding compaction depth (m)
     s.bedrockLay = 0       # no infinite-bedrock sentinel layer
     s.memclear  = False
+    s.stratLith = False    # single-fraction path (dual-lithology disabled)
 
     s.stratH = np.full((5, 3), 50.0, dtype=np.float64)
     s.phiS   = np.full((5, 3),  0.5, dtype=np.float64)
@@ -1616,6 +1994,7 @@ def test_stratigraphy_deposition_and_compaction():
     s2.z0s       = 100.0
     s2.bedrockLay = 1      # layer 0 is bedrock
     s2.memclear  = False
+    s2.stratLith = False   # single-fraction path (dual-lithology disabled)
 
     # Layer 0 holds the BEDROCK_SENTINEL thickness (1e6) — never compact it.
     s2.stratH = np.array([[1.0e6, 50.0, 50.0]] * 5, dtype=np.float64)

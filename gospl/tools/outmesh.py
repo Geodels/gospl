@@ -188,6 +188,27 @@ class WriteMesh(object):
                     :, : self.stratStep + 1
                 ]
 
+            # Dual-lithology fine-fraction fields. Only written when the
+            # dual coarse/fine option is enabled (self.stratHf allocated in
+            # readStratLayers); single-fraction outputs are unchanged.
+            if self.stratHf is not None:
+                f.create_dataset(
+                    "stratHf",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    compression="gzip",
+                )
+                f["stratHf"][:, : self.stratStep + 1] = self.stratHf[
+                    :, : self.stratStep + 1
+                ]
+                f.create_dataset(
+                    "phiF",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    compression="gzip",
+                )
+                f["phiF"][:, : self.stratStep + 1] = self.phiF[:, : self.stratStep + 1]
+
         MPIcomm.Barrier()
 
         if MPIrank == 0 and self.verbose:
@@ -497,6 +518,16 @@ class WriteMesh(object):
                     # behaviour for any pre-existing restart files.
                     self.stratK.fill(1.0)
                     self.stratK[:, : self.stratStep] = np.array(hf["/stratK"])
+                # Dual-lithology fine-fraction fields. Restarting a dual run
+                # from a single-fraction output (no /stratHf dataset) falls
+                # back to all-coarse zeros, so the restore stays robust.
+                if self.stratHf is not None:
+                    self.stratHf.fill(0.0)
+                    if "/stratHf" in hf:
+                        self.stratHf[:, : self.stratStep] = np.array(hf["/stratHf"])
+                    self.phiF.fill(0.0)
+                    if "/phiF" in hf:
+                        self.phiF[:, : self.stratStep] = np.array(hf["/phiF"])
 
         return
 
