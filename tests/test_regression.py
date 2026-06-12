@@ -611,6 +611,72 @@ def test_dual_lithology_advection_fine_pile():
     assert np.allclose(m.phiS[:, s], phiS0[:, s])
 
 
+@pytest.mark.slow
+def test_dual_model_runs_and_invariants(minimal_dual_model):
+    """
+    Integration (DESIGN_DUAL_LITHOLOGY.md Phase 6): a full dual-lithology model
+    runs end-to-end and preserves the per-fraction invariants. Exercises the
+    whole dual path together — erodeStrat split, _getSedFlux fine routing
+    (Phase 3a), deposeStrat per-node fineFrac, per-fraction compaction, and
+    fine-pile advection. This is the first live coverage of the dual sediment
+    transport path (both fixtures used by other tests have stratNb == 0).
+    """
+    model = minimal_dual_model
+    assert model.stratLith is True and model.stratNb > 0
+    assert model.stratHf is not None and model.phiF is not None
+    # Bedrock sentinel carries the configured fine split before any run.
+    assert np.isclose(
+        model.stratHf[0, 0], 1.0e6 * (1.0 - model.bedrock_coarse_frac)
+    )
+
+    model.runProcesses()
+
+    top = model.stratStep + 1
+    H = model.stratH[:, :top]
+    Hf = model.stratHf[:, :top]
+    # Fine pile stays physical: non-negative and never exceeding the total.
+    assert (Hf >= -1.0e-9).all(), "Negative fine thickness in the strata pile."
+    assert (Hf <= H + 1.0e-6).all(), "Fine thickness exceeds layer total."
+    # Porosity and the routed fine fraction stay in range.
+    assert (model.phiF[:, :top] >= -1.0e-12).all()
+    assert (model.phiF[:, :top] <= 1.0 + 1.0e-12).all()
+    assert (model.fineFrac >= 0.0).all() and (model.fineFrac <= 1.0).all()
+    # The dual path actually moved fine material (bedrock contributes it).
+    assert float(Hf.sum()) > 0.0
+
+
+@pytest.mark.slow
+def test_dual_all_coarse_matches_single_fraction(
+    minimal_dual_coarse_model, minimal_strat_model
+):
+    """
+    Parity guard (DESIGN_DUAL_LITHOLOGY.md Phase 6): dual lithology configured
+    all-coarse (bedrock_coarse_frac=1.0, no erodibility/diffusivity contrast)
+    must reproduce the single-fraction stratigraphy run exactly. Confirms the
+    dual code paths are a faithful superset of the single-fraction path — any
+    accidental divergence (extra deposition, wrong compaction branch, etc.)
+    trips this.
+    """
+    dual = minimal_dual_coarse_model
+    single = minimal_strat_model
+    dual.runProcesses()
+    single.runProcesses()
+
+    top = min(dual.stratStep, single.stratStep) + 1
+    # No fine produced anywhere in the all-coarse configuration.
+    assert float(dual.stratHf[:, :top].sum()) == 0.0, (
+        "All-coarse dual run produced fine sediment."
+    )
+    # Elevation and stratal thickness must match single-fraction bitwise
+    # (the smoke check measured exactly 0 difference; atol guards float noise).
+    assert np.allclose(
+        dual.hLocal.getArray(), single.hLocal.getArray(), rtol=0.0, atol=1.0e-9
+    ), "Elevation diverged from the single-fraction stratigraphy run."
+    assert np.allclose(
+        dual.stratH[:, :top], single.stratH[:, :top], rtol=0.0, atol=1.0e-9
+    ), "Stratal thickness diverged from the single-fraction stratigraphy run."
+
+
 # ---------------------------------------------------------------------------
 # TEST 2c - channel-evap hook reduces FA (DESIGN_EVAPORATION.md §4 T1)
 # ---------------------------------------------------------------------------

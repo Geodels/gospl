@@ -103,6 +103,35 @@ def minimal_model():
 
 
 @pytest.fixture
+def minimal_strat_model():
+    """
+    Minimal model with stratigraphy recording ON (single-fraction). Baseline
+    for the dual-lithology all-coarse parity test. See minimal_strat.yml.
+    """
+    return _instantiate("minimal_strat.yml")
+
+
+@pytest.fixture
+def minimal_dual_model():
+    """
+    Minimal model with dual-lithology (coarse/fine) stratigraphy enabled
+    (realistic fine contrast). Exercises the full dual path end-to-end:
+    erodeStrat split, _getSedFlux fine routing, deposeStrat fineFrac,
+    per-fraction compaction, fine-pile advection. See minimal_dual.yml.
+    """
+    return _instantiate("minimal_dual.yml")
+
+
+@pytest.fixture
+def minimal_dual_coarse_model():
+    """
+    Dual lithology enabled but configured all-coarse (bedrock_coarse_frac=1.0,
+    no contrast). Must reproduce minimal_strat_model. See minimal_dual_coarse.yml.
+    """
+    return _instantiate("minimal_dual_coarse.yml")
+
+
+@pytest.fixture
 def incising_model():
     """
     Tilted-plane Model with rain and `nodep: true` so the river-incision

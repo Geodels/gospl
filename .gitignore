@@ -19,6 +19,9 @@ results/
 # Regenerated goSPL test outputs (created when tests/fixtures/{minimal,incising}.yml runs)
 tests/fixtures/minimal/
 tests/fixtures/incising/
+tests/fixtures/minimal_strat/
+tests/fixtures/minimal_dual/
+tests/fixtures/minimal_dual_coarse/
 *.so
 .eggs
 MANIFEST
