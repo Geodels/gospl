@@ -23,10 +23,12 @@ in `docs/tech_guide/strat.rst` once shipped.
 | Composition source | **Per stratigraphic layer** — each layer carries its own coarse/fine split; eroded material inherits the composition of the layer(s) it came from |
 | Transport | **Separate** — fines travel farther (distal basin / depocenter); coarse stays proximal |
 | Lake/depression behaviour | Coarse builds **inlet deltas**, fines settle in the **depocenter**; fine-enriched overspill may bypass downstream while coarse is trapped |
-| Fortran kernel | Reuse existing **`stratathreesed`** (`fortran/functions.F90:1905`, bound in `functions.pyf:195`) with the weathered slot zeroed; dedicated 2-sed kernel is a later optimization |
+| Fortran kernel | **Call `strataonesed` twice** (once for the total/coarse pile, once for the fine pile) — no Fortran change. NOT `stratathreesed`: it treats its extra fields as 0–1 fractions and renormalises (`functions.F90:1968`), which conflicts with the bulk-thickness representation used here. |
 
-The dormant `stratathreesed` 3-fraction kernel already exists but is never called
-(today only `strataonesed` is, `stratplex.py:13,363`). This design wires up the
+The dormant `stratathreesed` 3-fraction kernel exists but is never called and
+its fraction semantics don't match this design's bulk-thickness `stratHf`;
+Phase 5 reuses `strataonesed` (already bound, `stratplex.py:13`) a second time
+for the fine pile instead. This design wires up the
 2-fraction subset of it.
 
 ---
@@ -57,20 +59,34 @@ input files still load unchanged.
 strata:
   dual: True                          # default False -> current single-fraction path
   coarse: {phi0: 0.49, z0: 3700.}     # coarse porosity-depth (today's phi0s/z0s = coarse)
-  fine:   {phi0: 0.63, z0: 1960.}     # fines: higher surface porosity, shallower decay
+  fine:   {phi0: 0.63, z0: 1960., k_factor: 1.0}   # fines: porosity-depth + erodibility ratio
   bedrock_coarse_frac: 0.5            # composition of the layer-0 bedrock sentinel
   # transport / deposition contrast (the "fines travel farther" knobs):
   fine_efficiency: <factor>           # marine: per-fraction Gmar (fine deposits less readily)
   pitInletBias: {coarse: 0.5, fine: 0.0}   # lacustrine: coarse delta vs fine depocenter
-  Dc: <coeff>                         # subaerial + subaqueous diffusivity, coarse
-  Df: <coeff>                         # ... fine (Df > Dc)
+  fine_diff_factor: 1.0               # fine diffusivity relative to coarse (1.0 = no contrast)
 ```
+
+**Diffusivity contrast is a multiplier, not a replacement.** goSPL already has
+the base diffusion coefficients `hillslopeKa` (→ `self.Cda`, subaerial linear),
+`hillslopeKm` (→ `self.Cdm`, subaqueous linear), and `nonlinKm` (→ `self.nlK`,
+non-linear) — all grain-size-agnostic today. `fine_diff_factor` layers the
+lithology contrast on top of whichever base coefficient a cell uses:
+
+> `Cd_eff = Cd_base * (fc + ff * fine_diff_factor)`,  with `Cd_base ∈ {Cda, Cdm, nlK}`.
+
+So the existing land/sea/linear/non-linear structure is untouched;
+`fine_diff_factor == 1.0` (default) or `dual: False` ⇒ `Cd_eff == Cd_base`
+(byte-identical). This mirrors `fine.k_factor` for erodibility — one
+`_surfaceComposition()` feeds both blends. (Earlier drafts used absolute
+`Dc`/`Df`; dropped because they would duplicate and risk contradicting
+`hillslopeKa`/`hillslopeKm`/`nonlinKm`.)
 
 Parsed by a new `_extraStrata` method in `tools/inputparser.py`, following the
 **mandatory `_extra*` continuation convention** (add it to the `_extra*` table in
-`AGENTS.md`). Sets `self.stratLith`, the two porosity curves, `fine_efficiency`,
-per-fraction inlet bias, and `Dc`/`Df`. All keys default such that `dual: False`
-reproduces current behaviour.
+`AGENTS.md`). Sets `self.stratLith`, the two porosity curves, `fine_k_factor`,
+`fine_efficiency`, per-fraction inlet bias, and `fine_diff_factor`. All keys
+default such that `dual: False` reproduces current behaviour.
 
 ---
 
@@ -90,7 +106,7 @@ This single helper feeds **all three** consumers:
    `_surfaceK`.
 2. **Eroded-mass split** — `erodeStrat` splits the eroded solid by the consumed
    layers' composition (Section 6).
-3. **Diffusivity blend** — hillslope `D_eff = fc·Dc + ff·Df` (Section 7).
+3. **Diffusivity blend** — hillslope `Cd_eff = Cd_base*(fc + ff*fine_diff_factor)` (Section 7).
 
 ---
 
@@ -144,29 +160,38 @@ Mirror the existing negative-thickness clamp (`stratplex.py:226-228`) for
 ## 7. Diffusion (hillslope + subaqueous)
 
 Today hillslope is **single-rate** for both grain sizes (`hillslope.py:64`).
-Add per-class `Dc`/`Df` and evaluate via **composition-weighted effective
-diffusivity in a single solve**:
+goSPL already has the base diffusivities `Cda`/`Cdm` (linear land/marine, YAML
+`hillslopeKa`/`hillslopeKm`) and `nlK` (non-linear, `nonlinKm`). Add the
+grain-size contrast as a **dimensionless multiplier** `fine_diff_factor` (NOT a
+new absolute coefficient — see §3) and evaluate via **composition-weighted
+effective diffusivity in a single solve**:
 
-- `D_eff = fc·Dc + ff·Df` from `_surfaceComposition()`; the diffused flux carries
-  the **donor cell's composition** into `erodeStrat`/`deposeStrat`.
+- `Cd_eff = Cd_base * (fc + ff*fine_diff_factor)`, with `fc/ff` from
+  `_surfaceComposition()` and `Cd_base ∈ {Cda, Cdm, nlK}` (the cell's existing
+  land/marine/non-linear coefficient). The diffused flux carries the **donor
+  cell's composition** into `erodeStrat`/`deposeStrat`.
 - **Drop-in** to the existing solvers — the FV scheme already supports node-
   varying diffusivity (the nonlinear hillslope varies D by slope via
-  `Dlimit`/`dexp`); composition is just a multiplicative factor. **No new cached
-  solver** (so no `destroy_DMPlex` churn) and **no two-field nonlinear coupling**.
+  `Dlimit`/`dexp`); composition is just another multiplicative factor. **No new
+  cached solver** (so no `destroy_DMPlex` churn) and **no two-field nonlinear
+  coupling**.
+- Neutral by construction: `fine_diff_factor == 1.0` or `dual: False` ⇒
+  `Cd_eff == Cd_base`, byte-identical to today. Mirrors `fine.k_factor`.
 - A genuine two-field separate-D solve is more accurate but much heavier; offer
   as a future opt-in only.
 
-**Subaqueous diffusion is where the D-contrast does the real work.** The marine +
+**Subaqueous diffusion is where the contrast does the real work.** The marine +
 lake diffusion path (cached `_ts_marine`, `_diffuseImplicit` in `hillslope.py`)
-with `Df > Dc` is *the mechanism* by which fines spread to the depocenter while
-coarse stays proximal — i.e. it implements "fines travel farther" consistently
-with the lacustrine inlet-bias and marine `Gmar`:
+with `fine_diff_factor > 1` (on the `Cdm`/`nlK` base) is *the mechanism* by which
+fines spread to the depocenter while coarse stays proximal — i.e. it implements
+"fines travel farther" consistently with the lacustrine inlet-bias and marine
+`Gmar`:
 
 | Domain | "Fines travel farther" realized by |
 |---|---|
-| Subaerial slopes | `D_eff` weighting (`Df > Dc`) |
-| Lakes/depressions | per-fraction inlet bias + subaqueous `Df` |
-| Marine | per-fraction `Gmar` + subaqueous `Df` |
+| Subaerial slopes | `Cd_eff` weighting on `Cda` (`fine_diff_factor > 1`) |
+| Lakes/depressions | per-fraction inlet bias + subaqueous `Cd_eff` |
+| Marine | per-fraction `Gmar` + subaqueous `Cd_eff` (`Cdm`/`nlK` base) |
 
 ---
 
@@ -217,7 +242,7 @@ de-risks the routing surgery.
 | **1** | Allocate `stratHf`/`phiF` (both branches of `readStratLayers`); write/restore in I/O + XDMF entries | `stratplex.py:45-103`, `outmesh.py` | low |
 | **2** | `_surfaceComposition()` helper; K-blend hook; eroded-mass split in `erodeStrat` | `stratplex.py` | medium |
 | **4** | Per-fraction deposition (`deposeStrat`) + per-fraction compaction (`_depthPorosity`/`getCompaction`) | `stratplex.py:146-345` | medium |
-| **5** | Stratal advection: `strataonesed` → `stratathreesed` (weathered slot = 0) | `stratplex.py:347-393` | medium |
+| **5** | Stratal advection: second `strataonesed` call for the fine pile (`stratHf`, `phiF`) | `stratplex.py` (`stratalRecord`) | medium |
 | **3a** | River routing: split `vSed → vSedC/vSedF` in `updateSedLoad`/`_getSedFlux` | `sedplex.py:46-83` | **high** |
 | **3b** | Lacustrine/pit deposition (Section 8) | `sedplex.py` | **high** |
 | **3c** | Marine routing: per-fraction `Gmar` in `_distOcean`/`_depMarineSystem` | `seaplex.py` | **high** |
@@ -264,9 +289,10 @@ local to `stratplex`/`inputparser`/`outmesh`.
 
 ## 12. Open decisions
 
-- Whether to ship a dedicated `stratatwosed` Fortran kernel (faster, cleaner) or
-  keep reusing `stratathreesed` with a zeroed slot (no f2py build change). Start
-  with reuse.
+- Whether to ship a dedicated `stratatwosed` Fortran kernel (one pass instead of
+  two `strataonesed` calls — interpolates the redundant elevation only once).
+  Implemented Phase 5 with two `strataonesed` calls (no f2py change); a fused
+  kernel is a later micro-optimization.
 - Whether transport-limited SPL gets per-fraction coupled solves (option B,
   Section 5) or stays deferred-to-sedplex (option A). Start with A.
 - Marine `fine_efficiency` vs lacustrine `pitInletBias`: kept as separate tunables

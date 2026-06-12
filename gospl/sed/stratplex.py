@@ -584,7 +584,12 @@ class STRAMesh(object):
         """
         Once the interpolation has been performed, the following function updates the stratigraphic records based on the advected mesh.
 
-        The function relies on fortran subroutines strataonesed.
+        The function relies on the fortran subroutine strataonesed. In
+        dual-lithology mode the fine pile (`stratHf`, `phiF`) is advected with
+        a second strataonesed call — `stratHf` is a bulk thickness, so the
+        plain weighted interpolation applies directly (the unused `stratathreesed`
+        kernel instead treats its extra fields as 0–1 fractions and renormalises
+        them, which does not match the thickness representation here).
 
         :arg indices: indices of the closest nodes used for interpolation
         :arg weights: weights based on the distances to closest nodes
@@ -611,6 +616,25 @@ class STRAMesh(object):
             nstratH[onIDs, :] = loc_stratH[indices[onIDs, 0], :]
             nphiS[onIDs, :] = loc_phiS[indices[onIDs, 0], :]
 
+        if self.stratLith:
+            # Advect the fine pile with the same interpolation (stratHf as
+            # thickness, phiF as porosity); the re-interpolated elevation is
+            # identical to nstratZ above and discarded.
+            loc_stratHf = self.stratHf[:, : self.stratStep]
+            loc_phiF = self.phiF[:, : self.stratStep]
+            nstratHf, _, nphiF = strataonesed(
+                self.lpoints,
+                self.stratStep,
+                indices,
+                weights,
+                loc_stratHf,
+                loc_stratZ,
+                loc_phiF,
+            )
+            if len(onIDs) > 0:
+                nstratHf[onIDs, :] = loc_stratHf[indices[onIDs, 0], :]
+                nphiF[onIDs, :] = loc_phiF[indices[onIDs, 0], :]
+
         # Updates stratigraphic records after mesh advection on the edges of each partition
         # to ensure that all stratigraphic information on the adjacent nodes of the neighbouring
         # partition are equals on all processors sharing a common number of nodes.
@@ -625,5 +649,13 @@ class STRAMesh(object):
             self.tmp.setArray(nphiS[:, k])
             self.dm.globalToLocal(self.tmp, self.tmpL)
             self.phiS[:, k] = self.tmpL.getArray().copy()
+
+            if self.stratLith:
+                self.tmp.setArray(nstratHf[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratHf[:, k] = self.tmpL.getArray().copy()
+                self.tmp.setArray(nphiF[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.phiF[:, k] = self.tmpL.getArray().copy()
 
         return

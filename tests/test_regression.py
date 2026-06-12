@@ -552,6 +552,67 @@ def test_dual_lithology_deposit_and_compaction():
     )
 
 
+def test_dual_lithology_advection_fine_pile():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 5 — stratalRecord advects the
+    fine pile (stratHf, phiF) alongside the total/coarse pile via a second
+    strataonesed call (NOT stratathreesed, whose extra fields are 0-1
+    fractions and renormalised — wrong for the bulk-thickness representation).
+
+    Uses an identity advection (each node maps to itself with weight 1) so
+    the records must come back unchanged, confirming the fine fields are
+    actually routed through the interpolation and written back.
+    """
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+
+    class _MockVec:
+        def __init__(self, n):
+            self._a = np.zeros(n)
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64).copy()
+        def getArray(self):
+            return self._a
+
+    class _MockDM:
+        def globalToLocal(self, src, dst):
+            dst.setArray(src.getArray())  # identity halo exchange
+
+    n = 4
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.lpoints = n
+    m.stratStep = 2          # advect layers 0..1
+    m.stratLith = True
+    m.stratH = np.array([[5.0, 7.0, 0.0]] * n)
+    m.stratHf = np.array([[2.0, 3.0, 0.0]] * n)
+    m.stratZ = np.array([[-10.0, -3.0, 0.0]] * n)
+    m.phiS = np.array([[0.45, 0.48, 0.0]] * n)
+    m.phiF = np.array([[0.60, 0.62, 0.0]] * n)
+    m.tmp = _MockVec(n)
+    m.tmpL = _MockVec(n)
+    m.dm = _MockDM()
+
+    # Identity interpolation: 3 neighbours all = self, weights summing to 1.
+    indices = np.repeat(np.arange(n)[:, None], 3, axis=1)
+    weights = np.full((n, 3), 1.0 / 3.0)
+    onIDs = np.array([], dtype=int)
+
+    H0, Hf0 = m.stratH.copy(), m.stratHf.copy()
+    phiS0, phiF0 = m.phiS.copy(), m.phiF.copy()
+    m.stratalRecord(indices, weights, onIDs)
+
+    # Advected layers (0..stratStep-1) must be preserved by identity mapping.
+    s = slice(0, m.stratStep)
+    assert np.allclose(m.stratHf[:, s], Hf0[:, s]), (
+        "Fine pile thickness must round-trip through identity advection."
+    )
+    assert np.allclose(m.phiF[:, s], phiF0[:, s]), (
+        "Fine porosity must round-trip through identity advection."
+    )
+    # Coarse/total pile still correct (regression on the original behaviour).
+    assert np.allclose(m.stratH[:, s], H0[:, s])
+    assert np.allclose(m.phiS[:, s], phiS0[:, s])
+
+
 # ---------------------------------------------------------------------------
 # TEST 2c - channel-evap hook reduces FA (DESIGN_EVAPORATION.md §4 T1)
 # ---------------------------------------------------------------------------
