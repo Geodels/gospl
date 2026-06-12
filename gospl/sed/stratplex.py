@@ -123,11 +123,14 @@ class STRAMesh(object):
             self.phiS[:, 0] = self.phi0s
             self.bedrockLay = 1          # layer 0 is the infinite-bedrock sentinel
 
-            # Dual-lithology fine-fraction fields (all-coarse to start; the
-            # bedrock-sentinel composition split is applied in Phase 2).
+            # Dual-lithology fine-fraction fields. The infinite-bedrock
+            # sentinel layer is split into coarse/fine by bedrock_coarse_frac
+            # so material eroded from bedrock inherits a defined composition.
             if self.stratLith:
                 self.stratHf = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+                self.stratHf[:, 0] = BEDROCK_SENTINEL * (1.0 - self.bedrock_coarse_frac)
+                self.phiF[:, 0] = self.phi0f
 
         return
     
@@ -171,6 +174,53 @@ class STRAMesh(object):
         rows = np.arange(sK.shape[0])
         out[any_valid] = sK[rows[any_valid], top_idx[any_valid]]
         return out
+
+    def _surfaceComposition(self):
+        """
+        Return the per-node coarse fraction ``fc`` (by bulk thickness) of
+        the topmost non-empty stratigraphic layer; the fine fraction is
+        ``1 - fc``.
+
+        Returns all-ones (all coarse) when dual lithology is disabled or the
+        fine pile is unallocated, so single-fraction callers are unchanged.
+        Shared hook for the SPL erodibility blend (`_surfaceLithoK`) and the
+        hillslope diffusivity blend (see DESIGN_DUAL_LITHOLOGY.md).
+        """
+        if not self.stratLith or self.stratHf is None or self.stratNb == 0:
+            return np.ones(self.lpoints, dtype=np.float64)
+
+        H = self.stratH[:, : self.stratStep + 1]
+        Hf = self.stratHf[:, : self.stratStep + 1]
+        mask = H > 0
+        # Topmost non-empty layer per node (reverse-then-argmax, as _surfaceK).
+        rev = mask[:, ::-1]
+        any_valid = rev.any(axis=1)
+        top_from_right = np.argmax(rev, axis=1)
+        top_idx = H.shape[1] - 1 - top_from_right
+
+        fc = np.ones(self.lpoints, dtype=np.float64)
+        rows = np.arange(H.shape[0])
+        Htop = H[rows, top_idx]
+        Hftop = Hf[rows, top_idx]
+        valid = any_valid & (Htop > 0)
+        fc[valid] = 1.0 - (Hftop[valid] / Htop[valid])
+        np.clip(fc, 0.0, 1.0, out=fc)
+        return fc
+
+    def _surfaceLithoK(self):
+        """
+        Per-node erodibility multiplier from the exposed surface
+        composition: ``fc + (1 - fc) * fine_k_factor``.
+
+        Equals 1.0 everywhere when dual lithology is off (or
+        ``fine_k_factor == 1``, i.e. no lithology contrast), so it composes
+        multiplicatively with ``_surfaceK`` in the SPL flavours without
+        altering single-fraction behaviour.
+        """
+        if not self.stratLith:
+            return np.ones(self.lpoints, dtype=np.float64)
+        fc = self._surfaceComposition()
+        return fc + (1.0 - fc) * self.fine_k_factor
 
     def deposeStrat(self):
         """
@@ -217,23 +267,50 @@ class STRAMesh(object):
         nids = np.where(ero < 0)[0]
         if len(nids) == 0:
             self.thCoarse = np.zeros(self.lpoints)
+            if self.stratLith:
+                self.thFine = np.zeros(self.lpoints)
             return
 
         # Cumulative thickness for each node
+        if self.stratLith:
+            # Inflate the fine pile in proportion to layer 0's CURRENT fine
+            # fraction so the sentinel never alters that layer's composition
+            # (for the infinite-bedrock case this fraction is 1-bedrock_coarse_frac;
+            # for a real basal layer it is its own fine ratio, i.e. 0 if all coarse).
+            H0 = self.stratH[nids, 0]
+            sentFine = BEDROCK_SENTINEL * np.divide(
+                self.stratHf[nids, 0], H0, out=np.zeros_like(H0), where=H0 > 0
+            )
         self.stratH[nids, 0] += BEDROCK_SENTINEL
+        if self.stratLith:
+            self.stratHf[nids, 0] += sentFine
         cumThick = np.cumsum(self.stratH[nids, self.stratStep :: -1], axis=1)[:, ::-1]
         boolMask = cumThick < -ero[nids].reshape((len(nids), 1))
         mask = boolMask.astype(int)
 
         thickS = self.stratH[nids, 0 : self.stratStep + 1]
-        thCoarse = thickS * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
-        thCoarse = np.sum((thCoarse * mask), axis=1)
+        if self.stratLith:
+            # Each layer's bulk thickness splits into coarse and fine; each
+            # fraction yields its own solid phase (1 - its own porosity).
+            fineTh = self.stratHf[nids, 0 : self.stratStep + 1]
+            coarseTh = thickS - fineTh
+            thCoarse = coarseTh * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
+            thFine = fineTh * (1.0 - self.phiF[nids, 0 : self.stratStep + 1])
+            thCoarse = np.sum((thCoarse * mask), axis=1)
+            thFine = np.sum((thFine * mask), axis=1)
+        else:
+            thCoarse = thickS * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
+            thCoarse = np.sum((thCoarse * mask), axis=1)
 
         # Clear all stratigraphy points which are eroded
         cumThick[boolMask] = 0.0
         tmp = self.stratH[nids, : self.stratStep + 1]
         tmp[boolMask] = 0
         self.stratH[nids, : self.stratStep + 1] = tmp
+        if self.stratLith:
+            tmpf = self.stratHf[nids, : self.stratStep + 1]
+            tmpf[boolMask] = 0
+            self.stratHf[nids, : self.stratStep + 1] = tmpf
 
         # Erode remaining stratal layers
         # Get non-zero top layer number
@@ -241,17 +318,41 @@ class STRAMesh(object):
         eroVal = cumThick[np.arange(len(nids)), eroLayNb] + ero[nids]
 
         self.thCoarse = np.zeros(self.lpoints)
-        # From sand thickness extract the solid phase that is eroded from this last layer
-        tmp = self.stratH[nids, eroLayNb] - eroVal
+        # From the partially eroded top layer extract the solid phase removed.
+        H_old = self.stratH[nids, eroLayNb]
+        tmp = H_old - eroVal
         tmp[tmp < 1.0e-8] = 0.0  # TODO-REFACTOR: value matches DISCHARGE_FLOOR but distinct role (thickness numerical-noise floor); do not replace
-        # Define the uncompacted sand thickness that will be deposited dowstream
-        thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
-        self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
-        self.thCoarse[self.thCoarse < 0.0] = 0.0
+        if self.stratLith:
+            self.thFine = np.zeros(self.lpoints)
+            Hf_old = self.stratHf[nids, eroLayNb]
+            # Well-mixed layer: coarse/fine bulk are removed in proportion to
+            # the layer composition; the remainder keeps the same ratio.
+            frac = np.divide(tmp, H_old, out=np.zeros_like(tmp), where=H_old > 0)
+            coarse_rm = (H_old - Hf_old) * frac
+            fine_rm = Hf_old * frac
+            thCoarse = thCoarse + coarse_rm * (1.0 - self.phiS[nids, eroLayNb])
+            thFine = thFine + fine_rm * (1.0 - self.phiF[nids, eroLayNb])
+            # Uncompacted thickness deposited downstream, per fraction, using
+            # each lithology's surface porosity.
+            self.thCoarse[nids] = thCoarse / (1.0 - self.phi0c)
+            self.thFine[nids] = thFine / (1.0 - self.phi0f)
+            self.thCoarse[self.thCoarse < 0.0] = 0.0
+            self.thFine[self.thFine < 0.0] = 0.0
+            # Remaining fine in the partial layer scales with remaining total.
+            self.stratHf[nids, eroLayNb] = Hf_old * np.divide(
+                eroVal, H_old, out=np.zeros_like(eroVal), where=H_old > 0
+            )
+        else:
+            # Define the uncompacted sand thickness that will be deposited dowstream
+            thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
+            self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
+            self.thCoarse[self.thCoarse < 0.0] = 0.0
 
         # Update thickness of top stratigraphic layer
         self.stratH[nids, eroLayNb] = eroVal
         self.stratH[nids, 0] -= BEDROCK_SENTINEL
+        if self.stratLith:
+            self.stratHf[nids, 0] -= sentFine
         neg = self.stratH < 0
         self.stratH[neg] = 0.0
         self.phiS[neg] = 0.0
@@ -264,7 +365,20 @@ class STRAMesh(object):
         self.stratK[:, : self.stratStep + 1] = self._fillZeroPorosity(
             self.stratK[:, : self.stratStep + 1]
         )
+        if self.stratLith:
+            top = self.stratStep + 1
+            self.stratHf[neg] = 0.0
+            self.phiF[neg] = 0.0
+            np.clip(self.stratHf, 0.0, None, out=self.stratHf)
+            # Fine bulk can never exceed the layer total thickness.
+            np.minimum(
+                self.stratHf[:, :top], self.stratH[:, :top],
+                out=self.stratHf[:, :top],
+            )
+            self.phiF[:, :top] = self._fillZeroPorosity(self.phiF[:, :top])
         self.thCoarse /= self.dt
+        if self.stratLith:
+            self.thFine /= self.dt
 
         return
 

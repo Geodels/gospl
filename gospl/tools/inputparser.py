@@ -1451,6 +1451,9 @@ class ReadYaml(object):
         self.z0c = self.z0s
         self.phi0f = 0.63
         self.z0f = 1960.0
+        # Fine erodibility relative to coarse: K_fine = K_coarse * fine_k_factor.
+        # 1.0 (default) = no lithology contrast in the SPL erodibility blend.
+        self.fine_k_factor = 1.0
         self.bedrock_coarse_frac = 0.5
         self.fine_efficiency = 0.5
         self.pit_inlet_bias_coarse = 0.50
@@ -1470,6 +1473,7 @@ class ReadYaml(object):
             fineDict = strataDict.get("fine", {})
             self.phi0f = fineDict.get("phi0", self.phi0f)
             self.z0f = fineDict.get("z0", self.z0f)
+            self.fine_k_factor = fineDict.get("k_factor", self.fine_k_factor)
 
             self.bedrock_coarse_frac = strataDict.get(
                 "bedrock_coarse_frac", self.bedrock_coarse_frac

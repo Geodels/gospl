@@ -186,7 +186,9 @@ class nlSPL(object):
         # Per-node erodibility multiplier from the top of the local
         # stratigraphic column (1.0 = use self.K as-is). Bedrock layers
         # imposed via the initial-strata `stratK` field show up here.
-        surfK = self._surfaceK()
+        # Fold in the dual-lithology erodibility blend (1.0 everywhere when
+        # single-fraction, so behaviour is unchanged): K_eff = K*surfK*litK.
+        surfK = self._surfaceK() * self._surfaceLithoK()
 
         # Incorporate the effect of local mean annual precipitation rate on erodibility
         if self.sedfacVal is not None:
@@ -271,7 +273,9 @@ class nlSPL(object):
 
         # Per-node erodibility multiplier from the top of the local
         # stratigraphic column (1.0 = use self.K as-is).
-        surfK = self._surfaceK()
+        # Fold in the dual-lithology erodibility blend (1.0 everywhere when
+        # single-fraction, so behaviour is unchanged): K_eff = K*surfK*litK.
+        surfK = self._surfaceK() * self._surfaceLithoK()
 
         # Incorporate the effect of local mean annual precipitation rate on erodibility
         if self.sedfacVal is not None:

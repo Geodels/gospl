@@ -330,12 +330,16 @@ def test_dual_lithology_layer_allocation():
     """
     from gospl.sed import stratplex
 
+    from gospl.tools.constants import BEDROCK_SENTINEL
+
     def _strata_mesh(stratLith):
         m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
         m.strataFile = None
         m.lpoints = 8
         m.stratNb = 3
         m.phi0s = 0.49
+        m.phi0f = 0.63
+        m.bedrock_coarse_frac = 0.5
         m.memclear = False
         m.stratLith = stratLith
         m.stratHf = None
@@ -349,13 +353,118 @@ def test_dual_lithology_layer_allocation():
         "Single-fraction run must not allocate stratHf/phiF."
     )
 
-    # Dual: fine fields allocated with the same shape as stratH, all-coarse.
+    # Dual: fine fields allocated with stratH's shape. The bedrock sentinel
+    # layer (layer 0) carries the bedrock fine fraction; layers above are 0.
     m = _strata_mesh(stratLith=True)
     m.readStratLayers()
     assert m.stratHf is not None and m.phiF is not None
     assert m.stratHf.shape == m.stratH.shape == (m.lpoints, m.stratNb)
     assert m.phiF.shape == (m.lpoints, m.stratNb)
-    assert (m.stratHf == 0.0).all(), "Initial dual column should be all-coarse."
+    assert np.allclose(m.stratHf[:, 0], BEDROCK_SENTINEL * (1.0 - 0.5)), (
+        "Bedrock-sentinel layer must carry the (1 - bedrock_coarse_frac) fine split."
+    )
+    assert (m.stratHf[:, 1:] == 0.0).all(), "Layers above bedrock start coarse-empty."
+
+
+def test_dual_lithology_erosion_split():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 2 — erodeStrat splits the
+    eroded solid into thCoarse/thFine by the consumed layers' composition,
+    and stays mass-consistent. K-blend / composition helpers also tested.
+
+    Builds a tiny single-node column by hand and drives erodeStrat through
+    a stubbed PETSc boundary (tmpL/globalToLocal), so the split arithmetic
+    is exercised without a full model.
+
+    Invariants:
+      1. All-coarse column -> thFine == 0 and thCoarse matches what the
+         single-fraction branch would produce (parity).
+      2. Mixed column -> the deposited (uncompacted) split reconstructs the
+         eroded solid: thCoarse*(1-phi0c) + thFine*(1-phi0f) == solid removed.
+      3. _surfaceComposition / _surfaceLithoK reflect the exposed layer and
+         the fine_k_factor; both are neutral (1.0) when dual is off.
+    """
+    from gospl.sed import stratplex
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = arr
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def globalToLocal(self, g, l):
+            l.setArray(g.getArray().copy())
+
+    def _mesh(stratLith, ero, stratH, stratHf=None, phiS=None, phiF=None):
+        m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+        lp, nb = stratH.shape
+        m.lpoints, m.stratNb, m.stratStep = lp, nb, nb - 1
+        m.dt = 1.0
+        m.memclear = False
+        m.phi0s = m.phi0c = 0.49
+        m.phi0f = 0.63
+        m.bedrock_coarse_frac = 0.5
+        m.fine_k_factor = 1.0
+        m.stratLith = stratLith
+        m.stratH = stratH.astype(np.float64).copy()
+        m.phiS = (phiS if phiS is not None else np.full_like(stratH, 0.49)).copy()
+        m.stratK = np.ones_like(m.stratH)
+        m.stratHf = stratHf.copy() if stratHf is not None else None
+        m.phiF = phiF.copy() if phiF is not None else None
+        # PETSc boundary stub: tmp carries -ero (erosion is negative).
+        m.tmp = _StubVec(np.array(ero, dtype=np.float64))
+        m.tmpL = _StubVec(np.zeros(lp))
+        m.dm = _StubDM()
+        return m
+
+    # ---- Case 1: all-coarse parity (single vs dual must agree on thCoarse)
+    stratH = np.array([[2.0, 3.0]])          # two layers, total 5 m
+    single = _mesh(False, ero=[-4.0], stratH=stratH)
+    single.erodeStrat()
+    dual = _mesh(
+        True, ero=[-4.0], stratH=stratH,
+        stratHf=np.zeros_like(stratH), phiF=np.full_like(stratH, 0.63),
+    )
+    dual.erodeStrat()
+    assert np.allclose(dual.thFine, 0.0), "All-coarse column must erode no fine."
+    assert np.allclose(dual.thCoarse, single.thCoarse), (
+        "All-coarse dual erosion must match the single-fraction thCoarse."
+    )
+
+    # ---- Case 2: mixed column -> per-fraction solid reconstruction
+    stratH = np.array([[2.0, 3.0]])
+    stratHf = np.array([[1.0, 1.2]])         # fine bulk per layer
+    phiS = np.full_like(stratH, 0.49)
+    phiF = np.full_like(stratH, 0.63)
+    dual = _mesh(True, ero=[-4.0], stratH=stratH, stratHf=stratHf,
+                 phiS=phiS, phiF=phiF)
+    dual.erodeStrat()
+    # Solid removed by erosion of 4 m: fully erode top layer (3 m) + 1 m of
+    # the lower (well-mixed) layer.
+    # top layer (idx1): coarse (3-1.2)*(1-.49) + fine 1.2*(1-.63)
+    # lower (idx0): remove 1 m of 2 m -> half: coarse (2-1)/2*(1-.49)*1 ... compute generically:
+    coarse_solid = (3 - 1.2) * (1 - 0.49) + ((2 - 1.0) * 0.5) * (1 - 0.49)
+    fine_solid = 1.2 * (1 - 0.63) + (1.0 * 0.5) * (1 - 0.63)
+    got = dual.thCoarse[0] * (1 - dual.phi0c) + dual.thFine[0] * (1 - dual.phi0f)
+    assert np.isclose(got, coarse_solid + fine_solid, rtol=1e-9), (
+        f"Per-fraction solid reconstruction failed: got {got}, "
+        f"expected {coarse_solid + fine_solid}"
+    )
+    assert dual.thFine[0] > 0 and dual.thCoarse[0] > 0
+
+    # ---- Case 3: composition + K-blend helpers
+    m = _mesh(True, ero=[0.0], stratH=np.array([[2.0, 2.0]]),
+              stratHf=np.array([[0.0, 0.5]]), phiF=np.full((1, 2), 0.63))
+    fc = m._surfaceComposition()
+    assert np.isclose(fc[0], 1.0 - 0.5 / 2.0), "Surface coarse fraction wrong."
+    m.fine_k_factor = 2.0
+    litK = m._surfaceLithoK()
+    assert np.isclose(litK[0], fc[0] + (1 - fc[0]) * 2.0)
+    m.stratLith = False
+    assert np.allclose(m._surfaceLithoK(), 1.0), "K-blend must be neutral when off."
 
 
 # ---------------------------------------------------------------------------

@@ -177,7 +177,9 @@ class soilSPL(object):
         # stratigraphic column (1.0 = use self.K as-is). Only scales the
         # *bedrock* SPL coefficient; the soil-layer K is governed by
         # `self.Ksoil` and is left unchanged.
-        surfK = self._surfaceK()
+        # Fold in the dual-lithology erodibility blend (1.0 everywhere when
+        # single-fraction, so behaviour is unchanged): K_eff = K*surfK*litK.
+        surfK = self._surfaceK() * self._surfaceLithoK()
 
         # Incorporate the effect of local mean annual precipitation rate on erodibility (for soil and bedrock)
         if self.sedfacVal is not None:
