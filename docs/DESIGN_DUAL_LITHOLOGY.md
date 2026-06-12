@@ -168,8 +168,12 @@ effective diffusivity in a single solve**:
 
 - `Cd_eff = Cd_base * (fc + ff*fine_diff_factor)`, with `fc/ff` from
   `_surfaceComposition()` and `Cd_base ∈ {Cda, Cdm, nlK}` (the cell's existing
-  land/marine/non-linear coefficient). The diffused flux carries the **donor
-  cell's composition** into `erodeStrat`/`deposeStrat`.
+  land/marine/non-linear coefficient). Implemented via `_surfaceLithoD()`
+  applied in `_hillSlope` (real-hillslope branch), `_hillSlopeNL`, and
+  `soilSPL.diffuseSoil` (the soil-coupled flavour). The marine/lake fresh-
+  deposit smoothing (`_diffuseImplicit`) is intentionally NOT weighted — the
+  subaqueous fines-distal effect is already handled by the 3b/3c depth-biased
+  composition, so weighting it again would double-count.
 - **Drop-in** to the existing solvers — the FV scheme already supports node-
   varying diffusivity (the nonlinear hillslope varies D by slope via
   `Dlimit`/`dexp`); composition is just another multiplicative factor. **No new
@@ -217,8 +221,21 @@ path, with `pitInletBias` per fraction (coarse high, fine ~0). New work:
 2. **Per-fraction deposit shape** — coarse → `_diffuseLargePit`, fine →
    `_bottomUpDelta`.
 3. **Fine-enriched overspill** — the excess `eV` overspilling a filled lake
-   (`sedplex.py:118-126`) carries composition; coarse is largely trapped, so
-   overspill is fine-enriched (and may bypass downstream).
+   should be fine-enriched (coarse trapped proximally). **NOT IMPLEMENTED — known
+   limitation.** A conservative implementation requires threading a parallel
+   fine volume through the iterative `_moveDownstream` cascade (coarse-settles-
+   first retention + routing the fine overspill + accumulating the post-cascade
+   fine into `vSedFLocal` for the marine handoff). An attempt was made and
+   reverted: the `vSedLocal` accumulation semantics (initial routed flux on the
+   *unfilled* topology + masked residuals across cascade iterations + pit-volume
+   bookkeeping) are subtle, and a mismatched fine mirror leaked fine (~10× drop
+   in deposited fine) — and crucially the total-cumED conservation test does
+   **not** catch a fine-only leak. Until the cascade's flux semantics are fully
+   pinned down (ideally with a fine-specific conservation test), the in-pit
+   composition uses the routed arriving fraction (3b depth-bias), not the
+   coarse-settles-first retained fraction; overspill carries the routed
+   composition. This is second-order vs the depocenter/distal bias already
+   shipped (3b/3c).
 4. **Fresh porosity** — lacustrine coarse → `phi0c`, fine → `phi0f` (feeds the
    per-fraction compaction).
 5. **Per-fraction mass conservation across the cascade** — the spillover cascade

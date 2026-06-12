@@ -1,0 +1,42 @@
+name: minimal dual-lithology test
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 100
+    tout: 50
+    dt: 10.
+    strat: 50
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 0.
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+strata:
+    dual: True
+    coarse: {phi0: 0.49, z0: 3700.}
+    fine: {phi0: 0.63, z0: 1960., k_factor: 1.5}
+    bedrock_coarse_frac: 0.6
+    fine_diff_factor: 2.0
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'minimal_dual'

@@ -82,6 +82,11 @@ class hillSLP(object):
         else:
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
             Cd[self.seaID] = self.Cdm
+            # Dual-lithology (Phase 7): scale the diffusivity by the surface
+            # composition so fines diffuse faster (1.0 everywhere when single-
+            # fraction / no contrast, so behaviour is unchanged).
+            if self.stratLith:
+                Cd = Cd * self._surfaceLithoD()
         diffCoeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
         if self.flatModel:
             diffCoeffs[self.idBorders, 1:] = 0.0
@@ -208,6 +213,11 @@ class hillSLP(object):
         self.hGlobal.copy(result=self.hOld)
         self.Cd_nl = np.full(self.lpoints, self.Cda, dtype=np.float64)
         self.Cd_nl[self.seaID] = self.Cdm
+        # Dual-lithology (Phase 7): scale the non-linear diffusivity by the
+        # surface composition so fines diffuse faster (neutral when single-
+        # fraction / no contrast).
+        if self.stratLith:
+            self.Cd_nl = self.Cd_nl * self._surfaceLithoD()
         self.hOldArray = self.hLocal.getArray().copy()
 
         if self._snes_hill is None:

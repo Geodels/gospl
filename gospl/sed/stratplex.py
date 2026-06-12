@@ -222,6 +222,22 @@ class STRAMesh(object):
         fc = self._surfaceComposition()
         return fc + (1.0 - fc) * self.fine_k_factor
 
+    def _surfaceLithoD(self):
+        """
+        Per-node diffusivity multiplier from the exposed surface composition:
+        ``fc + (1 - fc) * fine_diff_factor``.
+
+        Equals 1.0 everywhere when dual lithology is off (or
+        ``fine_diff_factor == 1``, i.e. no contrast), so it composes
+        multiplicatively with the base hillslope coefficients (``Cda``/``Cdm``)
+        without altering single-fraction behaviour. Fines diffuse faster when
+        ``fine_diff_factor > 1`` (see DESIGN_DUAL_LITHOLOGY.md Section 7).
+        """
+        if not self.stratLith:
+            return np.ones(self.lpoints, dtype=np.float64)
+        fc = self._surfaceComposition()
+        return fc + (1.0 - fc) * self.fine_diff_factor
+
     def deposeStrat(self):
         """
         Add deposition on top of an existing stratigraphic layer. The following variables will be recorded:
@@ -230,11 +246,11 @@ class STRAMesh(object):
         - porosity of sediment `phiS` in each stratigraphic layer computed at center of each layer.
 
         In dual-lithology mode the deposit is split into a coarse and a fine
-        fraction. The fine fraction is the step's **global eroded composition**
-        (``Σ thFine / Σ (thCoarse + thFine)`` over the domain) — a co-transport
-        placeholder: fines are assumed to travel with coarse so a deposit
-        carries the bulk source composition. Phase 3 (separate transport)
-        replaces this scalar with a spatially-resolved routed fine deposit.
+        fraction using the **per-node deposit fine fraction** ``self.depoFineFrac``.
+        It starts each step as ``self.fineFrac`` (the composition of the routed
+        sediment arriving at each node, from ``sedplex._getSedFlux``) and is
+        refined inside continental depressions by ``_pitFineFraction`` (3b:
+        fine biased to the depocenter, coarse to the inlet/margins).
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -243,14 +259,7 @@ class STRAMesh(object):
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         if self.stratLith:
-            # Area-weighted global eroded fine fraction (collective: every
-            # rank participates, matching the MPI contract).
-            cV = float(np.sum(self.thCoarse * self.larea))
-            fV = float(np.sum(self.thFine * self.larea))
-            cV = MPI.COMM_WORLD.allreduce(cV, op=MPI.SUM)
-            fV = MPI.COMM_WORLD.allreduce(fV, op=MPI.SUM)
-            ff_dep = fV / (cV + fV) if (cV + fV) > 0.0 else 0.0
-            self.stratHf[:, self.stratStep] += depo * ff_dep
+            self.stratHf[:, self.stratStep] += depo * self.depoFineFrac
             # Fresh deposit carries each lithology's surface porosity.
             self.phiS[ids, self.stratStep] = self.phi0c
             self.phiF[ids, self.stratStep] = self.phi0f

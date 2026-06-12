@@ -287,23 +287,23 @@ def test_dual_lithology_opt_in():
         "strata": {
             "dual": True,
             "coarse": {"phi0": 0.45, "z0": 3000.0},
-            "fine": {"phi0": 0.65, "z0": 1500.0},
+            "fine": {"phi0": 0.65, "z0": 1500.0, "k_factor": 1.5},
             "bedrock_coarse_frac": 0.7,
             "fine_efficiency": 0.3,
             "pitInletBias": {"coarse": 0.8, "fine": 0.1},
-            "Dc": 0.01,
-            "Df": 0.05,
+            "fine_diff_factor": 2.0,
         }
     }
     parser._extraStrata()
     assert parser.stratLith is True
     assert parser.phi0c == 0.45 and parser.z0c == 3000.0
     assert parser.phi0f == 0.65 and parser.z0f == 1500.0
+    assert parser.fine_k_factor == 1.5
     assert parser.bedrock_coarse_frac == 0.7
     assert parser.fine_efficiency == 0.3
     assert parser.pit_inlet_bias_coarse == 0.8
     assert parser.pit_inlet_bias_fine == 0.1
-    assert parser.Dc == 0.01 and parser.Df == 0.05
+    assert parser.fine_diff_factor == 2.0
 
     # ---- Case 3: dual requested but stratigraphy off → forced False
     parser = _strata_parser(stratNb=0)
@@ -494,15 +494,13 @@ def test_dual_lithology_deposit_and_compaction():
         def globalToLocal(self, g, l):
             l.setArray(g.getArray().copy())
 
-    # ---- Deposition: 4 m deposit, global eroded fine fraction = 1/(3+1) ----
+    # ---- Deposition: 4 m deposit, per-node fine fraction (fineFrac) = 0.25 ----
     m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
     m.lpoints, m.stratNb, m.stratStep = 1, 2, 1
     m.stratLith = True
     m.memclear = False
     m.phi0c, m.phi0f = 0.49, 0.63
-    m.larea = np.array([1.0])
-    m.thCoarse = np.array([3.0])
-    m.thFine = np.array([1.0])
+    m.depoFineFrac = np.array([0.25])   # per-node deposit fine fraction (Phase 3a/3b)
     m.stratH = np.zeros((1, 2))
     m.stratHf = np.zeros((1, 2))
     m.phiS = np.zeros((1, 2))
@@ -514,7 +512,7 @@ def test_dual_lithology_deposit_and_compaction():
     m.deposeStrat()
     assert np.isclose(m.stratH[0, 1], 4.0)
     assert np.isclose(m.stratHf[0, 1], 4.0 * 0.25), (
-        "Fine deposit must equal depo * global eroded fine fraction."
+        "Fine deposit must equal depo * per-node fineFrac."
     )
     assert np.isclose(m.phiF[0, 1], 0.63) and np.isclose(m.phiS[0, 1], 0.49)
 
@@ -611,6 +609,241 @@ def test_dual_lithology_advection_fine_pile():
     # Coarse/total pile still correct (regression on the original behaviour).
     assert np.allclose(m.stratH[:, s], H0[:, s])
     assert np.allclose(m.phiS[:, s], phiS0[:, s])
+
+
+def test_dual_lithology_pit_fine_bias():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 3b — _pitFineFraction biases the
+    pit/lake deposit composition so fine concentrates toward the depocenter
+    (deep) and coarse toward the inlet/margins (shallow), while conserving the
+    per-pit incoming fine volume.
+
+    Single pit, 4 nodes at increasing bathymetric depth, uniform deposit and
+    area, uniform arriving composition (ff_pit = 0.3). The resulting per-node
+    fine fraction must (a) increase monotonically with depth and (b) conserve
+    the fine volume: Σ(delta·larea·ffrac) == ff_pit·Σ(delta·larea).
+    """
+    sedplex = pytest.importorskip("gospl.sed.sedplex")
+    n = 4
+    m = sedplex.SEDMesh.__new__(sedplex.SEDMesh)
+    m.lpoints = n
+    m.stratLith = True
+    m.pitParams = np.zeros((1, 3))          # one pit
+    m.pitIDs = np.zeros(n, dtype=int)        # all nodes in pit 0
+    m.inIDs = np.ones(n, dtype=int)
+    m.larea = np.ones(n)
+    m.lFill = np.full(n, 10.0)               # rim at 10 m
+    hl = np.array([9.0, 7.0, 4.0, 8.0])      # depth = 1, 3, 6, 2
+    delta = np.ones(n)                       # uniform deposit thickness
+    m.fineFrac = np.full(n, 0.3)
+    m._totFlux = np.ones(n)
+    m.depoFineFrac = np.zeros(n)
+
+    m._pitFineFraction(hl, delta)
+
+    depth = m.lFill - hl
+    ff = m.depoFineFrac
+    # (a) fine fraction increases with depth (depocenter is fine-rich).
+    order = np.argsort(depth)
+    assert np.all(np.diff(ff[order]) > 0), (
+        f"Fine fraction must increase with depth; got {ff} for depth {depth}."
+    )
+    # (b) per-pit fine volume conserved (ff_pit = 0.3, Σ delta*larea = 4).
+    fine_vol = float(np.sum(delta * m.larea * ff))
+    assert np.isclose(fine_vol, 0.3 * 4.0, rtol=1e-9), (
+        f"Pit fine volume not conserved: {fine_vol} != 1.2"
+    )
+
+
+def test_dual_lithology_marine_fine_bias():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 3c — _marineFineFraction biases
+    the marine deposit composition so fine concentrates in deep / distal water
+    and coarse stays proximal (shallow), conserving the marine fine volume.
+    Subaqueous analogue of the pit-fine bias.
+
+    Four marine nodes at increasing water depth, uniform deposit and area,
+    uniform arriving composition (ff_mar = 0.3). The per-node fine fraction
+    must increase with depth and conserve fine volume.
+    """
+    seaplex = pytest.importorskip("gospl.sed.seaplex")
+    n = 4
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = np.asarray(arr, dtype=np.float64)
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def globalToLocal(self, g, l):
+            l.setArray(g.getArray().copy())
+
+    m = seaplex.SEAMesh.__new__(seaplex.SEAMesh)
+    m.lpoints = n
+    m.sealevel = 0.0
+    m.inIDs = np.ones(n, dtype=int)
+    m.larea = np.ones(n)
+    m.fineFrac = np.full(n, 0.3)
+    m.depoFineFrac = np.zeros(n)
+    mdep = np.ones(n)                        # uniform marine deposit
+    m.tmp = _StubVec(mdep)
+    m.tmpL = _StubVec(np.zeros(n))
+    m.dm = _StubDM()
+    hl = np.array([-1.0, -3.0, -6.0, -8.0])  # depth = 1, 3, 6, 8
+    sedFlux = np.ones(n)                     # uniform marine input
+
+    m._marineFineFraction(hl, sedFlux)
+
+    depth = m.sealevel - hl
+    ff = m.depoFineFrac
+    order = np.argsort(depth)
+    assert np.all(np.diff(ff[order]) > 0), (
+        f"Marine fine fraction must increase with depth; got {ff}."
+    )
+    fine_vol = float(np.sum(mdep * m.larea * ff))
+    assert np.isclose(fine_vol, 0.3 * n, rtol=1e-9), (
+        f"Marine fine volume not conserved: {fine_vol} != {0.3 * n}"
+    )
+
+
+@pytest.mark.slow
+def test_dual_model_runs_and_invariants(minimal_dual_model):
+    """
+    Integration (DESIGN_DUAL_LITHOLOGY.md Phase 6): a full dual-lithology model
+    runs end-to-end and preserves the per-fraction invariants. Exercises the
+    whole dual path together — erodeStrat split, _getSedFlux fine routing
+    (Phase 3a), deposeStrat per-node fineFrac, per-fraction compaction, and
+    fine-pile advection. This is the first live coverage of the dual sediment
+    transport path (both fixtures used by other tests have stratNb == 0).
+    """
+    model = minimal_dual_model
+    assert model.stratLith is True and model.stratNb > 0
+    assert model.stratHf is not None and model.phiF is not None
+    # Bedrock sentinel carries the configured fine split before any run.
+    assert np.isclose(
+        model.stratHf[0, 0], 1.0e6 * (1.0 - model.bedrock_coarse_frac)
+    )
+
+    model.runProcesses()
+
+    top = model.stratStep + 1
+    H = model.stratH[:, :top]
+    Hf = model.stratHf[:, :top]
+    # Fine pile stays physical: non-negative and never exceeding the total.
+    assert (Hf >= -1.0e-9).all(), "Negative fine thickness in the strata pile."
+    assert (Hf <= H + 1.0e-6).all(), "Fine thickness exceeds layer total."
+    # Porosity and the routed fine fraction stay in range.
+    assert (model.phiF[:, :top] >= -1.0e-12).all()
+    assert (model.phiF[:, :top] <= 1.0 + 1.0e-12).all()
+    assert (model.fineFrac >= 0.0).all() and (model.fineFrac <= 1.0).all()
+    # The dual path actually moved fine material (bedrock contributes it).
+    assert float(Hf.sum()) > 0.0
+
+
+@pytest.mark.slow
+def test_dual_all_coarse_matches_single_fraction(
+    minimal_dual_coarse_model, minimal_strat_model
+):
+    """
+    Parity guard (DESIGN_DUAL_LITHOLOGY.md Phase 6): dual lithology configured
+    all-coarse (bedrock_coarse_frac=1.0, no erodibility/diffusivity contrast)
+    must reproduce the single-fraction stratigraphy run exactly. Confirms the
+    dual code paths are a faithful superset of the single-fraction path — any
+    accidental divergence (extra deposition, wrong compaction branch, etc.)
+    trips this.
+    """
+    dual = minimal_dual_coarse_model
+    single = minimal_strat_model
+    dual.runProcesses()
+    single.runProcesses()
+
+    top = min(dual.stratStep, single.stratStep) + 1
+    # No fine produced anywhere in the all-coarse configuration.
+    assert float(dual.stratHf[:, :top].sum()) == 0.0, (
+        "All-coarse dual run produced fine sediment."
+    )
+    # Elevation and stratal thickness must match single-fraction bitwise
+    # (the smoke check measured exactly 0 difference; atol guards float noise).
+    assert np.allclose(
+        dual.hLocal.getArray(), single.hLocal.getArray(), rtol=0.0, atol=1.0e-9
+    ), "Elevation diverged from the single-fraction stratigraphy run."
+    assert np.allclose(
+        dual.stratH[:, :top], single.stratH[:, :top], rtol=0.0, atol=1.0e-9
+    ), "Stratal thickness diverged from the single-fraction stratigraphy run."
+
+
+@pytest.mark.slow
+def test_dual_mass_conservation(minimal_dual_model):
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 6 — sediment conservation through
+    the dual-lithology pipeline on a closed sphere, and a valid per-fraction
+    partition maintained end-to-end.
+
+    The standard test_mass_conservation SKIPS when stratNb > 0 (compaction
+    moves h without cumED), so dual/stratigraphy-mode total conservation is
+    otherwise untested. cumED only changes via PAIRED sediment erosion/
+    deposition (never by compaction), so on a closed sphere Σ(dcumED·larea)
+    must still vanish relative to the redistributed volume — even with the
+    extra fine-flux solve and the per-pit / marine composition reallocation
+    that dual lithology adds. A real sediment leak (e.g. fine routed but not
+    deposited) would push this to O(0.1+); measured ~1.6e-5 here.
+
+    Per-fraction: the coarse/fine partition must stay valid through erosion,
+    transport, deposition, compaction, advection and diffusion — fine bulk
+    non-negative and never exceeding the layer total; the fine solid phase
+    non-negative; and the pile must actually carry fine (not trivially zero).
+    """
+    model = minimal_dual_model
+
+    # Closed-domain gate (mirrors test_mass_conservation).
+    reasons = []
+    if getattr(model, "flatModel", True):
+        reasons.append("flatModel=True (boundary outflux)")
+    if getattr(model, "tecdata", None) is not None:
+        reasons.append("tectonics active")
+    if getattr(model, "flexOn", False):
+        reasons.append("flexure active")
+    if reasons:
+        pytest.skip(
+            "Dual mass conservation requires a closed sphere with only "
+            "sediment-conserving kernels. This fixture has: " + "; ".join(reasons)
+        )
+    assert model.stratLith and model.stratNb > 0, "fixture must enable dual strat"
+
+    larea = model.larea
+    owned = model.inIDs == 1
+    cumED_before = model.cumEDLocal.getArray().copy()
+
+    model.runProcesses()
+
+    dED = model.cumEDLocal.getArray() - cumED_before
+    from mpi4py import MPI
+    dV = MPI.COMM_WORLD.allreduce(float(np.sum((dED * larea)[owned])), op=MPI.SUM)
+    activity = MPI.COMM_WORLD.allreduce(
+        float(np.sum((np.abs(dED) * larea)[owned])), op=MPI.SUM
+    )
+
+    # ---- Total sediment conserved in dual mode (closed sphere) ----
+    assert activity > 0.0, "no sediment was redistributed; test is vacuous"
+    rel = abs(dV) / activity
+    assert rel < 5.0e-4, (
+        f"Dual-mode sediment not conserved: |ΣdcumED|/activity = {rel:.2e} "
+        f"(> 5e-4). A fraction routed-but-not-deposited would leak here."
+    )
+
+    # ---- Valid per-fraction partition end-to-end ----
+    top = model.stratStep + 1
+    H = model.stratH[:, :top]
+    Hf = model.stratHf[:, :top]
+    assert (Hf >= -1.0e-9).all(), "Negative fine bulk thickness."
+    assert (Hf <= H + 1.0e-6).all(), "Fine bulk exceeds layer total."
+    fine_solid = (Hf * (1.0 - model.phiF[:, :top]))[owned]
+    assert (fine_solid >= -1.0e-9).all(), "Negative fine solid phase."
+    fine_total = MPI.COMM_WORLD.allreduce(float(np.sum(fine_solid)), op=MPI.SUM)
+    assert fine_total > 0.0, "Dual pile carries no fine — sub-system is dead."
 
 
 # ---------------------------------------------------------------------------

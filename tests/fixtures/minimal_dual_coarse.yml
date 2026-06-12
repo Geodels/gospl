@@ -1,0 +1,46 @@
+name: minimal dual-lithology all-coarse parity test
+
+# Dual lithology enabled but configured all-coarse (bedrock_coarse_frac: 1.0,
+# no fine erodibility / diffusivity contrast). With no fine ever produced, the
+# dual code paths must reproduce the single-fraction stratigraphy run
+# (minimal_strat.yml) — this is the parity guard.
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 100
+    tout: 50
+    dt: 10.
+    strat: 50
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 0.
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+strata:
+    dual: True
+    bedrock_coarse_frac: 1.0
+    fine: {k_factor: 1.0}
+    fine_diff_factor: 1.0
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'minimal_dual_coarse'

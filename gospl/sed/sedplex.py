@@ -35,6 +35,24 @@ class SEDMesh(object):
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
 
+        # Dual-lithology fine sediment flux (m3/yr). vSed carries the TOTAL
+        # (coarse+fine) sediment; vSedF carries the fine sub-flux, both routed
+        # by the same upstream-integration operator. fineFrac is the per-node
+        # fine fraction of the routed flux (= arriving-sediment composition at
+        # sinks), used by deposeStrat. Allocated unconditionally (negligible)
+        # and registered in destroy_DMPlex; only populated when stratLith.
+        self.vSedF = self.hGlobal.duplicate()
+        self.vSedFLocal = self.hLocal.duplicate()
+        self.fineFrac = np.zeros(self.lpoints, dtype=np.float64)
+        # depoFineFrac is the per-node fine fraction actually used by
+        # deposeStrat. It starts each step as the routed arriving composition
+        # (fineFrac) and is overridden inside pits by _pitFineFraction (3b:
+        # fine biased to the depocenter, coarse to the margins/inlet).
+        # _totFlux snapshots the pre-cascade total routed flux (vSedLocal is
+        # later mutated by the pit cascade) so per-pit fine fractions stay valid.
+        self.depoFineFrac = np.zeros(self.lpoints, dtype=np.float64)
+        self._totFlux = np.zeros(self.lpoints, dtype=np.float64)
+
         # Get the maximum number of neighbours on the mesh
         maxnb = np.zeros(1, dtype=np.int64)
         maxnb[0] = setmaxnb(self.lpoints)
@@ -54,8 +72,13 @@ class SEDMesh(object):
         # Stratigraphic layers exist
         if self.stratNb > 0:
             # thCoarse is already an erosion-positive rate (m/yr) from
-            # stratplex.erodeStrat; use as-is.
-            self.tmpL.setArray(self.thCoarse)
+            # stratplex.erodeStrat; use as-is. In dual-lithology mode the
+            # transported sediment is the TOTAL (coarse + fine) so the
+            # deposition machinery handles all eroded volume.
+            if self.stratLith:
+                self.tmpL.setArray(self.thCoarse + self.thFine)
+            else:
+                self.tmpL.setArray(self.thCoarse)
             self.dm.localToGlobal(self.tmpL, self.tmp)
         else:
             # Eb is in the thickness-rate convention (positive deposition,
@@ -68,6 +91,30 @@ class SEDMesh(object):
         # Get the volume of sediment transported in m3/yr
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
+
+        # Dual lithology: route the fine sub-flux through the SAME operator
+        # (linear, so this is exact), then snapshot the per-node fine fraction
+        # of the routed (upstream-integrated) flux — i.e. the composition of
+        # sediment arriving at each node. Done before fMati is destroyed.
+        if self.stratNb > 0 and self.stratLith:
+            self.tmpL.setArray(self.thFine)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            self._solve_KSP(False, self.fMati, self.tmp, self.vSedF)
+            self.dm.globalToLocal(self.vSed, self.vSedLocal)
+            self.dm.globalToLocal(self.vSedF, self.vSedFLocal)
+            vtot = self.vSedLocal.getArray()
+            vfin = self.vSedFLocal.getArray()
+            self.fineFrac = np.divide(
+                vfin, vtot, out=np.zeros_like(vtot), where=vtot > 0.0
+            )
+            np.clip(self.fineFrac, 0.0, 1.0, out=self.fineFrac)
+            # Snapshot the clean pre-cascade total flux and seed the deposit
+            # composition with the arriving (routed) fine fraction; _updateSinks
+            # refines it inside pits (3b).
+            self._totFlux = vtot.copy()
+            self.depoFineFrac = self.fineFrac.copy()
+
         self.fMati.destroy()
 
         # Update local vector
@@ -563,6 +610,73 @@ class SEDMesh(object):
 
         return delta_smooth
 
+    def _pitFineFraction(self, hl, delta):
+        """
+        Dual-lithology (3b): set the per-node fine fraction of the continental
+        pit/lake deposit so fine settles toward the depocenter and coarse
+        builds the inlet/margins, while conserving each pit's incoming fine
+        volume.
+
+        Composition only — the deposit geometry ``delta`` is NOT modified, so
+        model dynamics (elevations, flow) are untouched; the worst case of a
+        bug here is a wrong recorded composition, caught by the per-fraction
+        invariant tests.
+
+        Mechanism:
+          - Per-pit incoming fine fraction ``ff_pit = Σ(fineFrac·totFlux) /
+            Σ(totFlux)`` over the pit's nodes — the routed-flux composition of
+            sediment entering the pit (``_totFlux`` is the clean pre-cascade
+            snapshot; ``vSedLocal`` is mutated by the cascade).
+          - Bathymetric depth ``d = max(lFill − hl, 0)`` is the depocenter
+            proxy (deep at the centre, shallow at the rim/inlet — independent
+            of where the deposit piled).
+          - Fine fraction is biased ∝ d and renormalised to the deposit-weighted
+            mean depth, so ``Σ(delta·larea·ffrac) == ff_pit·Σ(delta·larea) ==``
+            the fine volume that entered the pit.
+
+        :arg hl: pre-deposition local elevation
+        :arg delta: per-node continental deposit thickness (local)
+        """
+        num_pits = len(self.pitParams)
+        in_pit = self.pitIDs >= 0
+        owned = (self.inIDs == 1) & in_pit
+
+        # ---- per-pit incoming fine fraction (flux-weighted) ----
+        fineNum = np.zeros(num_pits, dtype=np.float64)
+        fluxDen = np.zeros(num_pits, dtype=np.float64)
+        # ---- deposit-weighted mean bathymetric depth per pit ----
+        depth = np.maximum(self.lFill - hl, 0.0)
+        dw = np.zeros(num_pits, dtype=np.float64)   # Σ delta*larea
+        dwd = np.zeros(num_pits, dtype=np.float64)  # Σ delta*larea*depth
+        if owned.any():
+            ids = self.pitIDs[owned]
+            grp = npi.group_by(ids)
+            up = grp.unique
+            fineNum[up] = grp.sum((self.fineFrac * self._totFlux)[owned])[1]
+            fluxDen[up] = grp.sum(self._totFlux[owned])[1]
+            dl = (delta * self.larea)[owned]
+            dw[up] = grp.sum(dl)[1]
+            dwd[up] = grp.sum(dl * depth[owned])[1]
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fineNum, op=MPI.SUM)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fluxDen, op=MPI.SUM)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dw, op=MPI.SUM)
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dwd, op=MPI.SUM)
+
+        ff_pit = np.divide(fineNum, fluxDen, out=np.zeros(num_pits), where=fluxDen > 0)
+        depthbar = np.divide(dwd, dw, out=np.zeros(num_pits), where=dw > 0)
+
+        # ---- per-node biased fine fraction (depocenter-weighted) ----
+        pit_safe = np.where(in_pit, self.pitIDs, 0)
+        ffp = ff_pit[pit_safe]
+        db = depthbar[pit_safe]
+        ffrac = np.where(
+            in_pit & (db > 0.0), ffp * depth / np.maximum(db, 1.0e-30), 0.0
+        )
+        np.clip(ffrac, 0.0, 1.0, out=ffrac)
+        self.depoFineFrac[in_pit] = ffrac[in_pit]
+
+        return
+
     def _updateSinks(self, hl):
         """
         Update depression elevations based on incoming sediment volumes.
@@ -605,6 +719,12 @@ class SEDMesh(object):
         if diffuse_path.any():
             delta_diff = self._diffuseLargePit(hl, depo, diffuse_path)
             delta = delta + delta_diff
+
+        # Dual lithology (3b): bias the deposit composition within pits — fine
+        # to the depocenter, coarse to the inlet/margins. Geometry (delta) is
+        # unchanged; only self.depoFineFrac (read by deposeStrat) is set.
+        if self.stratLith:
+            self._pitFineFraction(hl, delta)
 
         # Apply deposit
         self.tmpL.setArray(delta)

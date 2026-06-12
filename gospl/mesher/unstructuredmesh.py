@@ -820,6 +820,8 @@ class UnstMesh(object):
         self.cumEDLocal.destroy()
         self.vSed.destroy()
         self.vSedLocal.destroy()
+        self.vSedF.destroy()
+        self.vSedFLocal.destroy()
         self.areaGlobal.destroy()
         self.bG.destroy()
         self.bL.destroy()
