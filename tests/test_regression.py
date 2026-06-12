@@ -775,6 +775,77 @@ def test_dual_all_coarse_matches_single_fraction(
     ), "Stratal thickness diverged from the single-fraction stratigraphy run."
 
 
+@pytest.mark.slow
+def test_dual_mass_conservation(minimal_dual_model):
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 6 — sediment conservation through
+    the dual-lithology pipeline on a closed sphere, and a valid per-fraction
+    partition maintained end-to-end.
+
+    The standard test_mass_conservation SKIPS when stratNb > 0 (compaction
+    moves h without cumED), so dual/stratigraphy-mode total conservation is
+    otherwise untested. cumED only changes via PAIRED sediment erosion/
+    deposition (never by compaction), so on a closed sphere Σ(dcumED·larea)
+    must still vanish relative to the redistributed volume — even with the
+    extra fine-flux solve and the per-pit / marine composition reallocation
+    that dual lithology adds. A real sediment leak (e.g. fine routed but not
+    deposited) would push this to O(0.1+); measured ~1.6e-5 here.
+
+    Per-fraction: the coarse/fine partition must stay valid through erosion,
+    transport, deposition, compaction, advection and diffusion — fine bulk
+    non-negative and never exceeding the layer total; the fine solid phase
+    non-negative; and the pile must actually carry fine (not trivially zero).
+    """
+    model = minimal_dual_model
+
+    # Closed-domain gate (mirrors test_mass_conservation).
+    reasons = []
+    if getattr(model, "flatModel", True):
+        reasons.append("flatModel=True (boundary outflux)")
+    if getattr(model, "tecdata", None) is not None:
+        reasons.append("tectonics active")
+    if getattr(model, "flexOn", False):
+        reasons.append("flexure active")
+    if reasons:
+        pytest.skip(
+            "Dual mass conservation requires a closed sphere with only "
+            "sediment-conserving kernels. This fixture has: " + "; ".join(reasons)
+        )
+    assert model.stratLith and model.stratNb > 0, "fixture must enable dual strat"
+
+    larea = model.larea
+    owned = model.inIDs == 1
+    cumED_before = model.cumEDLocal.getArray().copy()
+
+    model.runProcesses()
+
+    dED = model.cumEDLocal.getArray() - cumED_before
+    from mpi4py import MPI
+    dV = MPI.COMM_WORLD.allreduce(float(np.sum((dED * larea)[owned])), op=MPI.SUM)
+    activity = MPI.COMM_WORLD.allreduce(
+        float(np.sum((np.abs(dED) * larea)[owned])), op=MPI.SUM
+    )
+
+    # ---- Total sediment conserved in dual mode (closed sphere) ----
+    assert activity > 0.0, "no sediment was redistributed; test is vacuous"
+    rel = abs(dV) / activity
+    assert rel < 5.0e-4, (
+        f"Dual-mode sediment not conserved: |ΣdcumED|/activity = {rel:.2e} "
+        f"(> 5e-4). A fraction routed-but-not-deposited would leak here."
+    )
+
+    # ---- Valid per-fraction partition end-to-end ----
+    top = model.stratStep + 1
+    H = model.stratH[:, :top]
+    Hf = model.stratHf[:, :top]
+    assert (Hf >= -1.0e-9).all(), "Negative fine bulk thickness."
+    assert (Hf <= H + 1.0e-6).all(), "Fine bulk exceeds layer total."
+    fine_solid = (Hf * (1.0 - model.phiF[:, :top]))[owned]
+    assert (fine_solid >= -1.0e-9).all(), "Negative fine solid phase."
+    fine_total = MPI.COMM_WORLD.allreduce(float(np.sum(fine_solid)), op=MPI.SUM)
+    assert fine_total > 0.0, "Dual pile carries no fine — sub-system is dead."
+
+
 # ---------------------------------------------------------------------------
 # TEST 2c - channel-evap hook reduces FA (DESIGN_EVAPORATION.md §4 T1)
 # ---------------------------------------------------------------------------
