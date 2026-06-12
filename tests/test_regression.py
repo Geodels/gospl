@@ -467,6 +467,91 @@ def test_dual_lithology_erosion_split():
     assert np.allclose(m._surfaceLithoK(), 1.0), "K-blend must be neutral when off."
 
 
+def test_dual_lithology_deposit_and_compaction():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 4 — per-fraction deposition
+    (deposeStrat) and per-fraction compaction (_depthPorosityDual).
+
+    Deposition: the fresh layer accumulates a fine fraction equal to the
+    step's global eroded composition, with each lithology's surface porosity.
+
+    Compaction (the headline physics): each fraction compacts on its own
+    porosity-depth curve, conserving its solid phase while fines lose more
+    bulk thickness than coarse at the same burial depth.
+    """
+    from gospl.sed import stratplex
+    from mpi4py import MPI
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = np.asarray(arr, dtype=np.float64)
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def globalToLocal(self, g, l):
+            l.setArray(g.getArray().copy())
+
+    # ---- Deposition: 4 m deposit, global eroded fine fraction = 1/(3+1) ----
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.lpoints, m.stratNb, m.stratStep = 1, 2, 1
+    m.stratLith = True
+    m.memclear = False
+    m.phi0c, m.phi0f = 0.49, 0.63
+    m.larea = np.array([1.0])
+    m.thCoarse = np.array([3.0])
+    m.thFine = np.array([1.0])
+    m.stratH = np.zeros((1, 2))
+    m.stratHf = np.zeros((1, 2))
+    m.phiS = np.zeros((1, 2))
+    m.phiF = np.zeros((1, 2))
+    m.stratK = np.ones((1, 2))
+    m.tmp = _StubVec([4.0])
+    m.tmpL = _StubVec([0.0])
+    m.dm = _StubDM()
+    m.deposeStrat()
+    assert np.isclose(m.stratH[0, 1], 4.0)
+    assert np.isclose(m.stratHf[0, 1], 4.0 * 0.25), (
+        "Fine deposit must equal depo * global eroded fine fraction."
+    )
+    assert np.isclose(m.phiF[0, 1], 0.63) and np.isclose(m.phiS[0, 1], 0.49)
+
+    # ---- Compaction: one mixed layer buried 2 km ----
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.stratStep = 0
+    m.stratLith = True
+    m.memclear = False
+    m.bedrockLay = 0
+    m.phi0c, m.z0c = 0.49, 3700.0
+    m.phi0f, m.z0f = 0.63, 1960.0
+    Hc0, Hf0 = 6.0, 4.0
+    m.stratH = np.array([[Hc0 + Hf0]])
+    m.stratHf = np.array([[Hf0]])
+    m.phiS = np.array([[0.49]])
+    m.phiF = np.array([[0.63]])
+    depth = np.array([[-2000.0]])
+    newH = m._depthPorosity(depth)
+
+    phiS_new = 0.49 * np.exp(-2000.0 / 3700.0)
+    phiF_new = 0.63 * np.exp(-2000.0 / 1960.0)
+    # Per-fraction solid is conserved through compaction.
+    Hc_new = newH[0, 0] - m.stratHf[0, 0]
+    Hf_new = m.stratHf[0, 0]
+    assert np.isclose(Hc_new * (1 - phiS_new), Hc0 * (1 - 0.49), rtol=1e-9), (
+        "Coarse solid must be conserved through compaction."
+    )
+    assert np.isclose(Hf_new * (1 - phiF_new), Hf0 * (1 - 0.63), rtol=1e-9), (
+        "Fine solid must be conserved through compaction."
+    )
+    assert newH[0, 0] < Hc0 + Hf0, "Compaction must reduce total thickness."
+    # Fines lose proportionally more bulk than coarse at the same depth.
+    assert (Hf_new / Hf0) < (Hc_new / Hc0), (
+        "Fines must compact more than coarse for these curves."
+    )
+
+
 # ---------------------------------------------------------------------------
 # TEST 2c - channel-evap hook reduces FA (DESIGN_EVAPORATION.md §4 T1)
 # ---------------------------------------------------------------------------
@@ -1716,6 +1801,7 @@ def test_stratigraphy_deposition_and_compaction():
     s.z0s       = 100.0    # e-folding compaction depth (m)
     s.bedrockLay = 0       # no infinite-bedrock sentinel layer
     s.memclear  = False
+    s.stratLith = False    # single-fraction path (dual-lithology disabled)
 
     s.stratH = np.full((5, 3), 50.0, dtype=np.float64)
     s.phiS   = np.full((5, 3),  0.5, dtype=np.float64)
@@ -1847,6 +1933,7 @@ def test_stratigraphy_deposition_and_compaction():
     s2.z0s       = 100.0
     s2.bedrockLay = 1      # layer 0 is bedrock
     s2.memclear  = False
+    s2.stratLith = False   # single-fraction path (dual-lithology disabled)
 
     # Layer 0 holds the BEDROCK_SENTINEL thickness (1e6) — never compact it.
     s2.stratH = np.array([[1.0e6, 50.0, 50.0]] * 5, dtype=np.float64)

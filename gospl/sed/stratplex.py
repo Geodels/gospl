@@ -228,6 +228,13 @@ class STRAMesh(object):
 
         - thickness of each stratigrapic layer `stratH` accounting for both erosion & deposition events.
         - porosity of sediment `phiS` in each stratigraphic layer computed at center of each layer.
+
+        In dual-lithology mode the deposit is split into a coarse and a fine
+        fraction. The fine fraction is the step's **global eroded composition**
+        (``Σ thFine / Σ (thCoarse + thFine)`` over the domain) — a co-transport
+        placeholder: fines are assumed to travel with coarse so a deposit
+        carries the bulk source composition. Phase 3 (separate transport)
+        replaces this scalar with a spatially-resolved routed fine deposit.
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
@@ -235,7 +242,20 @@ class STRAMesh(object):
         depo[depo < 1.0e-4] = 0.0
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
-        self.phiS[ids, self.stratStep] = self.phi0s
+        if self.stratLith:
+            # Area-weighted global eroded fine fraction (collective: every
+            # rank participates, matching the MPI contract).
+            cV = float(np.sum(self.thCoarse * self.larea))
+            fV = float(np.sum(self.thFine * self.larea))
+            cV = MPI.COMM_WORLD.allreduce(cV, op=MPI.SUM)
+            fV = MPI.COMM_WORLD.allreduce(fV, op=MPI.SUM)
+            ff_dep = fV / (cV + fV) if (cV + fV) > 0.0 else 0.0
+            self.stratHf[:, self.stratStep] += depo * ff_dep
+            # Fresh deposit carries each lithology's surface porosity.
+            self.phiS[ids, self.stratStep] = self.phi0c
+            self.phiF[ids, self.stratStep] = self.phi0f
+        else:
+            self.phiS[ids, self.stratStep] = self.phi0s
         # Freshly deposited sediment carries the default erodibility (no
         # multiplier). If you want re-deposited sediment to keep its
         # source-layer K, this is the line to revisit.
@@ -404,6 +424,9 @@ class STRAMesh(object):
         :return: newH updated sedimentary layer thicknesses after compaction
         """
 
+        if self.stratLith:
+            return self._depthPorosityDual(depth)
+
         # Depth-porosity functions
         phiS = self.phi0s * np.exp(depth / self.z0s)
         phiS = np.minimum(phiS, self.phiS[:, : self.stratStep + 1])
@@ -435,6 +458,76 @@ class STRAMesh(object):
         if self.memclear:
             del phiS, solidPhase
             del ids, tmpS, tot
+            gc.collect()
+
+        return newH
+
+    def _depthPorosityDual(self, depth):
+        """
+        Dual-lithology depth-porosity / compaction. Each fraction (coarse,
+        fine) compacts on its own porosity-depth curve; the layer's new
+        thickness is the sum of the two recompacted bulk thicknesses, and the
+        fine pile ``stratHf`` is updated consistently.
+
+        This is the headline physics of dual lithology: fine and coarse have
+        different compaction, so the same solid load yields a different
+        preserved thickness depending on the layer's grain mix.
+
+        :arg depth: depth below basement for each sedimentary layer
+        :return: newH updated layer thicknesses after compaction
+        """
+
+        top = self.stratStep + 1
+        phiS_cur = self.phiS[:, :top]
+        phiF_cur = self.phiF[:, :top]
+        H = self.stratH[:, :top]
+        Hf = self.stratHf[:, :top]
+        Hc = H - Hf
+
+        # Per-fraction depth-porosity, capped at the current value (porosity
+        # cannot increase on unloading — same assumption as single-fraction).
+        phiS_new = np.minimum(self.phi0c * np.exp(depth / self.z0c), phiS_cur)
+        phiF_new = np.minimum(self.phi0f * np.exp(depth / self.z0f), phiF_cur)
+
+        # Solid phase preserved per fraction.
+        coarseSolid = Hc * (1.0 - phiS_cur)
+        fineSolid = Hf * (1.0 - phiF_cur)
+
+        # Recompacted bulk thickness per fraction.
+        totC = 1.0 - phiS_new
+        totF = 1.0 - phiF_new
+        Hc_new = np.zeros_like(Hc)
+        Hf_new = np.zeros_like(Hf)
+        idc = totC > 0.0
+        idf = totF > 0.0
+        Hc_new[idc] = coarseSolid[idc] / totC[idc]
+        Hf_new[idf] = fineSolid[idf] / totF[idf]
+        Hc_new[Hc_new <= 0] = 0.0
+        Hf_new[Hf_new <= 0] = 0.0
+        newH = Hc_new + Hf_new
+
+        # Emptied layers carry no porosity.
+        empty = newH <= 0
+        phiS_new[empty] = 0.0
+        phiF_new[empty] = 0.0
+
+        # Freeze the bedrock sentinel layers (thickness + porosities unchanged).
+        if self.bedrockLay > 0:
+            b = self.bedrockLay
+            newH[:, :b] = H[:, :b]
+            Hf_new[:, :b] = Hf[:, :b]
+            phiS_new[:, :b] = phiS_cur[:, :b]
+            phiF_new[:, :b] = phiF_cur[:, :b]
+
+        phiS_new = self._fillZeroPorosity(phiS_new)
+        phiF_new = self._fillZeroPorosity(phiF_new)
+        self.phiS[:, :top] = phiS_new
+        self.phiF[:, :top] = phiF_new
+        self.stratHf[:, :top] = Hf_new
+
+        if self.memclear:
+            del phiS_new, phiF_new, coarseSolid, fineSolid
+            del Hc, Hf, Hc_new, Hf_new, totC, totF
             gc.collect()
 
         return newH
