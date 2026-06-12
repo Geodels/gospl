@@ -237,6 +237,128 @@ def test_evap_parser_opt_in():
 
 
 # ---------------------------------------------------------------------------
+# TEST 2b - dual-lithology opt-in flag (DESIGN_DUAL_LITHOLOGY.md Phase 0)
+# ---------------------------------------------------------------------------
+
+
+def _strata_parser(stratNb):
+    """
+    Bare parser primed for `_extraStrata`: it reads `self.input`,
+    `self.phi0s`/`self.z0s` (set by `_readCompaction` upstream), and
+    `self.stratNb` (set by `_readTime` upstream). See `_bare_parser`.
+    """
+    parser = inputparser.ReadYaml.__new__(inputparser.ReadYaml)
+    parser.input = {}
+    parser.phi0s = 0.49
+    parser.z0s = 3700.0
+    parser.stratNb = stratNb
+    return parser
+
+
+def test_dual_lithology_opt_in():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 0 — dual lithology is an
+    opt-in parsed in `_extraStrata` (continuation of `_readCompaction`).
+
+    Silent failure prevented: a refactor dropping the `_extraStrata` call
+    from `_readCompaction`, or flipping the default, would silently change
+    the sediment model for every existing input file.
+
+    Invariants:
+      1. No `strata` block  → stratLith False; coarse curve == compaction
+         curve (the dual-off path must stay bitwise-identical).
+      2. `strata: dual: True` with stratigraphy on → stratLith True and the
+         per-lithology parameters are parsed.
+      3. `strata: dual: True` with stratigraphy OFF (stratNb == 0) → flag
+         forced back to False (dual requires stratigraphy).
+    """
+    # ---- Case 1: no strata block → single-fraction, defaults mirror compaction
+    parser = _strata_parser(stratNb=5)
+    parser._extraStrata()
+    assert parser.stratLith is False
+    assert parser.phi0c == parser.phi0s and parser.z0c == parser.z0s, (
+        "Dual-off coarse porosity curve must default to the single-fraction "
+        "compaction curve so behaviour is unchanged."
+    )
+
+    # ---- Case 2: dual on with stratigraphy enabled → parsed
+    parser = _strata_parser(stratNb=5)
+    parser.input = {
+        "strata": {
+            "dual": True,
+            "coarse": {"phi0": 0.45, "z0": 3000.0},
+            "fine": {"phi0": 0.65, "z0": 1500.0},
+            "bedrock_coarse_frac": 0.7,
+            "fine_efficiency": 0.3,
+            "pitInletBias": {"coarse": 0.8, "fine": 0.1},
+            "Dc": 0.01,
+            "Df": 0.05,
+        }
+    }
+    parser._extraStrata()
+    assert parser.stratLith is True
+    assert parser.phi0c == 0.45 and parser.z0c == 3000.0
+    assert parser.phi0f == 0.65 and parser.z0f == 1500.0
+    assert parser.bedrock_coarse_frac == 0.7
+    assert parser.fine_efficiency == 0.3
+    assert parser.pit_inlet_bias_coarse == 0.8
+    assert parser.pit_inlet_bias_fine == 0.1
+    assert parser.Dc == 0.01 and parser.Df == 0.05
+
+    # ---- Case 3: dual requested but stratigraphy off → forced False
+    parser = _strata_parser(stratNb=0)
+    parser.input = {"strata": {"dual": True}}
+    parser._extraStrata()
+    assert parser.stratLith is False, (
+        "Dual lithology must require stratigraphy (stratNb > 0); with strat "
+        "disabled the flag has to fall back to single-fraction."
+    )
+
+
+def test_dual_lithology_layer_allocation():
+    """
+    Protects: DESIGN_DUAL_LITHOLOGY.md Phase 1 — the fine-fraction layer
+    fields (stratHf, phiF) are allocated by readStratLayers only when
+    dual lithology is enabled, and stay None otherwise.
+
+    Silent failure prevented: allocating the fields unconditionally would
+    change the single-fraction memory footprint and (via _outputStrat)
+    write extra HDF5 datasets into every existing single-fraction run.
+
+    Exercises the no-file branch of readStratLayers directly via __new__,
+    which only needs lpoints/stratNb/phi0s/stratLith/memclear/strataFile.
+    """
+    from gospl.sed import stratplex
+
+    def _strata_mesh(stratLith):
+        m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+        m.strataFile = None
+        m.lpoints = 8
+        m.stratNb = 3
+        m.phi0s = 0.49
+        m.memclear = False
+        m.stratLith = stratLith
+        m.stratHf = None
+        m.phiF = None
+        return m
+
+    # Single-fraction: fine fields stay None.
+    m = _strata_mesh(stratLith=False)
+    m.readStratLayers()
+    assert m.stratHf is None and m.phiF is None, (
+        "Single-fraction run must not allocate stratHf/phiF."
+    )
+
+    # Dual: fine fields allocated with the same shape as stratH, all-coarse.
+    m = _strata_mesh(stratLith=True)
+    m.readStratLayers()
+    assert m.stratHf is not None and m.phiF is not None
+    assert m.stratHf.shape == m.stratH.shape == (m.lpoints, m.stratNb)
+    assert m.phiF.shape == (m.lpoints, m.stratNb)
+    assert (m.stratHf == 0.0).all(), "Initial dual column should be all-coarse."
+
+
+# ---------------------------------------------------------------------------
 # TEST 2c - channel-evap hook reduces FA (DESIGN_EVAPORATION.md §4 T1)
 # ---------------------------------------------------------------------------
 

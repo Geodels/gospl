@@ -1416,6 +1416,94 @@ class ReadYaml(object):
             self.phi0s = 0.49
             self.z0s = 3700.0
 
+        self._extraStrata()
+
+        return
+
+    def _extraStrata(self):
+        """
+        Parse the optional dual-lithology (coarse/fine) stratigraphy block.
+
+        Continuation of ``_readCompaction`` (the coarse porosity curve
+        defaults to the single-fraction ``compaction`` values, so a model
+        with ``strata: dual: False`` — or no ``strata`` block at all — runs
+        the existing single-fraction path bitwise-unchanged).
+
+        Sets ``self.stratLith`` (master opt-in flag) plus the per-lithology
+        parameters consumed by later phases (porosity-depth curves, bedrock
+        composition, marine fine transport efficiency, per-fraction lake
+        inlet bias, and subaerial/subaqueous diffusivities). All of these
+        are inert while ``self.stratLith`` is False.
+
+        Dual lithology is only meaningful when stratigraphy recording is on;
+        if requested with stratigraphy disabled (``self.stratNb == 0``) the
+        flag is forced back to False with a rank-0 warning.
+
+        See ``docs/DESIGN_DUAL_LITHOLOGY.md`` and AGENTS.md > The ``_extra*``
+        methods are mandatory continuations.
+        """
+
+        # Coarse lithology porosity-depth defaults to the single-fraction
+        # compaction curve so the dual-off path is unchanged. Fine lithology
+        # defaults to a higher surface porosity / shallower decay; both fine
+        # values are inert unless dual lithology is enabled.
+        self.phi0c = self.phi0s
+        self.z0c = self.z0s
+        self.phi0f = 0.63
+        self.z0f = 1960.0
+        self.bedrock_coarse_frac = 0.5
+        self.fine_efficiency = 0.5
+        self.pit_inlet_bias_coarse = 0.50
+        self.pit_inlet_bias_fine = 0.0
+        self.Dc = None
+        self.Df = None
+
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets stratLith=False on missing "strata")
+        try:
+            strataDict = self.input["strata"]
+            self.stratLith = bool(strataDict.get("dual", False))
+
+            coarseDict = strataDict.get("coarse", {})
+            self.phi0c = coarseDict.get("phi0", self.phi0s)
+            self.z0c = coarseDict.get("z0", self.z0s)
+
+            fineDict = strataDict.get("fine", {})
+            self.phi0f = fineDict.get("phi0", self.phi0f)
+            self.z0f = fineDict.get("z0", self.z0f)
+
+            self.bedrock_coarse_frac = strataDict.get(
+                "bedrock_coarse_frac", self.bedrock_coarse_frac
+            )
+            self.fine_efficiency = strataDict.get("fine_efficiency", self.fine_efficiency)
+
+            biasDict = strataDict.get("pitInletBias", {})
+            if isinstance(biasDict, dict):
+                self.pit_inlet_bias_coarse = biasDict.get(
+                    "coarse", self.pit_inlet_bias_coarse
+                )
+                self.pit_inlet_bias_fine = biasDict.get("fine", self.pit_inlet_bias_fine)
+
+            self.Dc = strataDict.get("Dc", None)
+            self.Df = strataDict.get("Df", None)
+
+        except KeyError:
+            self.stratLith = False
+
+        # Dual lithology only makes sense when stratigraphy recording is on.
+        if self.stratLith and self.stratNb == 0:
+            if MPIrank == 0:
+                print(
+                    "Dual-lithology (strata: dual) requires stratigraphy to be "
+                    "enabled (set a positive `strat` interval in the time block); "
+                    "falling back to single-fraction sediment.",
+                    flush=True,
+                )
+            self.stratLith = False
+
+        # Clamp inlet-bias fractions to [0, 1] (mirrors nl_pit_inlet_bias).
+        self.pit_inlet_bias_coarse = min(1.0, max(0.0, self.pit_inlet_bias_coarse))
+        self.pit_inlet_bias_fine = min(1.0, max(0.0, self.pit_inlet_bias_fine))
+
         return
 
     def _readFlex(self):

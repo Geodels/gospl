@@ -33,6 +33,12 @@ class STRAMesh(object):
         self.stratH = None
         self.stratZ = None
         self.phiS = None
+        # Dual-lithology (coarse/fine) layer fields. Allocated only when
+        # self.stratLith is True (see _extraStrata / DESIGN_DUAL_LITHOLOGY.md).
+        # stratHf = fine-fraction layer thickness (coarse = stratH - stratHf);
+        # phiF = fine porosity per layer (phiS then holds the coarse porosity).
+        self.stratHf = None
+        self.phiF = None
         # Per-layer erodibility multiplier (lpoints, stratNb). Effective K
         # at the surface = self.K * stratK[<top non-empty layer>]. Fresh
         # deposits and the bedrock sentinel default to 1.0 (no scaling).
@@ -81,6 +87,23 @@ class STRAMesh(object):
                     self.locIDs, 0 : self.initLay
                 ]
 
+            # Dual-lithology fine-fraction layer fields. Optional in the
+            # npstrata file (`strataHf`, `phiF`); absent -> all-coarse
+            # (fine thickness 0), so a single-fraction file still loads.
+            if self.stratLith:
+                self.stratHf = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+                if "strataHf" in fileData.files:
+                    stratVal = fileData["strataHf"]
+                    self.stratHf[:, 0 : self.initLay] = stratVal[
+                        self.locIDs, 0 : self.initLay
+                    ]
+                self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+                if "phiF" in fileData.files:
+                    stratVal = fileData["phiF"]
+                    self.phiF[:, 0 : self.initLay] = stratVal[
+                        self.locIDs, 0 : self.initLay
+                    ]
+
             # All layers in the file are real sediment; no bedrock sentinel.
             self.bedrockLay = 0
 
@@ -99,6 +122,12 @@ class STRAMesh(object):
             self.stratH[:, 0] = BEDROCK_SENTINEL
             self.phiS[:, 0] = self.phi0s
             self.bedrockLay = 1          # layer 0 is the infinite-bedrock sentinel
+
+            # Dual-lithology fine-fraction fields (all-coarse to start; the
+            # bedrock-sentinel composition split is applied in Phase 2).
+            if self.stratLith:
+                self.stratHf = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+                self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
 
         return
     
