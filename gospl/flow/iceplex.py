@@ -1,19 +1,11 @@
 import os
-import gc
-import sys
-import scipy
 import petsc4py
 import numpy as np
-import numpy_indexed as npi
 
 from mpi4py import MPI
 from time import process_time
 
-from gospl.tools.constants import BOUNDARY_FLOW_SENTINEL, MISSING_DATA_SENTINEL
-
 if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import mfdreceivers
-    from gospl._fortran import epsfill
     from gospl._fortran import ice_flux
     from gospl._fortran import ice_velocity
 
@@ -24,13 +16,33 @@ MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
 
 class IceMesh(object):
-    """
-    This class calculates **ice flow acculation** based on a multiple flow direction paths (MFD).
+    r"""
+    Shallow-Ice-Approximation (SIA) ice-sheet model.
 
-    Useful links for improvements:
+    This class evolves the ice thickness :math:`H` as a non-linear diffusion of
+    the ice surface :math:`s = z_\mathrm{bed} + H`,
+
+    .. math::
+        \frac{\partial H}{\partial t} = \dot{m} - \nabla \cdot \mathbf{q},
+
+    where the ice flux :math:`\mathbf{q}` follows Glen's-law internal
+    deformation plus basal sliding (the ``ice_flux`` Fortran kernel) and
+    :math:`\dot{m}` is the equilibrium-line-altitude (ELA) surface mass balance.
+    The thickness is integrated **implicitly** with a cached Jacobian-free PETSc
+    ``SNES`` (unconditionally stable, so it takes the full goSPL timestep —
+    adequate at the km / :math:`10^2`–:math:`10^4` yr scale where explicit
+    sub-cycling is prohibitive).
+
+    From the converged thickness the model derives the basal sliding speed
+    (driving velocity-based glacial abrasion :math:`E_g = K_g |u_b|^l`), the
+    ablation meltwater re-injected into the river flow accumulation, glacial
+    till (abraded rock transported and deposited as moraine in the ablation
+    zone, conserving rock volume), and the ice load feeding the flexural
+    isostasy.
+
+    Useful links:
     - `Braun et al. (1999) <https://doi.org/10.3189/172756499781821797>`_
     - `Herman & Braun (2008) <https://doi.org/10.1029/2007JF000807>`_
-    - `Tomkin (2009) <https://doi.org/10.1016/j.geomorph.2008.04.021>`_
     - `Egholm (2012) <https://doi.org/10.1016/j.geomorph.2011.12.019>`_
     - `Deal & Prasicek (2020) <https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2020GL089263>`_
     - `Hergarten (2021) <http://dx.doi.org/10.5194/esurf-2021-1>`_
@@ -41,14 +53,13 @@ class IceMesh(object):
         """
         Initialisation of the `IceMesh` class.
 
-        This method initializes the ice-related fields (ice height, flow accumulation, and flexural response)
-        based on the configuration flags `iceOn` and `flexOn`. Memory is allocated for these fields.
+        This method initializes the ice-related fields (ice thickness, basal
+        velocity, meltwater and flexural response) based on the configuration
+        flags `iceOn` and `flexOn`. Memory is allocated for these fields.
         """
 
         if self.iceOn:
             self.iceHL = self.hLocal.duplicate()
-            self.iceFAG = self.hGlobal.duplicate()
-            self.iceFAL = self.hLocal.duplicate()
             # Local meltwater field captured at the end of iceAccumulation
             # and re-injected into the river FA source term in flowplex so
             # glacial discharge is not lost downstream.
@@ -56,12 +67,28 @@ class IceMesh(object):
             if self.flexOn:
                 self.iceFlex = self.hLocal.duplicate()
             # Basal sliding speed (m/yr) from the SIA solve; the driver for the
-            # velocity-based glacial abrasion law (Phase 3). Zero under the MFD
-            # proxy. Registered in destroy_DMPlex.
+            # velocity-based glacial abrasion law. Registered in destroy_DMPlex.
             self.iceUbL = self.hLocal.duplicate()
+            # Glacial abrasion rate E_g = Kg|u_b|^l (m/yr); a diagnostic output
+            # field, populated every step from the basal velocity (zero where
+            # abrasion is off, i.e. Kg = 0).
+            self.iceAbrL = self.hLocal.duplicate()
             self.iceHL.set(0.0)
             self.iceMeltL.set(0.0)
             self.iceUbL.set(0.0)
+            self.iceAbrL.set(0.0)
+            # Seed a pre-existing ice thickness on a fresh start; the SIA solve
+            # evolves it from there. On a restart (rStep > 0) readData restores
+            # the evolved iceH instead, so the seed is skipped. The flexure
+            # reference is taken AFTER this seed (first iceAccumulation), so a
+            # pre-existing ice load is not applied as a transient shock.
+            if self._iceInitSpec is not None and self.rStep == 0:
+                sc, spec = self._iceInitSpec
+                if spec is not None:
+                    h0 = self._loadIceMap(spec, "ice hinit")[self.locIDs]
+                else:
+                    h0 = np.full(self.lpoints, sc, dtype=np.float64)
+                self.iceHL.setArray(np.maximum(h0, 0.0))
             # Glacial-till mass-balance diagnostics (m^3, owned-node running
             # totals reduced by the till-conservation test).
             self._tillEroded = 0.0
@@ -71,81 +98,6 @@ class IceMesh(object):
             self._snes_ice = None
             self._snes_ice_f = None
             self._snes_ice_x = None
-
-        return
-
-    def _matrixIceFlow(self, dir_ice=1):
-        """
-        Compute Flow Direction Matrix for Ice Flow.
-
-        This function calculates the flow direction matrix for ice flow using a multiple flow direction (MFD) algorithm.
-        It fills in elevation data (using `epsfill`) and constructs the matrix for flow direction and weighting.
-
-        Parameters:
-        -----------
-        dir_ice : int, optional
-            Number of flow directions to consider. Defaults to 1.
-        """
-
-        # The filled + eps is done on the global grid!
-        hl = self.hLocal.getArray().copy()
-        minh = self.hGlobal.min()[1] + 0.1
-        minh = max(minh, self.sealevel)
-        if self.flatModel:
-            hl[self.idBorders] = BOUNDARY_FLOW_SENTINEL
-        fillz = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
-        fillz[self.locIDs] = hl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
-        if MPIrank == 0:
-            fillz = epsfill(minh, fillz)
-        # Broadcast filled elevation data across processors
-        fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
-        fillz = fillEPS[self.locIDs]
-
-        # Calculate receivers and weights for the flow direction matrix.
-        # `self.gid` is the per-node global ID, passed in for deterministic
-        # exact-tie-break on slope (see fortran/functions.F90:mfdreceivers).
-        rcv, _, wght = mfdreceivers(
-            dir_ice, 1.0, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
-        )
-
-        # Handle borders for flat models
-        if self.flatModel:
-            rcv[self.idBorders, :] = np.tile(self.idBorders, (dir_ice, 1)).T
-            wght[self.idBorders, :] = 0.0
-
-        self.iceRcv = rcv.copy()
-        self.iceWght = wght.copy()
-
-        # Create and assemble the flow direction matrix
-        self.iceMat = self.iMat.copy()
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-        nodes = indptr[:-1]
-
-        for k in range(dir_ice):
-            # Flow direction matrix for a specific direction
-            tmpMat = self._matrix_build()
-            data = wght[:, k].copy()
-            data[rcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                rcv[:, k].astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-
-            # Accumulate weights for each direction
-            self.iceMat.axpy(-1.0, tmpMat)
-            tmpMat.destroy()
-
-        if self.memclear:
-            del data, indptr, nodes
-            del hl, fillz, fillEPS, rcv, wght
-            gc.collect()
-
-        # Transpose the flow matrix for further computations
-        self.iceMat.transpose()
 
         return
 
@@ -160,17 +112,23 @@ class IceMesh(object):
         ad = 2.0 * self.sia_Aglen * (RHO_ICE * self.gravity) ** n / (n + 2.0)
         as_ = self.sia_slide
         zbed = self.hLocal.getArray().copy()              # bed elevation (fixed this step)
-        ramp = (zbed - elaH) / (iceH - elaH)
-        ramp[ramp > 1.0] = 1.0
+        # ELA mass-balance ramp (1 above the ice cap, 0 at the ELA, negative
+        # below). elaH/iceH may be scalars (uniform) or per-vertex arrays
+        # (spatial maps). Where iceH <= elaH (degenerate / no-ice-band cell) the
+        # ramp is zeroed so the division never blows up; this is exact for the
+        # uniform case, where the caller's guard already ensures iceH > elaH.
+        denom = iceH - elaH
+        safe = np.where(denom > 0.0, denom, 1.0)
+        ramp = np.where(denom > 0.0, (zbed - elaH) / safe, 0.0)
+        ramp = np.minimum(ramp, 1.0)
         mdot = self.rainVal * ramp                        # surface mass balance (m ice/yr)
         return n, ad, as_, zbed, mdot
 
     def _iceSIAFinalize(self, H, zbed, mdot, iceT, as_, n):
         """
-        Common post-solve steps for both SIA solvers: terminus clamp, store the
-        ice thickness, the basal sliding speed (for Phase-3 abrasion), capture
-        ablation meltwater (m^3/yr) for the river coupling, and zero the MFD
-        ice-flow field (SIA-mode erosion uses the basal velocity, not it).
+        Common post-solve steps for the SIA solve: terminus clamp, store the
+        ice thickness and the basal sliding speed (the abrasion driver), and
+        capture ablation meltwater (m^3/yr) for the river coupling.
         """
         H = np.maximum(H, 0.0)
         H[zbed < iceT] = 0.0
@@ -180,10 +138,13 @@ class IceMesh(object):
         ub = ice_velocity(self.lpoints, H, zbed, as_, n)
         ub[H <= 1.0e-2] = 0.0
         self.iceUbL.setArray(ub)
+        # Glacial abrasion rate diagnostic E_g = Kg|u_b|^l (m/yr), subaerial
+        # only; matches the incision applied by _glacialAbrasion / glacialTill.
+        abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
+        abr[self.seaID] = 0.0
+        self.iceAbrL.setArray(abr)
         melt_local = np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
         self.iceMeltL.setArray(melt_local)
-        self.iceFAL.set(0.0)
-        self.iceFAG.set(0.0)
         return
 
     def _form_residual_ice(self, snes, H, F):
@@ -206,16 +167,15 @@ class IceMesh(object):
         F.setArray(res[self.glIDs])
         return
 
-    def _iceFlowSIAImplicit(self, elaH, iceH, iceT):
+    def _iceFlowSIA(self, elaH, iceH, iceT):
         r"""
-        **Production** SIA ice-thickness solve (Phase 1b): implicit
-        (semi-implicit) integration of ``∂H/∂t = ṁ − ∇·q`` via a cached PETSc
-        SNES, reusing the non-linear hillslope pattern (``ngmres``, CG/HYPRE
-        KSP, Jacobian-free). Unconditionally stable in `dt`, so it takes the
-        full goSPL timestep — adequate for goSPL's km / 10²–10⁴ yr scale where
-        explicit subcycling is prohibitive. Free boundary `H≥0` by post-clamp;
-        validated against the explicit reference (`_iceFlowSIAExplicit`) and the
-        analytical SIA dome.
+        SIA ice-thickness solve: implicit (semi-implicit) integration of
+        ``∂H/∂t = ṁ − ∇·q`` via a cached PETSc SNES, reusing the non-linear
+        hillslope pattern (``ngmres``, CG/HYPRE KSP, Jacobian-free).
+        Unconditionally stable in `dt`, so it takes the full goSPL timestep —
+        adequate for goSPL's km / 10²–10⁴ yr scale where explicit subcycling is
+        prohibitive. Free boundary `H≥0` by post-clamp; validated against the
+        analytical SIA dome (ice-volume conservation under zero mass balance).
         """
         n, ad, as_, zbed, mdot = self._iceSIAParams(elaH, iceH)
         # Residual context (read by _form_residual_ice).
@@ -261,210 +221,64 @@ class IceMesh(object):
 
         return
 
-    def _iceFlowSIAExplicit(self, elaH, iceH, iceT):
-        r"""
-        Explicit, CFL-subcycled SIA reference scheme — the **validation oracle**
-        (see ``docs/DESIGN_ICE_SHEET.md`` §3). Correct but, at goSPL's km /
-        10²–10⁴ yr scale, can hit ``sia_max_substeps``; use the implicit solver
-        for production. Integrates ``∂H/∂t = ṁ − ∇·q`` with `ice_flux` on the
-        total surface (bed + H), substepping under the SIA diffusivity CFL.
-        """
-
-        n, ad, as_, zbed, mdot = self._iceSIAParams(elaH, iceH)
-        H = self.iceHL.getArray().copy()                  # persistent ice thickness
-
-        # Precompute neighbour offsets/distances once (mesh is fixed).
-        if not hasattr(self, "_iceNgbSafe"):
-            ngb = self.FVmesh_ngbID
-            valid = ngb >= 0
-            safe = np.where(valid, ngb, 0)
-            d = self.lcoords[safe] - self.lcoords[:, None, :]
-            dist = np.sqrt((d * d).sum(axis=2))
-            dist[~valid] = np.inf
-            finite = dist[valid]
-            self._iceNgbSafe = safe
-            self._iceNgbDist = dist
-            self._iceMinDist2 = float(finite.min() ** 2) if finite.size else 1.0
-        safe = self._iceNgbSafe
-        dist = self._iceNgbDist
-        nm1 = n - 1.0
-
-        # CFL-subcycled explicit integration over the goSPL timestep.
-        t_done = 0.0
-        sub = 0
-        while t_done < self.dt - 1.0e-9:
-            # Halo-sync H so ice_flux sees current ghost-node values (MPI).
-            self.tmpL.setArray(H)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            H = self.tmpL.getArray().copy()
-
-            div = ice_flux(self.lpoints, H, zbed, ad, as_, n)   # ∇·q per cell
-
-            # Stable substep from the SIA diffusivity D = (ad H^{n+1}+as H^{n-1})·H·|∇s|^{n-1}.
-            s = zbed + H
-            slope = np.abs(s[:, None] - s[safe]) / dist
-            gradS = slope.max(axis=1)
-            Dcell = (ad * H ** (n + 1.0) + as_ * np.maximum(H, 0.0) ** nm1) * H * gradS ** nm1
-            Dmax = MPI.COMM_WORLD.allreduce(
-                float(np.max(Dcell)) if Dcell.size else 0.0, op=MPI.MAX
-            )
-            if Dmax > 0.0:
-                dt_sub = min(
-                    self.dt - t_done,
-                    self.sia_cfl * self._iceMinDist2 / (2.0 * Dmax),
-                )
-            else:
-                dt_sub = self.dt - t_done
-
-            H = H + dt_sub * (mdot - div)
-            H[H < 0.0] = 0.0                              # free boundary: no negative ice
-            t_done += dt_sub
-            sub += 1
-            if sub >= self.sia_max_substeps:
-                if MPIrank == 0:
-                    print(
-                        "SIA ice solve hit max_substeps=%d (%.1f%% of dt done); "
-                        "consider the implicit solver."
-                        % (self.sia_max_substeps, 100.0 * t_done / self.dt),
-                        flush=True,
-                    )
-                break
-
-        self._iceSIAFinalize(H, zbed, mdot, iceT, as_, n)
-
-        return
-
     def iceAccumulation(self):
         """
         Main Ice Accumulation Calculation.
 
-        This method calculates ice accumulation based on the elevation, equilibrium-line altitude (ELA), and terminus positions. It integrates the flow direction matrix and computes ice flow across the landscape.
-
-        The method also accounts for flexural responses if enabled.
+        This method evolves the ice thickness with the SIA solve
+        (:meth:`_iceFlowSIA`) using the ice-cap altitude, the equilibrium-line
+        altitude (ELA) and the glacier terminus. Each of these may be a uniform
+        scalar (time-varying) or a per-vertex map — the latter for global models
+        where the ELA varies strongly with latitude. It also snapshots the ice
+        load for the flexural isostasy when enabled.
         """
 
         ti = process_time()
 
-        # Copy ice height to flexural parameter if flexure modeling is active
+        # Snapshot the current ice load for flexure (applyFlexure loads the
+        # increment iceHL - iceFlex), taken BEFORE the thickness is updated.
         if self.flexOn:
             self.iceHL.copy(result=self.iceFlex)
 
-        # Get dynamic properties such as ice cap altitude and equilibrium-line altitude
-        iceH = self.iceH(self.tNow)  # Ice Cap Altitude
-        elaH = self.elaH(self.tNow)  # Equilibrium-Line Altitude
-        iceT = self.iceT(self.tNow)  # Glacier terminus
+        # Resolve the glacier-geometry altitudes: per-vertex map where supplied
+        # (spatial ELA for global tropical-vs-polar runs), otherwise the uniform
+        # time-varying scalar. `spatial` flags that any field is a map.
+        iceH = self.iceMesh[self.locIDs] if self.iceMesh is not None else self.iceH(self.tNow)
+        elaH = self.elaMesh[self.locIDs] if self.elaMesh is not None else self.elaH(self.tNow)
+        iceT = self.termMesh[self.locIDs] if self.termMesh is not None else self.iceT(self.tNow)
+        spatial = (
+            self.iceMesh is not None
+            or self.elaMesh is not None
+            or self.termMesh is not None
+        )
 
-        # If maximum elevation is below ELA, no ice accumulation occurs
-        max_elev = self.hGlobal.max()[1]
-        if max_elev < elaH:
-            self.iceHL.set(0.)
-            self.iceFAL.set(0.)
-            self.iceFAG.set(0.)
-            self.iceMeltL.set(0.)
-            if self.flexOn:
-                self.iceFlex.set(0.)
-            return
+        # Uniform case keeps the cheap global short-circuit (byte-identical):
+        # no ice when the whole surface is below the ELA, or for a degenerate
+        # config where the ice-cap altitude is not above the ELA. With spatial
+        # maps these are per-node and handled robustly in _iceSIAParams.
+        if not spatial:
+            max_elev = self.hGlobal.max()[1]
+            if max_elev < elaH or iceH <= elaH:
+                self.iceHL.set(0.)
+                self.iceUbL.set(0.)
+                self.iceAbrL.set(0.)
+                self.iceMeltL.set(0.)
+                if self.flexOn:
+                    self.iceFlex.set(0.)
+                return
 
-        # Degenerate config: ice-cap altitude must lie above the ELA, otherwise
-        # the (hl - elaH) / (iceH - elaH) ratio below produces NaN/Inf.
-        if iceH <= elaH:
-            self.iceHL.set(0.)
-            self.iceFAL.set(0.)
-            self.iceFAG.set(0.)
-            self.iceMeltL.set(0.)
-            if self.flexOn:
-                self.iceFlex.set(0.)
-            return
+        # Implicit SIA ice-thickness solve.
+        self._iceFlowSIA(elaH, iceH, iceT)
 
-        # Dual ice flow models: SIA dynamics (opt-in) vs the MFD routing proxy.
-        if self.iceSIA:
-            if self.sia_solver == "explicit":
-                self._iceFlowSIAExplicit(elaH, iceH, iceT)
-            else:
-                self._iceFlowSIAImplicit(elaH, iceH, iceT)
-            if self.flexOn and self.tNow == self.tStart:
-                self.iceHL.copy(result=self.iceFlex)
-            if MPIrank == 0 and self.verbose:
-                print(
-                    "Glaciers Accumulation - SIA (%0.02f seconds)"
-                    % (process_time() - ti),
-                    flush=True,
-                )
-            return
-
-        # Compute the flow direction matrix for ice
-        self._matrixIceFlow(self.iceDir)
-
-        # Ice accumulation calculation
-        hl = self.hLocal.getArray().copy()
-        rainA = self.bL.getArray().copy()
-        tmp = (hl - elaH) / (iceH - elaH)
-        tmp[tmp > 1.] = 1.0
-        tmp[tmp < 0.] *= self.meltfac
-
-        # Calculate accumulation rates
-        iceA = np.multiply(rainA, tmp)
-        self.tmpL.setArray(iceA)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(True, self.iceMat, self.tmp, self.iceFAG)
-        self.dm.globalToLocal(self.iceFAG, self.iceFAL)
-        ice_clamped = self.iceFAL.getArray()
-        ice_clamped[ice_clamped < 0.] = 0.0
-        ice_clamped[hl < iceT] = 0.0
-        self.iceFAL.setArray(ice_clamped)
-        self.dm.localToGlobal(self.iceFAL, self.iceFAG)
-
-        # Capture glacial meltwater for the river FA. Below ELA the local
-        # ablation rate is `|hl - elaH|/(iceH - elaH)` of the precipitation;
-        # we gate by ice presence (clamped, pre-smoothing iceFAL > 0) so we
-        # only release water where ice actually reached. `meltfac` is
-        # deliberately NOT applied here because it is a numerical
-        # sink-amplifier inside the implicit ice solver, not a physical
-        # melt multiplier. This is consumed by flowplex.flowAccumulation
-        # and added back to `rainA` before the river FA is solved.
-        melt_local = np.zeros(self.lpoints, dtype=np.float64)
-        below_ela = hl < elaH
-        if below_ela.any():
-            ablation = np.zeros(self.lpoints, dtype=np.float64)
-            ablation[below_ela] = np.clip(
-                -(hl[below_ela] - elaH) / (iceH - elaH), 0.0, 1.0
-            )
-            has_ice = ice_clamped > 1.0e-8  # TODO-REFACTOR: value matches DISCHARGE_FLOOR but distinct role (ice-presence threshold for melt capture); do not replace
-            melt_local = ablation * rainA * has_ice
-        self.iceMeltL.setArray(melt_local)
-
-        # Smooth and diffuse glacier flow accumulation.
-        # NB: the linear-diffusion smoothing below is NOT mass-conservative
-        # (it spreads the field for visualisation and erosion-driver
-        # robustness). The output `iceFA` therefore differs slightly from
-        # the strict accumulated source. The meltwater field above was
-        # captured BEFORE smoothing, so the river re-injection is based on
-        # the true (un-smeared) ice presence.
-        self.iceFAG.copy(result=self.tmp1)
-        smthIce = self._hillSlope(smooth=1)
-        smthIce[smthIce < 0.] = 0.
-        self.iceFAL.setArray(smthIce)
-        self.dm.localToGlobal(self.iceFAL, self.iceFAG)
-
-        # Ice thickness from Bahr-style width-area scaling. Computed
-        # whenever ice is on (used by both flexure and the `iceH` output);
-        # the flex copy stays gated behind `flexOn`.
-        tmp = self.icewe * self.icewf * smthIce**0.3
-        tmp[tmp < 1.e-1] = 0.  # TODO-REFACTOR: value matches BEDROCK_EXPOSED but distinct role (minimum ice thickness for visualization); do not replace
-        self.tmpL.setArray(tmp)
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
-        tmp = self._hillSlope(smooth=1)
-        self.iceHL.setArray(tmp)
-
-        if self.flexOn:
-            # If simulation starts then set the ice flex variable to the initial glacier thickness
-            if self.tNow == self.tStart:
-                self.iceHL.copy(result=self.iceFlex)
+        # At the first step, seed the flexure reference with the ice just
+        # solved so the initial load is not applied as a transient.
+        if self.flexOn and self.tNow == self.tStart:
+            self.iceHL.copy(result=self.iceFlex)
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti),
+                "Glaciers Accumulation - SIA (%0.02f seconds)"
+                % (process_time() - ti),
                 flush=True,
             )
 
@@ -472,30 +286,37 @@ class IceMesh(object):
 
     def glacialTill(self):
         r"""
-        Glacial till — production, transport and deposition (Phase 4, SIA only).
+        Glacial till — production, transport and deposition.
 
         Glacial abrasion (:math:`E_g = K_g |u_b|^l`) erodes rock under sliding
         ice; the abraded material becomes **till** carried by the ice and
         deposited where the ice **melts out** — the ablation zone / terminal
         moraine. The bed is therefore **lowered** under fast ice and **raised**
-        in the ablation zone, conserving rock volume exactly (the net bed change
-        is zero by construction): a transport, not a source/sink.
+        in the ablation zone: a transport, not a source/sink.
 
-        Conservation is structural: the total abraded volume ``Vtot`` is
-        redistributed to the ablation cells weighted by the meltwater rate
-        (``iceMeltL``), so ``Σ deposited == Vtot``. Guarded by a dedicated
-        till-conservation test (the dual-lithology lesson: a volume the total
-        budget can't see needs its own guard).
+        Two modes, selected by whether stratigraphy is on:
 
-        Active only with ``flow_model: sia``, ``till.on`` and ``Kg > 0``; a
-        no-op otherwise, so existing behaviour is unchanged.
+        - **Bulk bed** (no stratigraphy): the abraded volume ``Vtot`` is
+          redistributed to the ablation cells weighted by the meltwater rate
+          (``iceMeltL``) as a bed-to-bed transport, so ``Σ deposited == Vtot``
+          and the net bed-volume change is zero by construction.
+        - **Stratigraphic** (:meth:`_glacialTillStrata`): the till is removed
+          from the layers it was abraded from and re-deposited as a fresh
+          moraine layer in the ablation zone — split into the coarse/fine
+          lithology fractions under dual lithology. Conservation is on the
+          *solid* phase (per fraction), so the bed bulks up by the porosity
+          contrast (uncompacted till vs compacted source rock).
 
-        Simplifications (v1, documented): till deposits across the ablation zone
-        weighted by melt rather than routed per ice-catchment to each terminus;
-        and it operates on the bulk bed (cumED/elevation), not yet the
-        stratigraphic pile — couple to stratigraphy / dual lithology later.
+        Both modes are guarded by a dedicated till-conservation test (the
+        dual-lithology lesson: a volume the total budget can't see needs its
+        own guard).
+
+        Active only with ``till.on`` and ``Kg > 0``; a no-op otherwise.
+
+        Simplification (documented): till deposits across the ablation zone
+        weighted by melt rather than routed per ice-catchment to each terminus.
         """
-        if not (self.iceOn and self.iceSIA and self.ice_till_on) or self.ice_Kg <= 0.0:
+        if not (self.iceOn and self.ice_till_on) or self.ice_Kg <= 0.0:
             return
 
         ti = process_time()
@@ -514,28 +335,139 @@ class IceMesh(object):
         if Vtot <= 0.0 or Wtot <= 0.0:
             return
 
-        # Bed change (m): erode at abrasion cells, deposit the till where ice
-        # melts, weighted by melt. Σ(dz·area) == 0 (rock moved, not created).
-        dz = -Eg * self.dt
-        dz_dep = (Vtot * melt / Wtot) / self.larea
-        dz = dz + dz_dep
+        dz_ero = -Eg * self.dt                            # bed lowering (m, ≤0)
 
-        self.tmpL.setArray(dz)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self.cumED.axpy(1.0, self.tmp)
-        self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-
-        self._tillEroded += Vtot
-        self._tillDeposited += MPI.COMM_WORLD.allreduce(
-            float(np.sum((dz_dep * self.larea)[owned])), op=MPI.SUM
-        )
+        if self.stratNb > 0:
+            # Stratigraphy on: route the till through the stratigraphic pile so
+            # the abraded material leaves the layers it came from and the
+            # moraine is recorded as a fresh deposit (split coarse/fine under
+            # dual lithology). See _glacialTillStrata.
+            self._glacialTillStrata(dz_ero, melt, Wtot, owned)
+        else:
+            # Bulk bed transport: erode at abrasion cells, deposit the till
+            # where ice melts, weighted by melt. Σ(dz·area) == 0 (rock moved,
+            # not created).
+            dz_dep = (Vtot * melt / Wtot) / self.larea
+            dz = dz_ero + dz_dep
+            self.tmpL.setArray(dz)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.cumED.axpy(1.0, self.tmp)
+            self.hGlobal.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            self._tillEroded += Vtot
+            self._tillDeposited += MPI.COMM_WORLD.allreduce(
+                float(np.sum((dz_dep * self.larea)[owned])), op=MPI.SUM
+            )
 
         if MPIrank == 0 and self.verbose:
             print(
                 "Glacial Till (%0.02f seconds)" % (process_time() - ti),
                 flush=True,
             )
+
+        return
+
+    def _glacialTillStrata(self, dz_ero, melt, Wtot, owned):
+        r"""
+        Stratigraphic / dual-lithology coupling for glacial till.
+
+        The abraded bed lowering ``dz_ero`` (m, ≤0) is removed from the
+        stratigraphic pile with :meth:`erodeStrat`, which returns the
+        uncompacted solid removed per fraction (``thCoarse`` / ``thFine``,
+        m/yr). That solid is the till: its total uncompacted volume is
+        redistributed to the ablation cells weighted by the meltwater rate and
+        laid down as a fresh moraine layer with :meth:`deposeStrat`, carrying
+        the **abraded fine fraction** (a single, ice-mixed composition).
+
+        Solid mass is conserved per fraction by construction: the fine volume
+        deposited equals the fine volume eroded (so the dual-lithology
+        ``_fineEroded`` / ``_fineDeposited`` budget stays balanced), and the
+        coarse volume likewise. The bed bulks up by the porosity contrast
+        between the uncompacted till and the compacted source rock.
+
+        ``erodeStrat`` / ``deposeStrat`` overwrite the transient routing arrays
+        (``thCoarse`` / ``thFine`` / ``depoFineFrac``) that the *fluvial*
+        ``sedChange`` consumes later this step, so they are saved and restored
+        around the till calls.
+        """
+        # Preserve the fluvial routing state (set by the eroder's erodeStrat,
+        # consumed by the later sedChange/_getSedFlux). glacialTill runs
+        # between the two.
+        saved_thCoarse = self.thCoarse.copy() if hasattr(self, "thCoarse") else None
+        saved_thFine = (
+            self.thFine.copy()
+            if self.stratLith and hasattr(self, "thFine")
+            else None
+        )
+        saved_depoFineFrac = self.depoFineFrac.copy()
+
+        # --- Erosion: remove the abraded bulk from the stratigraphic pile. ---
+        self.tmpL.setArray(dz_ero)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.erodeStrat()                                 # sets thCoarse/thFine
+        # Apply the bed lowering to the elevation / cumulative-erosion fields.
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+
+        # Uncompacted solid abraded (m^3): the till volume to redeposit.
+        coarseV = MPI.COMM_WORLD.allreduce(
+            float(np.sum((self.thCoarse * self.dt * self.larea)[owned])), op=MPI.SUM
+        )
+        if self.stratLith:
+            fineV = MPI.COMM_WORLD.allreduce(
+                float(np.sum((self.thFine * self.dt * self.larea)[owned])), op=MPI.SUM
+            )
+        else:
+            fineV = 0.0
+        Vsolid = coarseV + fineV
+        if Vsolid <= 0.0:
+            # Nothing actually came out of the pile (e.g. emptied to bedrock
+            # floor): no till to deposit. Restore and return.
+            self.thCoarse = saved_thCoarse
+            if saved_thFine is not None:
+                self.thFine = saved_thFine
+            self.depoFineFrac = saved_depoFineFrac
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            self._tillEroded += 0.0
+            return
+
+        # Ice-mixed till composition (single fine fraction for the moraine).
+        ffrac = fineV / Vsolid if self.stratLith else 0.0
+
+        # --- Deposition: lay the till down in the ablation zone. ---
+        dz_dep = (Vsolid * melt / Wtot) / self.larea      # bulk till thickness (m)
+        self.depoFineFrac = np.zeros(self.lpoints, dtype=np.float64)
+        self.depoFineFrac[dz_dep > 0.0] = ffrac
+        # Snapshot the current layer so the bed/cumED update uses the thickness
+        # deposeStrat ACTUALLY laid down (it floors sub-1e-4 m deposits), keeping
+        # elevation, the stratigraphic pile and the diagnostics consistent.
+        h_before = self.stratH[:, self.stratStep].copy()
+        self.tmpL.setArray(dz_dep)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.deposeStrat()                                # adds to stratH/stratHf
+        dep = self.stratH[:, self.stratStep] - h_before   # actual deposit (m)
+        self.tmpL.setArray(dep)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        # Diagnostics: solid abraded vs solid actually re-deposited (the two
+        # match to the deposeStrat thickness floor; any sub-floor remainder is
+        # dropped, as for every other deposit in the model).
+        self._tillEroded += Vsolid
+        self._tillDeposited += MPI.COMM_WORLD.allreduce(
+            float(np.sum((dep * self.larea)[owned])), op=MPI.SUM
+        )
+
+        # Restore the fluvial routing state for sedChange.
+        if saved_thCoarse is not None:
+            self.thCoarse = saved_thCoarse
+        if saved_thFine is not None:
+            self.thFine = saved_thFine
+        self.depoFineFrac = saved_depoFineFrac
 
         return

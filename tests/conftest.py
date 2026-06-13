@@ -134,9 +134,9 @@ def minimal_dual_coarse_model():
 @pytest.fixture
 def minimal_ice_sia_model():
     """
-    Minimal model with the opt-in SIA ice-sheet flow model
-    (`ice: flow_model: sia`). Exercises the dynamic ice-thickness evolution
-    (ice_flux kernel). See minimal_ice_sia.yml and docs/DESIGN_ICE_SHEET.md.
+    Minimal model with the SIA ice-sheet model (opt-in via the `ice` section).
+    Exercises the dynamic ice-thickness evolution (ice_flux kernel). See
+    minimal_ice_sia.yml and docs/DESIGN_ICE_SHEET.md.
     """
     return _instantiate("minimal_ice_sia.yml")
 
@@ -162,12 +162,24 @@ def minimal_ice_flex_model():
 
 
 @pytest.fixture
-def minimal_ice_mfd_model():
+def minimal_ice_dual_model():
     """
-    Minimal model with the default MFD flow-routing ice proxy (no flow_model
-    key). Confirms the existing ice path is unaffected by the SIA opt-in.
+    Minimal SIA model with glacial abrasion + till on AND dual-lithology
+    stratigraphy. Exercises the strata coupling of glacial till
+    (iceplex._glacialTillStrata): abraded rock removed from the pile and
+    re-deposited as a moraine layer, split coarse/fine. See minimal_ice_dual.yml.
     """
-    return _instantiate("minimal_ice_mfd.yml")
+    return _instantiate("minimal_ice_dual.yml")
+
+
+@pytest.fixture
+def minimal_ice_seed_model():
+    """
+    Minimal SIA model with a pre-existing ice thickness seeded from the input
+    (`ice.hinit`). Exercises the seed-and-evolve path: iceHL starts non-zero and
+    the SIA solve evolves it. See minimal_ice_seed.yml.
+    """
+    return _instantiate("minimal_ice_seed.yml")
 
 
 @pytest.fixture

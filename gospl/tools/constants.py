@@ -46,7 +46,7 @@ MISSING_LARGE_SENTINEL = -1.0e10
 # to the on-disk HDF5 outputs. Anything at or below this floor is
 # clamped to this floor (avoids -inf in log10 visualisation and
 # absorbs the trickle of numerical noise from KSP residuals). Used by:
-#   - tools/outmesh.py (FA, fillFA, iceFA, iceH, sedLoad output fields)
+#   - tools/outmesh.py (FA, fillFA, iceH, iceUb, iceMelt, iceAbr, sedLoad output fields)
 # See AGENTS.md > Magic numbers.
 DISCHARGE_FLOOR = 1.0e-8
 

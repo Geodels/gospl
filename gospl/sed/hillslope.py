@@ -63,7 +63,7 @@ class hillSLP(object):
         .. note::
             The hillslope processes in goSPL are considered to be happening at the same rate for coarse and fine sediment sizes.
 
-        :arg smooth: integer specifying if the diffusion equation is used for ice flow (1) and marine deposits (2).
+        :arg smooth: integer specifying if the diffusion equation is used to smooth marine deposits (2).
         """
 
         if smooth == 0:
@@ -72,9 +72,7 @@ class hillSLP(object):
 
         t0 = process_time()
         # Diffusion matrix construction
-        if smooth == 1:
-            Cd = np.full(self.lpoints, self.gaussIce, dtype=np.float64)
-        elif smooth == 2:
+        if smooth == 2:
             # Hard-coded coefficients here, used to generate a smooth surface
             # for computing marine flow directions...
             Cd = np.full(self.lpoints, 1.e5, dtype=np.float64)

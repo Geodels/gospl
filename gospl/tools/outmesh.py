@@ -325,22 +325,6 @@ class WriteMesh(object):
 
             if self.iceOn:
                 f.create_dataset(
-                    "iceFA",
-                    shape=(self.lpoints, 1),
-                    dtype="float32",
-                    compression="gzip",
-                )
-                data = self.iceFAL.getArray().copy()
-                # Suppress sub-1 noise (mostly MPI partition-edge artefacts
-                # from the linear-diffusion smoothing in iceAccumulation).
-                # The in-memory iceFAL is unchanged; only the on-disk
-                # visualisation field is floored.
-                data[data < 1.0] = 1.0
-                if not self.fast:
-                    data[self.seaID] = 1.0
-                f["iceFA"][:, 0] = data
-
-                f.create_dataset(
                     "iceH",
                     shape=(self.lpoints, 1),
                     dtype="float32",
@@ -352,16 +336,35 @@ class WriteMesh(object):
                     data[self.seaID] = 1.0
                 f["iceH"][:, 0] = data
 
-                # SIA basal sliding speed (m/yr). Zero under the MFD proxy;
-                # the abrasion driver and a diagnostic of ice dynamics.
-                if self.iceSIA:
-                    f.create_dataset(
-                        "iceUb",
-                        shape=(self.lpoints, 1),
-                        dtype="float32",
-                        compression="gzip",
-                    )
-                    f["iceUb"][:, 0] = self.iceUbL.getArray().copy()
+                # SIA basal sliding speed (m/yr): the abrasion driver and a
+                # diagnostic of ice dynamics.
+                f.create_dataset(
+                    "iceUb",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["iceUb"][:, 0] = self.iceUbL.getArray().copy()
+
+                # Ablation meltwater (m^3/yr) re-injected into the rivers: the
+                # glacial contribution to downstream discharge.
+                f.create_dataset(
+                    "iceMelt",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["iceMelt"][:, 0] = self.iceMeltL.getArray().copy()
+
+                # Glacial abrasion rate E_g = Kg|u_b|^l (m/yr); zero where
+                # abrasion is off (Kg = 0).
+                f.create_dataset(
+                    "iceAbr",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["iceAbr"][:, 0] = self.iceAbrL.getArray().copy()
 
             if self.flexOn:
                 f.create_dataset(
@@ -660,12 +663,12 @@ class WriteMesh(object):
             f.write("         </Attribute>\n")
 
             if self.iceOn:
-                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceFA">\n')
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceUb">\n')
                 f.write(
                     '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
                 )
                 f.write(
-                    'Dimensions="%d 1">%s:/iceFA</DataItem>\n' % (self.nodes[p], pfile)
+                    'Dimensions="%d 1">%s:/iceUb</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 
@@ -675,6 +678,24 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/iceH</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceMelt">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceMelt</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceAbr">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceAbr</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

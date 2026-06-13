@@ -1635,46 +1635,50 @@ class ReadYaml(object):
         Parse ice flow variables.
         """
 
-        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets iceOn=False + 4 local defaults on missing "ice")
+        # When an `ice` section is present, goSPL runs the Shallow-Ice-
+        # Approximation (SIA) ice-sheet model: an implicit non-linear diffusion
+        # of ice thickness driving glacial abrasion, till transport and ice
+        # loading. See docs/DESIGN_ICE_SHEET.md.
+        #
+        # The glacier-geometry altitudes (terminus / ELA / ice-cap) can each be
+        # a uniform scalar OR a per-vertex map ``[file, key]`` — the latter for
+        # global models where the ELA varies strongly with latitude (tropical
+        # vs polar). They may also be a TIME SERIES via the optional `glaciers`
+        # list (mirroring the precipitation `climate` block): each entry has a
+        # `start` time and uniform-or-map hela/hice/hterm, stepped over time by
+        # _updateIce. `self._iceTimeSeries` carries that series (None = legacy
+        # uniform/`evol` scalars handled by _extraIce).
+        self._iceTimeSeries = None
+        self._iceSeriesIdx = -1
+        self.termMesh = None
+        self.elaMesh = None
+        self.iceMesh = None
+        # Optional pre-existing ice thickness seeded at the first step (uniform
+        # scalar or per-vertex map). The SIA solve then evolves it; restart
+        # overrides it. None = start from no ice.
+        self._iceInitSpec = None
+        useSeries = False
         try:
             iceDict = self.input["ice"]
             self.iceOn = True
-            self.gaussIce = iceDict.get("diff", 10.0)
+            icefile = iceDict.get("evol")
+            glaciers = iceDict.get("glaciers")
             elaH = iceDict.get("hela", 2000.0)
             iceH = iceDict.get("hice", 2400.0)
-            iceT = iceDict.get("hterm", 1800.0)  # glacier terminus
-            icefile = iceDict.get("evol")
-            self.Kice = iceDict.get("Ki", 0.0)
-            self.iceDir = iceDict.get("icedir", 1)
-            self.meltfac = iceDict.get("melt", 10.)  # Melting factor adjustment
-            self.icewf = iceDict.get("fwidth", 1.5)  # width factor (a in Eq. (8))
-            # thickness-to-width ratio (delta in Eq. (9))
-            self.icewe = iceDict.get("eheight", 0.25)
+            iceT = iceDict.get("hterm", 1800.0)
 
-            # Ice flow model: 'mfd' (default, flow-routing proxy) or 'sia'
-            # (Shallow-Ice-Approximation dynamics). See docs/DESIGN_ICE_SHEET.md.
-            # All SIA parameters are inert while flow_model != 'sia', so the
-            # default keeps the existing proxy behaviour byte-identical.
-            self.ice_flow_model = iceDict.get("flow_model", "mfd")
-            if self.ice_flow_model not in ("mfd", "sia"):
-                if MPIrank == 0:
-                    print(
-                        "Ice flow_model '%s' is not recognised; choices are "
-                        "'mfd' or 'sia'." % self.ice_flow_model,
-                        flush=True,
-                    )
-                raise ValueError("Ice flow_model not recognised.")
-            self.iceSIA = self.ice_flow_model == "sia"
+            # Initial (pre-existing) ice thickness — scalar or [file, key] map.
+            hinit = iceDict.get("hinit")
+            if hinit is not None:
+                sc, spec = self._iceGeomField(hinit)
+                if spec is not None:
+                    self._checkMap(spec, "ice hinit")
+                self._iceInitSpec = (sc, spec)
 
             siaDict = iceDict.get("sia", {})
             self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
             self.sia_slide = siaDict.get("slide", 1.0e-3)    # sliding coefficient
             self.sia_glen = siaDict.get("glen", 3.0)         # Glen exponent n
-            self.sia_cfl = siaDict.get("cfl", 0.25)          # explicit-ref CFL number
-            self.sia_max_substeps = siaDict.get("max_substeps", 500)
-            # 'implicit' (default, production semi-implicit SNES) or 'explicit'
-            # (CFL-subcycled reference/validation scheme).
-            self.sia_solver = siaDict.get("solver", "implicit")
 
             abrDict = iceDict.get("abrasion", {})
             self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
@@ -1682,29 +1686,97 @@ class ReadYaml(object):
 
             tillDict = iceDict.get("till", {})
             self.ice_till_on = bool(tillDict.get("on", False))
+
+            # Use the per-vertex / time-series path when a `glaciers` series is
+            # given or any top-level altitude is a map.
+            topIsMap = any(
+                isinstance(v, (list, tuple)) for v in (elaH, iceH, iceT)
+            )
+            useSeries = glaciers is not None or topIsMap
+            if useSeries and icefile is not None:
+                if MPIrank == 0:
+                    print(
+                        "Ice: an `evol` time series and per-vertex / `glaciers` "
+                        "geometry were both given; using `evol` (the maps are "
+                        "ignored).",
+                        flush=True,
+                    )
+                useSeries = False
+            if useSeries:
+                self._iceTimeSeries = self._buildIceSeries(
+                    glaciers, elaH, iceH, iceT
+                )
         except KeyError:
             self.iceOn = False
             icefile = None
             elaH = None
             iceH = None
             iceT = None
-            self.ice_flow_model = "mfd"
-            self.iceSIA = False
             self.sia_Aglen = 1.0e-16
             self.sia_slide = 1.0e-3
             self.sia_glen = 3.0
-            self.sia_cfl = 0.25
-            self.sia_max_substeps = 500
-            self.sia_solver = "implicit"
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
             self.ice_till_on = False
 
-        self._extraIce(icefile, elaH, iceH, iceT)
+        # Legacy uniform / `evol` path builds the scalar time functions. In
+        # series mode the geometry comes from _iceTimeSeries via _updateIce, so
+        # _extraIce is skipped.
+        if not useSeries:
+            self._extraIce(icefile, elaH, iceH, iceT)
 
         return
 
+    def _iceGeomField(self, val):
+        """
+        Split a glacier-geometry input (``hela``/``hice``/``hterm``) into a
+        scalar fallback and an optional ``[file, key]`` map spec. A list/tuple
+        value is a per-vertex npz map; anything else is a uniform scalar.
+
+        :return: (scalar_or_None, map_spec_or_None)
+        """
+        if isinstance(val, (list, tuple)):
+            return None, list(val)
+        return val, None
+
+    def _buildIceSeries(self, glaciers, elaTop, iceTop, termTop):
+        """
+        Build the glacier-geometry time series consumed by ``_updateIce``.
+
+        ``glaciers`` (when given) is a list of ``{start, hela, hice, hterm}``
+        events (each altitude uniform-or-map); otherwise the top-level
+        ``hela``/``hice``/``hterm`` define a single interval starting at
+        ``tStart``. Each interval stores, per field, a ``(scalar, map_spec)``
+        pair (exactly one is non-None). Map files/keys are validated here; the
+        arrays are loaded lazily on interval change in ``_updateIce``.
+
+        :return: list of intervals sorted by start time.
+        """
+        if glaciers is not None:
+            events = sorted(glaciers, key=itemgetter("start"))
+        else:
+            events = [
+                {"start": self.tStart, "hela": elaTop, "hice": iceTop, "hterm": termTop}
+            ]
+        series = []
+        for ev in events:
+            interval = {"start": ev["start"]}
+            for fld, default in (("hela", 2000.0), ("hice", 2400.0), ("hterm", 1800.0)):
+                sc, spec = self._iceGeomField(ev.get(fld, default))
+                if spec is not None:
+                    self._checkMap(spec, "ice %s" % fld)
+                interval[fld] = (sc, spec)
+            series.append(interval)
+        return series
+
     def _extraIce(self, icefile, elaH, iceH, iceT):
+        """
+        Legacy uniform glacier geometry: build the scalar time functions
+        ``self.iceT`` / ``self.elaH`` / ``self.iceH`` from an ``evol`` CSV or
+        from constant ``hterm`` / ``hela`` / ``hice``. The per-vertex /
+        time-series map path is handled separately by ``_buildIceSeries`` +
+        ``_updateIce``.
+        """
 
         if icefile is not None:
             try:
@@ -1764,6 +1836,42 @@ class ReadYaml(object):
             self.iceH = interp1d(year, iceval, kind="linear")
 
         return
+
+    def _checkMap(self, spec, name):
+        """
+        Validate that a ``[file, key]`` npz map exists and contains the field,
+        without loading the (potentially large) array. Used at parse time for
+        the glacier-geometry maps; the array is loaded lazily by ``_loadIceMap``
+        on interval change.
+        """
+        fname, key = spec[0], spec[1]
+        try:
+            with open(fname + ".npz") as f:
+                f.close()
+        except IOError:
+            print("Unable to open %s map file: %s.npz" % (name, fname), flush=True)
+            raise IOError("The %s map file is not found." % name)
+        mdata = np.load(fname + ".npz")
+        if key not in mdata:
+            print(
+                "Field '%s' is missing from %s map file %s.npz" % (key, name, fname),
+                flush=True,
+            )
+            raise ValueError("Missing field in %s map file." % name)
+        del mdata
+        return
+
+    def _loadIceMap(self, spec, name):
+        """
+        Load a per-vertex glacier-geometry map (full-mesh array) from a
+        validated ``[file, key]`` npz spec — the same convention as the
+        precipitation/tectonic maps.
+        """
+        fname, key = spec[0], spec[1]
+        mdata = np.load(fname + ".npz")
+        arr = mdata[key].astype(np.float64)
+        del mdata
+        return arr
 
     def _readOut(self):
         """

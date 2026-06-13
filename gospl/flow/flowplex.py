@@ -328,7 +328,7 @@ class FAMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, out, op=MPI.SUM)
         return out
 
-    def _distributeDownstream(self, pitVol, FA, hl, step, ice=False):
+    def _distributeDownstream(self, pitVol, FA, hl, step):
         """
         In cases where rivers flow in depressions, they might fill the sink completely and overspill or remain within the depression, forming a lake. This function computes the excess of water (if any) able to flow dowstream.
 
@@ -340,7 +340,6 @@ class FAMesh(object):
         :arg FA: excess flow accumulation array
         :arg hl: current elevation array
         :arg step: downstream distribution step
-        :arg ice: boolean indicating where the ice flow is considered or not.
 
         :return: pitVol, excess, nFA (updated volume in each depression, boolean set to True is excess flow remains to be distributed and new flow accumulation values)
         """
@@ -429,10 +428,7 @@ class FAMesh(object):
                 FA = nFA.copy()
                 FA[hl < self.waterFilled] = 0.0
                 self.tmpL.setArray(FA / self.dt)
-                if ice:
-                    self.iceFAL.axpy(1.0, self.tmpL)
-                else:
-                    self.FAL.axpy(1.0, self.tmpL)
+                self.FAL.axpy(1.0, self.tmpL)
             else:
                 nFA = None
         else:
@@ -487,18 +483,23 @@ class FAMesh(object):
             rainA = rainA - channelLoss
             self.evapLoss += channelLoss.sum() * self.dt
         if self.iceOn:
-            elaH = self.elaH(self.tNow)
-            iceH = self.iceH(self.tNow)
-            tmp = (hl - elaH) / (iceH - elaH)
-            tmp[tmp > 1.] = 1.0
-            tmp[tmp < 0.] = 0.0
+            # ELA / ice-cap altitude: per-vertex maps when in spatial /
+            # time-series mode, otherwise the uniform time scalars. The
+            # accumulation ramp is hardened against degenerate (iceH <= elaH)
+            # cells so the precipitation split never divides by zero.
+            elaH = self.elaMesh[self.locIDs] if self.elaMesh is not None else self.elaH(self.tNow)
+            iceH = self.iceMesh[self.locIDs] if self.iceMesh is not None else self.iceH(self.tNow)
+            denom = iceH - elaH
+            safe = np.where(denom > 0.0, denom, 1.0)
+            tmp = np.where(denom > 0.0, (hl - elaH) / safe, 0.0)
+            tmp = np.clip(tmp, 0.0, 1.0)
             rainA = np.multiply(rainA, 1. - tmp)
-            # Re-inject glacial meltwater captured during iceAccumulation:
-            # sub-ELA cells with ice present release the local ablation
-            # rate as liquid water into the river source. Without this,
-            # melt computed in the ice solve is discarded by the negative
-            # clamp on iceFAL and downstream basins under-predict
-            # discharge.
+            # Re-inject glacial meltwater captured during the SIA solve:
+            # ablation-zone cells with ice present release the local melt
+            # rate (iceMeltL, set in iceplex._iceSIAFinalize) as liquid water
+            # into the river source. Without this, the meltwater produced by
+            # the ice model would be lost and downstream basins would
+            # under-predict discharge.
             rainA = rainA + self.iceMeltL.getArray()
             rainA[self.seaID] = 0.
 

@@ -616,6 +616,10 @@ class UnstMesh(object):
         if self.sedfacdata is not None:
             self._updateEroFactor()
 
+        # Glacier-geometry maps (per-vertex / time-series hela/hice/hterm).
+        if self.iceOn and self._iceTimeSeries is not None:
+            self._updateIce()
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Update Climatic Forces (%0.02f seconds)" % (process_time() - t0),
@@ -719,6 +723,48 @@ class UnstMesh(object):
         self.dm.localToGlobal(self.bL, self.bG)
 
         return
+
+    def _updateIce(self):
+        """
+        Refresh the glacier-geometry fields (terminus / ELA / ice-cap altitude)
+        for the current time from the ``_iceTimeSeries`` built in the input
+        parser — the ice analogue of ``_updateRain``.
+
+        Each interval supplies, per field, either a uniform scalar or a
+        per-vertex ``[file, key]`` map; both are materialised here to full-mesh
+        arrays (``elaMesh`` / ``iceMesh`` / ``termMesh``) which ``iceAccumulation``
+        indexes by ``locIDs``. Maps are (re)loaded only when the active interval
+        changes (step changes, like the precipitation maps).
+        """
+        ts = self._iceTimeSeries
+
+        # Active interval: the latest event whose start time is at or before now.
+        nb = 0
+        for k in range(len(ts)):
+            if ts[k]["start"] <= self.tNow:
+                nb = k
+            else:
+                break
+        if nb == self._iceSeriesIdx:
+            return
+        self._iceSeriesIdx = nb
+
+        iv = ts[nb]
+        self.elaMesh = self._resolveIceField(iv["hela"])
+        self.iceMesh = self._resolveIceField(iv["hice"])
+        self.termMesh = self._resolveIceField(iv["hterm"])
+
+        return
+
+    def _resolveIceField(self, field):
+        """
+        Materialise one glacier-geometry field (a ``(scalar, map_spec)`` pair,
+        exactly one non-None) to a full-mesh array.
+        """
+        scalar, spec = field
+        if spec is not None:
+            return self._loadIceMap(spec, "ice map")
+        return np.full(self.mpoints, scalar, dtype=np.float64)
 
     def _updateEvap(self):
         """
@@ -839,9 +885,9 @@ class UnstMesh(object):
         self.EbLocal.destroy()
         if self.iceOn:
             self.iceHL.destroy()
-            self.iceFAG.destroy()
-            self.iceFAL.destroy()
+            self.iceMeltL.destroy()
             self.iceUbL.destroy()
+            self.iceAbrL.destroy()
             if self.flexOn:
                 self.iceFlex.destroy()
 

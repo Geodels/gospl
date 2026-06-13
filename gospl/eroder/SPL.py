@@ -69,12 +69,6 @@ class SPL(object):
         Kbr *= self.dt * (PA ** self.spl_m)
         Kbr[self.seaID] = 0.0
 
-        # In case glacial erosion is accounted for
-        if self.iceOn:
-            Ai = self.iceFAL.getArray().copy()
-            Kbi = self.Kice * self.dt * (Ai ** self.spl_m)
-            Kbi[self.seaID] = 0.0
-
         # Initialise matrices...
         eMat = self.iMat.copy()
         wght = self.wghtVali.copy()
@@ -96,14 +90,6 @@ class SPL(object):
                 out=np.zeros_like(PA),
                 where=self.distRcvi[:, k] != 0,
             )
-
-            if self.iceOn:
-                data += np.divide(
-                    Kbi * limiter,
-                    self.distRcvi[:, k],
-                    out=np.zeros_like(PA),
-                    where=self.distRcvi[:, k] != 0,
-                )
 
             tmpMat = self._matrix_build()
             data = np.multiply(data, -wght[:, k])
@@ -349,16 +335,14 @@ class SPL(object):
         sediment system through the standard ``Eb·dt`` → cumED / hGlobal /
         erodeStrat path in the SPL wrappers (no separate bookkeeping).
 
-        No-op unless dual ice flow is on in SIA mode with ``Kg > 0``. Under SIA
-        the legacy stream-power glacial term ``Ki·F^m`` is inactive (iceFAL is
-        zeroed), so the two laws never double-count. Masked to subaerial cells
+        No-op unless ice is on with ``Kg > 0``. Masked to subaerial cells
         (abrasion is subglacial; no marine abrasion) and to ice presence
         (``iceUbL`` is already zero where there is no ice).
         """
         # When till handling is on, abrasion is routed to till (deposited as
         # moraine in the ablation zone) by iceplex.glacialTill instead of
         # straight into the fluvial sediment system — mutually exclusive here.
-        if not (self.iceOn and self.iceSIA) or self.ice_Kg <= 0.0 or self.ice_till_on:
+        if not self.iceOn or self.ice_Kg <= 0.0 or self.ice_till_on:
             return
         ub = self.iceUbL.getArray()
         abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
