@@ -51,7 +51,12 @@ class SEDMesh(object):
         # _totFlux snapshots the pre-cascade total routed flux (vSedLocal is
         # later mutated by the pit cascade) so per-pit fine fractions stay valid.
         self.depoFineFrac = np.zeros(self.lpoints, dtype=np.float64)
-        self._totFlux = np.zeros(self.lpoints, dtype=np.float64)
+        # Per-pit fine volume RETAINED through the cascade under coarse-settles-
+        # first (filled pits keep coarse, fine overspills); reset each step in
+        # _distributeSediment and used by _pitFineFraction. _routedFine carries
+        # the fine overspill routed downstream by _moveDownstream.
+        self._pitRetFine = np.zeros(1, dtype=np.float64)
+        self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
 
         # Get the maximum number of neighbours on the mesh
         maxnb = np.zeros(1, dtype=np.int64)
@@ -109,10 +114,9 @@ class SEDMesh(object):
                 vfin, vtot, out=np.zeros_like(vtot), where=vtot > 0.0
             )
             np.clip(self.fineFrac, 0.0, 1.0, out=self.fineFrac)
-            # Snapshot the clean pre-cascade total flux and seed the deposit
-            # composition with the arriving (routed) fine fraction; _updateSinks
-            # refines it inside pits (3b).
-            self._totFlux = vtot.copy()
+            # Seed the deposit composition with the arriving (routed) fine
+            # fraction; _updateSinks (pits, coarse-settles-first) and seaChange
+            # (marine) refine it.
             self.depoFineFrac = self.fineFrac.copy()
 
         self.fMati.destroy()
@@ -128,7 +132,7 @@ class SEDMesh(object):
 
         return
 
-    def _moveDownstream(self, vSed, step):
+    def _moveDownstream(self, vSed, vSedF, step):
         """
         In cases where river sediment fluxes drain into depressions, they might fill the sink completely and overspill or be deposited in it. This function computes the excess of sediment (if any) able to flow dowstream.
 
@@ -136,7 +140,17 @@ class SEDMesh(object):
 
             The excess sediment volume is then added to the downstream sediment flux (`vSed`).
 
-        :arg vSed: excess sediment volume array
+        Dual lithology: the fine sub-volume ``vSedF`` is threaded in lockstep so
+        overspill is **fine-enriched** — coarse settles first (retained up to the
+        pit capacity), so a filled pit keeps a coarse-enriched deposit and the
+        excess that overspills carries the remaining fine. The fine overspill is
+        routed through the same flow matrix as the total (linear); the per-pit
+        retained fine is accumulated in ``self._pitRetFine`` (used by
+        ``_pitFineFraction``) and the routed-downstream fine is returned in
+        ``self._routedFine``.
+
+        :arg vSed: excess sediment volume array (total)
+        :arg vSedF: excess fine sediment volume array (ignored when single)
         :arg step: downstream distribution step
 
         :return: (excess, sedFilled_changed) where excess is True when sediment
@@ -146,9 +160,12 @@ class SEDMesh(object):
         """
         excess = False
         sedFilled_changed = False
+        dual = self.stratLith
 
         # Remove points belonging to other processors
         vSed = np.multiply(vSed, self.inIDs)
+        if dual:
+            vSedF = np.multiply(vSedF, self.inIDs)
 
         # Get volume incoming in each depression
         grp = npi.group_by(self.pitIDs[self.lsink])
@@ -157,29 +174,49 @@ class SEDMesh(object):
         inV = np.zeros(len(self.pitParams), dtype=np.float64)
         ids = uID > -1
         inV[uID[ids]] = vol[ids]
-
-        # Combine incoming volume globally
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)
+
+        inVf = np.zeros(len(self.pitParams), dtype=np.float64)
+        if dual:
+            _, volf = grp.sum(vSedF[self.lsink])
+            inVf[uID[ids]] = volf[ids]
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inVf, op=MPI.SUM)
+            inVf = np.minimum(inVf, inV)
+
+        nvSed = np.zeros(self.lpoints, dtype=np.float64)
+        nvSedF = np.zeros(self.lpoints, dtype=np.float64)
 
         # Get excess volume to distribute downstream
         eV = inV - self.pitVol
         if (eV > 0.0).any():
             eIDs = eV > 0.0
-            self.pitVol[eIDs] = 0.0
             spillIDs = self.pitInfo[eIDs, 0]
             localSpill = np.where(self.pitInfo[eIDs, 1] == MPIrank)[0]
             localPts = spillIDs[localSpill]
-            nvSed = np.zeros(self.lpoints, dtype=np.float64)
             nvSed[localPts] = eV[eIDs][localSpill]
+            if dual:
+                # Coarse settles first: the pit retains its capacity, coarse
+                # filling it before fine, so the retained deposit is coarse-
+                # enriched and the overspill (eV) is fine-enriched.
+                coarse_in = inV - inVf
+                ret_coarse = np.minimum(coarse_in, self.pitVol)
+                ret_fine = np.clip(self.pitVol - ret_coarse, 0.0, inVf)
+                ovf_fine = inVf - ret_fine
+                self._pitRetFine[eIDs] += ret_fine[eIDs]
+                nvSedF[localPts] = ovf_fine[eIDs][localSpill]
+            self.pitVol[eIDs] = 0.0
             ids = np.isin(self.pitIDs, np.where(eV > 0.0)[0])
             self.sedFilled[ids] = self.lFill[ids]
             sedFilled_changed = True
 
-        # Update unfilled depressions volumes
+        # Update unfilled depressions volumes (retain all incoming)
         eIDs = eV < 0
         self.pitVol[eIDs] -= inV[eIDs]
         self.pitVol[self.pitVol < 0] = 0.0
+        if dual:
+            self._pitRetFine[eIDs] += inVf[eIDs]
 
+        self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
         # In case there is still remaining sediment flux to distribute downstream
         if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (sediment-routing convergence threshold); do not replace
             # Only rebuild the flow direction matrix when the topography has
@@ -203,6 +240,13 @@ class SEDMesh(object):
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
+                if dual:
+                    # Route the fine overspill through the SAME matrix (linear).
+                    self.nQs.setArray(nvSedF)
+                    self.dm.localToGlobal(self.nQs, self.tmp)
+                    self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+                    self.dm.globalToLocal(self.tmp1, self.nQs)
+                    self._routedFine = self.nQs.getArray().copy()
             # Note: matrix lifecycle moved to _distributeSediment so we don't
             # destroy/rebuild on every iteration when the topography is stable.
 
@@ -224,6 +268,17 @@ class SEDMesh(object):
         # Get the volumetric sediment rate (m3/yr) to distribute during the time step and convert it in volume (m3)
         vSed = self.QsL.getArray().copy() * self.dt
 
+        # Dual lithology: distribute the fine sub-volume in lockstep so the
+        # coarse-settles-first overspill in _moveDownstream is conservative.
+        # vSedFLocal mirrors vSedLocal EXACTLY (it is NOT zeroed): it keeps the
+        # initial fine flux and accumulates the residual overspill, so at the
+        # marine sinks it ends up as the post-cascade fine reaching the sea.
+        if self.stratLith:
+            vSedF = self.vSedFLocal.getArray().copy() * self.dt
+            self._pitRetFine = np.zeros(len(self.pitParams), dtype=np.float64)
+        else:
+            vSedF = None
+
         # Drop any matrix from the prior context; _moveDownstream will rebuild
         # on iteration 0 and only rebuild thereafter when sedFilled changes.
         self.fMat.destroy()
@@ -242,7 +297,7 @@ class SEDMesh(object):
                     )
                 break
             t1 = process_time()
-            excess, _ = self._moveDownstream(vSed, step)
+            excess, _ = self._moveDownstream(vSed, vSedF, step)
             if excess:
                 vSed = self.tmpL.getArray().copy()
                 nvSed = vSed.copy()
@@ -250,6 +305,14 @@ class SEDMesh(object):
                 self.tmpL.setArray(nvSed / self.dt)
                 vSed[self.idBorders] = 0.0
                 self.vSedLocal.axpy(1.0, self.tmpL)
+                if self.stratLith:
+                    # Mirror the residual-flux accumulation for the fine pile.
+                    vSedF = self._routedFine.copy()
+                    nvSedF = vSedF.copy()
+                    nvSedF[hl < self.sedFilled] = 0.0
+                    self.tmpL.setArray(nvSedF / self.dt)
+                    vSedF[self.idBorders] = 0.0
+                    self.vSedFLocal.axpy(1.0, self.tmpL)
             if MPIrank == 0 and self.verbose:
                 print(
                     "Downstream sediment flux computation step %d (%0.02f seconds)"
@@ -264,6 +327,8 @@ class SEDMesh(object):
             self.fMat = None
 
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
+        if self.stratLith:
+            self.dm.localToGlobal(self.vSedFLocal, self.vSedF)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -610,40 +675,45 @@ class SEDMesh(object):
 
         return delta_smooth
 
-    def _pitFineFraction(self, hl, delta):
+    def _pitFineFraction(self, hl, delta, depo):
         """
-        Dual-lithology (3b): set the per-node fine fraction of the continental
-        pit/lake deposit so fine settles toward the depocenter and coarse
-        builds the inlet/margins, while conserving each pit's incoming fine
-        volume.
+        Dual-lithology (3b + fine-enriched overspill): set the per-node fine
+        fraction of the continental pit/lake deposit so fine settles toward the
+        depocenter and coarse builds the inlet/margins, conserving each pit's
+        RETAINED fine volume.
 
         Composition only — the deposit geometry ``delta`` is NOT modified, so
         model dynamics (elevations, flow) are untouched; the worst case of a
         bug here is a wrong recorded composition, caught by the per-fraction
-        invariant tests.
+        invariant + fine-conservation tests.
 
         Mechanism:
-          - Per-pit incoming fine fraction ``ff_pit = Σ(fineFrac·totFlux) /
-            Σ(totFlux)`` over the pit's nodes — the routed-flux composition of
-            sediment entering the pit (``_totFlux`` is the clean pre-cascade
-            snapshot; ``vSedLocal`` is mutated by the cascade).
+          - Per-pit retained fine fraction ``ff_pit = _pitRetFine / depo`` —
+            the fine actually kept in the pit under coarse-settles-first
+            (accumulated through the cascade by ``_moveDownstream``); a pit that
+            overspilled keeps a coarse-enriched deposit, the excess fine having
+            travelled downstream.
           - Bathymetric depth ``d = max(lFill − hl, 0)`` is the depocenter
             proxy (deep at the centre, shallow at the rim/inlet — independent
             of where the deposit piled).
           - Fine fraction is biased ∝ d and renormalised to the deposit-weighted
             mean depth, so ``Σ(delta·larea·ffrac) == ff_pit·Σ(delta·larea) ==``
-            the fine volume that entered the pit.
+            the fine volume retained in the pit.
 
         :arg hl: pre-deposition local elevation
         :arg delta: per-node continental deposit thickness (local)
+        :arg depo: per-pit deposited (retained) volume (m^3)
         """
         num_pits = len(self.pitParams)
         in_pit = self.pitIDs >= 0
         owned = (self.inIDs == 1) & in_pit
 
-        # ---- per-pit incoming fine fraction (flux-weighted) ----
-        fineNum = np.zeros(num_pits, dtype=np.float64)
-        fluxDen = np.zeros(num_pits, dtype=np.float64)
+        # ---- per-pit retained fine fraction (coarse-settles-first) ----
+        ff_pit = np.divide(
+            self._pitRetFine, depo, out=np.zeros(num_pits), where=depo > 0
+        )
+        np.clip(ff_pit, 0.0, 1.0, out=ff_pit)
+
         # ---- deposit-weighted mean bathymetric depth per pit ----
         depth = np.maximum(self.lFill - hl, 0.0)
         dw = np.zeros(num_pits, dtype=np.float64)   # Σ delta*larea
@@ -652,17 +722,12 @@ class SEDMesh(object):
             ids = self.pitIDs[owned]
             grp = npi.group_by(ids)
             up = grp.unique
-            fineNum[up] = grp.sum((self.fineFrac * self._totFlux)[owned])[1]
-            fluxDen[up] = grp.sum(self._totFlux[owned])[1]
             dl = (delta * self.larea)[owned]
             dw[up] = grp.sum(dl)[1]
             dwd[up] = grp.sum(dl * depth[owned])[1]
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fineNum, op=MPI.SUM)
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fluxDen, op=MPI.SUM)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dw, op=MPI.SUM)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dwd, op=MPI.SUM)
 
-        ff_pit = np.divide(fineNum, fluxDen, out=np.zeros(num_pits), where=fluxDen > 0)
         depthbar = np.divide(dwd, dw, out=np.zeros(num_pits), where=dw > 0)
 
         # ---- per-node biased fine fraction (depocenter-weighted) ----
@@ -721,10 +786,11 @@ class SEDMesh(object):
             delta = delta + delta_diff
 
         # Dual lithology (3b): bias the deposit composition within pits — fine
-        # to the depocenter, coarse to the inlet/margins. Geometry (delta) is
+        # to the depocenter, coarse to the inlet/margins, using the cascade-
+        # tracked retained fine (coarse-settles-first). Geometry (delta) is
         # unchanged; only self.depoFineFrac (read by deposeStrat) is set.
         if self.stratLith:
-            self._pitFineFraction(hl, delta)
+            self._pitFineFraction(hl, delta, depo)
 
         # Apply deposit
         self.tmpL.setArray(delta)

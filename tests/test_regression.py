@@ -625,9 +625,10 @@ def test_dual_lithology_pit_fine_bias():
     per-pit incoming fine volume.
 
     Single pit, 4 nodes at increasing bathymetric depth, uniform deposit and
-    area, uniform arriving composition (ff_pit = 0.3). The resulting per-node
-    fine fraction must (a) increase monotonically with depth and (b) conserve
-    the fine volume: Σ(delta·larea·ffrac) == ff_pit·Σ(delta·larea).
+    area. The pit retained fine volume 1.2 of total 4 (ff_pit = 0.3, the
+    coarse-settles-first retained fraction from the cascade). The resulting
+    per-node fine fraction must (a) increase monotonically with depth and (b)
+    conserve the retained fine volume: Σ(delta·larea·ffrac) == _pitRetFine.
     """
     sedplex = pytest.importorskip("gospl.sed.sedplex")
     n = 4
@@ -641,11 +642,11 @@ def test_dual_lithology_pit_fine_bias():
     m.lFill = np.full(n, 10.0)               # rim at 10 m
     hl = np.array([9.0, 7.0, 4.0, 8.0])      # depth = 1, 3, 6, 2
     delta = np.ones(n)                       # uniform deposit thickness
-    m.fineFrac = np.full(n, 0.3)
-    m._totFlux = np.ones(n)
+    depo = np.array([4.0])                   # retained volume (Σ delta*larea)
+    m._pitRetFine = np.array([1.2])          # retained fine → ff_pit = 1.2/4 = 0.3
     m.depoFineFrac = np.zeros(n)
 
-    m._pitFineFraction(hl, delta)
+    m._pitFineFraction(hl, delta, depo)
 
     depth = m.lFill - hl
     ff = m.depoFineFrac
@@ -692,16 +693,16 @@ def test_dual_lithology_marine_fine_bias():
     m.sealevel = 0.0
     m.inIDs = np.ones(n, dtype=int)
     m.larea = np.ones(n)
-    m.fineFrac = np.full(n, 0.3)
     m.depoFineFrac = np.zeros(n)
     mdep = np.ones(n)                        # uniform marine deposit
     m.tmp = _StubVec(mdep)
     m.tmpL = _StubVec(np.zeros(n))
     m.dm = _StubDM()
     hl = np.array([-1.0, -3.0, -6.0, -8.0])  # depth = 1, 3, 6, 8
-    sedFlux = np.ones(n)                     # uniform marine input
+    sedFlux = np.ones(n)                     # uniform marine input (total)
+    fineFlux = np.full(n, 0.3)               # post-cascade fine → ff_mar = 0.3
 
-    m._marineFineFraction(hl, sedFlux)
+    m._marineFineFraction(hl, sedFlux, fineFlux)
 
     depth = m.sealevel - hl
     ff = m.depoFineFrac
