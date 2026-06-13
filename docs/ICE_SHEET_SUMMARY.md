@@ -132,6 +132,10 @@ ice:
         on: True          # carry abraded rock as till / moraine
 ```
 
+`hela`/`hice`/`hterm` accept a uniform scalar (as above), a per-vertex map
+`[file, key]`, or a `glaciers` time series of either — see the user guide for
+the spatial/time-varying ELA syntax used by global models.
+
 ## Validation
 
 Seven regression tests guard the model (`tests/test_regression.py`,
@@ -156,6 +160,12 @@ Seven regression tests guard the model (`tests/test_regression.py`,
   forcing and is adequate for the long-term, landscape-to-global mass budget
   the model targets; a climate-driven SMB would be the upgrade for studies where
   the melt physics itself is the object of interest.
+- **Spatially / temporally varying ELA.** For global runs, `hela`, `hice` and
+  `hterm` can each be a per-vertex map and/or a `glaciers` time series (like the
+  precipitation `climate` block), so the ELA varies with latitude (tropical vs
+  polar) and through time — a single global scalar cannot represent both. The
+  mass-balance ramp is evaluated per node with its local ELA. Uniform scalars
+  and the `evol` CSV remain unchanged.
 - **Till routing.** Till is deposited across the ablation zone weighted by the
   meltwater rate rather than routed per ice-catchment to each individual
   terminus — a simplification matched to goSPL's resolution, where a cell

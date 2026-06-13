@@ -29,6 +29,17 @@ below the ELA the ramp goes negative and the source becomes ablation (melt).
 A degenerate-configuration guard zeroes the ice and returns immediately when
 ``hice <= hela`` or when the maximum surface elevation lies below the ELA.
 
+.. note::
+
+   For **global** models a single ELA is unphysical — it ranges from ~5000–6000 m
+   in the tropics to near sea level at the poles. ``hela``, ``hice`` and
+   ``hterm`` may therefore each be a **per-vertex map** rather than a scalar, and
+   may vary **in time** through a ``glaciers`` time series (mirroring the
+   precipitation ``climate`` block). The mass-balance ramp is then evaluated
+   per node with its local ELA / ice-cap altitude, so the same run can grow
+   tropical summit glaciers and polar ice sheets simultaneously. See the
+   :ref:`user guide <surfproc>` for the input syntax.
+
 Ice dynamics (SIA)
 ------------------
 

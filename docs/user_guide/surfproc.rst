@@ -189,6 +189,55 @@ Ice sheets and glacial erosion
 
             The glacial evolution file is defined as a 4 columns **csv** file containing in the first column the time in years (it doesn't need to be regularly temporally spaced) and in the second the glacier characteristics for the given time. When goSPL interprets this file, it will interpolate linearly between the defined times to find the values of ``hterm``, ``hela`` and ``hice`` for every time step.
 
+    .. grid-item-card::
+
+        **Spatially-varying ELA (global models)**
+
+        In a **global** run a single ``hela`` cannot be right everywhere — the
+        equilibrium-line altitude is ~5000–6000 m in the tropics but near sea
+        level at the poles. Each of ``hela``, ``hice`` and ``hterm`` can
+        therefore be given as a **per-vertex map** (``[file, key]``) instead of a
+        scalar — the same convention as the precipitation maps:
+
+        .. code:: yaml
+
+            ice:
+                hela:  ['input/ela', 'ela']    # per-vertex ELA (e.g. latitude-varying)
+                hice:  ['input/ela', 'hice']   # ice-cap altitude must track hela
+                hterm: 0.                       # a global scalar floor is usually fine
+                sia: {Aglen: 1.0e-16, slide: 1.0e-3, glen: 3.0}
+
+        Only ``hela`` really needs a map; ``hice`` should follow it (it is the
+        top of the accumulation band, so ``hice > hela`` everywhere), while
+        ``hterm`` is a backstop floor that can stay a global scalar.
+
+        The geometry can also vary **in time** through a ``glaciers`` time series
+        (mirroring the precipitation ``climate`` block) — each entry has a
+        ``start`` time and uniform-or-map ``hela``/``hice``/``hterm``, stepped as
+        the simulation advances. This gives a latitude-**and**-time varying ELA,
+        e.g. for glacial–interglacial cycles:
+
+        .. code:: yaml
+
+            ice:
+                sia: {Aglen: 1.0e-16, slide: 1.0e-3, glen: 3.0}
+                glaciers:
+                  - start: -120000.
+                    hela:  ['input/ela_lgm', 'ela']
+                    hice:  ['input/ela_lgm', 'hice']
+                    hterm: 0.
+                  - start: -20000.
+                    hela:  ['input/ela_holocene', 'ela']
+                    hice:  ['input/ela_holocene', 'hice']
+                    hterm: 500.
+
+        .. note::
+
+            The map files follow the standard goSPL ``.npz`` convention: the
+            ``key`` field is a per-vertex array over the mesh. A uniform scalar
+            and the ``evol`` CSV remain available and unchanged; ``evol`` takes
+            precedence over maps if both are given.
+
 
 Soil production, erosion, transport and deposition
 -----------------------------------------------------

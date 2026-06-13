@@ -483,11 +483,16 @@ class FAMesh(object):
             rainA = rainA - channelLoss
             self.evapLoss += channelLoss.sum() * self.dt
         if self.iceOn:
-            elaH = self.elaH(self.tNow)
-            iceH = self.iceH(self.tNow)
-            tmp = (hl - elaH) / (iceH - elaH)
-            tmp[tmp > 1.] = 1.0
-            tmp[tmp < 0.] = 0.0
+            # ELA / ice-cap altitude: per-vertex maps when in spatial /
+            # time-series mode, otherwise the uniform time scalars. The
+            # accumulation ramp is hardened against degenerate (iceH <= elaH)
+            # cells so the precipitation split never divides by zero.
+            elaH = self.elaMesh[self.locIDs] if self.elaMesh is not None else self.elaH(self.tNow)
+            iceH = self.iceMesh[self.locIDs] if self.iceMesh is not None else self.iceH(self.tNow)
+            denom = iceH - elaH
+            safe = np.where(denom > 0.0, denom, 1.0)
+            tmp = np.where(denom > 0.0, (hl - elaH) / safe, 0.0)
+            tmp = np.clip(tmp, 0.0, 1.0)
             rainA = np.multiply(rainA, 1. - tmp)
             # Re-inject glacial meltwater captured during the SIA solve:
             # ablation-zone cells with ice present release the local melt

@@ -100,8 +100,15 @@ class IceMesh(object):
         ad = 2.0 * self.sia_Aglen * (RHO_ICE * self.gravity) ** n / (n + 2.0)
         as_ = self.sia_slide
         zbed = self.hLocal.getArray().copy()              # bed elevation (fixed this step)
-        ramp = (zbed - elaH) / (iceH - elaH)
-        ramp[ramp > 1.0] = 1.0
+        # ELA mass-balance ramp (1 above the ice cap, 0 at the ELA, negative
+        # below). elaH/iceH may be scalars (uniform) or per-vertex arrays
+        # (spatial maps). Where iceH <= elaH (degenerate / no-ice-band cell) the
+        # ramp is zeroed so the division never blows up; this is exact for the
+        # uniform case, where the caller's guard already ensures iceH > elaH.
+        denom = iceH - elaH
+        safe = np.where(denom > 0.0, denom, 1.0)
+        ramp = np.where(denom > 0.0, (zbed - elaH) / safe, 0.0)
+        ramp = np.minimum(ramp, 1.0)
         mdot = self.rainVal * ramp                        # surface mass balance (m ice/yr)
         return n, ad, as_, zbed, mdot
 
@@ -207,9 +214,11 @@ class IceMesh(object):
         Main Ice Accumulation Calculation.
 
         This method evolves the ice thickness with the SIA solve
-        (:meth:`_iceFlowSIA`) using the dynamic ice-cap altitude, the
-        equilibrium-line altitude (ELA) and the glacier terminus. It also
-        snapshots the ice load for the flexural isostasy when enabled.
+        (:meth:`_iceFlowSIA`) using the ice-cap altitude, the equilibrium-line
+        altitude (ELA) and the glacier terminus. Each of these may be a uniform
+        scalar (time-varying) or a per-vertex map — the latter for global models
+        where the ELA varies strongly with latitude. It also snapshots the ice
+        load for the flexural isostasy when enabled.
         """
 
         ti = process_time()
@@ -219,23 +228,32 @@ class IceMesh(object):
         if self.flexOn:
             self.iceHL.copy(result=self.iceFlex)
 
-        # Get dynamic properties such as ice cap altitude and equilibrium-line altitude
-        iceH = self.iceH(self.tNow)  # Ice Cap Altitude
-        elaH = self.elaH(self.tNow)  # Equilibrium-Line Altitude
-        iceT = self.iceT(self.tNow)  # Glacier terminus
+        # Resolve the glacier-geometry altitudes: per-vertex map where supplied
+        # (spatial ELA for global tropical-vs-polar runs), otherwise the uniform
+        # time-varying scalar. `spatial` flags that any field is a map.
+        iceH = self.iceMesh[self.locIDs] if self.iceMesh is not None else self.iceH(self.tNow)
+        elaH = self.elaMesh[self.locIDs] if self.elaMesh is not None else self.elaH(self.tNow)
+        iceT = self.termMesh[self.locIDs] if self.termMesh is not None else self.iceT(self.tNow)
+        spatial = (
+            self.iceMesh is not None
+            or self.elaMesh is not None
+            or self.termMesh is not None
+        )
 
-        # No ice when the whole surface is below the ELA, or for a degenerate
-        # config where the ice-cap altitude is not above the ELA (the
-        # (z - elaH) / (iceH - elaH) mass-balance ramp would be NaN/Inf).
-        max_elev = self.hGlobal.max()[1]
-        if max_elev < elaH or iceH <= elaH:
-            self.iceHL.set(0.)
-            self.iceUbL.set(0.)
-            self.iceAbrL.set(0.)
-            self.iceMeltL.set(0.)
-            if self.flexOn:
-                self.iceFlex.set(0.)
-            return
+        # Uniform case keeps the cheap global short-circuit (byte-identical):
+        # no ice when the whole surface is below the ELA, or for a degenerate
+        # config where the ice-cap altitude is not above the ELA. With spatial
+        # maps these are per-node and handled robustly in _iceSIAParams.
+        if not spatial:
+            max_elev = self.hGlobal.max()[1]
+            if max_elev < elaH or iceH <= elaH:
+                self.iceHL.set(0.)
+                self.iceUbL.set(0.)
+                self.iceAbrL.set(0.)
+                self.iceMeltL.set(0.)
+                if self.flexOn:
+                    self.iceFlex.set(0.)
+                return
 
         # Implicit SIA ice-thickness solve.
         self._iceFlowSIA(elaH, iceH, iceT)

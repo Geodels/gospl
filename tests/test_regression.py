@@ -296,6 +296,101 @@ def test_ice_opt_in():
     assert p.ice_till_on is True
 
 
+def test_ice_geom_field_split():
+    """
+    Protects: _iceGeomField splits a glacier-geometry input into a scalar
+    fallback and an optional [file, key] map spec (the per-vertex ELA path for
+    global models).
+    """
+    p = _ice_parser()
+    assert p._iceGeomField(2000.0) == (2000.0, None)
+    sc, spec = p._iceGeomField(["ela_map", "ela"])
+    assert sc is None and spec == ["ela_map", "ela"]
+
+
+def test_ice_geom_time_series_parsing(tmp_path):
+    """
+    Protects: _buildIceSeries turns the optional `glaciers` time series (and the
+    single top-level interval) into per-interval (scalar, map_spec) fields, so
+    the ELA/ice-cap/terminus can vary in BOTH space (maps) and time — like the
+    precipitation `climate` block.
+    """
+    np.savez(tmp_path / "em.npz", ela=np.zeros(5), hice=np.zeros(5))
+    base = str(tmp_path / "em")
+    p = _ice_parser()
+
+    # Single top-level interval, ELA as a map, ice-cap as a scalar.
+    series = p._buildIceSeries(None, [base, "ela"], 2400.0, 1500.0)
+    assert len(series) == 1 and series[0]["start"] == p.tStart
+    assert series[0]["hela"] == (None, [base, "ela"])
+    assert series[0]["hice"] == (2400.0, None)
+
+    # Multi-interval `glaciers` series, sorted by start, mixing scalars & maps.
+    glaciers = [
+        {"start": 100.0, "hela": [base, "ela"], "hice": [base, "hice"], "hterm": 0.0},
+        {"start": 0.0, "hela": 2000.0, "hice": 2400.0, "hterm": 1500.0},
+    ]
+    series = p._buildIceSeries(glaciers, None, None, None)
+    assert [iv["start"] for iv in series] == [0.0, 100.0]
+    assert series[0]["hela"] == (2000.0, None)
+    assert series[1]["hela"] == (None, [base, "ela"])
+
+
+@pytest.mark.slow
+def test_ice_geom_time_series_steps(minimal_ice_sia_model):
+    """
+    Protects: _updateIce selects the active interval for the current time and
+    materialises the per-vertex glacier-geometry fields, stepping them as time
+    advances (the time-dependent analogue of the precipitation maps).
+    """
+    m = minimal_ice_sia_model
+    m._iceTimeSeries = [
+        {"start": 0.0, "hela": (2000.0, None), "hice": (3000.0, None), "hterm": (1500.0, None)},
+        {"start": 50.0, "hela": (1000.0, None), "hice": (2000.0, None), "hterm": (500.0, None)},
+    ]
+    m._iceSeriesIdx = -1
+
+    m.tNow = 0.0
+    m._updateIce()
+    assert np.allclose(m.elaMesh, 2000.0) and np.allclose(m.iceMesh, 3000.0)
+
+    m.tNow = 60.0
+    m._updateIce()
+    assert np.allclose(m.elaMesh, 1000.0) and np.allclose(m.termMesh, 500.0)
+
+
+@pytest.mark.slow
+def test_ice_spatial_smb(minimal_ice_sia_model):
+    """
+    Protects: the SIA surface mass balance is per-vertex when the ELA / ice-cap
+    altitude are maps (the tropical-vs-polar fix). A constant-array ELA must
+    reproduce the uniform-scalar result exactly, and a spatially-high ELA must
+    suppress accumulation locally.
+    """
+    m = minimal_ice_sia_model
+    npts = m.lpoints
+
+    # Array path with constant fields == scalar path (byte-identical SMB).
+    _, _, _, _, mdot_scalar = m._iceSIAParams(2000.0, 3000.0)
+    elaA = np.full(npts, 2000.0)
+    iceA = np.full(npts, 3000.0)
+    _, _, _, _, mdot_arr = m._iceSIAParams(elaA, iceA)
+    assert np.allclose(mdot_scalar, mdot_arr), "array SMB must match scalar SMB"
+
+    # Spatially-high ELA suppresses accumulation: split the domain and raise the
+    # ELA out of reach on one half -> no positive mass balance there.
+    zbed = m.hLocal.getArray()
+    blocked = zbed < np.median(zbed)
+    elaS = np.where(blocked, 1.0e9, 2000.0)
+    # Keep the unblocked accumulation band identical to the scalar reference
+    # (hela=2000, hice=3000) so it must reproduce that SMB exactly.
+    iceS = np.where(blocked, elaS + 800.0, 3000.0)
+    _, _, _, _, mdot_s = m._iceSIAParams(elaS, iceS)
+    assert (mdot_s[blocked] <= 0.0).all(), "no accumulation where the ELA is out of reach"
+    # Where the ELA is normal, the SMB matches the uniform-ELA result.
+    assert np.allclose(mdot_s[~blocked], mdot_scalar[~blocked])
+
+
 @pytest.mark.slow
 def test_ice_sia_runs_and_invariants(minimal_ice_sia_model):
     """
