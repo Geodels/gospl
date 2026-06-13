@@ -62,6 +62,10 @@ class IceMesh(object):
             self.iceHL.set(0.0)
             self.iceMeltL.set(0.0)
             self.iceUbL.set(0.0)
+            # Glacial-till mass-balance diagnostics (m^3, owned-node running
+            # totals reduced by the till-conservation test).
+            self._tillEroded = 0.0
+            self._tillDeposited = 0.0
             # Cached SIA implicit-solver handles (created lazily on first use;
             # destroyed in destroy_DMPlex).
             self._snes_ice = None
@@ -461,6 +465,76 @@ class IceMesh(object):
         if MPIrank == 0 and self.verbose:
             print(
                 "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti),
+                flush=True,
+            )
+
+        return
+
+    def glacialTill(self):
+        r"""
+        Glacial till — production, transport and deposition (Phase 4, SIA only).
+
+        Glacial abrasion (:math:`E_g = K_g |u_b|^l`) erodes rock under sliding
+        ice; the abraded material becomes **till** carried by the ice and
+        deposited where the ice **melts out** — the ablation zone / terminal
+        moraine. The bed is therefore **lowered** under fast ice and **raised**
+        in the ablation zone, conserving rock volume exactly (the net bed change
+        is zero by construction): a transport, not a source/sink.
+
+        Conservation is structural: the total abraded volume ``Vtot`` is
+        redistributed to the ablation cells weighted by the meltwater rate
+        (``iceMeltL``), so ``Σ deposited == Vtot``. Guarded by a dedicated
+        till-conservation test (the dual-lithology lesson: a volume the total
+        budget can't see needs its own guard).
+
+        Active only with ``flow_model: sia``, ``till.on`` and ``Kg > 0``; a
+        no-op otherwise, so existing behaviour is unchanged.
+
+        Simplifications (v1, documented): till deposits across the ablation zone
+        weighted by melt rather than routed per ice-catchment to each terminus;
+        and it operates on the bulk bed (cumED/elevation), not yet the
+        stratigraphic pile — couple to stratigraphy / dual lithology later.
+        """
+        if not (self.iceOn and self.iceSIA and self.ice_till_on) or self.ice_Kg <= 0.0:
+            return
+
+        ti = process_time()
+        ub = self.iceUbL.getArray()
+        Eg = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)  # m/yr
+        Eg[self.seaID] = 0.0
+        Vero = Eg * self.dt * self.larea                  # abraded volume (m^3) per cell
+        owned = self.inIDs == 1
+        Vtot = MPI.COMM_WORLD.allreduce(float(np.sum(Vero[owned])), op=MPI.SUM)
+
+        melt = self.iceMeltL.getArray()                   # ablation water volume (m^3/yr)
+        Wtot = MPI.COMM_WORLD.allreduce(float(np.sum(melt[owned])), op=MPI.SUM)
+
+        # No abrasion or no ablation zone to receive the till -> nothing happens
+        # (skipping the erosion too keeps it conservative: no orphaned till).
+        if Vtot <= 0.0 or Wtot <= 0.0:
+            return
+
+        # Bed change (m): erode at abrasion cells, deposit the till where ice
+        # melts, weighted by melt. Σ(dz·area) == 0 (rock moved, not created).
+        dz = -Eg * self.dt
+        dz_dep = (Vtot * melt / Wtot) / self.larea
+        dz = dz + dz_dep
+
+        self.tmpL.setArray(dz)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        self._tillEroded += Vtot
+        self._tillDeposited += MPI.COMM_WORLD.allreduce(
+            float(np.sum((dz_dep * self.larea)[owned])), op=MPI.SUM
+        )
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Glacial Till (%0.02f seconds)" % (process_time() - ti),
                 flush=True,
             )
 

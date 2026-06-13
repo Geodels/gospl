@@ -355,7 +355,10 @@ class SPL(object):
         (abrasion is subglacial; no marine abrasion) and to ice presence
         (``iceUbL`` is already zero where there is no ice).
         """
-        if not (self.iceOn and self.iceSIA) or self.ice_Kg <= 0.0:
+        # When till handling is on, abrasion is routed to till (deposited as
+        # moraine in the ablation zone) by iceplex.glacialTill instead of
+        # straight into the fluvial sediment system — mutually exclusive here.
+        if not (self.iceOn and self.iceSIA) or self.ice_Kg <= 0.0 or self.ice_till_on:
             return
         ub = self.iceUbL.getArray()
         abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)

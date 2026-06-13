@@ -142,6 +142,16 @@ def minimal_ice_sia_model():
 
 
 @pytest.fixture
+def minimal_ice_till_model():
+    """
+    Minimal SIA model with glacial abrasion + till on (`ice.abrasion.Kg`,
+    `ice.till.on`). Exercises the till production/transport/deposition path.
+    See minimal_ice_till.yml.
+    """
+    return _instantiate("minimal_ice_till.yml")
+
+
+@pytest.fixture
 def minimal_ice_mfd_model():
     """
     Minimal model with the default MFD flow-routing ice proxy (no flow_model

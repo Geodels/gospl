@@ -250,6 +250,13 @@ class Model(
                     # Non-linear slope dependencies
                     _nlSPL.erodepSPLnl(self)
 
+                # Glacial till: abrasion-produced till transported by ice and
+                # deposited (melt-out) as moraine in the ablation zone (SIA +
+                # till only; no-op otherwise). Done before fluvial deposition
+                # so the moraine is reworked by meltwater/rivers this step.
+                if self.iceOn:
+                    _IceMesh.glacialTill(self)
+
                 if not self.nodep:
                     # Downstream sediment deposition over the continents
                     _FAMesh.flowAccumulation(self)
