@@ -251,22 +251,29 @@ class IceMesh(object):
         ice; the abraded material becomes **till** carried by the ice and
         deposited where the ice **melts out** — the ablation zone / terminal
         moraine. The bed is therefore **lowered** under fast ice and **raised**
-        in the ablation zone, conserving rock volume exactly (the net bed change
-        is zero by construction): a transport, not a source/sink.
+        in the ablation zone: a transport, not a source/sink.
 
-        Conservation is structural: the total abraded volume ``Vtot`` is
-        redistributed to the ablation cells weighted by the meltwater rate
-        (``iceMeltL``), so ``Σ deposited == Vtot``. Guarded by a dedicated
-        till-conservation test (the dual-lithology lesson: a volume the total
-        budget can't see needs its own guard).
+        Two modes, selected by whether stratigraphy is on:
+
+        - **Bulk bed** (no stratigraphy): the abraded volume ``Vtot`` is
+          redistributed to the ablation cells weighted by the meltwater rate
+          (``iceMeltL``) as a bed-to-bed transport, so ``Σ deposited == Vtot``
+          and the net bed-volume change is zero by construction.
+        - **Stratigraphic** (:meth:`_glacialTillStrata`): the till is removed
+          from the layers it was abraded from and re-deposited as a fresh
+          moraine layer in the ablation zone — split into the coarse/fine
+          lithology fractions under dual lithology. Conservation is on the
+          *solid* phase (per fraction), so the bed bulks up by the porosity
+          contrast (uncompacted till vs compacted source rock).
+
+        Both modes are guarded by a dedicated till-conservation test (the
+        dual-lithology lesson: a volume the total budget can't see needs its
+        own guard).
 
         Active only with ``till.on`` and ``Kg > 0``; a no-op otherwise.
 
         Simplification (documented): till deposits across the ablation zone
         weighted by melt rather than routed per ice-catchment to each terminus.
-        When stratigraphy is on the till is layered into the stratigraphic
-        record (and split into the coarse/fine lithology fractions under
-        dual-lithology); otherwise it moves the bulk bed only.
         """
         if not (self.iceOn and self.ice_till_on) or self.ice_Kg <= 0.0:
             return
@@ -287,28 +294,139 @@ class IceMesh(object):
         if Vtot <= 0.0 or Wtot <= 0.0:
             return
 
-        # Bed change (m): erode at abrasion cells, deposit the till where ice
-        # melts, weighted by melt. Σ(dz·area) == 0 (rock moved, not created).
-        dz = -Eg * self.dt
-        dz_dep = (Vtot * melt / Wtot) / self.larea
-        dz = dz + dz_dep
+        dz_ero = -Eg * self.dt                            # bed lowering (m, ≤0)
 
-        self.tmpL.setArray(dz)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self.cumED.axpy(1.0, self.tmp)
-        self.hGlobal.axpy(1.0, self.tmp)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-
-        self._tillEroded += Vtot
-        self._tillDeposited += MPI.COMM_WORLD.allreduce(
-            float(np.sum((dz_dep * self.larea)[owned])), op=MPI.SUM
-        )
+        if self.stratNb > 0:
+            # Stratigraphy on: route the till through the stratigraphic pile so
+            # the abraded material leaves the layers it came from and the
+            # moraine is recorded as a fresh deposit (split coarse/fine under
+            # dual lithology). See _glacialTillStrata.
+            self._glacialTillStrata(dz_ero, melt, Wtot, owned)
+        else:
+            # Bulk bed transport: erode at abrasion cells, deposit the till
+            # where ice melts, weighted by melt. Σ(dz·area) == 0 (rock moved,
+            # not created).
+            dz_dep = (Vtot * melt / Wtot) / self.larea
+            dz = dz_ero + dz_dep
+            self.tmpL.setArray(dz)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.cumED.axpy(1.0, self.tmp)
+            self.hGlobal.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            self._tillEroded += Vtot
+            self._tillDeposited += MPI.COMM_WORLD.allreduce(
+                float(np.sum((dz_dep * self.larea)[owned])), op=MPI.SUM
+            )
 
         if MPIrank == 0 and self.verbose:
             print(
                 "Glacial Till (%0.02f seconds)" % (process_time() - ti),
                 flush=True,
             )
+
+        return
+
+    def _glacialTillStrata(self, dz_ero, melt, Wtot, owned):
+        r"""
+        Stratigraphic / dual-lithology coupling for glacial till.
+
+        The abraded bed lowering ``dz_ero`` (m, ≤0) is removed from the
+        stratigraphic pile with :meth:`erodeStrat`, which returns the
+        uncompacted solid removed per fraction (``thCoarse`` / ``thFine``,
+        m/yr). That solid is the till: its total uncompacted volume is
+        redistributed to the ablation cells weighted by the meltwater rate and
+        laid down as a fresh moraine layer with :meth:`deposeStrat`, carrying
+        the **abraded fine fraction** (a single, ice-mixed composition).
+
+        Solid mass is conserved per fraction by construction: the fine volume
+        deposited equals the fine volume eroded (so the dual-lithology
+        ``_fineEroded`` / ``_fineDeposited`` budget stays balanced), and the
+        coarse volume likewise. The bed bulks up by the porosity contrast
+        between the uncompacted till and the compacted source rock.
+
+        ``erodeStrat`` / ``deposeStrat`` overwrite the transient routing arrays
+        (``thCoarse`` / ``thFine`` / ``depoFineFrac``) that the *fluvial*
+        ``sedChange`` consumes later this step, so they are saved and restored
+        around the till calls.
+        """
+        # Preserve the fluvial routing state (set by the eroder's erodeStrat,
+        # consumed by the later sedChange/_getSedFlux). glacialTill runs
+        # between the two.
+        saved_thCoarse = self.thCoarse.copy() if hasattr(self, "thCoarse") else None
+        saved_thFine = (
+            self.thFine.copy()
+            if self.stratLith and hasattr(self, "thFine")
+            else None
+        )
+        saved_depoFineFrac = self.depoFineFrac.copy()
+
+        # --- Erosion: remove the abraded bulk from the stratigraphic pile. ---
+        self.tmpL.setArray(dz_ero)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.erodeStrat()                                 # sets thCoarse/thFine
+        # Apply the bed lowering to the elevation / cumulative-erosion fields.
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+
+        # Uncompacted solid abraded (m^3): the till volume to redeposit.
+        coarseV = MPI.COMM_WORLD.allreduce(
+            float(np.sum((self.thCoarse * self.dt * self.larea)[owned])), op=MPI.SUM
+        )
+        if self.stratLith:
+            fineV = MPI.COMM_WORLD.allreduce(
+                float(np.sum((self.thFine * self.dt * self.larea)[owned])), op=MPI.SUM
+            )
+        else:
+            fineV = 0.0
+        Vsolid = coarseV + fineV
+        if Vsolid <= 0.0:
+            # Nothing actually came out of the pile (e.g. emptied to bedrock
+            # floor): no till to deposit. Restore and return.
+            self.thCoarse = saved_thCoarse
+            if saved_thFine is not None:
+                self.thFine = saved_thFine
+            self.depoFineFrac = saved_depoFineFrac
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+            self._tillEroded += 0.0
+            return
+
+        # Ice-mixed till composition (single fine fraction for the moraine).
+        ffrac = fineV / Vsolid if self.stratLith else 0.0
+
+        # --- Deposition: lay the till down in the ablation zone. ---
+        dz_dep = (Vsolid * melt / Wtot) / self.larea      # bulk till thickness (m)
+        self.depoFineFrac = np.zeros(self.lpoints, dtype=np.float64)
+        self.depoFineFrac[dz_dep > 0.0] = ffrac
+        # Snapshot the current layer so the bed/cumED update uses the thickness
+        # deposeStrat ACTUALLY laid down (it floors sub-1e-4 m deposits), keeping
+        # elevation, the stratigraphic pile and the diagnostics consistent.
+        h_before = self.stratH[:, self.stratStep].copy()
+        self.tmpL.setArray(dz_dep)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.deposeStrat()                                # adds to stratH/stratHf
+        dep = self.stratH[:, self.stratStep] - h_before   # actual deposit (m)
+        self.tmpL.setArray(dep)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        # Diagnostics: solid abraded vs solid actually re-deposited (the two
+        # match to the deposeStrat thickness floor; any sub-floor remainder is
+        # dropped, as for every other deposit in the model).
+        self._tillEroded += Vsolid
+        self._tillDeposited += MPI.COMM_WORLD.allreduce(
+            float(np.sum((dep * self.larea)[owned])), op=MPI.SUM
+        )
+
+        # Restore the fluvial routing state for sedChange.
+        if saved_thCoarse is not None:
+            self.thCoarse = saved_thCoarse
+        if saved_thFine is not None:
+            self.thFine = saved_thFine
+        self.depoFineFrac = saved_depoFineFrac
 
         return

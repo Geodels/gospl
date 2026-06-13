@@ -162,6 +162,17 @@ def minimal_ice_flex_model():
 
 
 @pytest.fixture
+def minimal_ice_dual_model():
+    """
+    Minimal SIA model with glacial abrasion + till on AND dual-lithology
+    stratigraphy. Exercises the strata coupling of glacial till
+    (iceplex._glacialTillStrata): abraded rock removed from the pile and
+    re-deposited as a moraine layer, split coarse/fine. See minimal_ice_dual.yml.
+    """
+    return _instantiate("minimal_ice_dual.yml")
+
+
+@pytest.fixture
 def incising_model():
     """
     Tilted-plane Model with rain and `nodep: true` so the river-incision

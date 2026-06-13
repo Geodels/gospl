@@ -424,6 +424,64 @@ def test_ice_glacial_till_conserves(minimal_ice_till_model):
 
 
 @pytest.mark.slow
+def test_ice_glacial_till_dual_lithology(minimal_ice_dual_model):
+    """
+    Protects: glacial till coupled to dual-lithology stratigraphy
+    (iceplex._glacialTillStrata). When stratigraphy is on the abraded rock is
+    removed from the stratigraphic pile and re-deposited as a moraine layer
+    split into coarse/fine. The conservation invariant is on the SOLID phase:
+    the fine volume deposited equals the fine volume eroded (so the
+    dual-lithology _fineEroded / _fineDeposited budget stays balanced), and the
+    moraine carries the abraded fine fraction.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_dual_model
+    assert m.iceOn and m.ice_till_on and m.ice_Kg > 0.0
+    assert m.stratLith and m.stratNb > 0
+    # Full SIA + till + dual-lithology run must not break.
+    m.runProcesses()
+
+    # Deterministic check: fast ice up high (abrasion), melt band lower
+    # (ablation / moraine deposition).
+    zbed = m.hLocal.getArray().copy()
+    m.iceUbL.setArray(np.where(zbed > 2500.0, 0.1, 0.0))
+    m.iceMeltL.setArray(np.where((zbed > 1500.0) & (zbed < 2000.0), 1.0, 0.0))
+    owned = m.inIDs == 1
+
+    stratH0 = m.stratH.copy()
+    stratHf0 = m.stratHf.copy()
+    fe0, fd0 = m._fineEroded, m._fineDeposited
+    te0, td0 = m._tillEroded, m._tillDeposited
+
+    m.glacialTill()
+
+    # Solid till moved (eroded == deposited, by construction).
+    dte = MPI.COMM_WORLD.allreduce(m._tillEroded - te0, op=MPI.SUM)
+    dtd = MPI.COMM_WORLD.allreduce(m._tillDeposited - td0, op=MPI.SUM)
+    assert dte > 0.0, "no till produced; test is vacuous"
+    assert np.isclose(dte, dtd, rtol=1.0e-9), "till solid eroded != deposited"
+
+    # Dual-lithology fine budget stays balanced: the fine removed from the pile
+    # by abrasion equals the fine laid back down in the moraine.
+    dfe = MPI.COMM_WORLD.allreduce(m._fineEroded - fe0, op=MPI.SUM)
+    dfd = MPI.COMM_WORLD.allreduce(m._fineDeposited - fd0, op=MPI.SUM)
+    assert dfe > 0.0, "no fine abraded; dual-lithology coupling inactive"
+    assert np.isclose(dfe, dfd, rtol=1.0e-6), (
+        f"till fine eroded ({dfe:.4e}) != fine deposited ({dfd:.4e})"
+    )
+
+    # The stratigraphic pile lost thickness under fast ice and gained a moraine
+    # (with a fine component) in the ablation band.
+    dH = (m.stratH - stratH0).sum(axis=1)
+    dHf = (m.stratHf - stratHf0).sum(axis=1)
+    abr = zbed > 2500.0
+    abl = (zbed > 1500.0) & (zbed < 2000.0)
+    assert (dH[abr] <= 1.0e-9).all(), "pile not eroded under fast ice"
+    assert float(dH[abl].max()) > 0.0, "no moraine deposited in the ablation zone"
+    assert float(dHf[abl].max()) > 0.0, "moraine carries no fine fraction"
+
+
+@pytest.mark.slow
 def test_ice_sia_volume_conservation(minimal_ice_sia_model):
     """
     Protects: DESIGN_ICE_SHEET.md Phase 6 — the SIA ice flux is mass-conservative
