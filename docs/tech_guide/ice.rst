@@ -92,6 +92,12 @@ From the converged thickness, goSPL derives the **basal sliding speed**
 :math:`u_b` (``ice_velocity`` kernel), which is written to the output as
 ``iceUb`` and drives glacial abrasion.
 
+By default the ice grows in from zero. A **pre-existing ice thickness** can be
+seeded at the first step with ``hinit`` (a uniform scalar or a per-vertex map);
+the SIA solve then evolves it. The flexural reference is taken after seeding, so
+a pre-existing ice load does not shock the plate, and a restart restores the
+evolved thickness instead of re-seeding.
+
 Meltwater re-injection into the river network
 ---------------------------------------------
 

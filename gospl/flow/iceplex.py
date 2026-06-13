@@ -77,6 +77,18 @@ class IceMesh(object):
             self.iceMeltL.set(0.0)
             self.iceUbL.set(0.0)
             self.iceAbrL.set(0.0)
+            # Seed a pre-existing ice thickness on a fresh start; the SIA solve
+            # evolves it from there. On a restart (rStep > 0) readData restores
+            # the evolved iceH instead, so the seed is skipped. The flexure
+            # reference is taken AFTER this seed (first iceAccumulation), so a
+            # pre-existing ice load is not applied as a transient shock.
+            if self._iceInitSpec is not None and self.rStep == 0:
+                sc, spec = self._iceInitSpec
+                if spec is not None:
+                    h0 = self._loadIceMap(spec, "ice hinit")[self.locIDs]
+                else:
+                    h0 = np.full(self.lpoints, sc, dtype=np.float64)
+                self.iceHL.setArray(np.maximum(h0, 0.0))
             # Glacial-till mass-balance diagnostics (m^3, owned-node running
             # totals reduced by the till-conservation test).
             self._tillEroded = 0.0

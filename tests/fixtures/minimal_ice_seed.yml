@@ -1,4 +1,4 @@
-name: minimal SIA ice + glacial till + dual lithology test
+name: minimal SIA ice with pre-existing (seeded) ice thickness
 
 domain:
     npdata: ['mesh','v','c','z']
@@ -12,7 +12,6 @@ time:
     end: 100
     tout: 50
     dt: 10.
-    strat: 50
 
 spl:
     K: 4.0e-6
@@ -24,26 +23,15 @@ diffusion:
     hillslopeKa: 0.01
     hillslopeKm: 0.2
 
-strata:
-    dual: True
-    coarse: {phi0: 0.49, z0: 3700.}
-    fine: {phi0: 0.63, z0: 1960., k_factor: 1.5}
-    bedrock_coarse_frac: 0.6
-    fine_diff_factor: 2.0
-
 ice:
     hela: 2000.
     hice: 3000.
     hterm: 1500.
+    hinit: 50.            # pre-existing 50 m ice everywhere, evolved by the SIA
     sia:
         Aglen: 1.0e-16
         slide: 1.0e-3
         glen: 3.0
-    abrasion:
-        Kg: 1.0e-3
-        l: 1.0
-    till:
-        on: True
 
 sea:
     position: -100.
@@ -53,4 +41,4 @@ climate:
     uniform: 1
 
 output:
-    dir: 'minimal_ice_dual'
+    dir: 'minimal_ice_seed'

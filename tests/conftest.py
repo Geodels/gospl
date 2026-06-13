@@ -173,6 +173,16 @@ def minimal_ice_dual_model():
 
 
 @pytest.fixture
+def minimal_ice_seed_model():
+    """
+    Minimal SIA model with a pre-existing ice thickness seeded from the input
+    (`ice.hinit`). Exercises the seed-and-evolve path: iceHL starts non-zero and
+    the SIA solve evolves it. See minimal_ice_seed.yml.
+    """
+    return _instantiate("minimal_ice_seed.yml")
+
+
+@pytest.fixture
 def incising_model():
     """
     Tilted-plane Model with rain and `nodep: true` so the river-incision

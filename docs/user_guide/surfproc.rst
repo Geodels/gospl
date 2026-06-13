@@ -137,6 +137,7 @@ Ice sheets and glacial erosion
                 hice: 2100.0
                 # Or using a file to characterise glacial evolution
                 # evol: 'data/ice_evol.csv'
+                # hinit: ['input/ice0', 'H']   # optional pre-existing ice
                 sia:
                     Aglen: 1.0e-16
                     slide: 1.0e-3
@@ -180,6 +181,13 @@ Ice sheets and glacial erosion
         j. ``evol`` is the glacier characteristics over time (`csv` file). When
            used, ``hterm``, ``hela`` and ``hice`` are not required because they
            are defined in this file.
+        k. ``hinit`` (optional) is a **pre-existing ice thickness** (m) — a
+           uniform scalar or a per-vertex ``[file, key]`` map — used to seed the
+           ice at the start of the run; the SIA solve then evolves it. Without
+           it the ice grows in from zero. The equilibrium-line geometry
+           (``hela``/``hice``/``hterm``) is still required, as it drives the
+           evolution. On a restart the evolved ice thickness is restored
+           instead, so ``hinit`` only applies to a fresh start.
 
         When flexural isostasy is enabled, the SIA ice thickness is automatically
         used as the ice load contribution to the isostatic computation — no extra

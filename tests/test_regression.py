@@ -360,6 +360,23 @@ def test_ice_geom_time_series_steps(minimal_ice_sia_model):
 
 
 @pytest.mark.slow
+def test_ice_seed_and_evolve(minimal_ice_seed_model):
+    """
+    Protects: a pre-existing ice thickness given via `ice.hinit` seeds iceHL on a
+    fresh start (before any solve), and the SIA solve then evolves it.
+    """
+    m = minimal_ice_seed_model
+    # The seed is applied during model init, before any time step.
+    assert np.allclose(m.iceHL.getArray(), 50.0), "hinit did not seed iceHL"
+
+    m.runProcesses()
+    H = m.iceHL.getArray()
+    # Still a valid ice field after evolving the seed.
+    assert np.isfinite(H).all() and (H >= -1.0e-9).all()
+    assert float(H.max()) > 0.0, "seeded ice vanished entirely"
+
+
+@pytest.mark.slow
 def test_ice_spatial_smb(minimal_ice_sia_model):
     """
     Protects: the SIA surface mass balance is per-vertex when the ELA / ice-cap

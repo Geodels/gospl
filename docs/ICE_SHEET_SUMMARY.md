@@ -134,7 +134,10 @@ ice:
 
 `hela`/`hice`/`hterm` accept a uniform scalar (as above), a per-vertex map
 `[file, key]`, or a `glaciers` time series of either — see the user guide for
-the spatial/time-varying ELA syntax used by global models.
+the spatial/time-varying ELA syntax used by global models. An optional `hinit`
+(scalar or map) seeds a pre-existing ice thickness on a fresh start, which the
+SIA solve then evolves (the ELA geometry still drives the evolution); a restart
+restores the evolved thickness instead.
 
 ## Validation
 

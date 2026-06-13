@@ -1653,6 +1653,10 @@ class ReadYaml(object):
         self.termMesh = None
         self.elaMesh = None
         self.iceMesh = None
+        # Optional pre-existing ice thickness seeded at the first step (uniform
+        # scalar or per-vertex map). The SIA solve then evolves it; restart
+        # overrides it. None = start from no ice.
+        self._iceInitSpec = None
         useSeries = False
         try:
             iceDict = self.input["ice"]
@@ -1662,6 +1666,14 @@ class ReadYaml(object):
             elaH = iceDict.get("hela", 2000.0)
             iceH = iceDict.get("hice", 2400.0)
             iceT = iceDict.get("hterm", 1800.0)
+
+            # Initial (pre-existing) ice thickness — scalar or [file, key] map.
+            hinit = iceDict.get("hinit")
+            if hinit is not None:
+                sc, spec = self._iceGeomField(hinit)
+                if spec is not None:
+                    self._checkMap(spec, "ice hinit")
+                self._iceInitSpec = (sc, spec)
 
             siaDict = iceDict.get("sia", {})
             self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
