@@ -27,3 +27,5 @@ tests/fixtures/minimal_dual_coarse/
 MANIFEST
 .ipynb_checkpoints
 fortran/meshparams.mod
+tests/fixtures/minimal_ice_sia/
+tests/fixtures/minimal_ice_mfd/

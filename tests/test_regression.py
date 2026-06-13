@@ -243,6 +243,157 @@ def test_evap_parser_opt_in():
 # ---------------------------------------------------------------------------
 
 
+def _ice_parser():
+    """Bare parser primed for `_readIce` (needs tStart/tEnd/dt for the
+    no-file interpolators built in `_extraIce`)."""
+    parser = inputparser.ReadYaml.__new__(inputparser.ReadYaml)
+    parser.input = {}
+    parser.tStart = 0.0
+    parser.tEnd = 1000.0
+    parser.dt = 100.0
+    return parser
+
+
+def test_ice_flow_model_opt_in():
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 0 — the SIA ice flow model is opt-in via
+    `ice: flow_model: sia`; the default (`mfd`, or no key) keeps the existing
+    flow-routing proxy and leaves all SIA parameters inert.
+
+    Invariants:
+      1. No `ice` block        -> iceOn False, iceSIA False, flow_model 'mfd'.
+      2. `ice` without flow_model -> iceOn True, iceSIA False (proxy default).
+      3. `ice: flow_model: sia` + sia/abrasion/till -> iceSIA True, params parsed.
+      4. Unknown flow_model     -> ValueError.
+    """
+    # ---- Case 1: no ice block ----
+    p = _ice_parser()
+    p._readIce()
+    assert p.iceOn is False and p.iceSIA is False and p.ice_flow_model == "mfd"
+
+    # ---- Case 2: ice on, default flow model (proxy) ----
+    p = _ice_parser()
+    p.input = {"ice": {"hela": 1500.0, "hice": 2000.0}}
+    p._readIce()
+    assert p.iceOn is True and p.iceSIA is False and p.ice_flow_model == "mfd"
+
+    # ---- Case 3: SIA enabled with parameters ----
+    p = _ice_parser()
+    p.input = {
+        "ice": {
+            "hela": 1500.0,
+            "hice": 2000.0,
+            "flow_model": "sia",
+            "sia": {"Aglen": 2.0e-16, "slide": 5.0e-3, "glen": 3.0, "cfl": 0.2},
+            "abrasion": {"Kg": 1.0e-4, "l": 1.5},
+            "till": {"on": True},
+        }
+    }
+    p._readIce()
+    assert p.iceSIA is True and p.ice_flow_model == "sia"
+    assert p.sia_Aglen == 2.0e-16 and p.sia_slide == 5.0e-3 and p.sia_glen == 3.0
+    assert p.ice_Kg == 1.0e-4 and p.ice_abr_l == 1.5
+    assert p.ice_till_on is True
+
+    # ---- Case 4: unknown flow model rejected ----
+    p = _ice_parser()
+    p.input = {"ice": {"hela": 1500.0, "hice": 2000.0, "flow_model": "full-stokes"}}
+    with pytest.raises(ValueError):
+        p._readIce()
+
+
+@pytest.mark.slow
+def test_ice_sia_runs_and_invariants(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 1 — the SIA ice-sheet model runs
+    end-to-end (the dynamic ice_flux thickness evolution) and preserves the
+    physical invariants of a free-boundary ice solve.
+
+    Invariants after a run:
+      - ice thickness non-negative and finite everywhere (free boundary, no
+        blow-up from the explicit subcycling);
+      - ice actually forms (max H > 0);
+      - no ice below the glacier terminus elevation (terminus clamp);
+      - ice only where it can accumulate (above the ELA region).
+    """
+    model = minimal_ice_sia_model
+    assert model.iceSIA is True and model.ice_flow_model == "sia"
+
+    model.runProcesses()
+
+    H = model.iceHL.getArray()
+    zbed = model.hLocal.getArray()
+    elaH = float(model.elaH(model.tNow))
+    iceT = float(model.iceT(model.tNow))
+
+    assert np.isfinite(H).all(), "SIA ice thickness went non-finite (blow-up)."
+    assert (H >= -1.0e-9).all(), "Negative ice thickness (free boundary violated)."
+    assert float(H.max()) > 0.0, "SIA produced no ice."
+    assert not (H[zbed < iceT] > 1.0e-6).any(), "Ice below the glacier terminus."
+    # Ice only where accumulation is possible (at/above the ELA).
+    assert not (H[zbed < elaH] > 1.0e-6).any(), "Ice below the ELA."
+
+    # Basal sliding speed (Phase 2): finite, non-negative, and confined to ice.
+    ub = model.iceUbL.getArray()
+    assert np.isfinite(ub).all() and (ub >= -1.0e-12).all()
+    assert not (ub[H <= 1.0e-2] > 0.0).any(), "Basal velocity where there is no ice."
+
+
+@pytest.mark.slow
+def test_ice_mfd_proxy_still_runs(minimal_ice_mfd_model):
+    """
+    Protects: the existing MFD flow-routing ice proxy is unaffected by the SIA
+    opt-in. With no `flow_model` key, iceSIA is False and the proxy path runs,
+    producing ice via the Bahr width-area scaling.
+    """
+    model = minimal_ice_mfd_model
+    assert model.iceSIA is False and model.ice_flow_model == "mfd"
+    model.runProcesses()
+    H = model.iceHL.getArray()
+    assert np.isfinite(H).all() and (H >= -1.0e-9).all()
+    assert float(H.max()) > 0.0, "MFD proxy produced no ice."
+
+
+@pytest.mark.slow
+def test_ice_sia_implicit_matches_explicit(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 1b — the implicit (production) SIA
+    solver agrees with the explicit reference oracle on a flux-active thick ice
+    dome, and the SIA flux actually redistributes ice (not just SMB).
+
+    A 500 m ice cap over the high ground is stepped once by each solver from the
+    same initial state. The implicit solve (unconditionally stable, full dt in
+    one solve) must match the CFL-subcycled explicit reference to a tight
+    tolerance — validating the implicit flux solve against the oracle and the
+    convergence of the SNES on a stiff (thick-ice) state.
+    """
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    elaH = float(m.elaH(m.tNow))
+    iceH = float(m.iceH(m.tNow))
+    iceT = float(m.iceT(m.tNow))
+    H0 = np.where(zbed > 2000.0, 500.0, 0.0)   # 500 m cap above 2000 m
+
+    m.iceHL.setArray(H0.copy())
+    m._iceFlowSIAImplicit(elaH, iceH, iceT)
+    Hi = m.iceHL.getArray().copy()
+
+    m.iceHL.setArray(H0.copy())
+    m._iceFlowSIAExplicit(elaH, iceH, iceT)
+    He = m.iceHL.getArray().copy()
+
+    assert np.isfinite(Hi).all() and (Hi >= -1.0e-9).all()
+    # The SIA step (flux + SMB) actually changed the dome — not a no-op.
+    assert float(np.max(np.abs(Hi - H0))) > 1.0, "SIA step did nothing."
+    # Implicit production solver agrees with the explicit oracle.
+    denom = max(float(He.max()), 1.0)
+    rel = float(np.max(np.abs(Hi - He))) / denom
+    assert rel < 1.0e-2, (
+        f"Implicit and explicit SIA disagree (rel={rel:.2e}). The implicit "
+        f"flux solve must match the CFL-subcycled reference."
+    )
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,

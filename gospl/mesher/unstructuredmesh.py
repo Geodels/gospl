@@ -841,6 +841,7 @@ class UnstMesh(object):
             self.iceHL.destroy()
             self.iceFAG.destroy()
             self.iceFAL.destroy()
+            self.iceUbL.destroy()
             if self.flexOn:
                 self.iceFlex.destroy()
 
@@ -858,6 +859,7 @@ class UnstMesh(object):
             "_snes_nl", "_snes_nl_f", "_snes_nl_x", "_snes_nl_J",
             "_snes_soil", "_snes_soil_f", "_snes_soil_x",
             "_snes_hill", "_snes_hill_f", "_snes_hill_x",
+            "_snes_ice", "_snes_ice_f", "_snes_ice_x",
             "_ts_marine", "_ts_marine_x",
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
         ):

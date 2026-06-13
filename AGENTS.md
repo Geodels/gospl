@@ -189,7 +189,7 @@ NOT optional parsers. Each sets attributes required by other modules. Never dele
 - `_extraStrata` (called from `_readCompaction`) → `stratLith` (dual-lithology master opt-in), `phi0c/z0c` (coarse porosity curve, defaults to compaction `phi0s/z0s`), `phi0f/z0f` (fine), `fine_k_factor` (fine erodibility multiplier), `bedrock_coarse_frac`, `fine_efficiency`, `pit_inlet_bias_coarse/fine`, `fine_diff_factor` (fine diffusivity multiplier). All inert while `stratLith` is False; forced False if `stratNb == 0`. See `docs/DESIGN_DUAL_LITHOLOGY.md`.
 - `_extraFlex` (:1430) → `nu`, `flex_res_deg`, `flex_bcN/S/E/W`.
 - `_extraOrography` (:1517) → `oro_cw`, `oro_conv_time`, `oro_fall_time`, `oro_precip_*`, `rainfall_frequency`.
-- `_extraIce` (:1621) → `iceT`, `elaH`, `iceH` interpolators.
+- `_extraIce` (:1621) → `iceT`, `elaH`, `iceH` interpolators. `_readIce` also sets the ice flow-model opt-in `ice_flow_model` (`mfd` default proxy | `sia`) and `iceSIA` flag, plus SIA/abrasion/till params (`sia_Aglen/slide/glen/cfl/max_substeps`, `ice_Kg`, `ice_abr_l`, `ice_till_on`) — all inert while `flow_model != 'sia'`. See `docs/DESIGN_ICE_SHEET.md`.
 
 ## YAML parsing helpers (use `_get_param` / `dict.get`)
 `tools/inputparser.py` no longer uses bare `try/except KeyError` for default-on-miss. Two patterns are canonical:

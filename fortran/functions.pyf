@@ -22,6 +22,14 @@ python module _fortran
             double precision intent(in) :: glen
             double precision dimension(nb),intent(out),depend(nb) :: val
         end subroutine ice_flux
+        subroutine ice_velocity(nb,hice,zbed,as,glen,vel)
+            integer :: nb
+            double precision dimension(nb),intent(in),depend(nb) :: hice
+            double precision dimension(nb),intent(in),depend(nb) :: zbed
+            double precision intent(in) :: as
+            double precision intent(in) :: glen
+            double precision dimension(nb),intent(out),depend(nb) :: vel
+        end subroutine ice_velocity
 
         subroutine hillslp_nl(nb,elev,kd,exp,n,val)
             integer :: nb

@@ -132,6 +132,25 @@ def minimal_dual_coarse_model():
 
 
 @pytest.fixture
+def minimal_ice_sia_model():
+    """
+    Minimal model with the opt-in SIA ice-sheet flow model
+    (`ice: flow_model: sia`). Exercises the dynamic ice-thickness evolution
+    (ice_flux kernel). See minimal_ice_sia.yml and docs/DESIGN_ICE_SHEET.md.
+    """
+    return _instantiate("minimal_ice_sia.yml")
+
+
+@pytest.fixture
+def minimal_ice_mfd_model():
+    """
+    Minimal model with the default MFD flow-routing ice proxy (no flow_model
+    key). Confirms the existing ice path is unaffected by the SIA opt-in.
+    """
+    return _instantiate("minimal_ice_mfd.yml")
+
+
+@pytest.fixture
 def incising_model():
     """
     Tilted-plane Model with rain and `nodep: true` so the river-incision
