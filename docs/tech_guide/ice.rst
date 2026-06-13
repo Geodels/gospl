@@ -151,11 +151,26 @@ modes are used depending on whether stratigraphy is active:
   budget stays balanced. The bed bulks up by the porosity contrast between the
   uncompacted till and the compacted source rock.
 
-.. note::
+Independently of the bulk/stratigraphic split, the **deposition distribution**
+has two options. By default the till is spread across the ablation zone weighted
+by the local meltwater rate — adequate when a mesh cell aggregates a whole
+glacier (continental/global resolution). With ``till.route: True`` the till is
+instead **routed down the ice-surface flow network**: it is transported along
+steepest descent of the surface :math:`s = z_\mathrm{bed} + H` and melts out
+progressively toward each catchment's terminus, building moraine at the actual
+ice margins. This is a transport-with-loss solved with the same MPI-correct
+flow-matrix / KSP machinery as the river accumulation,
 
-   Till is deposited across the ablation zone weighted by the meltwater rate
-   rather than routed per ice-catchment to each individual terminus. Both modes
-   are protected by a dedicated mass-conservation test.
+.. math::
+   L_i = A_i + \sum_{u \to i} w_{ui}\,(1-f_u)\,L_u, \qquad D_i = f_i\,L_i,
+
+where :math:`A_i` is the local abraded volume, :math:`L_i` the till load passing
+through cell :math:`i`, and :math:`f_i = \min(1, \dot a_i \Delta t / H_i)` the
+melt-out fraction (forced to 1 at the ice margin so no till leaks onto bare
+ground). Routing is appropriate for high-resolution (sub-km) regional runs where
+individual glacier catchments and termini are resolved; at coarse resolution it
+reduces to near-local deposition. Both options conserve mass and are protected by
+dedicated tests.
 
 Ice loading and flexure
 -----------------------

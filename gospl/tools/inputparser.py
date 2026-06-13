@@ -1697,6 +1697,11 @@ class ReadYaml(object):
 
             tillDict = iceDict.get("till", {})
             self.ice_till_on = bool(tillDict.get("on", False))
+            # Catchment-aware till routing: when True, the abraded till is
+            # routed down the ice-surface flow network and melts out toward each
+            # terminus (for high-resolution regional runs); default False keeps
+            # the melt-weighted spreading across the whole ablation zone.
+            self.ice_till_route = bool(tillDict.get("route", False))
 
             # Use the per-vertex / time-series path when a `glaciers` series is
             # given or any top-level altitude is a map.
@@ -1729,6 +1734,7 @@ class ReadYaml(object):
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
             self.ice_till_on = False
+            self.ice_till_route = False
 
         # Legacy uniform / `evol` path builds the scalar time functions. In
         # series mode the geometry comes from _iceTimeSeries via _updateIce, so
