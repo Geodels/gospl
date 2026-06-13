@@ -9,5 +9,10 @@
         "name": "v2026.6.13",
         "version": "v2026.6.13",
         "url": "https://gospl.readthedocs.io/en/v2026.6.13/"
+    },
+    {
+        "name": "Development",
+        "version": "dev",
+        "url": "https://gospl.readthedocs.io/en/dev/"
     }
 ]
