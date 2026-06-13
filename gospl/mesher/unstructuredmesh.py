@@ -841,6 +841,7 @@ class UnstMesh(object):
             self.iceHL.destroy()
             self.iceMeltL.destroy()
             self.iceUbL.destroy()
+            self.iceAbrL.destroy()
             if self.flexOn:
                 self.iceFlex.destroy()
 

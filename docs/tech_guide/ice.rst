@@ -149,5 +149,12 @@ subsidence and deglaciation drives rebound.
 Output
 ------
 
-``iceH`` (ice thickness) and ``iceUb`` (basal sliding speed) are written to the
-HDF5 output whenever the ice model is on. ``iceH`` is restored on restart.
+Four ice fields are written to the HDF5 / XDMF output whenever the ice model is
+on:
+
+- ``iceH`` — ice thickness (m); restored on restart;
+- ``iceUb`` — basal sliding speed (m/yr);
+- ``iceMelt`` — ablation meltwater (m\ :sup:`3`/yr) re-injected into the rivers
+  (the glacial contribution to downstream discharge);
+- ``iceAbr`` — glacial abrasion rate :math:`E_g = K_g|u_b|^{l}` (m/yr); zero
+  where abrasion is off (``Kg = 0``).

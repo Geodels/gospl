@@ -35,6 +35,12 @@
          <Attribute Type="Scalar" Center="Node" Name="iceH">
           <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="3766 1">h5/gospl.0.p0.h5:/iceH</DataItem>
          </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="iceMelt">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="3766 1">h5/gospl.0.p0.h5:/iceMelt</DataItem>
+         </Attribute>
+         <Attribute Type="Scalar" Center="Node" Name="iceAbr">
+          <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="3766 1">h5/gospl.0.p0.h5:/iceAbr</DataItem>
+         </Attribute>
          <Attribute Type="Scalar" Center="Node" Name="SL">
           <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="3766 1">h5/gospl.0.p0.h5:/sedLoad</DataItem>
          </Attribute>

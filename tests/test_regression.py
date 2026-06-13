@@ -529,14 +529,16 @@ def test_ice_sia_flexure_loading(minimal_ice_flex_model):
     assert np.isfinite(flx).all(), "flexural field non-finite"
     assert float(flx.min()) < 0.0, "no subsidence — ice/sediment load not applied"
 
-    # SIA basal-velocity output is written (Phase 6).
+    # The ice diagnostic fields are written: thickness, basal velocity,
+    # meltwater and abrasion rate.
     files = sorted(
         glob.glob(os.path.join(str(model.outputDir), "h5", "gospl.*.p*.h5"))
     )
     if files:
         h5py = pytest.importorskip("h5py")
         with h5py.File(files[-1], "r") as hf:
-            assert "iceUb" in hf, "SIA basal-velocity field iceUb not in output"
+            for field in ("iceH", "iceUb", "iceMelt", "iceAbr"):
+                assert field in hf, f"ice output field {field} not in output"
 
 
 def _strata_parser(stratNb):

@@ -69,9 +69,14 @@ class IceMesh(object):
             # Basal sliding speed (m/yr) from the SIA solve; the driver for the
             # velocity-based glacial abrasion law. Registered in destroy_DMPlex.
             self.iceUbL = self.hLocal.duplicate()
+            # Glacial abrasion rate E_g = Kg|u_b|^l (m/yr); a diagnostic output
+            # field, populated every step from the basal velocity (zero where
+            # abrasion is off, i.e. Kg = 0).
+            self.iceAbrL = self.hLocal.duplicate()
             self.iceHL.set(0.0)
             self.iceMeltL.set(0.0)
             self.iceUbL.set(0.0)
+            self.iceAbrL.set(0.0)
             # Glacial-till mass-balance diagnostics (m^3, owned-node running
             # totals reduced by the till-conservation test).
             self._tillEroded = 0.0
@@ -114,6 +119,11 @@ class IceMesh(object):
         ub = ice_velocity(self.lpoints, H, zbed, as_, n)
         ub[H <= 1.0e-2] = 0.0
         self.iceUbL.setArray(ub)
+        # Glacial abrasion rate diagnostic E_g = Kg|u_b|^l (m/yr), subaerial
+        # only; matches the incision applied by _glacialAbrasion / glacialTill.
+        abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
+        abr[self.seaID] = 0.0
+        self.iceAbrL.setArray(abr)
         melt_local = np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
         self.iceMeltL.setArray(melt_local)
         return
@@ -221,6 +231,7 @@ class IceMesh(object):
         if max_elev < elaH or iceH <= elaH:
             self.iceHL.set(0.)
             self.iceUbL.set(0.)
+            self.iceAbrL.set(0.)
             self.iceMeltL.set(0.)
             if self.flexOn:
                 self.iceFlex.set(0.)

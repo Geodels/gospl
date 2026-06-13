@@ -105,6 +105,8 @@ appendix of `DUAL_LITHOLOGY_SUMMARY.md` for the flexure-method overview.
 |---|---|---|
 | `iceH` | mesh HDF5 / XDMF | ice thickness (m); restored on restart |
 | `iceUb` | mesh HDF5 / XDMF | basal sliding speed (m/yr); abrasion driver and dynamics diagnostic |
+| `iceMelt` | mesh HDF5 / XDMF | ablation meltwater (m³/yr) re-injected into the rivers — glacial discharge contribution |
+| `iceAbr` | mesh HDF5 / XDMF | glacial abrasion rate `E_g = Kg·|u_b|^l` (m/yr); zero when abrasion is off |
 
 The old `iceFA` (MFD ice flow accumulation) output is removed.
 

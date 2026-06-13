@@ -346,6 +346,26 @@ class WriteMesh(object):
                 )
                 f["iceUb"][:, 0] = self.iceUbL.getArray().copy()
 
+                # Ablation meltwater (m^3/yr) re-injected into the rivers: the
+                # glacial contribution to downstream discharge.
+                f.create_dataset(
+                    "iceMelt",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["iceMelt"][:, 0] = self.iceMeltL.getArray().copy()
+
+                # Glacial abrasion rate E_g = Kg|u_b|^l (m/yr); zero where
+                # abrasion is off (Kg = 0).
+                f.create_dataset(
+                    "iceAbr",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["iceAbr"][:, 0] = self.iceAbrL.getArray().copy()
+
             if self.flexOn:
                 f.create_dataset(
                     "flexIso",
@@ -658,6 +678,24 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/iceH</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceMelt">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceMelt</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceAbr">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceAbr</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 
