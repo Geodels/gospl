@@ -349,6 +349,46 @@ def test_ice_mfd_proxy_still_runs(minimal_ice_mfd_model):
     assert float(H.max()) > 0.0, "MFD proxy produced no ice."
 
 
+@pytest.mark.slow
+def test_ice_sia_implicit_matches_explicit(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 1b — the implicit (production) SIA
+    solver agrees with the explicit reference oracle on a flux-active thick ice
+    dome, and the SIA flux actually redistributes ice (not just SMB).
+
+    A 500 m ice cap over the high ground is stepped once by each solver from the
+    same initial state. The implicit solve (unconditionally stable, full dt in
+    one solve) must match the CFL-subcycled explicit reference to a tight
+    tolerance — validating the implicit flux solve against the oracle and the
+    convergence of the SNES on a stiff (thick-ice) state.
+    """
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    elaH = float(m.elaH(m.tNow))
+    iceH = float(m.iceH(m.tNow))
+    iceT = float(m.iceT(m.tNow))
+    H0 = np.where(zbed > 2000.0, 500.0, 0.0)   # 500 m cap above 2000 m
+
+    m.iceHL.setArray(H0.copy())
+    m._iceFlowSIAImplicit(elaH, iceH, iceT)
+    Hi = m.iceHL.getArray().copy()
+
+    m.iceHL.setArray(H0.copy())
+    m._iceFlowSIAExplicit(elaH, iceH, iceT)
+    He = m.iceHL.getArray().copy()
+
+    assert np.isfinite(Hi).all() and (Hi >= -1.0e-9).all()
+    # The SIA step (flux + SMB) actually changed the dome — not a no-op.
+    assert float(np.max(np.abs(Hi - H0))) > 1.0, "SIA step did nothing."
+    # Implicit production solver agrees with the explicit oracle.
+    denom = max(float(He.max()), 1.0)
+    rel = float(np.max(np.abs(Hi - He))) / denom
+    assert rel < 1.0e-2, (
+        f"Implicit and explicit SIA disagree (rel={rel:.2e}). The implicit "
+        f"flux solve must match the CFL-subcycled reference."
+    )
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,

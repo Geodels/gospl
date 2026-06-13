@@ -1672,6 +1672,9 @@ class ReadYaml(object):
             self.sia_glen = siaDict.get("glen", 3.0)         # Glen exponent n
             self.sia_cfl = siaDict.get("cfl", 0.25)          # explicit-ref CFL number
             self.sia_max_substeps = siaDict.get("max_substeps", 500)
+            # 'implicit' (default, production semi-implicit SNES) or 'explicit'
+            # (CFL-subcycled reference/validation scheme).
+            self.sia_solver = siaDict.get("solver", "implicit")
 
             abrDict = iceDict.get("abrasion", {})
             self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
@@ -1692,6 +1695,7 @@ class ReadYaml(object):
             self.sia_glen = 3.0
             self.sia_cfl = 0.25
             self.sia_max_substeps = 500
+            self.sia_solver = "implicit"
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
             self.ice_till_on = False
