@@ -60,6 +60,12 @@ the distal basin), depocenter/distal-biased lake and marine deposition,
 per-fraction compaction, and fine-pile advection. Total **and** per-fraction
 mass are conserved on a closed sphere.
 
+The **glacial till** produced by the SIA ice-sheet model (now on `dev`) also
+feeds this chain: when stratigraphy is on, abraded rock is removed from the
+layers it came from and re-deposited as a moraine split into the coarse/fine
+fractions (carrying the abraded fine fraction), so the per-fraction solid budget
+stays balanced. See `docs/ICE_SHEET_SUMMARY.md`.
+
 ### Flexure — existing machinery, no new code this cycle
 
 No flexure source was modified (`addprocess.py` flexure routines,
