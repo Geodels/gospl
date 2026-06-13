@@ -277,6 +277,9 @@ def test_ice_opt_in():
     assert p.iceOn is True
     assert p.sia_Aglen == 1.0e-16 and p.sia_glen == 3.0
     assert p.ice_Kg == 0.0 and p.ice_till_on is False
+    # Terminus is unprescribed -> sentinel, resolved to the sea-level position
+    # at runtime (so ice is not silently truncated above sea level).
+    assert float(p.iceT(p.tStart)) < -1.0e9
 
     # ---- Case 3: full SIA parameters ----
     p = _ice_parser()
@@ -374,6 +377,38 @@ def test_ice_seed_and_evolve(minimal_ice_seed_model):
     # Still a valid ice field after evolving the seed.
     assert np.isfinite(H).all() and (H >= -1.0e-9).all()
     assert float(H.max()) > 0.0, "seeded ice vanished entirely"
+
+
+@pytest.mark.slow
+def test_ice_terminus_sea_level_floor(minimal_ice_sia_model):
+    """
+    Protects: the terminus floor is max(hterm, sea level) — no land ice persists
+    below the sea surface, and a prescribed hterm below sea level is raised to
+    sea level. The unprescribed default resolves to the sea-level position.
+    """
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    n = m.lpoints
+    H_in = np.full(n, 100.0)            # ice everywhere to start
+    mdot0 = np.zeros(n)
+
+    # Sea level at 500 m; terminus unprescribed (sentinel) -> floor = sea level.
+    m.sealevel = 500.0
+    m._iceSIAFinalize(H_in.copy(), zbed, mdot0, -1.0e10, m.sia_slide, m.sia_glen)
+    H = m.iceHL.getArray()
+    assert (H[zbed < 500.0] == 0.0).all(), "ice kept below sea level"
+    if (zbed >= 500.0).any():
+        assert (H[zbed >= 500.0] > 0.0).any(), "ice wrongly removed above sea level"
+
+    # Prescribed hterm BELOW sea level is raised to sea level (floor stays 500).
+    m._iceSIAFinalize(H_in.copy(), zbed, mdot0, 100.0, m.sia_slide, m.sia_glen)
+    H = m.iceHL.getArray()
+    assert (H[zbed < 500.0] == 0.0).all(), "hterm below sea level not raised to sea level"
+
+    # Prescribed hterm ABOVE sea level is respected (floor = hterm = 800).
+    m._iceSIAFinalize(H_in.copy(), zbed, mdot0, 800.0, m.sia_slide, m.sia_glen)
+    H = m.iceHL.getArray()
+    assert (H[zbed < 800.0] == 0.0).all(), "prescribed terminus above sea level not honoured"
 
 
 @pytest.mark.slow

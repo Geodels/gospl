@@ -83,10 +83,13 @@ using a cached, Jacobian-free PETSc ``SNES`` (``ngmres`` with a CG / HYPRE
 BoomerAMG inner solve) — the same non-linear-diffusion machinery as the
 non-linear hillslope solver. The scheme is unconditionally stable, so it takes
 the **full goSPL time step in one solve**. The free boundary :math:`H \ge 0` is
-enforced by clamping after convergence, and ice is removed below the glacier
-terminus elevation (``hterm``). The solver is validated against the analytical
-SIA dome: with zero surface mass balance the flux conserves ice volume to the
-numerical floor.
+enforced by clamping after convergence, and ice is removed below the terminus
+floor :math:`\max(h_\mathrm{term}, \text{sea level})` — so it never persists
+below the (possibly time-varying) sea surface, and an ``hterm`` below sea level
+is raised to it. When ``hterm`` is omitted the floor is simply the sea-level
+position, leaving the dynamics and ablation to set the terminus. The solver is
+validated against the analytical SIA dome: with zero surface mass balance the
+flux conserves ice volume to the numerical floor.
 
 From the converged thickness, goSPL derives the **basal sliding speed**
 :math:`u_b` (``ice_velocity`` kernel), which is written to the output as
