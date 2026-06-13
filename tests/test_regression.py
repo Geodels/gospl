@@ -20,6 +20,8 @@ EXERCISES public + private methods documented in AGENTS.md.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -888,6 +890,45 @@ def test_dual_fine_conservation(minimal_dual_model):
         f"rel imbalance={rel:.2e} (> 5e-3). A fine-only leak the total-cumED "
         f"test cannot see."
     )
+
+
+@pytest.mark.slow
+def test_dual_sedloadf_output(minimal_dual_model, minimal_strat_model):
+    """
+    Protects: the fine sediment load `sedLoadF` is written to the HDF5 output
+    when dual lithology is enabled, and absent for single-fraction runs.
+    `sedLoad` is the TOTAL flux; `sedLoadF` the fine sub-flux, so
+    0 <= sedLoadF <= sedLoad at every node.
+    """
+    h5py = pytest.importorskip("h5py")
+    import glob
+
+    def _latest_h5(model):
+        files = sorted(
+            glob.glob(os.path.join(str(model.outputDir), "h5", "gospl.*.p*.h5"))
+        )
+        return files[-1] if files else None
+
+    # ---- dual run writes sedLoadF, 0 <= fine <= total ----
+    dual = minimal_dual_model
+    dual.runProcesses()
+    f = _latest_h5(dual)
+    assert f is not None, "no gospl HDF5 output was written"
+    with h5py.File(f, "r") as hf:
+        assert "sedLoadF" in hf, "sedLoadF missing from dual-lithology output"
+        sl = np.array(hf["sedLoad"])[:, 0]
+        slf = np.array(hf["sedLoadF"])[:, 0]
+    assert (slf >= 0.0).all(), "negative fine sediment load"
+    assert (slf <= sl + 1.0e-6).all(), "fine load exceeds total load"
+
+    # ---- single-fraction stratigraphy run must NOT write sedLoadF ----
+    single = minimal_strat_model
+    single.runProcesses()
+    fs = _latest_h5(single)
+    with h5py.File(fs, "r") as hf:
+        assert "sedLoad" in hf and "sedLoadF" not in hf, (
+            "single-fraction output must not contain sedLoadF"
+        )
 
 
 # ---------------------------------------------------------------------------

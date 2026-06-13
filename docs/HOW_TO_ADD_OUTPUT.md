@@ -41,6 +41,7 @@ Each rank writes its own partition of the data into `gospl.<step>.p<rank>.h5`. T
 | `flexIso` | `flexIso` | `self.localFlex` (numpy array) | `self.flexOn` |
 | `soilH` | `soilH` | `self.Lsoil.getArray().copy()` (Vec) | `self.cptSoil` |
 | `sedLoad` | `SL` | `self.vSedLocal.getArray().copy()` + floor | always |
+| `sedLoadF` | `SLf` | `self.vSedFLocal.getArray().copy()` + floor (fine sub-flux; coarse = sedLoad − sedLoadF) | `self.stratLith` (dual lithology) |
 | `uplift` | `vTec` | `self.upsub` (numpy array) | `self.upsub is not None` |
 | `rain` | `Rain` | `self.rainVal` (numpy array) | `self.rainVal is not None` |
 | `sea` | `sea` | constant function of `self.sealevel`, no HDF5 dataset | always (XMF only) |
@@ -273,7 +274,7 @@ Add the matching XMF block in `_save_DMPlex_XMF` in the SAME relative position s
 
 ### Restart loop (optional)
 
-`readData` (outmesh.py:401-493) restores the state Vecs from a previous run's HDF5 outputs. Only fields that participate in restarting the simulation appear there — `elev`, `erodep`, `EDrate`, `FA`, `fillFA`, `sedLoad`, optionally `iceH`, `flexIso`, `soilH`.
+`readData` (outmesh.py:401-493) restores the state Vecs from a previous run's HDF5 outputs. Only fields that participate in restarting the simulation appear there — `elev`, `erodep`, `EDrate`, `FA`, `fillFA`, `sedLoad`, optionally `sedLoadF` (dual lithology), `iceH`, `flexIso`, `soilH`.
 
 - **If your field is purely a visualisation output**, do NOT add a read block in `readData`. Restart works fine without it.
 - **If your field is state** (initialised at the start of a fresh run, expected to survive restarts), add a read block mirroring outmesh.py:434-441:
