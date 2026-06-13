@@ -14,6 +14,10 @@ from gospl.tools.constants import BOUNDARY_FLOW_SENTINEL, MISSING_DATA_SENTINEL
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdreceivers
     from gospl._fortran import epsfill
+    from gospl._fortran import ice_flux
+
+# Ice density (kg/m^3), used for the SIA deformation coefficient and loading.
+RHO_ICE = 910.0
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
@@ -130,6 +134,118 @@ class IceMesh(object):
 
         return
 
+    def _iceFlowSIA(self, elaH, iceH, iceT):
+        r"""
+        Shallow-Ice-Approximation ice-thickness evolution (Phase 1).
+
+        Prognostic: evolves the **persistent** ice thickness ``self.iceHL`` over
+        the goSPL step by integrating
+
+        .. math:: \partial H/\partial t = \dot m - \nabla\!\cdot q,\quad q=(u_d+u_s)H,\ s=z_{bed}+H
+
+        with the SIA flux divergence from the Glen's-law ``ice_flux`` kernel
+        (deformation `u_d` + sliding `u_s`) on the **total surface** (bed + H).
+        Surface mass balance `ṁ` is the ELA model (no `meltfac` — that is an
+        MFD numerical sink amplifier, not physical).
+
+        .. important::
+            This is the **explicit, CFL-subcycled reference scheme** — the
+            validation oracle (see ``docs/DESIGN_ICE_SHEET.md`` §3). It is
+            correct but, at goSPL's km / 10²–10⁴ yr scale, can hit
+            ``sia_max_substeps``; the **implicit (semi-implicit SNES)** solve is
+            the production scheme (Phase 1b). Coefficients (`ad`, `as`, `glen`)
+            are uniform (the kernel's signature); spatially-variable sliding is
+            a later extension.
+        """
+
+        n = self.sia_glen
+        # Deformation coefficient ad = 2 A (rho_ice g)^n / (n+2) (SIA flux form).
+        ad = 2.0 * self.sia_Aglen * (RHO_ICE * self.gravity) ** n / (n + 2.0)
+        as_ = self.sia_slide
+
+        zbed = self.hLocal.getArray().copy()              # bed elevation (fixed this step)
+        rainV = self.rainVal.copy()                       # precip rate (m/yr)
+        ramp = (zbed - elaH) / (iceH - elaH)
+        ramp[ramp > 1.0] = 1.0
+        mdot = rainV * ramp                               # surface mass balance (m ice/yr)
+
+        H = self.iceHL.getArray().copy()                  # persistent ice thickness
+
+        # Precompute neighbour offsets/distances once (mesh is fixed).
+        if not hasattr(self, "_iceNgbSafe"):
+            ngb = self.FVmesh_ngbID
+            valid = ngb >= 0
+            safe = np.where(valid, ngb, 0)
+            d = self.lcoords[safe] - self.lcoords[:, None, :]
+            dist = np.sqrt((d * d).sum(axis=2))
+            dist[~valid] = np.inf
+            finite = dist[valid]
+            self._iceNgbSafe = safe
+            self._iceNgbDist = dist
+            self._iceMinDist2 = float(finite.min() ** 2) if finite.size else 1.0
+        safe = self._iceNgbSafe
+        dist = self._iceNgbDist
+        nm1 = n - 1.0
+
+        # CFL-subcycled explicit integration over the goSPL timestep.
+        t_done = 0.0
+        sub = 0
+        while t_done < self.dt - 1.0e-9:
+            # Halo-sync H so ice_flux sees current ghost-node values (MPI).
+            self.tmpL.setArray(H)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            H = self.tmpL.getArray().copy()
+
+            div = ice_flux(self.lpoints, H, zbed, ad, as_, n)   # ∇·q per cell
+
+            # Stable substep from the SIA diffusivity D = (ad H^{n+1}+as H^{n-1})·H·|∇s|^{n-1}.
+            s = zbed + H
+            slope = np.abs(s[:, None] - s[safe]) / dist
+            gradS = slope.max(axis=1)
+            Dcell = (ad * H ** (n + 1.0) + as_ * np.maximum(H, 0.0) ** nm1) * H * gradS ** nm1
+            Dmax = MPI.COMM_WORLD.allreduce(
+                float(np.max(Dcell)) if Dcell.size else 0.0, op=MPI.MAX
+            )
+            if Dmax > 0.0:
+                dt_sub = min(
+                    self.dt - t_done,
+                    self.sia_cfl * self._iceMinDist2 / (2.0 * Dmax),
+                )
+            else:
+                dt_sub = self.dt - t_done
+
+            H = H + dt_sub * (mdot - div)
+            H[H < 0.0] = 0.0                              # free boundary: no negative ice
+            t_done += dt_sub
+            sub += 1
+            if sub >= self.sia_max_substeps:
+                if MPIrank == 0:
+                    print(
+                        "SIA ice solve hit max_substeps=%d (%.1f%% of dt done); "
+                        "consider the implicit solver."
+                        % (self.sia_max_substeps, 100.0 * t_done / self.dt),
+                        flush=True,
+                    )
+                break
+
+        # Glacier terminus clamp (below it, ice is removed).
+        H[zbed < iceT] = 0.0
+
+        self.iceHL.setArray(H)
+
+        # Meltwater for the river coupling: ablation water volume where ice is
+        # present (m^3/yr), consumed by flowplex.flowAccumulation. No meltfac.
+        melt_local = np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
+        self.iceMeltL.setArray(melt_local)
+
+        # The MFD "ice flow accumulation" is not meaningful under SIA; zero it
+        # (SIA-mode glacial erosion uses the basal velocity, Phase 3).
+        self.iceFAL.set(0.0)
+        self.iceFAG.set(0.0)
+
+        return
+
     def iceAccumulation(self):
         """
         Main Ice Accumulation Calculation.
@@ -170,6 +286,19 @@ class IceMesh(object):
             self.iceMeltL.set(0.)
             if self.flexOn:
                 self.iceFlex.set(0.)
+            return
+
+        # Dual ice flow models: SIA dynamics (opt-in) vs the MFD routing proxy.
+        if self.iceSIA:
+            self._iceFlowSIA(elaH, iceH, iceT)
+            if self.flexOn and self.tNow == self.tStart:
+                self.iceHL.copy(result=self.iceFlex)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Glaciers Accumulation - SIA (%0.02f seconds)"
+                    % (process_time() - ti),
+                    flush=True,
+                )
             return
 
         # Compute the flow direction matrix for ice

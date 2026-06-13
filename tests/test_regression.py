@@ -302,6 +302,53 @@ def test_ice_flow_model_opt_in():
         p._readIce()
 
 
+@pytest.mark.slow
+def test_ice_sia_runs_and_invariants(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 1 — the SIA ice-sheet model runs
+    end-to-end (the dynamic ice_flux thickness evolution) and preserves the
+    physical invariants of a free-boundary ice solve.
+
+    Invariants after a run:
+      - ice thickness non-negative and finite everywhere (free boundary, no
+        blow-up from the explicit subcycling);
+      - ice actually forms (max H > 0);
+      - no ice below the glacier terminus elevation (terminus clamp);
+      - ice only where it can accumulate (above the ELA region).
+    """
+    model = minimal_ice_sia_model
+    assert model.iceSIA is True and model.ice_flow_model == "sia"
+
+    model.runProcesses()
+
+    H = model.iceHL.getArray()
+    zbed = model.hLocal.getArray()
+    elaH = float(model.elaH(model.tNow))
+    iceT = float(model.iceT(model.tNow))
+
+    assert np.isfinite(H).all(), "SIA ice thickness went non-finite (blow-up)."
+    assert (H >= -1.0e-9).all(), "Negative ice thickness (free boundary violated)."
+    assert float(H.max()) > 0.0, "SIA produced no ice."
+    assert not (H[zbed < iceT] > 1.0e-6).any(), "Ice below the glacier terminus."
+    # Ice only where accumulation is possible (at/above the ELA).
+    assert not (H[zbed < elaH] > 1.0e-6).any(), "Ice below the ELA."
+
+
+@pytest.mark.slow
+def test_ice_mfd_proxy_still_runs(minimal_ice_mfd_model):
+    """
+    Protects: the existing MFD flow-routing ice proxy is unaffected by the SIA
+    opt-in. With no `flow_model` key, iceSIA is False and the proxy path runs,
+    producing ice via the Bahr width-area scaling.
+    """
+    model = minimal_ice_mfd_model
+    assert model.iceSIA is False and model.ice_flow_model == "mfd"
+    model.runProcesses()
+    H = model.iceHL.getArray()
+    assert np.isfinite(H).all() and (H >= -1.0e-9).all()
+    assert float(H.max()) > 0.0, "MFD proxy produced no ice."
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,
