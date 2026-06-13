@@ -129,12 +129,24 @@ a P1 add-on.
 The per-step **flow-graph build** (`downhill_edges`) is fully vectorised in NumPy
 (edge slopes/weights via CSR run-length + `bincount`/`lexsort`). The downstream
 **accumulation sweep** is inherently sequential (topological order, each node
-depends on its donors) — O(N+E) per step in Python, the bottleneck for large
-meshes. Production speed-ups (not in the prototype): a `numba`-JIT sweep, or
-recast the deposition as the **sparse transport-with-loss solve**
-`(I − Wᵀ diag(1−f)) L_c = A_c` per class (the same linear form as the SIA till
-routing), factorising once per step and solving the N_class right-hand sides in
-compiled sparse code.
+depends on its donors) — O(N+E) per step.
+
+The sweep is factored into a single Numba-`njit`-compatible kernel (`_sweep_impl`)
+used both as the pure-Python reference and, when `numba` is installed, as the
+compiled fast path (`method='auto'|'numba'|'python'`, default `auto`). Both give
+identical results. Numba removes the Python per-node loop — the dominant cost at
+scale — for a several-fold per-step speedup that grows with N (≈2.4× at 40 k
+nodes in a quick bench; the vectorised edge build / erosion is shared, so small
+meshes gain little).
+
+**A sparse transport-with-loss solve was prototyped and rejected.** Recasting the
+deposition as `(I − Wᵀ diag(1−f)) L_c = A_c` per class and factorising with
+`splu` is exact only when *no* node is sediment-undersupplied (`f = D/T` ≤ 1) —
+but the reconstruction *does* hit under-supply (net per-output-step `erodep` can
+exceed the through-flux a coarse-cadence snapshot sees), where it diverges from
+the `min(D, flux)` cap; and it was **slower** than the Python sweep at realistic
+sizes (LU fill-in on the 2-D mesh matrix + two factorisations per step). The
+Numba sweep is exact and faster, so it is the chosen path.
 
 ## 5. Copper prospectivity — scope boundary
 

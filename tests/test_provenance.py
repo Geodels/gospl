@@ -107,6 +107,31 @@ def test_mfd_splits_by_slope():
     assert np.isclose(t2.dep[1, 0], 0.0)
 
 
+def test_numba_matches_python():
+    """The Numba-compiled sweep reproduces the pure-Python reference exactly
+    (same kernel source). Skipped if numba is not installed."""
+    pytest.importorskip("numba")
+
+    def run(method, mesh, src, n):
+        coords, elev, nbr = mesh
+        t = prov.ProvenanceTracker(coords, src, n, neighbours=nbr, method=method)
+        t.step(elev, np.zeros(len(coords)))
+        t.step(elev, np.array([-2.0, -1.0, 0.0, 3.0, 0.0]) if len(coords) == 5
+               else np.array([-3.0, 10.0, 10.0, 0.0]))
+        return t
+
+    py = run("python", _chain(), np.array([0, 1, 0, 0, 0]), 2)
+    nb = run("numba", _chain(), np.array([0, 1, 0, 0, 0]), 2)
+    assert np.allclose(py.dep, nb.dep)
+    assert np.allclose(np.nan_to_num(py.mean_distance()),
+                       np.nan_to_num(nb.mean_distance()))
+    assert np.isclose(py.exported.sum(), nb.exported.sum())
+
+    py_f = run("python", _fan(), np.array([0, 0, 0, 0]), 1)
+    nb_f = run("numba", _fan(), np.array([0, 0, 0, 0]), 1)
+    assert np.allclose(py_f.dep, nb_f.dep)
+
+
 def test_source_class_validation():
     """source_class must be a full per-vertex array in [0, n_classes)."""
     coords, _, nbr = _chain()
