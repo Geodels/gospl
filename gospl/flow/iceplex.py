@@ -15,6 +15,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdreceivers
     from gospl._fortran import epsfill
     from gospl._fortran import ice_flux
+    from gospl._fortran import ice_velocity
 
 # Ice density (kg/m^3), used for the SIA deformation coefficient and loading.
 RHO_ICE = 910.0
@@ -54,8 +55,13 @@ class IceMesh(object):
             self.iceMeltL = self.hLocal.duplicate()
             if self.flexOn:
                 self.iceFlex = self.hLocal.duplicate()
+            # Basal sliding speed (m/yr) from the SIA solve; the driver for the
+            # velocity-based glacial abrasion law (Phase 3). Zero under the MFD
+            # proxy. Registered in destroy_DMPlex.
+            self.iceUbL = self.hLocal.duplicate()
             self.iceHL.set(0.0)
             self.iceMeltL.set(0.0)
+            self.iceUbL.set(0.0)
             # Cached SIA implicit-solver handles (created lazily on first use;
             # destroyed in destroy_DMPlex).
             self._snes_ice = None
@@ -155,16 +161,21 @@ class IceMesh(object):
         mdot = self.rainVal * ramp                        # surface mass balance (m ice/yr)
         return n, ad, as_, zbed, mdot
 
-    def _iceSIAFinalize(self, H, zbed, mdot, iceT):
+    def _iceSIAFinalize(self, H, zbed, mdot, iceT, as_, n):
         """
         Common post-solve steps for both SIA solvers: terminus clamp, store the
-        ice thickness, capture ablation meltwater (m^3/yr) for the river
-        coupling, and zero the MFD ice-flow field (SIA-mode erosion uses the
-        basal velocity, Phase 3).
+        ice thickness, the basal sliding speed (for Phase-3 abrasion), capture
+        ablation meltwater (m^3/yr) for the river coupling, and zero the MFD
+        ice-flow field (SIA-mode erosion uses the basal velocity, not it).
         """
         H = np.maximum(H, 0.0)
         H[zbed < iceT] = 0.0
         self.iceHL.setArray(H)
+        # Basal sliding speed from the converged thickness (steepest-descent
+        # SIA velocity); zero where there is no ice.
+        ub = ice_velocity(self.lpoints, H, zbed, as_, n)
+        ub[H <= 1.0e-2] = 0.0
+        self.iceUbL.setArray(ub)
         melt_local = np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
         self.iceMeltL.setArray(melt_local)
         self.iceFAL.set(0.0)
@@ -242,7 +253,7 @@ class IceMesh(object):
             )
 
         self.dm.globalToLocal(x, self.tmpL)
-        self._iceSIAFinalize(self.tmpL.getArray().copy(), zbed, mdot, iceT)
+        self._iceSIAFinalize(self.tmpL.getArray().copy(), zbed, mdot, iceT, as_, n)
 
         return
 
@@ -316,7 +327,7 @@ class IceMesh(object):
                     )
                 break
 
-        self._iceSIAFinalize(H, zbed, mdot, iceT)
+        self._iceSIAFinalize(H, zbed, mdot, iceT, as_, n)
 
         return
 

@@ -333,6 +333,11 @@ def test_ice_sia_runs_and_invariants(minimal_ice_sia_model):
     # Ice only where accumulation is possible (at/above the ELA).
     assert not (H[zbed < elaH] > 1.0e-6).any(), "Ice below the ELA."
 
+    # Basal sliding speed (Phase 2): finite, non-negative, and confined to ice.
+    ub = model.iceUbL.getArray()
+    assert np.isfinite(ub).all() and (ub >= -1.0e-12).all()
+    assert not (ub[H <= 1.0e-2] > 0.0).any(), "Basal velocity where there is no ice."
+
 
 @pytest.mark.slow
 def test_ice_mfd_proxy_still_runs(minimal_ice_mfd_model):

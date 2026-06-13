@@ -803,6 +803,51 @@ subroutine ice_flux(nb, hice, zbed, ad, as, glen, val)
 
 end subroutine ice_flux
 
+subroutine ice_velocity(nb, hice, zbed, as, glen, vel)
+!*****************************************************************************
+! Per-cell basal sliding speed magnitude for the SIA ice model.
+!
+! SIA ice flows down the surface (zbed+hice) gradient, so the basal sliding
+! velocity is essentially along the steepest-descent direction; we return the
+! magnitude of the largest down-edge sliding velocity at each cell. This is the
+! driver for the velocity-based glacial abrasion law E = Kg*|u_b|^l.
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+    double precision, intent(in) :: hice(nb)
+    double precision, intent(in) :: zbed(nb)
+    double precision, intent(in) :: as
+    double precision, intent(in) :: glen
+
+    double precision, intent(out) :: vel(nb)
+
+    integer :: k, p, i
+    double precision :: hs, midh, nhs, s, us
+
+    vel = 0.
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        hs = zbed(k) + hice(k)
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            i = FVnID(k,p)+1
+            midh = 0.5*(hice(k)+hice(i))
+            nhs = zbed(i) + hice(i)
+            s = (hs-nhs)/FVeLgt(k,p)
+            ! Sliding speed magnitude along this edge (same form as ice_flux).
+            us = as*midh**(glen-1.)*abs(s)**(glen-1.)*s
+            if(abs(us) > vel(k)) vel(k) = abs(us)
+          endif
+        enddo
+      endif
+    enddo
+
+    return
+
+end subroutine ice_velocity
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
 !!   HILLSLOPE AND ADVECTION PROCESSES FUNCTIONS    !!
