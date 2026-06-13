@@ -65,10 +65,15 @@ dependencies = [
 packages = [
     "gospl",
     "gospl._fortran",
+    "gospl.analyse",
 ]
 
 [project.optional-dependencies]
 dev = ["pip-tools", "pytest"]
+# Post-processing analysis tools (gospl.analyse). numba accelerates the
+# sediment-provenance routing sweep; geopandas assigns source/sink classes from
+# shapefiles. Both are optional — the tools fall back / error clearly without them.
+analysis = ["numba", "geopandas"]
 
 [tool.pytest.ini_options]
 # Marker registry — discovered no matter which directory pytest is

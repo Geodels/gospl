@@ -654,6 +654,13 @@ def main(argv=None):
                     basin_rows.append((s, b, pct))
     print("wrote %s.h5 (%d steps)" % (args.out_prefix, len(steps)))
 
+    if cells is not None:
+        write_xdmf(
+            args.out_prefix, len(coords), len(cells), coords.shape[1],
+            n_classes, steps, cu_weight is not None,
+        )
+        print("wrote %s.xdmf (open in ParaView)" % args.out_prefix)
+
     if basin_id is not None:
         with open(args.out_prefix + "_basins.csv", "w") as fh:
             fh.write("step,basin," + ",".join("class%d" % c for c in range(n_classes)) + "\n")
@@ -661,6 +668,73 @@ def main(argv=None):
                 fh.write("%d,%d,%s\n" % (s, b, ",".join("%.3f" % v for v in pct)))
         print("wrote %s_basins.csv (per-step basin %%)" % args.out_prefix)
     return 0
+
+
+def write_xdmf(prefix, npoints, ncells, geom_dim, n_classes, steps, has_cu):
+    """
+    Write an XDMF temporal-collection wrapper for the provenance HDF5 so the
+    per-step results open as a time series in ParaView (it references the
+    ``<prefix>.h5`` datasets — keep the two files side by side).
+
+    Exposes, per step: ``dominant`` source (scalar), ``distance``, optional
+    ``cu_fraction``, and each source's contribution ``frac_class<c>`` (a
+    HyperSlab column of the ``fractions`` array).
+    """
+    import os
+
+    base = os.path.basename(prefix) + ".h5"
+    geom = "XYZ" if geom_dim == 3 else "XY"
+
+    def _scalar(name, path, dtype="Float", prec=4):
+        return (
+            '       <Attribute Name="%s" AttributeType="Scalar" Center="Node">\n'
+            '        <DataItem Format="HDF" NumberType="%s" Precision="%d" '
+            'Dimensions="%d 1">%s:%s</DataItem>\n'
+            '       </Attribute>\n' % (name, dtype, prec, npoints, base, path)
+        )
+
+    def _frac_col(c, sp):
+        # HyperSlab selecting column c of the (npoints, n_classes) fractions.
+        return (
+            '       <Attribute Name="frac_class%d" AttributeType="Scalar" Center="Node">\n'
+            '        <DataItem ItemType="HyperSlab" Dimensions="%d 1">\n'
+            '         <DataItem Dimensions="3 2" Format="XML">0 %d 1 1 %d 1</DataItem>\n'
+            '         <DataItem Format="HDF" NumberType="Float" Precision="4" '
+            'Dimensions="%d %d">%s:/step_%d/fractions</DataItem>\n'
+            '        </DataItem>\n'
+            '       </Attribute>\n'
+            % (c, npoints, c, npoints, npoints, n_classes, base, sp)
+        )
+
+    lines = [
+        '<?xml version="1.0" ?>\n<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>\n',
+        '<Xdmf Version="2.0">\n <Domain>\n',
+        '  <Grid Name="Provenance" GridType="Collection" CollectionType="Temporal">\n',
+    ]
+    for s in steps:
+        lines.append('   <Grid Name="step_%d" GridType="Uniform">\n' % s)
+        lines.append('    <Time Value="%d"/>\n' % s)
+        lines.append(
+            '    <Topology TopologyType="Triangle" NumberOfElements="%d">\n'
+            '     <DataItem Format="HDF" DataType="Int" Dimensions="%d 3">%s:/mesh/cells</DataItem>\n'
+            '    </Topology>\n' % (ncells, ncells, base)
+        )
+        lines.append(
+            '    <Geometry GeometryType="%s">\n'
+            '     <DataItem Format="HDF" NumberType="Float" Precision="8" '
+            'Dimensions="%d %d">%s:/mesh/coords</DataItem>\n'
+            '    </Geometry>\n' % (geom, npoints, geom_dim, base)
+        )
+        lines.append(_scalar("dominant", "/step_%d/dominant" % s, dtype="Int"))
+        lines.append(_scalar("distance", "/step_%d/distance" % s))
+        if has_cu:
+            lines.append(_scalar("cu_fraction", "/step_%d/cu_fraction" % s))
+        for c in range(n_classes):
+            lines.append(_frac_col(c, s))
+        lines.append('   </Grid>\n')
+    lines.append('  </Grid>\n </Domain>\n</Xdmf>\n')
+    with open(prefix + ".xdmf", "w") as f:
+        f.writelines(lines)
 
 
 if __name__ == "__main__":

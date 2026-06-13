@@ -171,3 +171,20 @@ def test_gospl_output_partition_reassembly(tmp_path):
     reader = prov.GosplOutput(str(d), gcoords)
     ed = reader.field(0, "erodep")
     assert np.allclose(ed, [10.0, 20.0, 30.0, 40.0])   # reassembled in global order
+
+
+def test_write_xdmf(tmp_path):
+    """The XDMF wrapper is well-formed XML with one grid per step referencing
+    the HDF5 datasets."""
+    import xml.etree.ElementTree as ET
+
+    prefix = str(tmp_path / "prov")
+    prov.write_xdmf(prefix, npoints=10, ncells=12, geom_dim=3,
+                    n_classes=2, steps=[0, 5], has_cu=True)
+    tree = ET.parse(prefix + ".xdmf")           # raises if malformed
+    grids = tree.getroot().findall(".//Grid[@GridType='Uniform']")
+    assert len(grids) == 2                       # one per step
+    text = open(prefix + ".xdmf").read()
+    assert "prov.h5:/mesh/coords" in text and "prov.h5:/mesh/cells" in text
+    assert "/step_0/dominant" in text and "/step_5/cu_fraction" in text
+    assert 'Name="frac_class0"' in text and 'Name="frac_class1"' in text
