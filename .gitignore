@@ -3,6 +3,7 @@ build
 builddir
 docs/_build/*
 *.pyc
+__pycache__/
 .vscode/*
 dist
 gospl.egg-info
