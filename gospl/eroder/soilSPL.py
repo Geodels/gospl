@@ -324,6 +324,7 @@ class soilSPL(object):
         self.hGlobal.copy(result=self.hOld)
         self.dm.globalToLocal(self.hOld, self.hOldLocal)
         self._getEroDepRateSoil()
+        self._glacialAbrasion()
 
         # Get erosion / deposition thicknesses (Eb is in thickness rate
         # convention: positive deposition, negative incision). See SPL.py.

@@ -338,6 +338,37 @@ class SPL(object):
 
         return
 
+    def _glacialAbrasion(self):
+        r"""
+        Velocity-based glacial abrasion (SIA ice model, Phase 3).
+
+        Adds a bed-lowering term :math:`E_g = K_g\,|u_b|^{l}` (m/yr) to the
+        erosion-deposition rate ``self.Eb`` as an incision (negative, the Eb
+        thickness-rate convention), where :math:`u_b` is the SIA basal sliding
+        speed (``self.iceUbL``, Phase 2). The eroded material then flows into the
+        sediment system through the standard ``Eb·dt`` → cumED / hGlobal /
+        erodeStrat path in the SPL wrappers (no separate bookkeeping).
+
+        No-op unless dual ice flow is on in SIA mode with ``Kg > 0``. Under SIA
+        the legacy stream-power glacial term ``Ki·F^m`` is inactive (iceFAL is
+        zeroed), so the two laws never double-count. Masked to subaerial cells
+        (abrasion is subglacial; no marine abrasion) and to ice presence
+        (``iceUbL`` is already zero where there is no ice).
+        """
+        # When till handling is on, abrasion is routed to till (deposited as
+        # moraine in the ablation zone) by iceplex.glacialTill instead of
+        # straight into the fluvial sediment system — mutually exclusive here.
+        if not (self.iceOn and self.iceSIA) or self.ice_Kg <= 0.0 or self.ice_till_on:
+            return
+        ub = self.iceUbL.getArray()
+        abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
+        abr[self.seaID] = 0.0
+        self.tmpL.setArray(-abr)                 # incision (negative), local
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.Eb.axpy(1.0, self.tmp)              # Eb += (-abrasion)
+        self.dm.globalToLocal(self.Eb, self.EbLocal)
+        return
+
     def erodepSPL(self):
         """
         Modified **stream power law** model used to represent erosion by rivers also taking into account the role played by sediment in modulating erosion and deposition rate.
@@ -353,6 +384,7 @@ class SPL(object):
         self.hGlobal.copy(result=self.hOld)
         self.dm.globalToLocal(self.hOld, self.hOldLocal)
         self._getEroDepRate()
+        self._glacialAbrasion()
 
         # Get erosion / deposition thicknesses (Eb is in thickness rate
         # convention: positive deposition, negative incision; so Eb*dt is

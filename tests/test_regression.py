@@ -394,6 +394,96 @@ def test_ice_sia_implicit_matches_explicit(minimal_ice_sia_model):
     )
 
 
+@pytest.mark.slow
+def test_ice_glacial_abrasion(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 3 — velocity-based glacial abrasion
+    E = Kg·|u_b|^l adds incision to Eb exactly where ice slides (and only there),
+    and is a no-op when Kg = 0.
+
+    Drives _glacialAbrasion with a known basal-velocity field so the result is
+    analytic: Eb = −Kg·u_b (l=1) on the sliding cells, 0 elsewhere.
+    """
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    ub = np.where(zbed > 2000.0, 0.1, 0.0)     # 0.1 m/yr sliding above 2000 m
+    m.iceUbL.setArray(ub.copy())
+    m.ice_abr_l = 1.0
+
+    # Kg = 0 -> no abrasion.
+    m.ice_Kg = 0.0
+    m.Eb.set(0.0)
+    m._glacialAbrasion()
+    assert np.allclose(m.Eb.getArray(), 0.0), "abrasion must be a no-op when Kg=0"
+
+    # Kg > 0 -> incision E = -Kg·u_b where ice slides (all above sea here).
+    m.ice_Kg = 1.0e3
+    m.Eb.set(0.0)
+    m._glacialAbrasion()
+    EbL = m.EbLocal.getArray()
+    sliding = ub > 0.0
+    assert np.allclose(EbL[sliding], -1.0e3 * ub[sliding], rtol=1.0e-6, atol=1.0e-9), (
+        "abrasion incision must equal -Kg*|u_b|^l where ice slides"
+    )
+    assert np.allclose(EbL[~sliding], 0.0, atol=1.0e-9), "abrasion outside ice"
+
+
+@pytest.mark.slow
+def test_ice_glacial_till_conserves(minimal_ice_till_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 4 — glacial till is a conservative
+    bed-to-bed transport: abrasion lowers the bed under sliding ice and the
+    till is deposited (melt-out) in the ablation zone, so the NET bed-volume
+    change is zero (rock moved, not created/destroyed). This is the till
+    analogue of the dual-lithology fine-conservation guard — a volume the total
+    sediment budget cannot see needs its own check.
+
+    The full model runs end-to-end with till on (smoke), then `glacialTill` is
+    driven with an imposed sliding-velocity + meltwater field for a
+    deterministic conservation check.
+    """
+    m = minimal_ice_till_model
+    assert m.iceSIA and m.ice_till_on and m.ice_Kg > 0.0
+    # Full SIA + till run must not break.
+    m.runProcesses()
+
+    # Deterministic conservation check: fast ice up high, ablation band lower.
+    from mpi4py import MPI
+    zbed = m.hLocal.getArray().copy()
+    m.iceUbL.setArray(np.where(zbed > 2500.0, 0.1, 0.0))
+    m.iceMeltL.setArray(np.where((zbed > 1500.0) & (zbed < 2000.0), 1.0, 0.0))
+    larea = m.larea
+    owned = m.inIDs == 1
+
+    cum0 = m.cumEDLocal.getArray().copy()
+    m._tillEroded = 0.0
+    m._tillDeposited = 0.0
+    m.glacialTill()
+    dcum = m.cumEDLocal.getArray() - cum0
+
+    ero = MPI.COMM_WORLD.allreduce(m._tillEroded, op=MPI.SUM)
+    dep = MPI.COMM_WORLD.allreduce(m._tillDeposited, op=MPI.SUM)
+    netvol = MPI.COMM_WORLD.allreduce(
+        float(np.sum((dcum * larea)[owned])), op=MPI.SUM
+    )
+    activity = MPI.COMM_WORLD.allreduce(
+        float(np.sum((np.abs(dcum) * larea)[owned])), op=MPI.SUM
+    )
+
+    assert ero > 0.0, "no till was produced; test is vacuous"
+    # Rock is conserved: eroded volume == deposited volume.
+    assert np.isclose(ero, dep, rtol=1.0e-9), "till eroded != till deposited"
+    # Net bed-volume change is zero relative to the rock moved.
+    assert abs(netvol) / activity < 1.0e-6, (
+        f"glacial till not volume-conserving: net={netvol:.3e} activity={activity:.3e}"
+    )
+    # Bed lowered under fast ice, raised in the ablation zone.
+    assert (dcum[zbed > 2500.0] <= 1.0e-9).all(), "no abrasion under fast ice"
+    assert (dcum[(zbed > 1500.0) & (zbed < 2000.0)] >= -1.0e-9).all(), (
+        "no till deposition in the ablation zone"
+    )
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,
