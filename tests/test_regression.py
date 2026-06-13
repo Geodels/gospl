@@ -243,6 +243,65 @@ def test_evap_parser_opt_in():
 # ---------------------------------------------------------------------------
 
 
+def _ice_parser():
+    """Bare parser primed for `_readIce` (needs tStart/tEnd/dt for the
+    no-file interpolators built in `_extraIce`)."""
+    parser = inputparser.ReadYaml.__new__(inputparser.ReadYaml)
+    parser.input = {}
+    parser.tStart = 0.0
+    parser.tEnd = 1000.0
+    parser.dt = 100.0
+    return parser
+
+
+def test_ice_flow_model_opt_in():
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 0 — the SIA ice flow model is opt-in via
+    `ice: flow_model: sia`; the default (`mfd`, or no key) keeps the existing
+    flow-routing proxy and leaves all SIA parameters inert.
+
+    Invariants:
+      1. No `ice` block        -> iceOn False, iceSIA False, flow_model 'mfd'.
+      2. `ice` without flow_model -> iceOn True, iceSIA False (proxy default).
+      3. `ice: flow_model: sia` + sia/abrasion/till -> iceSIA True, params parsed.
+      4. Unknown flow_model     -> ValueError.
+    """
+    # ---- Case 1: no ice block ----
+    p = _ice_parser()
+    p._readIce()
+    assert p.iceOn is False and p.iceSIA is False and p.ice_flow_model == "mfd"
+
+    # ---- Case 2: ice on, default flow model (proxy) ----
+    p = _ice_parser()
+    p.input = {"ice": {"hela": 1500.0, "hice": 2000.0}}
+    p._readIce()
+    assert p.iceOn is True and p.iceSIA is False and p.ice_flow_model == "mfd"
+
+    # ---- Case 3: SIA enabled with parameters ----
+    p = _ice_parser()
+    p.input = {
+        "ice": {
+            "hela": 1500.0,
+            "hice": 2000.0,
+            "flow_model": "sia",
+            "sia": {"Aglen": 2.0e-16, "slide": 5.0e-3, "glen": 3.0, "cfl": 0.2},
+            "abrasion": {"Kg": 1.0e-4, "l": 1.5},
+            "till": {"on": True},
+        }
+    }
+    p._readIce()
+    assert p.iceSIA is True and p.ice_flow_model == "sia"
+    assert p.sia_Aglen == 2.0e-16 and p.sia_slide == 5.0e-3 and p.sia_glen == 3.0
+    assert p.ice_Kg == 1.0e-4 and p.ice_abr_l == 1.5
+    assert p.ice_till_on is True
+
+    # ---- Case 4: unknown flow model rejected ----
+    p = _ice_parser()
+    p.input = {"ice": {"hela": 1500.0, "hice": 2000.0, "flow_model": "full-stokes"}}
+    with pytest.raises(ValueError):
+        p._readIce()
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,

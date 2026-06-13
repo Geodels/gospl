@@ -1650,12 +1650,51 @@ class ReadYaml(object):
             self.icewf = iceDict.get("fwidth", 1.5)  # width factor (a in Eq. (8))
             # thickness-to-width ratio (delta in Eq. (9))
             self.icewe = iceDict.get("eheight", 0.25)
+
+            # Ice flow model: 'mfd' (default, flow-routing proxy) or 'sia'
+            # (Shallow-Ice-Approximation dynamics). See docs/DESIGN_ICE_SHEET.md.
+            # All SIA parameters are inert while flow_model != 'sia', so the
+            # default keeps the existing proxy behaviour byte-identical.
+            self.ice_flow_model = iceDict.get("flow_model", "mfd")
+            if self.ice_flow_model not in ("mfd", "sia"):
+                if MPIrank == 0:
+                    print(
+                        "Ice flow_model '%s' is not recognised; choices are "
+                        "'mfd' or 'sia'." % self.ice_flow_model,
+                        flush=True,
+                    )
+                raise ValueError("Ice flow_model not recognised.")
+            self.iceSIA = self.ice_flow_model == "sia"
+
+            siaDict = iceDict.get("sia", {})
+            self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
+            self.sia_slide = siaDict.get("slide", 1.0e-3)    # sliding coefficient
+            self.sia_glen = siaDict.get("glen", 3.0)         # Glen exponent n
+            self.sia_cfl = siaDict.get("cfl", 0.25)          # explicit-ref CFL number
+            self.sia_max_substeps = siaDict.get("max_substeps", 500)
+
+            abrDict = iceDict.get("abrasion", {})
+            self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
+            self.ice_abr_l = abrDict.get("l", 1.0)           # sliding-velocity exponent
+
+            tillDict = iceDict.get("till", {})
+            self.ice_till_on = bool(tillDict.get("on", False))
         except KeyError:
             self.iceOn = False
             icefile = None
             elaH = None
             iceH = None
             iceT = None
+            self.ice_flow_model = "mfd"
+            self.iceSIA = False
+            self.sia_Aglen = 1.0e-16
+            self.sia_slide = 1.0e-3
+            self.sia_glen = 3.0
+            self.sia_cfl = 0.25
+            self.sia_max_substeps = 500
+            self.ice_Kg = 0.0
+            self.ice_abr_l = 1.0
+            self.ice_till_on = False
 
         self._extraIce(icefile, elaH, iceH, iceT)
 
