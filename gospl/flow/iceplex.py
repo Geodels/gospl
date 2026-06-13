@@ -8,6 +8,7 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import ice_flux
     from gospl._fortran import ice_velocity
+    from gospl._fortran import mfdreceivers
 
 # Ice density (kg/m^3), used for the SIA deformation coefficient and loading.
 RHO_ICE = 910.0
@@ -320,8 +321,15 @@ class IceMesh(object):
 
         Active only with ``till.on`` and ``Kg > 0``; a no-op otherwise.
 
-        Simplification (documented): till deposits across the ablation zone
-        weighted by melt rather than routed per ice-catchment to each terminus.
+        **Deposition distribution.** By default the till is spread across the
+        whole ablation zone weighted by the meltwater rate. With
+        ``till.route: True`` it is instead **routed down the ice-surface flow
+        network** and melts out toward each catchment's terminus
+        (:meth:`_routeTill`) — appropriate for high-resolution regional runs
+        where individual glacier catchments and termini are resolved. Both
+        produce a per-cell deposition weight (summing to one) consumed
+        identically by the bulk and stratigraphic paths, so conservation is
+        unchanged.
         """
         if not (self.iceOn and self.ice_till_on) or self.ice_Kg <= 0.0:
             return
@@ -334,12 +342,28 @@ class IceMesh(object):
         owned = self.inIDs == 1
         Vtot = MPI.COMM_WORLD.allreduce(float(np.sum(Vero[owned])), op=MPI.SUM)
 
-        melt = self.iceMeltL.getArray()                   # ablation water volume (m^3/yr)
-        Wtot = MPI.COMM_WORLD.allreduce(float(np.sum(melt[owned])), op=MPI.SUM)
+        # No abrasion -> nothing happens (skipping the erosion too keeps it
+        # conservative: no orphaned till).
+        if Vtot <= 0.0:
+            return
 
-        # No abrasion or no ablation zone to receive the till -> nothing happens
-        # (skipping the erosion too keeps it conservative: no orphaned till).
-        if Vtot <= 0.0 or Wtot <= 0.0:
+        # Per-cell deposition weight (local array, Σ over owned nodes = 1):
+        # melt-weighted spreading, or catchment-routed melt-out to the termini.
+        if self.ice_till_route:
+            dep_w = self._routeTill(Vero, Vtot, owned)
+        else:
+            melt = self.iceMeltL.getArray()               # ablation volume (m^3/yr)
+            Wtot = MPI.COMM_WORLD.allreduce(
+                float(np.sum(melt[owned])), op=MPI.SUM
+            )
+            # No ablation zone to receive the melt-spread till -> no-op.
+            if Wtot <= 0.0:
+                return
+            dep_w = melt / Wtot
+
+        # Routing can leave nothing depositable (e.g. no resolved outlet); guard.
+        Wdep = MPI.COMM_WORLD.allreduce(float(np.sum(dep_w[owned])), op=MPI.SUM)
+        if Wdep <= 0.0:
             return
 
         dz_ero = -Eg * self.dt                            # bed lowering (m, ≤0)
@@ -349,12 +373,11 @@ class IceMesh(object):
             # the abraded material leaves the layers it came from and the
             # moraine is recorded as a fresh deposit (split coarse/fine under
             # dual lithology). See _glacialTillStrata.
-            self._glacialTillStrata(dz_ero, melt, Wtot, owned)
+            self._glacialTillStrata(dz_ero, dep_w, owned)
         else:
-            # Bulk bed transport: erode at abrasion cells, deposit the till
-            # where ice melts, weighted by melt. Σ(dz·area) == 0 (rock moved,
-            # not created).
-            dz_dep = (Vtot * melt / Wtot) / self.larea
+            # Bulk bed transport: erode at abrasion cells, deposit the till per
+            # the deposition weight. Σ(dz·area) == 0 (rock moved, not created).
+            dz_dep = (Vtot * dep_w) / self.larea
             dz = dz_ero + dz_dep
             self.tmpL.setArray(dz)
             self.dm.localToGlobal(self.tmpL, self.tmp)
@@ -375,7 +398,7 @@ class IceMesh(object):
 
         return
 
-    def _glacialTillStrata(self, dz_ero, melt, Wtot, owned):
+    def _glacialTillStrata(self, dz_ero, dep_w, owned):
         r"""
         Stratigraphic / dual-lithology coupling for glacial till.
 
@@ -443,8 +466,8 @@ class IceMesh(object):
         # Ice-mixed till composition (single fine fraction for the moraine).
         ffrac = fineV / Vsolid if self.stratLith else 0.0
 
-        # --- Deposition: lay the till down in the ablation zone. ---
-        dz_dep = (Vsolid * melt / Wtot) / self.larea      # bulk till thickness (m)
+        # --- Deposition: lay the till down per the deposition weight. ---
+        dz_dep = (Vsolid * dep_w) / self.larea            # bulk till thickness (m)
         self.depoFineFrac = np.zeros(self.lpoints, dtype=np.float64)
         self.depoFineFrac[dz_dep > 0.0] = ffrac
         # Snapshot the current layer so the bed/cumED update uses the thickness
@@ -478,3 +501,103 @@ class IceMesh(object):
         self.depoFineFrac = saved_depoFineFrac
 
         return
+
+    def _routeTill(self, Vero, Vtot, owned):
+        r"""
+        Catchment-aware till routing on the ice-surface flow network
+        (``till.route: True``).
+
+        The abraded till is transported down the **ice surface**
+        :math:`s = z_\mathrm{bed} + H` along steepest descent (the same
+        direction the ice flux follows) and **melts out** progressively toward
+        each catchment's terminus, building moraine where the ice actually ends
+        rather than smearing it across the whole ablation zone. This matters at
+        high (sub-km) resolution where individual glacier catchments and termini
+        are resolved.
+
+        It is a transport-with-loss on the ice network, solved with the same
+        MPI-correct flow-matrix / KSP machinery as the river accumulation:
+
+        .. math::
+            L_i = A_i + \sum_{u \to i} w_{ui}\,(1 - f_u)\,L_u,
+            \qquad D_i = f_i\,L_i
+
+        where :math:`A_i` is the local abraded volume, :math:`L_i` the till
+        load passing through cell :math:`i`, and :math:`f_i \in [0,1]` the
+        melt-out fraction — the share of the local ice column lost to ablation
+        this step, :math:`f_i = \min(1, \dot{a}_i\,\Delta t / H_i)`. At the ice
+        margin (a cell whose steepest-descent receiver is ice-free) :math:`f`
+        is forced to 1 so no till leaks onto bare ground, which makes the
+        transport exactly conservative: :math:`\sum_i D_i = \sum_i A_i`.
+
+        :arg Vero: per-cell abraded volume (m^3, local array).
+        :arg Vtot: total abraded volume over owned nodes (m^3).
+        :arg owned: boolean mask of owned (non-ghost) nodes.
+
+        :return: per-cell deposition weight (local array, Σ over owned = 1).
+        """
+        # Halo-synced ice thickness and meltwater (ghost values are needed for
+        # the steepest-descent receivers and the melt-out fraction).
+        self.dm.localToGlobal(self.iceHL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        H = self.tmpL.getArray().copy()
+        self.dm.localToGlobal(self.iceMeltL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        melt = self.tmpL.getArray().copy()
+
+        zbed = self.hLocal.getArray()
+        s = zbed + H                                       # ice surface
+
+        # Steepest-descent (single-flow-direction) receivers on the ice surface.
+        rcv, _, wght = mfdreceivers(1, self.flowExp, s, self.sealevel, self.gid)
+        rcv0 = rcv[:, 0].astype(petsc4py.PETSc.IntType)
+        w0 = wght[:, 0].copy()
+
+        thr = 1.0e-2                                       # ice-presence threshold (m)
+        ice = H > thr
+        # Melt-out fraction f = (ablation thickness this step) / H, clamped.
+        meltThick = (melt * self.dt) / np.maximum(self.larea, 1.0e-12)
+        f = np.clip(meltThick / np.maximum(H, thr), 0.0, 1.0)
+        # Deposit fully (no downstream carry) off-ice and at the ice margin
+        # (receiver ice-free), so nothing leaks onto bare ground -> conservative.
+        f[~ice] = 1.0
+        f[ice & (H[rcv0] <= thr)] = 1.0
+
+        # Downstream-carried weight (1 - f); zero on ghosts/borders.
+        outw = w0 * (1.0 - f)
+        outw[self.ghostIDs] = 0.0
+        if self.flatModel:
+            outw[self.idBorders] = 0.0
+
+        # Accumulation matrix (I - W^T) on the ice network, then L = solve(·, A).
+        mat = self.iMat.copy()
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        nodes = indptr[:-1]
+        data = -outw
+        data[rcv0 == nodes] = 0.0
+        tmpMat = self._matrix_build()
+        tmpMat.assemblyBegin()
+        tmpMat.setValuesLocalCSR(indptr, rcv0, data)
+        tmpMat.assemblyEnd()
+        mat.axpy(1.0, tmpMat)
+        tmpMat.destroy()
+        mat.transpose()
+
+        self.tmpL.setArray(Vero)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._solve_KSP(True, mat, self.tmp, self.tmp1)
+        mat.destroy()
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        L = self.tmpL.getArray().copy()
+
+        # Deposited volume per cell. The transport conserves analytically, but
+        # the KSP solve is only accurate to its tolerance, so normalise by the
+        # ACTUAL routed total (not Vtot) to make the weight sum to one exactly —
+        # mass conservation then matches the melt-weighted path bit-for-bit.
+        dep_vol = f * L
+        total = MPI.COMM_WORLD.allreduce(
+            float(np.sum(dep_vol[owned])), op=MPI.SUM
+        )
+        if total <= 0.0:
+            return np.zeros(self.lpoints, dtype=np.float64)
+        return dep_vol / total

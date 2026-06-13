@@ -277,6 +277,7 @@ def test_ice_opt_in():
     assert p.iceOn is True
     assert p.sia_Aglen == 1.0e-16 and p.sia_glen == 3.0
     assert p.ice_Kg == 0.0 and p.ice_till_on is False
+    assert p.ice_till_route is False          # melt-weighted spreading by default
     # Terminus is unprescribed -> sentinel, resolved to the sea-level position
     # at runtime (so ice is not silently truncated above sea level).
     assert float(p.iceT(p.tStart)) < -1.0e9
@@ -289,13 +290,14 @@ def test_ice_opt_in():
             "hice": 2000.0,
             "sia": {"Aglen": 2.0e-16, "slide": 5.0e-3, "glen": 3.0},
             "abrasion": {"Kg": 1.0e-4, "l": 1.5},
-            "till": {"on": True},
+            "till": {"on": True, "route": True},
         }
     }
     p._readIce()
     assert p.iceOn is True
     assert p.sia_Aglen == 2.0e-16 and p.sia_slide == 5.0e-3 and p.sia_glen == 3.0
     assert p.ice_Kg == 1.0e-4 and p.ice_abr_l == 1.5
+    assert p.ice_till_route is True           # catchment routing opted in
     assert p.ice_till_on is True
 
 
@@ -567,6 +569,108 @@ def test_ice_glacial_till_conserves(minimal_ice_till_model):
     assert (dcum[zbed > 2500.0] <= 1.0e-9).all(), "no abrasion under fast ice"
     assert (dcum[(zbed > 1500.0) & (zbed < 2000.0)] >= -1.0e-9).all(), (
         "no till deposition in the ablation zone"
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.slow
+def test_ice_till_routing(minimal_ice_sia_model):
+    """
+    Protects: catchment-aware till routing (iceplex._routeTill, `till.route`).
+    Abraded till is transported down the ice-surface flow network and melts out
+    toward the terminus, so (a) the deposition weight is conserved (Σ = 1), and
+    (b) with no ablation the melt-out fraction is zero at interior ice cells, so
+    they retain NO till — everything is carried downstream and deposited only at
+    the margin outlets (mesh-independent check of the transport mechanism).
+    """
+    from mpi4py import MPI
+    from gospl._fortran import mfdreceivers
+
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    n = m.lpoints
+    owned = m.inIDs == 1
+
+    # Synthetic ice cap: thick interior thinning to a margin near 1500 m, so the
+    # ice surface s = zbed + H descends outward and routing funnels toward it.
+    H = np.clip(zbed - 1500.0, 0.0, 800.0)
+    m.iceHL.setArray(H)
+    m.iceMeltL.setArray(np.zeros(n))            # no melt -> pure routing to margin
+
+    if not (zbed > 2000.0).any():
+        pytest.skip("test mesh lacks the relief needed to exercise till routing")
+
+    # Abrasion source confined to the thick interior.
+    Vero = np.where(zbed > 2500.0, 1.0e6, 0.0)
+    Vtot = MPI.COMM_WORLD.allreduce(float(np.sum(Vero[owned])), op=MPI.SUM)
+    if Vtot <= 0.0:
+        pytest.skip("no abrasion source on this mesh")
+
+    dep_w = m._routeTill(Vero, Vtot, owned)
+
+    # (a) Mass conserved: the deposition weight sums to one over owned nodes.
+    wsum = MPI.COMM_WORLD.allreduce(float(np.sum(dep_w[owned])), op=MPI.SUM)
+    assert np.isclose(wsum, 1.0, rtol=1.0e-6), f"routed till not conserved (Σw={wsum})"
+    assert (dep_w >= -1.0e-12).all()
+
+    # (b) Interior ice cells (those whose steepest-descent receiver is also ice)
+    # have melt-out fraction 0 with no ablation, so they must retain no till —
+    # it is all carried downstream to the outlets.
+    rcv, _, _ = mfdreceivers(1, m.flowExp, zbed + H, m.sealevel, m.gid)
+    rcv0 = rcv[:, 0].astype(int)
+    ice = H > 1.0e-2
+    interior = owned & ice & (H[rcv0] > 1.0e-2)
+    if not interior.any():
+        pytest.skip("mesh too coarse: no multi-cell ice flow path to route along")
+    assert np.allclose(dep_w[interior], 0.0, atol=1.0e-12), (
+        "interior ice retained till despite routing (melt-out should carry it on)"
+    )
+    # And the till did land somewhere (at the outlets).
+    assert float(np.max(dep_w[owned])) > 0.0
+
+
+@pytest.mark.slow
+def test_ice_till_routing_conserves(minimal_ice_sia_model):
+    """
+    Protects: glacialTill with `till.route` is mass-conserving end-to-end (bulk
+    bed mode) — abraded rock routed down-ice and deposited at the termini leaves
+    the net bed-volume change zero (eroded == deposited).
+    """
+    from mpi4py import MPI
+    m = minimal_ice_sia_model
+    m.ice_till_on = True
+    m.ice_till_route = True
+    m.ice_Kg = 1.0e-3
+    m.ice_abr_l = 1.0
+    n = m.lpoints
+    owned = m.inIDs == 1
+    larea = m.larea
+
+    zbed = m.hLocal.getArray().copy()
+    m.iceHL.setArray(np.clip(zbed - 1500.0, 0.0, 800.0))
+    m.iceUbL.setArray(np.where(zbed > 2500.0, 0.1, 0.0))   # sliding interior
+    m.iceMeltL.setArray(np.zeros(n))
+    if not (zbed > 2500.0).any():
+        pytest.skip("test mesh lacks the relief to exercise till routing")
+
+    cum0 = m.cumEDLocal.getArray().copy()
+    m._tillEroded = 0.0
+    m._tillDeposited = 0.0
+    m.glacialTill()
+
+    ero = MPI.COMM_WORLD.allreduce(m._tillEroded, op=MPI.SUM)
+    dep = MPI.COMM_WORLD.allreduce(m._tillDeposited, op=MPI.SUM)
+    assert ero > 0.0, "no till produced; test is vacuous"
+    assert np.isclose(ero, dep, rtol=1.0e-9), "routed till eroded != deposited"
+
+    # Net bed-volume change is negligible relative to the till volume moved
+    # (erosion balanced by deposition). Measured against `ero` rather than the
+    # bed "activity", which collapses to ~0 on a coarse mesh where the abraded
+    # cell is its own outlet (till deposited where it was eroded).
+    dcum = m.cumEDLocal.getArray() - cum0
+    netvol = MPI.COMM_WORLD.allreduce(float(np.sum((dcum * larea)[owned])), op=MPI.SUM)
+    assert abs(netvol) < 1.0e-6 * ero, (
+        f"routed till not volume-conserving: net={netvol:.3e} eroded={ero:.3e}"
     )
 
 

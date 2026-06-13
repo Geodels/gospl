@@ -131,6 +131,7 @@ ice:
         l:  1.0           # sliding-velocity exponent
     till:
         on: True          # carry abraded rock as till / moraine
+        route: False      # True = route to termini (high-res); False = melt-spread
 ```
 
 `hela`/`hice`/`hterm` accept a uniform scalar (as above), a per-vertex map
@@ -170,10 +171,12 @@ Seven regression tests guard the model (`tests/test_regression.py`,
   polar) and through time — a single global scalar cannot represent both. The
   mass-balance ramp is evaluated per node with its local ELA. Uniform scalars
   and the `evol` CSV remain unchanged.
-- **Till routing.** Till is deposited across the ablation zone weighted by the
-  meltwater rate rather than routed per ice-catchment to each individual
-  terminus — a simplification matched to goSPL's resolution, where a cell
-  aggregates many glacial elements. The mass is conserved either way.
+- **Till routing.** By default till is deposited across the ablation zone
+  weighted by the meltwater rate — matched to coarse resolution where a cell
+  aggregates many glacial elements. For high-resolution (sub-km) regional runs,
+  `till.route: True` instead routes the till down the ice-surface flow network
+  and melts it out toward each catchment's terminus, building moraine at the
+  actual ice margins. Both conserve mass.
 - **Scalar SIA coefficients.** `Aglen` / `slide` are uniform (no spatial
   thermomechanical coupling). Spatially-variable softness/sliding would matter
   only for studies resolving thermal regime or till rheology, below the scope

@@ -147,6 +147,7 @@ Ice sheets and glacial erosion
                     l: 1.0
                 till:
                     on: True
+                    route: False
 
         The equilibrium-line / ice-cap geometry controls where ice accumulates
         and melts:
@@ -175,6 +176,14 @@ Ice sheets and glacial erosion
            conserving the abraded volume. With stratigraphy on, the till is
            layered into the stratigraphic record and split into the coarse/fine
            lithology fractions when dual lithology is enabled.
+        j. ``route`` (default ``False``) — controls how the till is distributed.
+           ``False`` spreads it across the whole ablation zone weighted by the
+           meltwater rate (appropriate when a cell aggregates a glacier, i.e.
+           continental/global resolution). ``True`` instead **routes the till
+           down the ice-surface flow network** and melts it out toward each
+           catchment's terminus, building moraine at the actual ice margins — for
+           high-resolution (sub-km) regional runs where individual glacier
+           catchments and termini are resolved. Both conserve mass.
 
         The glacier geometry can instead be read from a file:
 
