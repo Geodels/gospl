@@ -394,6 +394,40 @@ def test_ice_sia_implicit_matches_explicit(minimal_ice_sia_model):
     )
 
 
+@pytest.mark.slow
+def test_ice_glacial_abrasion(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 3 — velocity-based glacial abrasion
+    E = Kg·|u_b|^l adds incision to Eb exactly where ice slides (and only there),
+    and is a no-op when Kg = 0.
+
+    Drives _glacialAbrasion with a known basal-velocity field so the result is
+    analytic: Eb = −Kg·u_b (l=1) on the sliding cells, 0 elsewhere.
+    """
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    ub = np.where(zbed > 2000.0, 0.1, 0.0)     # 0.1 m/yr sliding above 2000 m
+    m.iceUbL.setArray(ub.copy())
+    m.ice_abr_l = 1.0
+
+    # Kg = 0 -> no abrasion.
+    m.ice_Kg = 0.0
+    m.Eb.set(0.0)
+    m._glacialAbrasion()
+    assert np.allclose(m.Eb.getArray(), 0.0), "abrasion must be a no-op when Kg=0"
+
+    # Kg > 0 -> incision E = -Kg·u_b where ice slides (all above sea here).
+    m.ice_Kg = 1.0e3
+    m.Eb.set(0.0)
+    m._glacialAbrasion()
+    EbL = m.EbLocal.getArray()
+    sliding = ub > 0.0
+    assert np.allclose(EbL[sliding], -1.0e3 * ub[sliding], rtol=1.0e-6, atol=1.0e-9), (
+        "abrasion incision must equal -Kg*|u_b|^l where ice slides"
+    )
+    assert np.allclose(EbL[~sliding], 0.0, atol=1.0e-9), "abrasion outside ice"
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,
