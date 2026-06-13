@@ -120,7 +120,8 @@ The `ice` section is the opt-in. SIA is the only model, so the previous
 ice:
     hela: 1850.0          # equilibrium-line altitude (m)
     hice: 2100.0          # ice-cap altitude (m)
-    hterm: 1700.0         # glacier terminus (m)   [or evol: <csv>]
+    hterm: 1700.0         # glacier terminus (m); floor = max(hterm, sea level),
+                          #   defaults to sea level if omitted  [or evol: <csv>]
     sia:
         Aglen: 1.0e-16    # Glen rate factor
         slide: 1.0e-3     # basal sliding coefficient

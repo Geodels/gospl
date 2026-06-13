@@ -151,7 +151,7 @@ Ice sheets and glacial erosion
         The equilibrium-line / ice-cap geometry controls where ice accumulates
         and melts:
 
-        a. ``hterm`` is the glacier terminus elevation (m) — no ice is kept below it,
+        a. ``hterm`` is the glacier terminus elevation (m) — no ice is kept below it. The effective floor is ``max(hterm, sea level)``: ice never persists below the (possibly time-varying) sea surface, and a ``hterm`` below sea level is raised to it. When omitted, the terminus defaults to the **sea-level position**, so the SIA dynamics and ablation set the actual terminus,
         b. ``hela`` is the equilibrium-line altitude (m) — ablation below, accumulation above,
         c. ``hice`` is the ice-cap altitude (m) — full precipitation is captured as ice above it.
 

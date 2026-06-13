@@ -12,6 +12,12 @@ if "READTHEDOCS" not in os.environ:
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
+# Sentinel for an unprescribed glacier terminus altitude (``ice.hterm``): the
+# effective terminus floor is then the sea-level position (see
+# iceplex._iceSIAFinalize). Any value safely below the lowest plausible sea
+# level works.
+TERMINUS_UNSET = -1.0e10
+
 
 class ReadYaml(object):
     """
@@ -1665,7 +1671,12 @@ class ReadYaml(object):
             glaciers = iceDict.get("glaciers")
             elaH = iceDict.get("hela", 2000.0)
             iceH = iceDict.get("hice", 2400.0)
-            iceT = iceDict.get("hterm", 1800.0)
+            # Terminus: the effective floor is max(hterm, sea level), applied in
+            # iceplex._iceSIAFinalize. The SIA dynamics + ablation set where the
+            # glacier actually ends; the clamp only stops land ice persisting
+            # below the (possibly time-varying) sea surface. The sentinel below
+            # means "not prescribed" -> defaults to the sea-level position.
+            iceT = iceDict.get("hterm", TERMINUS_UNSET)
 
             # Initial (pre-existing) ice thickness — scalar or [file, key] map.
             hinit = iceDict.get("hinit")
@@ -1761,7 +1772,7 @@ class ReadYaml(object):
         series = []
         for ev in events:
             interval = {"start": ev["start"]}
-            for fld, default in (("hela", 2000.0), ("hice", 2400.0), ("hterm", 1800.0)):
+            for fld, default in (("hela", 2000.0), ("hice", 2400.0), ("hterm", TERMINUS_UNSET)):
                 sc, spec = self._iceGeomField(ev.get(fld, default))
                 if spec is not None:
                     self._checkMap(spec, "ice %s" % fld)

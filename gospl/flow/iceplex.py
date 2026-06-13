@@ -129,9 +129,16 @@ class IceMesh(object):
         Common post-solve steps for the SIA solve: terminus clamp, store the
         ice thickness and the basal sliding speed (the abrasion driver), and
         capture ablation meltwater (m^3/yr) for the river coupling.
+
+        The terminus floor is ``max(hterm, sea level)``: ice is removed below
+        the prescribed terminus and, regardless, below the (possibly
+        time-varying) sea surface — no land ice persists offshore (there is no
+        marine-ice / calving model). When ``hterm`` is unprescribed (the
+        ``TERMINUS_UNSET`` sentinel) the floor is simply the sea-level position.
         """
         H = np.maximum(H, 0.0)
-        H[zbed < iceT] = 0.0
+        terminus = np.maximum(iceT, self.sealevel)
+        H[zbed < terminus] = 0.0
         self.iceHL.setArray(H)
         # Basal sliding speed from the converged thickness (steepest-descent
         # SIA velocity); zero where there is no ice.
