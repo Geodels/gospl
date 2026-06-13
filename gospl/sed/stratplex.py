@@ -39,6 +39,15 @@ class STRAMesh(object):
         # phiF = fine porosity per layer (phiS then holds the coarse porosity).
         self.stratHf = None
         self.phiF = None
+        # Dual-lithology fine mass-balance diagnostics (m^3, owned-node running
+        # totals over the run; reduced across ranks by the conservation test).
+        # _fineEroded accumulates fine solid removed from the pile (erodeStrat);
+        # _fineDeposited accumulates fine deposited back (deposeStrat, both the
+        # continental and marine calls). On a closed sphere they must match to
+        # within the floor/transit budget — the fine-specific analogue of the
+        # total-cumED mass-conservation check.
+        self._fineEroded = 0.0
+        self._fineDeposited = 0.0
         # Per-layer erodibility multiplier (lpoints, stratNb). Effective K
         # at the surface = self.K * stratK[<top non-empty layer>]. Fresh
         # deposits and the bedrock sentinel default to 1.0 (no scaling).
@@ -259,7 +268,12 @@ class STRAMesh(object):
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         if self.stratLith:
-            self.stratHf[:, self.stratStep] += depo * self.depoFineFrac
+            fineDepo = depo * self.depoFineFrac
+            self.stratHf[:, self.stratStep] += fineDepo
+            # Mass-balance diagnostic (owned nodes only, m^3).
+            self._fineDeposited += float(
+                np.sum((fineDepo * self.larea)[self.inIDs == 1])
+            )
             # Fresh deposit carries each lithology's surface porosity.
             self.phiS[ids, self.stratStep] = self.phi0c
             self.phiF[ids, self.stratStep] = self.phi0f
@@ -408,6 +422,12 @@ class STRAMesh(object):
         self.thCoarse /= self.dt
         if self.stratLith:
             self.thFine /= self.dt
+            # Mass-balance diagnostic: fine solid removed this step (owned
+            # nodes, m^3). thFine is the uncompacted deposit-equivalent rate,
+            # the same basis transported and deposited downstream.
+            self._fineEroded += float(
+                np.sum((self.thFine * self.dt * self.larea)[self.inIDs == 1])
+            )
 
         return
 

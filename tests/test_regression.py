@@ -408,6 +408,9 @@ def test_dual_lithology_erosion_split():
         m.phi0f = 0.63
         m.bedrock_coarse_frac = 0.5
         m.fine_k_factor = 1.0
+        m.inIDs = np.ones(lp, dtype=int)
+        m.larea = np.ones(lp)
+        m._fineEroded = 0.0
         m.stratLith = stratLith
         m.stratH = stratH.astype(np.float64).copy()
         m.phiS = (phiS if phiS is not None else np.full_like(stratH, 0.49)).copy()
@@ -501,6 +504,9 @@ def test_dual_lithology_deposit_and_compaction():
     m.memclear = False
     m.phi0c, m.phi0f = 0.49, 0.63
     m.depoFineFrac = np.array([0.25])   # per-node deposit fine fraction (Phase 3a/3b)
+    m.inIDs = np.ones(1, dtype=int)
+    m.larea = np.ones(1)
+    m._fineDeposited = 0.0
     m.stratH = np.zeros((1, 2))
     m.stratHf = np.zeros((1, 2))
     m.phiS = np.zeros((1, 2))
@@ -844,6 +850,43 @@ def test_dual_mass_conservation(minimal_dual_model):
     assert (fine_solid >= -1.0e-9).all(), "Negative fine solid phase."
     fine_total = MPI.COMM_WORLD.allreduce(float(np.sum(fine_solid)), op=MPI.SUM)
     assert fine_total > 0.0, "Dual pile carries no fine — sub-system is dead."
+
+
+@pytest.mark.slow
+def test_dual_fine_conservation(minimal_dual_model):
+    """
+    Protects: per-fraction (FINE) mass conservation on a closed sphere.
+
+    The total-cumED test_dual_mass_conservation checks the *total* sediment
+    budget; it would pass even if fine were silently created/destroyed while
+    coarse compensated. This test closes that gap directly: the fine solid
+    REMOVED from the strata pile (erodeStrat, accumulated in _fineEroded) must
+    equal the fine DEPOSITED back into it (deposeStrat continental + marine,
+    _fineDeposited), to within the floor/transit budget.
+
+    This is the guard required before any future fine-routing change (e.g.
+    fine-enriched overspill): a mismatched fine mirror in the pit/marine
+    cascade — exactly the bug that reverted the first overspill attempt —
+    trips this where the total budget does not. Measured imbalance ~1e-4 on
+    minimal_dual; asserted < 5e-3.
+    """
+    model = minimal_dual_model
+    if getattr(model, "flatModel", True):
+        pytest.skip("fine conservation needs a closed sphere (flatModel=False)")
+    assert model.stratLith and model.stratNb > 0, "fixture must enable dual strat"
+
+    model.runProcesses()
+
+    from mpi4py import MPI
+    ero = MPI.COMM_WORLD.allreduce(model._fineEroded, op=MPI.SUM)
+    dep = MPI.COMM_WORLD.allreduce(model._fineDeposited, op=MPI.SUM)
+    assert ero > 0.0, "no fine was eroded; test is vacuous"
+    rel = abs(ero - dep) / ero
+    assert rel < 5.0e-3, (
+        f"Fine not conserved: eroded={ero:.4e} deposited={dep:.4e} "
+        f"rel imbalance={rel:.2e} (> 5e-3). A fine-only leak the total-cumED "
+        f"test cannot see."
+    )
 
 
 # ---------------------------------------------------------------------------
