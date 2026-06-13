@@ -66,6 +66,13 @@ class STRAMesh(object):
         - thickness of each stratigrapic layer `strataH` accounting for both erosion & deposition events.
         - elevation at time of deposition, considered to be to the current elevation for the top stratigraphic layer `strataZ`.
         - porosity of coarse sediment `phiS` in each stratigraphic layer computed at center of each layer.
+
+        With dual lithology enabled (`strata: dual: True`), two optional keys
+        let each initial layer carry its own coarse/fine composition:
+
+        - `strataHf`: fine-fraction bulk thickness per layer (coarse =
+          `strataH - strataHf`); absent -> all-coarse.
+        - `phiF`: fine porosity per layer; absent -> defaults to `phi0f`.
         """
 
         if self.strataFile is not None:
@@ -97,8 +104,10 @@ class STRAMesh(object):
                 ]
 
             # Dual-lithology fine-fraction layer fields. Optional in the
-            # npstrata file (`strataHf`, `phiF`); absent -> all-coarse
-            # (fine thickness 0), so a single-fraction file still loads.
+            # npstrata file: `strataHf` (per-layer fine bulk thickness, so each
+            # initial layer carries its own coarse/fine composition; coarse =
+            # strataH - strataHf) and `phiF` (per-layer fine porosity). Absent
+            # `strataHf` -> all-coarse, so a single-fraction file still loads.
             if self.stratLith:
                 self.stratHf = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 if "strataHf" in fileData.files:
@@ -106,12 +115,31 @@ class STRAMesh(object):
                     self.stratHf[:, 0 : self.initLay] = stratVal[
                         self.locIDs, 0 : self.initLay
                     ]
+                    # Keep the partition physical: 0 <= fine <= total thickness.
+                    np.clip(
+                        self.stratHf[:, 0 : self.initLay],
+                        0.0,
+                        self.stratH[:, 0 : self.initLay],
+                        out=self.stratHf[:, 0 : self.initLay],
+                    )
                 self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 if "phiF" in fileData.files:
                     stratVal = fileData["phiF"]
                     self.phiF[:, 0 : self.initLay] = stratVal[
                         self.locIDs, 0 : self.initLay
                     ]
+                else:
+                    # No fine porosity supplied: default to the fine surface
+                    # porosity so fine-bearing initial layers compact sensibly
+                    # (irrelevant where strataHf == 0).
+                    self.phiF[:, 0 : self.initLay] = self.phi0f
+            elif "strataHf" in fileData.files and MPIrank == 0:
+                print(
+                    "Warning: the npstrata file provides 'strataHf' (per-layer "
+                    "fine composition) but dual lithology is disabled. Set "
+                    "`strata: dual: True` to use it; the field is ignored.",
+                    flush=True,
+                )
 
             # All layers in the file are real sediment; no bedrock sentinel.
             self.bedrockLay = 0

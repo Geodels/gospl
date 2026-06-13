@@ -368,6 +368,51 @@ def test_dual_lithology_layer_allocation():
     assert (m.stratHf[:, 1:] == 0.0).all(), "Layers above bedrock start coarse-empty."
 
 
+def test_dual_lithology_initial_strata_composition(tmp_path):
+    """
+    Protects: a user can supply a per-layer coarse/fine composition for the
+    INITIAL stratigraphy via the npstrata file (strataHf = fine bulk thickness,
+    phiF = fine porosity). readStratLayers must load it per layer, clamp
+    0 <= strataHf <= strataH, and default phiF to phi0f when absent.
+    """
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+    n, nl = 3, 2
+    f = tmp_path / "init.npz"
+    np.savez(
+        str(f),
+        strataH=np.full((n, nl), 10.0),
+        strataZ=np.zeros((n, nl)),
+        phiS=np.full((n, nl), 0.49),
+        # per-layer fine thickness; row 2 layer 0 is 15 > 10 -> must clamp to 10.
+        strataHf=np.array([[2.0, 5.0], [0.0, 10.0], [15.0, 3.0]]),
+        # phiF deliberately omitted -> should default to phi0f.
+    )
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.strataFile = str(f)
+    m.lpoints = n
+    m.stratNb = 2                     # extra capacity beyond the initial layers
+    m.locIDs = np.arange(n)
+    m.phi0s, m.phi0f = 0.49, 0.63
+    m.memclear = False
+    m.stratLith = True
+    m.stratHf = None
+    m.phiF = None
+
+    m.readStratLayers()
+
+    il = m.initLay
+    assert il == nl
+    # Per-layer composition loaded.
+    assert np.isclose(m.stratHf[0, 0], 2.0) and np.isclose(m.stratHf[0, 1], 5.0)
+    # Clamp: strataHf (15) exceeded strataH (10) -> clamped to 10.
+    assert np.isclose(m.stratHf[2, 0], 10.0)
+    # Partition stays physical everywhere.
+    assert (m.stratHf[:, :il] <= m.stratH[:, :il] + 1e-9).all()
+    assert (m.stratHf[:, :il] >= 0.0).all()
+    # phiF absent -> defaulted to phi0f on the initial layers.
+    assert np.allclose(m.phiF[:, :il], 0.63)
+
+
 def test_dual_lithology_erosion_split():
     """
     Protects: DESIGN_DUAL_LITHOLOGY.md Phase 2 — erodeStrat splits the
