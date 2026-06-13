@@ -113,53 +113,78 @@ Hillslope and marine deposition parameters
         In this last model, the non-linear creep formulation is described in `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_ (section 3.4.3 **EQ. 14**).
 
 
-Glacial erosion
+Ice sheets and glacial erosion
 -----------------------------------------------------
 
 .. grid:: 1
     :padding: 3
 
-    .. grid-item-card::  
-        
+    .. grid-item-card::
+
+        Adding an ``ice`` section turns on goSPL's **Shallow-Ice-Approximation
+        (SIA) ice-sheet model**: an implicit non-linear diffusion of the ice
+        thickness driving glacial abrasion, till transport and ice loading. The
+        full algorithm is described in the technical guide (:ref:`ice`).
+
         **Declaration example**:
 
         .. code:: yaml
 
             ice:
-                icedir: 1
-                Ki: 6.e-6
-                melt: 10.
-                diff: 20.
                 # Either constant glacial parameters
                 hterm: 1700.0
                 hela: 1850.0
                 hice: 2100.0
                 # Or using a file to characterise glacial evolution
                 # evol: 'data/ice_evol.csv'
-                fwidth: 1.5
-                eheight: 0.25
+                sia:
+                    Aglen: 1.0e-16
+                    slide: 1.0e-3
+                    glen: 3.0
+                abrasion:
+                    Kg: 1.0e-4
+                    l: 1.0
+                till:
+                    on: True
 
-        a. ``icedir`` is the flow direction used to evaluate ice flow (default: 1 - i.e. SFD),
-        b. ``Ki`` is the erodibility coefficient for glacial erosion (default: 0.0 — set this to enable ice-driven erosion in the SPL),
-        c. ``melt`` is the melting-factor amplifier used by the implicit ice solver to make sub-ELA cells act as strong sinks (default: 10.). This is a numerical solver knob, not the physical melt multiplier — the meltwater released into the river network uses the unamplified local ablation rate (see :ref:`ice`),
-        d. ``diff`` is the diffusion coefficient applied to the ice flow accumulation,
-        e. ``hterm`` is the glacier terminus elevation (m),
-        f. ``hela`` is the equilibrium-line altitude (m),
-        g. ``hice`` is the ice cap altitude (m).
+        The equilibrium-line / ice-cap geometry controls where ice accumulates
+        and melts:
 
-        Then the user can specify the initial soil thickness if any by setting **either**:
+        a. ``hterm`` is the glacier terminus elevation (m) — no ice is kept below it,
+        b. ``hela`` is the equilibrium-line altitude (m) — ablation below, accumulation above,
+        c. ``hice`` is the ice-cap altitude (m) — full precipitation is captured as ice above it.
 
-        **or**:
+        The ``sia`` sub-block sets the flow physics (all optional, with the
+        defaults shown above):
 
-        h. ``evol`` is the glacier characteristics over time (`csv` file). When used ``hterm``, ``hela``, ``hice`` are not required because they are defined in this file. 
-        
-        When the flexural isostasy is turned-on the glacier thickness is also calculated based on the following parameters:
+        d. ``Aglen`` is the Glen's-law rate factor (ice softness) controlling internal deformation,
+        e. ``slide`` is the basal-sliding coefficient,
+        f. ``glen`` is the Glen's-law exponent :math:`n` (usually 3).
 
+        The ``abrasion`` sub-block enables velocity-based glacial erosion
+        :math:`E_g = K_g\,|u_b|^{l}` (off by default, ``Kg: 0``):
 
-        i. ``fwidth`` glacier width factor (default value: 1.5).
-        
-        j. ``eheight`` thickness-to-width ratio (default value: 0.25). 
-        
+        g. ``Kg`` is the abrasion coefficient (default ``0.0`` — set it to enable glacial erosion),
+        h. ``l`` is the basal-sliding-velocity exponent (default ``1.0``).
+
+        The ``till`` sub-block controls glacial sediment (default off):
+
+        i. ``on`` — when ``True``, abraded rock is carried as **till** and
+           deposited as a moraine where the ice melts out (the ablation zone),
+           conserving the abraded volume. With stratigraphy on, the till is
+           layered into the stratigraphic record and split into the coarse/fine
+           lithology fractions when dual lithology is enabled.
+
+        The glacier geometry can instead be read from a file:
+
+        j. ``evol`` is the glacier characteristics over time (`csv` file). When
+           used, ``hterm``, ``hela`` and ``hice`` are not required because they
+           are defined in this file.
+
+        When flexural isostasy is enabled, the SIA ice thickness is automatically
+        used as the ice load contribution to the isostatic computation — no extra
+        parameters are needed.
+
         .. important::
 
             The glacial evolution file is defined as a 4 columns **csv** file containing in the first column the time in years (it doesn't need to be regularly temporally spaced) and in the second the glacier characteristics for the given time. When goSPL interprets this file, it will interpolate linearly between the defined times to find the values of ``hterm``, ``hela`` and ``hice`` for every time step.

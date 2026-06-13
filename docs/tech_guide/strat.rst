@@ -166,3 +166,11 @@ pit is coarse-enriched while the excess that overspills is fine-enriched and
 continues downstream — ultimately reaching the distal marine basin. The fine
 sub-volume is threaded through the depression-filling cascade in lockstep with
 the total, conserving fine mass to within the floor/transit budget.
+
+*Glacial till* couples to the stratigraphic record when the :ref:`ice sheet
+model <ice>` is run with till handling on: the rock abraded under sliding ice is
+removed from the stratigraphic layers it came from and re-deposited as a fresh
+moraine layer in the ablation zone. Under dual lithology the moraine carries the
+abraded (ice-mixed) fine fraction, so coarse and fine are tracked through the
+glacial pathway exactly as through the fluvial one, and the per-fraction solid
+budget stays balanced.
