@@ -6,10 +6,20 @@ ice thickness that drives glacial abrasion, till transport and flexural loading.
 It supersedes the previous MFD flow-routing proxy, which is removed — when an
 `ice` section is present, goSPL now runs the SIA model.
 
-The work was delivered across three PRs (#423–#425) on top of the design doc,
-then refined: the MFD proxy and the explicit SIA reference scheme were removed
-to leave the implicit SIA as the single ice model, and glacial till was coupled
-to the stratigraphic / dual-lithology fractions.
+The work was delivered across the design doc and PRs #423–#425 (dynamics +
+basal velocity, abrasion + till, flexural loading + output), then refined:
+
+- **#426** — the MFD proxy and the explicit SIA reference scheme removed, leaving
+  the implicit SIA as the single model; glacial till coupled to the
+  stratigraphic / dual-lithology fractions; `iceMelt` / `iceAbr` outputs added;
+  per-vertex / time-series ELA maps (the `glaciers` series) for global runs;
+  optional `hinit` seed-and-evolve initial ice.
+- **#427** — terminus floor = `max(hterm, sea level)`, defaulting to the
+  sea-level position.
+- **#428** — opt-in catchment-aware till routing (`till.route`) for
+  high-resolution regional runs.
+- **#429** — `scripts/ela_from_temperature.py` helper deriving ELA maps from
+  paleo-climate temperature.
 
 Mapped to the roadmap item *"glacial and ice-sheet model and associated
 erosion / deposition and loading"*:
@@ -170,7 +180,10 @@ Seven regression tests guard the model (`tests/test_regression.py`,
   precipitation `climate` block), so the ELA varies with latitude (tropical vs
   polar) and through time — a single global scalar cannot represent both. The
   mass-balance ramp is evaluated per node with its local ELA. Uniform scalars
-  and the `evol` CSV remain unchanged.
+  and the `evol` CSV remain unchanged. The `scripts/ela_from_temperature.py`
+  helper derives `hela`/`hice` maps from a paleo-climate temperature history by
+  lapse-rate inversion (it sets the ELA *position*; ablation stays
+  precipitation-scaled).
 - **Till routing.** By default till is deposited across the ablation zone
   weighted by the meltwater rate — matched to coarse resolution where a cell
   aggregates many glacial elements. For high-resolution (sub-km) regional runs,
