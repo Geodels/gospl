@@ -255,6 +255,56 @@ Ice sheets and glacial erosion
             and the ``evol`` CSV remain available and unchanged; ``evol`` takes
             precedence over maps if both are given.
 
+        **Deriving the ELA from paleo-climate temperature.** The helper
+        ``scripts/ela_from_temperature.py`` turns a per-vertex temperature map
+        into the ``hela``/``hice`` ``.npz`` maps above by lapse-rate inversion
+        (``ELA = z + (T - T_ELA)/Gamma``). It derives the ELA *position* only;
+        the ablation magnitude stays precipitation-scaled (it is not a
+        degree-day melt model).
+
+        From a **terminal** (run once per climate snapshot; ``--start`` prints a
+        ready-to-paste ``glaciers`` entry):
+
+        .. code:: bash
+
+            python scripts/ela_from_temperature.py \
+                --temperature climate/t2m_21ka.npz --t-key t2m \
+                --reference surface --elevation input/mesh.npz --z-key z \
+                --lapse 0.0065 --t-ela -2.0 --band 400 \
+                --out input/ela_21ka.npz --start -21000
+
+        ``--help`` lists every option; loop over snapshots with a shell ``for``.
+
+        From a **Jupyter notebook**, either shell out with the ``!`` magic:
+
+        .. code:: python
+
+            !python scripts/ela_from_temperature.py \
+                --temperature climate/t2m_21ka.npz --t-key t2m \
+                --reference surface --elevation input/mesh.npz --z-key z \
+                --lapse 0.0065 --t-ela -2.0 --band 400 --out input/ela_21ka.npz
+
+        or import the conversion and build the ``glaciers`` list directly:
+
+        .. code:: python
+
+            import sys, numpy as np
+            sys.path.append("scripts")
+            from ela_from_temperature import derive_ela
+
+            z = np.load("input/mesh.npz")["z"]
+            glaciers = []
+            for t, f in [(-21000, "climate/t2m_21ka.npz"),
+                         (-18000, "climate/t2m_18ka.npz")]:
+                T = np.load(f)["t2m"]
+                hela, hice = derive_ela(T, lapse=0.0065, t_ela=-2.0, band=400.0,
+                                        reference="surface", elevation=z)
+                out = f"input/ela_{int(-t/1000)}ka.npz"
+                np.savez(out, hela=hela, hice=hice)
+                glaciers.append({"start": float(t),
+                                 "hela": [out[:-4], "hela"],
+                                 "hice": [out[:-4], "hice"]})
+
 
 Soil production, erosion, transport and deposition
 -----------------------------------------------------
