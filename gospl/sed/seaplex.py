@@ -486,7 +486,7 @@ class SEAMesh(object):
 
         return vdep
 
-    def _marineFineFraction(self, hl, sedFlux):
+    def _marineFineFraction(self, hl, sedFlux, fineFlux):
         """
         Dual-lithology (3c): set the per-node fine fraction of the marine
         deposit so fine concentrates in deep / distal water and coarse stays
@@ -500,22 +500,26 @@ class SEAMesh(object):
         toward the deeper deposits rather than re-routed.
 
         Mechanism:
-          - Domain marine fine fraction ``ff_mar = Σ(fineFrac·sedFlux) /
-            Σ(sedFlux)`` — flux-weighted composition of sediment entering the
-            sea (``sedFlux`` is the marine input volume, zero outside sinks).
+          - Domain marine fine fraction ``ff_mar = Σ(fineFlux) / Σ(sedFlux)`` —
+            the fine that actually reached the sea after the continental
+            cascade (``fineFlux`` is the post-cascade fine input, ``sedFlux``
+            the total input, both zero outside the marine sinks). With the
+            fine-enriched overspill in the cascade, this is genuinely enriched
+            relative to the upstream-eroded composition.
           - Water depth ``d = max(sealevel − hl, 0)`` is the distal/deep proxy.
           - Fine fraction biased ∝ d, renormalised to the deposit-weighted mean
             depth, so ``Σ(mdep·larea·ffrac) == ff_mar·Σ(mdep·larea)``.
 
         :arg hl: pre-deposition local elevation
         :arg sedFlux: marine input sediment volume per node (m^3)
+        :arg fineFlux: marine input fine sediment volume per node (m^3)
         """
         self.dm.globalToLocal(self.tmp, self.tmpL)
         mdep = self.tmpL.getArray().copy()
         owned = self.inIDs == 1
 
-        # Flux-weighted fine fraction of sediment entering the marine domain.
-        fineNum = float(np.sum((self.fineFrac * sedFlux)[owned]))
+        # Fine fraction of sediment reaching the marine domain (post-cascade).
+        fineNum = float(np.sum(fineFlux[owned]))
         den = float(np.sum(sedFlux[owned]))
         fineNum = MPI.COMM_WORLD.allreduce(fineNum, op=MPI.SUM)
         den = MPI.COMM_WORLD.allreduce(den, op=MPI.SUM)
@@ -607,7 +611,12 @@ class SEAMesh(object):
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
             if self.stratLith:
-                self._marineFineFraction(hl, sedFlux)
+                # Post-cascade fine reaching the sea (same sink mask as
+                # sedFlux), carried by the continental fine-enriched overspill.
+                fineFlux = self.vSedFLocal.getArray().copy() * self.dt
+                fineFlux[np.invert(self.sinkIDs)] = 0.0
+                fineFlux[fineFlux < 0] = 0.0
+                self._marineFineFraction(hl, sedFlux, fineFlux)
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
