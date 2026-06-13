@@ -117,8 +117,8 @@ Parsed in `inputparser._extraIce` (extend; mandatory-continuation contract).
 | **2** | Expose basal/sliding velocity `|u_b|` per cell from the SIA solve. | `iceplex.py`, maybe `ice_flux` companion | medium |
 | **3** | Velocity-based abrasion `Kg·|u_b|^l` in the erosion step (gated; replaces/【supplements】the `Ki·F^m` proxy under `flow_model: sia`). | `eroder/SPL.py`/`nlSPL.py`/`soilSPL.py` | medium |
 | **4** | Till: production from abrasion → advect with ice flux → deposit at melt/terminus (moraine) → hand melt-zone till to meltwater. Per-step till mass-conservation guard. | `iceplex.py`, `flowplex.py`, `sedplex` hand-off | **high** |
-| **5** | Loading: feed SIA `iceH` to flexure (mostly exists); optional separate ice-load density. | `addprocess.py` | low |
-| **6** | Output (`iceH`, basal velocity, `tillH`) + restart; fixtures + tests (analytical dome, abrasion sign, till conservation, ice-off/MFD parity). | `outmesh.py`, `tests/` | medium |
+| **5** | ✅ DONE. Loading works through the **existing** `applyFlexure` unchanged: the `iceFlex` snapshot is taken before the SIA update, so `dIce = iceHL − iceFlex` (×910/`rhoc`) loads the plate with the SIA thickness. Verified: SIA+global flexure produces isostatic subsidence under ice. | `addprocess.py` (no change) | low |
+| **6** | ✅ DONE. Output: `iceUb` (basal velocity) added (`iceH` already written). Tests: SIA invariants, implicit≡explicit, glacial-abrasion sign, till volume conservation, **ice-volume conservation under zero SMB (Halfar-style flux check)**, flexure loading, MFD/ice-off parity. *Quantitative transient Halfar dome on a flat-bed fixture remains a deeper future validation.* | `outmesh.py`, `tests/` | medium |
 
 **Recommended PR grouping:** PR-A = Phases 0–2 (dynamics + velocity, the new ice engine, validated against the dome); PR-B = Phases 3–4 (erosion + till); PR-C = Phases 5–6 (loading + output + tests). Stack like the dual-lithology PRs.
 

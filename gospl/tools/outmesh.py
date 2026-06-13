@@ -352,6 +352,17 @@ class WriteMesh(object):
                     data[self.seaID] = 1.0
                 f["iceH"][:, 0] = data
 
+                # SIA basal sliding speed (m/yr). Zero under the MFD proxy;
+                # the abrasion driver and a diagnostic of ice dynamics.
+                if self.iceSIA:
+                    f.create_dataset(
+                        "iceUb",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        compression="gzip",
+                    )
+                    f["iceUb"][:, 0] = self.iceUbL.getArray().copy()
+
             if self.flexOn:
                 f.create_dataset(
                     "flexIso",

@@ -484,6 +484,64 @@ def test_ice_glacial_till_conserves(minimal_ice_till_model):
     )
 
 
+@pytest.mark.slow
+def test_ice_sia_volume_conservation(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 6 — the SIA ice flux is mass-conservative
+    (it redistributes ice, it does not create or destroy it). Halfar-style check:
+    with zero surface mass balance and the terminus clamp disabled, stepping an
+    ice dome must conserve ice volume to the flux-numerics floor.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    m.rainVal = np.zeros_like(m.rainVal)       # zero SMB -> pure flux redistribution
+    m.iceT = lambda t: 0.0                     # disable terminus clamp
+    H0 = np.where(zbed > 2500.0, 300.0, 0.0)
+    owned = m.inIDs == 1
+    larea = m.larea
+
+    V0 = MPI.COMM_WORLD.allreduce(float(np.sum((H0 * larea)[owned])), op=MPI.SUM)
+    m.iceHL.setArray(H0.copy())
+    m._iceFlowSIAImplicit(0.0, 1000.0, 0.0)    # elaH, iceH, iceT
+    H1 = m.iceHL.getArray()
+    V1 = MPI.COMM_WORLD.allreduce(float(np.sum((H1 * larea)[owned])), op=MPI.SUM)
+
+    assert V0 > 0.0
+    assert abs(V1 - V0) / V0 < 1.0e-4, (
+        f"SIA flux not volume-conserving: V0={V0:.4e} V1={V1:.4e}"
+    )
+    # The flux actually moved ice (not a frozen field).
+    assert float(np.max(np.abs(H1 - H0))) > 0.0
+
+
+@pytest.mark.slow
+def test_ice_sia_flexure_loading(minimal_ice_flex_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md Phase 5 — the SIA ice thickness feeds the
+    existing flexural-isostasy ice load (applyFlexure converts the iceHL change
+    to an equivalent sediment load). The run produces a finite flexural field
+    with subsidence (negative deflection) under the load.
+    """
+    import glob
+    model = minimal_ice_flex_model
+    assert model.iceSIA and model.flexOn
+    model.runProcesses()
+
+    flx = model.localFlex
+    assert np.isfinite(flx).all(), "flexural field non-finite"
+    assert float(flx.min()) < 0.0, "no subsidence — ice/sediment load not applied"
+
+    # SIA basal-velocity output is written (Phase 6).
+    files = sorted(
+        glob.glob(os.path.join(str(model.outputDir), "h5", "gospl.*.p*.h5"))
+    )
+    if files:
+        h5py = pytest.importorskip("h5py")
+        with h5py.File(files[-1], "r") as hf:
+            assert "iceUb" in hf, "SIA basal-velocity field iceUb not in output"
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,

@@ -30,3 +30,4 @@ fortran/meshparams.mod
 tests/fixtures/minimal_ice_sia/
 tests/fixtures/minimal_ice_mfd/
 tests/fixtures/minimal_ice_till/
+tests/fixtures/minimal_ice_flex/

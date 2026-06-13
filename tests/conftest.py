@@ -152,6 +152,16 @@ def minimal_ice_till_model():
 
 
 @pytest.fixture
+def minimal_ice_flex_model():
+    """
+    Minimal SIA model with global flexural isostasy on. Confirms the SIA ice
+    thickness feeds the existing ice-loading path in applyFlexure. See
+    minimal_ice_flex.yml.
+    """
+    return _instantiate("minimal_ice_flex.yml")
+
+
+@pytest.fixture
 def minimal_ice_mfd_model():
     """
     Minimal model with the default MFD flow-routing ice proxy (no flow_model
