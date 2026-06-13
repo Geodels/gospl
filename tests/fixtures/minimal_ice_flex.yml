@@ -24,7 +24,6 @@ diffusion:
     hillslopeKm: 0.2
 
 ice:
-    flow_model: sia
     hela: 2000.
     hice: 3000.
     hterm: 1500.

@@ -839,8 +839,7 @@ class UnstMesh(object):
         self.EbLocal.destroy()
         if self.iceOn:
             self.iceHL.destroy()
-            self.iceFAG.destroy()
-            self.iceFAL.destroy()
+            self.iceMeltL.destroy()
             self.iceUbL.destroy()
             if self.flexOn:
                 self.iceFlex.destroy()

@@ -24,7 +24,6 @@ diffusion:
     hillslopeKm: 0.2
 
 ice:
-    flow_model: sia
     hela: 2000.
     hice: 3000.
     hterm: 1500.
@@ -32,7 +31,6 @@ ice:
         Aglen: 1.0e-16
         slide: 1.0e-3
         glen: 3.0
-        cfl: 0.25
 
 sea:
     position: -100.

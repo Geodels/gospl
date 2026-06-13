@@ -128,8 +128,6 @@ class soilSPL(object):
         # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0
         res = (h_array - self.hOldArray) * (1.0 - self.fDep)
         res += self.Kbr * np.exp(-hSoil / self.h_star) * S**self.spl_n
-        if self.iceOn:
-            res += self.Kbi * np.exp(-hSoil / self.h_star) * S**self.spl_n
         res += self.K_soil * (1.0 - np.exp(-hSoil / self.h_star)) * S**self.spl_n
         if self.fDepa > 0:
             res -= self.fDep * self.dt * Qt / self.larea
@@ -191,12 +189,6 @@ class soilSPL(object):
 
         self.K_soil = self.Ksoil * self.dt * (PA ** self.spl_m) * elimiter
         self.K_soil[self.seaID] = 0.0
-
-        # In case glacial erosion is accounted for
-        if self.iceOn:
-            Ai = self.iceFAL.getArray()
-            self.Kbi = self.Kice * self.dt * (Ai ** self.spl_m) * elimiter
-            self.Kbi[self.seaID] = 0.0
 
         # Dimensionless depositional coefficient
         self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)

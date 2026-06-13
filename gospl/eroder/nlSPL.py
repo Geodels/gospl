@@ -65,8 +65,6 @@ class nlSPL(object):
 
         # Residuals based on the equation: h(t+dt) - h(t) + dt * K * A^m * S^n = 0
         res = h_array - self.hOldArray + self.Kbr * S**self.spl_n
-        if self.iceOn:
-            res += self.Kbi * S**self.spl_n
 
         # Residual vector
         F.setArray(res[self.glIDs])
@@ -106,8 +104,6 @@ class nlSPL(object):
         # h(t+dt) (1-G) - h(t) (1-G) + dt * K * A^m * S^n - dt * G * Qt / Area = 0
         res = (h_array - self.hOldArray) * (1.0 - self.fDep)
         res += self.Kbr * S**self.spl_n
-        if self.iceOn:
-            res += self.Kbi * S**self.spl_n
         res -= self.fDep * self.dt * Qt / self.larea
 
         # Residual vector
@@ -147,8 +143,6 @@ class nlSPL(object):
         coeffs[S == 0, :] = 0.
         ids = np.where(S > 0)[0]
         derivatives[ids] = self.spl_n * self.Kbr * np.power(S[ids], self.spl_n - 1.0)
-        if self.iceOn:
-            derivatives[ids] += self.spl_n * self.Kbi * np.power(S[ids], self.spl_n - 1.0)
 
         # Build Jacobian matrix
         for row in range(self.lpoints):
@@ -197,12 +191,6 @@ class nlSPL(object):
             self.Kbr = self.K * surfK * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
-
-        # In case glacial erosion is accounted for
-        if self.iceOn:
-            Ai = self.iceFAL.getArray()
-            self.Kbi = self.Kice * self.dt * (Ai ** self.spl_m) * elimiter
-            self.Kbi[self.seaID] = 0.0
 
         # Dimensionless depositional coefficient
         self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
@@ -284,12 +272,6 @@ class nlSPL(object):
             self.Kbr = self.K * surfK * (self.rainVal ** self.coeffd)
         self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
         self.Kbr[self.seaID] = 0.0
-
-        # In case glacial erosion is accounted for
-        if self.iceOn:
-            Ai = self.iceFAL.getArray()
-            self.Kbi = self.Kice * self.dt * (Ai ** self.spl_m) * elimiter
-            self.Kbi[self.seaID] = 0.0
 
         if self._snes_nl is None:
             snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)

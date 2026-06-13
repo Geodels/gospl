@@ -1635,46 +1635,22 @@ class ReadYaml(object):
         Parse ice flow variables.
         """
 
-        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets iceOn=False + 4 local defaults on missing "ice")
+        # When an `ice` section is present, goSPL runs the Shallow-Ice-
+        # Approximation (SIA) ice-sheet model: an implicit non-linear diffusion
+        # of ice thickness driving glacial abrasion, till transport and ice
+        # loading. See docs/DESIGN_ICE_SHEET.md.
         try:
             iceDict = self.input["ice"]
             self.iceOn = True
-            self.gaussIce = iceDict.get("diff", 10.0)
             elaH = iceDict.get("hela", 2000.0)
             iceH = iceDict.get("hice", 2400.0)
             iceT = iceDict.get("hterm", 1800.0)  # glacier terminus
             icefile = iceDict.get("evol")
-            self.Kice = iceDict.get("Ki", 0.0)
-            self.iceDir = iceDict.get("icedir", 1)
-            self.meltfac = iceDict.get("melt", 10.)  # Melting factor adjustment
-            self.icewf = iceDict.get("fwidth", 1.5)  # width factor (a in Eq. (8))
-            # thickness-to-width ratio (delta in Eq. (9))
-            self.icewe = iceDict.get("eheight", 0.25)
-
-            # Ice flow model: 'mfd' (default, flow-routing proxy) or 'sia'
-            # (Shallow-Ice-Approximation dynamics). See docs/DESIGN_ICE_SHEET.md.
-            # All SIA parameters are inert while flow_model != 'sia', so the
-            # default keeps the existing proxy behaviour byte-identical.
-            self.ice_flow_model = iceDict.get("flow_model", "mfd")
-            if self.ice_flow_model not in ("mfd", "sia"):
-                if MPIrank == 0:
-                    print(
-                        "Ice flow_model '%s' is not recognised; choices are "
-                        "'mfd' or 'sia'." % self.ice_flow_model,
-                        flush=True,
-                    )
-                raise ValueError("Ice flow_model not recognised.")
-            self.iceSIA = self.ice_flow_model == "sia"
 
             siaDict = iceDict.get("sia", {})
             self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
             self.sia_slide = siaDict.get("slide", 1.0e-3)    # sliding coefficient
             self.sia_glen = siaDict.get("glen", 3.0)         # Glen exponent n
-            self.sia_cfl = siaDict.get("cfl", 0.25)          # explicit-ref CFL number
-            self.sia_max_substeps = siaDict.get("max_substeps", 500)
-            # 'implicit' (default, production semi-implicit SNES) or 'explicit'
-            # (CFL-subcycled reference/validation scheme).
-            self.sia_solver = siaDict.get("solver", "implicit")
 
             abrDict = iceDict.get("abrasion", {})
             self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
@@ -1688,14 +1664,9 @@ class ReadYaml(object):
             elaH = None
             iceH = None
             iceT = None
-            self.ice_flow_model = "mfd"
-            self.iceSIA = False
             self.sia_Aglen = 1.0e-16
             self.sia_slide = 1.0e-3
             self.sia_glen = 3.0
-            self.sia_cfl = 0.25
-            self.sia_max_substeps = 500
-            self.sia_solver = "implicit"
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
             self.ice_till_on = False
