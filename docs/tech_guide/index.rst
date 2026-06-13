@@ -137,10 +137,10 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     .. grid-item-card::
         :text-align: center
 
-        **Ice accumulation and meltwater**
+        **Ice sheets and glacial erosion**
         ^^^
 
-        First-order mass-balance proxy for glacial ice: ELA-based accumulation, MFD routing on the filled DEM, and meltwater re-injection into the river network.
+        Shallow-Ice-Approximation ice-sheet model: implicit non-linear-diffusion ice dynamics, velocity-based glacial abrasion, till/moraine deposition, meltwater re-injection and ice loading.
 
         +++
 
@@ -149,6 +149,22 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             :click-parent:
 
             Learn more about the ice implementation.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Sediment provenance (source-to-sink)**
+        ^^^
+
+        Post-processing tool attributing sediment deposited in sink basins to source-rock types — per basin and per pixel — with transport distance and a copper-fertility layer.
+
+        +++
+
+        .. button-ref:: provenance
+            :color: secondary
+            :click-parent:
+
+            Learn more about provenance attribution.
 
 
 .. toctree::
@@ -162,3 +178,4 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     strat
     tecto
     ice
+    provenance

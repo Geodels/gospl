@@ -12,4 +12,5 @@ from .provenance import (  # noqa: F401
     build_neighbours,
     downhill_edges,
     steepest_receivers,
+    write_xdmf,
 )
