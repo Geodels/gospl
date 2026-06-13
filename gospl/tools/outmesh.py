@@ -378,6 +378,19 @@ class WriteMesh(object):
             data = self.vSedLocal.getArray().copy()
             data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
             f["sedLoad"][:, 0] = data
+            # Dual-lithology fine sediment load (m3/yr). `sedLoad` is the TOTAL
+            # (coarse+fine) flux; `sedLoadF` is the fine sub-flux, so coarse =
+            # sedLoad - sedLoadF. Only written when dual lithology is enabled.
+            if self.stratLith:
+                f.create_dataset(
+                    "sedLoadF",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                dataF = self.vSedFLocal.getArray().copy()
+                dataF[dataF <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
+                f["sedLoadF"][:, 0] = dataF
             if self.upsub is not None:
                 f.create_dataset(
                     "uplift",
@@ -466,6 +479,13 @@ class WriteMesh(object):
             self.dm.localToGlobal(self.cumEDLocal, self.cumED)
             self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
             self.dm.localToGlobal(self.vSedLocal, self.vSed)
+            # Restart-safe restore of the fine sediment load (dual lithology).
+            # Older single-fraction outputs have no /sedLoadF; the field is
+            # recomputed each step in _getSedFlux anyway, so a missing dataset
+            # just leaves the init zeros.
+            if self.stratLith and "/sedLoadF" in hf:
+                self.vSedFLocal.setArray(np.array(hf["/sedLoadF"])[:, 0])
+                self.dm.localToGlobal(self.vSedFLocal, self.vSedF)
             self.EbLocal.setArray(np.array(hf["/EDrate"])[:, 0])
             self.dm.localToGlobal(self.EbLocal, self.Eb)
             self.FAL.setArray(np.array(hf["/FA"])[:, 0])
@@ -675,6 +695,19 @@ class WriteMesh(object):
                 'Dimensions="%d 1">%s:/sedLoad</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
+
+            if self.stratLith:
+                f.write(
+                    '         <Attribute Type="Scalar" Center="Node" Name="SLf">\n'
+                )
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/sedLoadF</DataItem>\n'
+                    % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
 
             if self.upsub is not None:
                 f.write(
