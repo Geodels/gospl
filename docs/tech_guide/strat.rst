@@ -160,10 +160,9 @@ builds the **inlet/margins**, and in the marine domain fine concentrates in
 volume is conserved by this re-partition; the deposit geometry (and therefore
 the elevation evolution) is unchanged relative to the total-sediment result.
 
-.. note::
-
-   *Fine-enriched overspill* — preferential trapping of coarse in a filled
-   depression with fine-enriched sediment continuing downstream — is **not yet
-   implemented**: sediment overspilling a filled pit currently carries the
-   incoming composition. This is a known limitation; see the design notes for
-   details.
+*Fine-enriched overspill* is also modelled: in a filled depression coarse
+settles first (is retained up to the pit capacity), so the deposit kept in the
+pit is coarse-enriched while the excess that overspills is fine-enriched and
+continues downstream — ultimately reaching the distal marine basin. The fine
+sub-volume is threaded through the depression-filling cascade in lockstep with
+the total, conserving fine mass to within the floor/transit budget.

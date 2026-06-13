@@ -220,22 +220,20 @@ path, with `pitInletBias` per fraction (coarse high, fine ~0). New work:
    coarse-at-inlet and fine-in-depocenter, conserving total = `pitVol`.
 2. **Per-fraction deposit shape** — coarse → `_diffuseLargePit`, fine →
    `_bottomUpDelta`.
-3. **Fine-enriched overspill** — the excess `eV` overspilling a filled lake
-   should be fine-enriched (coarse trapped proximally). **NOT IMPLEMENTED — known
-   limitation.** A conservative implementation requires threading a parallel
-   fine volume through the iterative `_moveDownstream` cascade (coarse-settles-
-   first retention + routing the fine overspill + accumulating the post-cascade
-   fine into `vSedFLocal` for the marine handoff). An attempt was made and
-   reverted: the `vSedLocal` accumulation semantics (initial routed flux on the
-   *unfilled* topology + masked residuals across cascade iterations + pit-volume
-   bookkeeping) are subtle, and a mismatched fine mirror leaked fine (~10× drop
-   in deposited fine) — and crucially the total-cumED conservation test does
-   **not** catch a fine-only leak. Until the cascade's flux semantics are fully
-   pinned down (ideally with a fine-specific conservation test), the in-pit
-   composition uses the routed arriving fraction (3b depth-bias), not the
-   coarse-settles-first retained fraction; overspill carries the routed
-   composition. This is second-order vs the depocenter/distal bias already
-   shipped (3b/3c).
+3. **Fine-enriched overspill** — IMPLEMENTED. `_moveDownstream` threads the fine
+   sub-volume through the iterative cascade with **coarse-settles-first**
+   retention: a filled pit keeps coarse up to its capacity (`_pitRetFine`,
+   coarse-enriched), and the excess overspills fine-enriched, routed through the
+   same flow matrix and on to the marine domain. `vSedFLocal` accumulates the
+   residual fine **mirroring `vSedLocal` exactly (NOT zeroed)** — this was the
+   bug that reverted the first attempt: the `vSedLocal` accumulation (initial
+   routed flux on the *unfilled* topology + masked residuals + pit-volume
+   bookkeeping) keeps the initial flux, so zeroing the fine mirror leaked it
+   (~10× drop). The prerequisite that made this safe to land was the
+   **fine-specific conservation test** (`test_dual_fine_conservation`,
+   `_fineEroded` vs `_fineDeposited`) — the total-cumED test does not catch a
+   fine-only leak. Measured fine imbalance ~3e-5; ~98% of deposited fine now
+   reaches the marine basin on `minimal_dual`.
 4. **Fresh porosity** — lacustrine coarse → `phi0c`, fine → `phi0f` (feeds the
    per-fraction compaction).
 5. **Per-fraction mass conservation across the cascade** — the spillover cascade
