@@ -380,6 +380,8 @@ class STRAMesh(object):
             self.thCoarse = np.zeros(self.lpoints)
             if self.stratLith:
                 self.thFine = np.zeros(self.lpoints)
+            if getattr(self, "provOn", False):
+                self.provEro = np.zeros((self.lpoints, self.provNb))
             return
 
         # Cumulative thickness for each node
@@ -395,9 +397,20 @@ class STRAMesh(object):
         self.stratH[nids, 0] += BEDROCK_SENTINEL
         if self.stratLith:
             self.stratHf[nids, 0] += sentFine
+        provOn = getattr(self, "provOn", False)
+        if provOn:
+            # The infinite-bedrock sentinel is pure bedrock -> the node's source
+            # class (keeps Σ over classes == stratH for layer 0).
+            self.stratP[nids, 0, self.source_class[nids]] += BEDROCK_SENTINEL
         cumThick = np.cumsum(self.stratH[nids, self.stratStep :: -1], axis=1)[:, ::-1]
         boolMask = cumThick < -ero[nids].reshape((len(nids), 1))
         mask = boolMask.astype(int)
+        if provOn:
+            # Per-class bulk eroded from the FULLY consumed layers (captured
+            # before they are cleared below).
+            provMaskedBulk = (
+                self.stratP[nids, : self.stratStep + 1, :] * mask[:, :, None]
+            ).sum(axis=1)
 
         thickS = self.stratH[nids, 0 : self.stratStep + 1]
         if self.stratLith:
@@ -422,6 +435,10 @@ class STRAMesh(object):
             tmpf = self.stratHf[nids, : self.stratStep + 1]
             tmpf[boolMask] = 0
             self.stratHf[nids, : self.stratStep + 1] = tmpf
+        if provOn:
+            tmpp = self.stratP[nids, : self.stratStep + 1, :]
+            tmpp[boolMask] = 0.0
+            self.stratP[nids, : self.stratStep + 1, :] = tmpp
 
         # Erode remaining stratal layers
         # Get non-zero top layer number
@@ -459,11 +476,24 @@ class STRAMesh(object):
             self.thCoarse[nids] = thCoarse / (1.0 - self.phi0s)
             self.thCoarse[self.thCoarse < 0.0] = 0.0
 
+        if provOn:
+            # Per-class bulk removed from the partial top layer (proportional to
+            # the bulk removed), plus the fully-eroded layers captured earlier.
+            fracP = np.divide(
+                H_old - eroVal, H_old, out=np.zeros_like(H_old), where=H_old > 0
+            )
+            P_part = self.stratP[nids, eroLayNb, :].copy()
+            provBulkEro = provMaskedBulk + P_part * fracP[:, None]   # (n, classes)
+            keepP = np.divide(eroVal, H_old, out=np.zeros_like(eroVal), where=H_old > 0)
+            self.stratP[nids, eroLayNb, :] = P_part * keepP[:, None]
+
         # Update thickness of top stratigraphic layer
         self.stratH[nids, eroLayNb] = eroVal
         self.stratH[nids, 0] -= BEDROCK_SENTINEL
         if self.stratLith:
             self.stratHf[nids, 0] -= sentFine
+        if provOn:
+            self.stratP[nids, 0, self.source_class[nids]] -= BEDROCK_SENTINEL
         neg = self.stratH < 0
         self.stratH[neg] = 0.0
         self.phiS[neg] = 0.0
@@ -495,6 +525,35 @@ class STRAMesh(object):
             # the same basis transported and deposited downstream.
             self._fineEroded += float(
                 np.sum((self.thFine * self.dt * self.larea)[self.inIDs == 1])
+            )
+
+        if provOn:
+            top = self.stratStep + 1
+            np.clip(self.stratP[:, :top, :], 0.0, None, out=self.stratP[:, :top, :])
+            # Re-impose Σ over classes == stratH per layer (absorbs the sentinel
+            # round-off and the neg-thickness clamp); empty layers stay zero.
+            psum = self.stratP[:, :top, :].sum(axis=2)
+            scale = np.divide(
+                self.stratH[:, :top], psum, out=np.ones_like(psum), where=psum > 0
+            )
+            self.stratP[:, :top, :] *= scale[:, :, None]
+
+            # Per-class eroded sediment as the uncompacted deposit-equivalent
+            # RATE: the total (self.thCoarse[+thFine]) split by the eroded bulk's
+            # provenance composition. Σ over classes == the total, so the class
+            # sub-fluxes routed in transport sum to the total flux.
+            thTot = self.thCoarse.copy()
+            if self.stratLith:
+                thTot = thTot + self.thFine
+            totBulk = provBulkEro.sum(axis=1)
+            provComp = np.divide(
+                provBulkEro, totBulk[:, None],
+                out=np.zeros_like(provBulkEro), where=totBulk[:, None] > 0,
+            )
+            self.provEro = np.zeros((self.lpoints, self.provNb))
+            self.provEro[nids] = provComp * thTot[nids][:, None]
+            self._provEroded += np.sum(
+                (self.provEro * self.dt * self.larea[:, None])[self.inIDs == 1], axis=0
             )
 
         return

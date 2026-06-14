@@ -194,9 +194,12 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   `_provDeposited` diagnostics in `sedplex`; `destroy_DMPlex` registration.
   Passive (no hooks yet) ⇒ provenance-on is byte-identical to off. Tests:
   `test_provenance_opt_in`, `test_provenance_seeding`.
-- **B1 — erosion split**: in `erodeStrat`, split the eroded solid by the consumed
-  layers' `stratP`; the bedrock sentinel contributes the node's `source_class`.
-  Accumulate `_provEroded`. (Mirrors the dual fine split.)
+- **B1 — erosion split** ✅ *(done)*: `erodeStrat` mirrors every `stratHf`
+  operation per class — the eroded sediment is split by the consumed layers'
+  `stratP` (the bedrock sentinel → the node's `source_class`), producing the
+  per-class eroded rate `provEro` (Σ over classes == the total uncompacted
+  erosion) and accumulating `_provEroded`; `stratP` is reduced and re-normalised
+  so Σ over classes == `stratH`. Tested in isolation (`test_provenance_erosion_split`).
 - **B2 — transport**: route the N provenance sub-fluxes `vSedP[c]` through the
   same operator as the total in `_getSedFlux`/`_moveDownstream` (thread like
   `vSedF`); snapshot `provFrac` = arriving composition.
