@@ -69,6 +69,11 @@ class SEDMesh(object):
             self.depoProvFrac = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
             self._provEroded = np.zeros(self.provNb, dtype=np.float64)
             self._provDeposited = np.zeros(self.provNb, dtype=np.float64)
+            # B2b-pit: per-pit retained provenance (accumulated through the
+            # cascade in _moveDownstream, used by _pitProvFraction) and the
+            # provenance overspill routed downstream each iteration.
+            self._pitRetProv = np.zeros((1, self.provNb), dtype=np.float64)
+            self._routedProv = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
 
         # Get the maximum number of neighbours on the mesh
         maxnb = np.zeros(1, dtype=np.int64)
@@ -165,7 +170,7 @@ class SEDMesh(object):
 
         return
 
-    def _moveDownstream(self, vSed, vSedF, step):
+    def _moveDownstream(self, vSed, vSedF, step, vSedP=None):
         """
         In cases where river sediment fluxes drain into depressions, they might fill the sink completely and overspill or be deposited in it. This function computes the excess of sediment (if any) able to flow dowstream.
 
@@ -194,11 +199,14 @@ class SEDMesh(object):
         excess = False
         sedFilled_changed = False
         dual = self.stratLith
+        prov = getattr(self, "provOn", False)
 
         # Remove points belonging to other processors
         vSed = np.multiply(vSed, self.inIDs)
         if dual:
             vSedF = np.multiply(vSedF, self.inIDs)
+        if prov:
+            vSedP = vSedP * self.inIDs[:, None]
 
         # Get volume incoming in each depression
         grp = npi.group_by(self.pitIDs[self.lsink])
@@ -216,8 +224,18 @@ class SEDMesh(object):
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inVf, op=MPI.SUM)
             inVf = np.minimum(inVf, inV)
 
+        # Provenance entering each pit (per class). Proportional tracer: the pit
+        # retains and overspills each class in proportion to its incoming mix.
+        inVp = np.zeros((len(self.pitParams), self.provNb), dtype=np.float64)
+        if prov:
+            for c in range(self.provNb):
+                _, volp = grp.sum(vSedP[self.lsink, c])
+                inVp[uID[ids], c] = volp[ids]
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inVp, op=MPI.SUM)
+
         nvSed = np.zeros(self.lpoints, dtype=np.float64)
         nvSedF = np.zeros(self.lpoints, dtype=np.float64)
+        nvSedP = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
 
         # Get excess volume to distribute downstream
         eV = inV - self.pitVol
@@ -237,6 +255,16 @@ class SEDMesh(object):
                 ovf_fine = inVf - ret_fine
                 self._pitRetFine[eIDs] += ret_fine[eIDs]
                 nvSedF[localPts] = ovf_fine[eIDs][localSpill]
+            if prov:
+                # Proportional: retained = pitVol fraction of the incoming mix,
+                # overspill = the rest (each class in the pit's composition).
+                ret_frac = np.divide(
+                    self.pitVol, inV, out=np.zeros_like(inV), where=inV > 0.0
+                )
+                ret_prov = inVp * ret_frac[:, None]
+                ovf_prov = inVp - ret_prov
+                self._pitRetProv[eIDs] += ret_prov[eIDs]
+                nvSedP[localPts] = ovf_prov[eIDs][localSpill]
             self.pitVol[eIDs] = 0.0
             ids = np.isin(self.pitIDs, np.where(eV > 0.0)[0])
             self.sedFilled[ids] = self.lFill[ids]
@@ -248,8 +276,11 @@ class SEDMesh(object):
         self.pitVol[self.pitVol < 0] = 0.0
         if dual:
             self._pitRetFine[eIDs] += inVf[eIDs]
+        if prov:
+            self._pitRetProv[eIDs] += inVp[eIDs]      # unfilled pits retain all
 
         self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
+        self._routedProv = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
         # In case there is still remaining sediment flux to distribute downstream
         if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (sediment-routing convergence threshold); do not replace
             # Only rebuild the flow direction matrix when the topography has
@@ -280,6 +311,14 @@ class SEDMesh(object):
                     self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
                     self.dm.globalToLocal(self.tmp1, self.nQs)
                     self._routedFine = self.nQs.getArray().copy()
+                if prov:
+                    # Route each class's overspill through the SAME matrix.
+                    for c in range(self.provNb):
+                        self.nQs.setArray(nvSedP[:, c])
+                        self.dm.localToGlobal(self.nQs, self.tmp)
+                        self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+                        self.dm.globalToLocal(self.tmp1, self.nQs)
+                        self._routedProv[:, c] = self.nQs.getArray().copy()
             # Note: matrix lifecycle moved to _distributeSediment so we don't
             # destroy/rebuild on every iteration when the topography is stable.
 
@@ -312,6 +351,21 @@ class SEDMesh(object):
         else:
             vSedF = None
 
+        # Provenance: thread each class's sub-flux through the cascade so a pit's
+        # retained mix (and its overspill into downstream pits) is exact.
+        # _pitRetProv accumulates the per-pit retained provenance for
+        # _pitProvFraction; no separate accumulator is needed.
+        if self.provOn:
+            vSedP = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
+            for c in range(self.provNb):
+                self.dm.globalToLocal(self.vSedP[c], self.vSedPLocal)
+                vSedP[:, c] = self.vSedPLocal.getArray() * self.dt
+            self._pitRetProv = np.zeros(
+                (len(self.pitParams), self.provNb), dtype=np.float64
+            )
+        else:
+            vSedP = None
+
         # Drop any matrix from the prior context; _moveDownstream will rebuild
         # on iteration 0 and only rebuild thereafter when sedFilled changes.
         self.fMat.destroy()
@@ -330,7 +384,7 @@ class SEDMesh(object):
                     )
                 break
             t1 = process_time()
-            excess, _ = self._moveDownstream(vSed, vSedF, step)
+            excess, _ = self._moveDownstream(vSed, vSedF, step, vSedP=vSedP)
             if excess:
                 vSed = self.tmpL.getArray().copy()
                 nvSed = vSed.copy()
@@ -346,6 +400,11 @@ class SEDMesh(object):
                     self.tmpL.setArray(nvSedF / self.dt)
                     vSedF[self.idBorders] = 0.0
                     self.vSedFLocal.axpy(1.0, self.tmpL)
+                if self.provOn:
+                    # Carry the routed provenance overspill to the next pit
+                    # (downstream-lake chains), matching the total's treatment.
+                    vSedP = self._routedProv.copy()
+                    vSedP[self.idBorders, :] = 0.0
             if MPIrank == 0 and self.verbose:
                 print(
                     "Downstream sediment flux computation step %d (%0.02f seconds)"
@@ -775,6 +834,43 @@ class SEDMesh(object):
 
         return
 
+    def _pitProvFraction(self, depo):
+        """
+        Provenance (B2b-pit): set the per-node source composition of the
+        continental pit/lake deposit to each pit's RETAINED provenance mix,
+        tracked through the overspill cascade by ``_moveDownstream``.
+
+        Unlike the dual-lithology fine fraction there is **no depocenter bias**
+        — provenance is a passive label, so every node in a pit records the same
+        retained mix. ``_pitRetProv[pit, :]`` sums over classes to the pit's
+        retained volume ``depo[pit]`` (the cascade conserves each class), so the
+        per-pit fractions ``_pitRetProv / depo`` sum to 1 and ``depoProvFrac``
+        stays summed-to-1 — ``stratP`` partitions ``stratH`` machine-exactly.
+
+        Composition only — the deposit geometry is untouched.
+
+        :arg depo: per-pit deposited (retained) volume (m^3)
+        """
+        num_pits = len(self.pitParams)
+        in_pit = self.pitIDs >= 0
+
+        # Per-pit retained provenance fraction (overspill-chain aware).
+        ffp = np.divide(
+            self._pitRetProv,
+            depo[:, None],
+            out=np.zeros((num_pits, self.provNb)),
+            where=depo[:, None] > 0,
+        )
+        # Guard rounding: renormalise rows with deposit to sum to 1.
+        rsum = ffp.sum(axis=1)
+        good = rsum > 0
+        ffp[good] /= rsum[good][:, None]
+
+        pit_safe = np.where(in_pit, self.pitIDs, 0)
+        self.depoProvFrac[in_pit, :] = ffp[pit_safe][in_pit, :]
+
+        return
+
     def _updateSinks(self, hl):
         """
         Update depression elevations based on incoming sediment volumes.
@@ -824,6 +920,13 @@ class SEDMesh(object):
         # unchanged; only self.depoFineFrac (read by deposeStrat) is set.
         if self.stratLith:
             self._pitFineFraction(hl, delta, depo)
+
+        # Provenance (B2b-pit): record each pit's retained source mix (uniform
+        # within the pit; cascade-tracked overspill keeps downstream-lake chains
+        # exact). Geometry unchanged; only self.depoProvFrac (read by
+        # deposeStrat) is set.
+        if self.provOn:
+            self._pitProvFraction(depo)
 
         # Apply deposit
         self.tmpL.setArray(delta)

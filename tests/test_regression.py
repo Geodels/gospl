@@ -965,6 +965,42 @@ def test_provenance_conservation(minimal_prov_model):
     assert float(np.abs(P.sum(axis=2) - H).sum()) / relH < 1.0e-6
 
 
+def test_provenance_pit_fraction(minimal_prov_multi_model):
+    """
+    Protects: Phase B2b-pit — _pitProvFraction sets a continental pit/lake
+    deposit's per-node source composition to the pit's cascade-retained mix.
+    The invariant is that the per-pit retained provenance (Σ over classes ==
+    retained volume) yields per-node fractions that sum to 1 and reproduce the
+    retained mix uniformly across the pit, so depoProvFrac stays summed-to-1 and
+    stratP keeps partitioning stratH exactly.
+    """
+    m = minimal_prov_multi_model
+    n = m.lpoints
+
+    # Synthesise a single pit covering the first third of the local nodes with a
+    # known retained mix (60% class 0, 40% class 1), then drive the method.
+    m.pitIDs = np.full(n, -1, dtype=np.int64)
+    in_pit = np.zeros(n, dtype=bool)
+    in_pit[: max(n // 3, 1)] = True
+    m.pitIDs[in_pit] = 0
+
+    # Match pitParams length to the (one) pit so _pitProvFraction can index it.
+    depo = np.array([1000.0], dtype=np.float64)         # retained volume (m^3)
+    m._pitRetProv = np.array([[600.0, 400.0]], dtype=np.float64)
+    m.depoProvFrac = np.zeros((n, m.provNb), dtype=np.float64)
+    # Stub pitParams so len(self.pitParams) == 1.
+    m.pitParams = np.zeros((1, 3), dtype=np.float64)
+
+    m._pitProvFraction(depo)
+
+    # Every in-pit node carries the retained mix; rows sum to 1.
+    assert np.allclose(m.depoProvFrac[in_pit, 0], 0.6)
+    assert np.allclose(m.depoProvFrac[in_pit, 1], 0.4)
+    assert np.allclose(m.depoProvFrac[in_pit].sum(axis=1), 1.0)
+    # Non-pit nodes are untouched (left at zero here).
+    assert np.allclose(m.depoProvFrac[~in_pit], 0.0)
+
+
 @pytest.mark.slow
 def test_provenance_multisource(minimal_prov_multi_model):
     """
