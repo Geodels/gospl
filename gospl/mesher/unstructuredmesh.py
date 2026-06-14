@@ -868,6 +868,10 @@ class UnstMesh(object):
         self.vSedLocal.destroy()
         self.vSedF.destroy()
         self.vSedFLocal.destroy()
+        if getattr(self, "provOn", False):
+            for v in self.vSedP:
+                v.destroy()
+            self.vSedPLocal.destroy()
         self.areaGlobal.destroy()
         self.bG.destroy()
         self.bL.destroy()

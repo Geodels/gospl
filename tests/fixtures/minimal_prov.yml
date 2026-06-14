@@ -1,0 +1,40 @@
+name: minimal in-model provenance test
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 100
+    tout: 50
+    dt: 10.
+    strat: 50
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 0.
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+provenance:
+    classes: 2
+    uniform: 1          # all bedrock is source class 1 (tests non-zero seeding)
+    cu_weight: [0.0, 1.0]
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'minimal_prov'

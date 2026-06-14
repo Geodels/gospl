@@ -143,13 +143,29 @@ Caveats
 
 .. _prov-inmodel:
 
-In-model provenance tracers (planned)
--------------------------------------
+In-model provenance tracers (in progress)
+-----------------------------------------
 
 For conservation-exact, recycling-aware percentages, the dual-lithology
 two-fraction machinery (separate routed sub-flux ``vSedF``, per-layer
-composition ``stratHf``) will be generalised to *N* source-provenance classes:
+composition ``stratHf``) is being generalised to *N* source-provenance classes:
 tag erosion by source, route each class sub-flux through the same flow operator,
 deposit with the *N*-fraction composition, and store per-layer provenance in the
-stratigraphic record. This section will be expanded when that feature lands; see
-``docs/DESIGN_PROVENANCE.md`` §6 for the scope.
+stratigraphic record. Provenance is a **passive label** (no erodibility /
+diffusivity / sorting feedback), so it simply rides the existing total-sediment
+routing.
+
+Enabled by a ``provenance:`` block (requires stratigraphy)::
+
+    provenance:
+        classes: 3
+        source: ['input/source', 'rock']   # per-vertex int class (or `uniform: 0`)
+        cu_weight: [1.0, 0.0, 0.3]
+
+**Status:** the foundation (Phase B0) is in place — opt-in parsing, the
+``stratP[node, layer, class]`` per-layer composition seeded to the bedrock
+source class, the routed sub-flux state, and conservation-diagnostic scaffolding;
+inert/byte-identical when off. The erosion split, N-flux transport, deposition
+write-back, advection and I/O are landing phase by phase (see
+``docs/DESIGN_PROVENANCE.md`` §6, phases B1–B4). This section will be expanded as
+they merge.

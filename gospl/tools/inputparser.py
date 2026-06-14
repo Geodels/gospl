@@ -1517,6 +1517,54 @@ class ReadYaml(object):
         self.pit_inlet_bias_coarse = min(1.0, max(0.0, self.pit_inlet_bias_coarse))
         self.pit_inlet_bias_fine = min(1.0, max(0.0, self.pit_inlet_bias_fine))
 
+        self._extraProvenance()
+
+        return
+
+    def _extraProvenance(self):
+        """
+        Parse the optional in-model **sediment-provenance tracer** block. N
+        source-rock classes are carried (as a passive label — no physics
+        feedback) through erosion, transport, deposition and the stratigraphic
+        record, giving conservation-exact, recycling-aware provenance per layer.
+        See ``docs/DESIGN_PROVENANCE.md`` §6.
+
+        Sets ``self.provOn`` (master opt-in), ``self.provNb`` (class count), the
+        per-vertex source-class source (``uniform`` scalar or ``source``
+        ``[file, key]`` map, resolved post-mesh in ``readStratLayers``), and an
+        optional ``cu_weight``. All inert while ``provOn`` is False; like dual
+        lithology it requires stratigraphy (``stratNb > 0``).
+        """
+        self.provOn = False
+        self.provNb = 0
+        self._provSourceUniform = None
+        self._provSourceMap = None
+        self.prov_cu_weight = None
+        try:
+            provDict = self.input["provenance"]
+        except KeyError:
+            return
+
+        self.provNb = int(provDict.get("classes", 0))
+        self._provSourceUniform = provDict.get("uniform")
+        self._provSourceMap = provDict.get("source")          # [file, key] or None
+        cw = provDict.get("cu_weight")
+        if cw is not None:
+            self.prov_cu_weight = np.asarray(cw, dtype=np.float64)
+
+        self.provOn = self.provNb > 0
+        if self.provOn and self.stratNb == 0:
+            if MPIrank == 0:
+                print(
+                    "Provenance tracers (provenance:) require stratigraphy to be "
+                    "enabled (set a positive `strat` interval in the time block); "
+                    "disabling provenance.",
+                    flush=True,
+                )
+            self.provOn = False
+        # Default to a single source class everywhere if none specified.
+        if self.provOn and self._provSourceUniform is None and self._provSourceMap is None:
+            self._provSourceUniform = 0
         return
 
     def _readFlex(self):
