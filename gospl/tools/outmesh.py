@@ -209,6 +209,19 @@ class WriteMesh(object):
                 )
                 f["phiF"][:, : self.stratStep + 1] = self.phiF[:, : self.stratStep + 1]
 
+            # In-model provenance: per-layer per-class thickness (lpoints,
+            # layers, classes). Only written when provenance tracers are on.
+            if getattr(self, "provOn", False):
+                f.create_dataset(
+                    "stratP",
+                    shape=(self.lpoints, self.stratStep + 1, self.provNb),
+                    dtype="float64",
+                    compression="gzip",
+                )
+                f["stratP"][:, : self.stratStep + 1, :] = self.stratP[
+                    :, : self.stratStep + 1, :
+                ]
+
         MPIcomm.Barrier()
 
         if MPIrank == 0 and self.verbose:
@@ -562,6 +575,13 @@ class WriteMesh(object):
                     self.phiF.fill(0.0)
                     if "/phiF" in hf:
                         self.phiF[:, : self.stratStep] = np.array(hf["/phiF"])
+                # In-model provenance: restore per-layer per-class thickness.
+                # Restarting a provenance run from an output without /stratP
+                # falls back to the bedrock-seeded stratP (set in
+                # readStratLayers), so the restore stays robust.
+                if getattr(self, "provOn", False) and "/stratP" in hf:
+                    self.stratP.fill(0.0)
+                    self.stratP[:, : self.stratStep, :] = np.array(hf["/stratP"])
 
         return
 

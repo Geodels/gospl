@@ -217,10 +217,14 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   multi-source it slightly mis-attributes pit-internal and marine-only deposits.
   Thread `vSedP[c]` proportionally through `_moveDownstream` (no coarse-settles
   bias) to make it exact.
-- **B4 — advection + I/O + restart**: advect `stratP` with the strata pile
-  (second `strataonesed`-style call per class, like `stratHf`); write/read
-  `stratP` to the stratal HDF5; per-pixel/per-basin provenance read directly off
-  `stratP`.
+- **B4 — advection + I/O + restart** ✅: `stratalRecord` advects each class's
+  `stratP[:,:,c]` with the same `strataonesed` interpolation as `stratHf`
+  (re-normalised so Σ over classes == `stratH`); `_outputStrat` writes the
+  `(lpoints, layers, classes)` `stratP` to the stratal HDF5 and the restart path
+  restores it. Provenance per pixel/per layer reads directly off `stratP`.
+  Tested via the I/O round-trip (`test_provenance_output_io`); the advection
+  branch mirrors the tested `stratHf` path (a horizontal-tectonics fixture would
+  exercise it directly).
 
 ## 7. Phasing
 

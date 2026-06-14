@@ -965,6 +965,33 @@ def test_provenance_conservation(minimal_prov_model):
     assert float(np.abs(P.sum(axis=2) - H).sum()) / relH < 1.0e-6
 
 
+@pytest.mark.slow
+def test_provenance_output_io(minimal_prov_model):
+    """
+    Protects: Phase B4 (I/O) — the per-layer provenance composition stratP is
+    written to the stratal HDF5 (lpoints, layers, classes), consistent with the
+    recorded stratH (Σ over classes == stratH).
+    """
+    import glob
+
+    model = minimal_prov_model
+    model.runProcesses()
+    files = sorted(
+        glob.glob(os.path.join(str(model.outputDir), "h5", "stratal.*.p*.h5"))
+    )
+    if not files:
+        pytest.skip("no stratal output written")
+    h5py = pytest.importorskip("h5py")
+    with h5py.File(files[-1], "r") as hf:
+        assert "stratP" in hf, "provenance stratP not in stratal output"
+        P = np.array(hf["stratP"])
+        H = np.array(hf["stratH"])
+        assert P.shape[2] == model.provNb
+        relH = max(float(H.sum()), 1.0)
+        assert float(np.abs(P.sum(axis=2) - H).sum()) / relH < 1.0e-6
+        assert float(np.abs(P[:, :, 0]).max()) == 0.0      # single source -> class 1
+
+
 def test_dual_lithology_layer_allocation():
     """
     Protects: DESIGN_DUAL_LITHOLOGY.md Phase 1 — the fine-fraction layer
