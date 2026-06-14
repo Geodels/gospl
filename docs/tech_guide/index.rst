@@ -135,6 +135,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about the tectonics implementation.
 
     .. grid-item-card::
+        :img-top: ../_static/glacier.png
         :text-align: center
 
         **Ice sheets and glacial erosion**
@@ -151,6 +152,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about the ice implementation.
 
     .. grid-item-card::
+        :img-top: ../_static/provenance.png
         :text-align: center
 
         **Sediment provenance (source-to-sink)**
