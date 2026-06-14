@@ -446,3 +446,43 @@ Dual-lithology (coarse/fine) variables definition
         .. note::
 
             See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/strat.html>`_ (Dual lithology section) for the physics and current limitations.
+
+
+Sediment provenance tracers
+-----------------------------------------------------
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+
+        **Declaration example**:
+
+        .. code:: yaml
+
+            provenance:
+                classes: 3
+                source: ['input/source', 'rock']    # per-vertex source class
+                # uniform: 0                          #   ... or one class everywhere
+                cu_weight: [1.0, 0.0, 0.3]            # optional copper fertility
+
+        When stratigraphy is enabled (a positive ``strat`` interval in the
+        ``time`` block), adding a ``provenance`` block carries **N source-rock
+        classes** through erosion, transport, deposition and the stratigraphic
+        record, so the composition of each layer (and hence per-pixel /
+        per-basin provenance) is tracked conservatively. Provenance is a passive
+        label — it has no effect on erodibility, diffusivity or deposition, so a
+        model without the block is unchanged.
+
+        a. ``classes`` — number of source classes,
+        b. ``source`` — a per-vertex integer class map ``[file, key]`` (values
+           in ``[0, classes)``), **or**
+        c. ``uniform`` — a single source class everywhere,
+        d. ``cu_weight`` (optional) — copper fertility per class, for a
+           Cu-sourced fraction diagnostic.
+
+        The per-layer composition is written to the stratal output (``stratP``).
+
+        .. note::
+
+            See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/provenance.html>`_ (provenance section) for the algorithm, the standalone post-processing tool, and the copper-prospectivity scope.

@@ -22,7 +22,7 @@ Two approaches
    existing goSPL run — re-derive the flow network and route the eroded material
    to the sinks. No re-run; flexible; gives distances and pathways. Approximate
    (it sees the *net* erosion/deposition per output step).
-#. **In-model provenance tracers** (planned, see :ref:`below <prov-inmodel>`):
+#. **In-model provenance tracers** (see :ref:`below <prov-inmodel>`):
    generalise the dual-lithology two-fraction machinery to *N* provenance
    classes for exact, recycling-aware percentages — at the cost of re-running.
 
@@ -143,35 +143,54 @@ Caveats
 
 .. _prov-inmodel:
 
-In-model provenance tracers (in progress)
------------------------------------------
+In-model provenance tracers
+---------------------------
 
-For conservation-exact, recycling-aware percentages, the dual-lithology
-two-fraction machinery (separate routed sub-flux ``vSedF``, per-layer
-composition ``stratHf``) is being generalised to *N* source-provenance classes:
-tag erosion by source, route each class sub-flux through the same flow operator,
-deposit with the *N*-fraction composition, and store per-layer provenance in the
-stratigraphic record. Provenance is a **passive label** (no erodibility /
-diffusivity / sorting feedback), so it simply rides the existing total-sediment
-routing.
+For **conservation-exact, recycling-aware** provenance, goSPL can carry *N*
+source-rock classes through its own erosion → transport → deposition →
+stratigraphy, generalising the dual-lithology two-fraction machinery (the routed
+sub-flux ``vSedF``, the per-layer composition ``stratHf``). Each stratigraphic
+layer stores its source composition, so provenance percentages per pixel and per
+layer are read directly off the saved stratigraphy — no post-processing
+reconstruction. Provenance is a **passive label** (no erodibility / diffusivity /
+porosity / sorting feedback), so it simply rides the total-sediment routing.
 
-Enabled by a ``provenance:`` block (requires stratigraphy)::
+Enabled by a ``provenance:`` block (requires stratigraphy, ``time: strat``):
+
+.. code:: yaml
 
     provenance:
-        classes: 3
-        source: ['input/source', 'rock']   # per-vertex int class (or `uniform: 0`)
-        cu_weight: [1.0, 0.0, 0.3]
+        classes: 3                          # number of source-rock classes
+        source: ['input/source', 'rock']    # per-vertex int class in [0, classes)
+        # uniform: 0                         #   ... or a single class everywhere
+        cu_weight: [1.0, 0.0, 0.3]           # optional copper fertility per class
 
-**Status:** functional end-to-end (phases B0–B3) — opt-in parsing,
-``stratP[node, layer, class]`` seeded to the bedrock source class, the eroded
-sediment split by provenance (`erodeStrat`), each class sub-flux routed through
-the upstream-integration operator (`_getSedFlux`), and the deposit laid into the
-layer composition (`deposeStrat`), keeping Σ over classes == ``stratH``. With a
-single source every layer stays 100 % that class after a run, and with multiple
-sources the composition still partitions the layer thickness exactly
-(``stratP`` advected with the pile and written/restored from the stratal HDF5 —
-B4). The only remaining refinement (B2b) is the per-class *spatial attribution*
-of pit-internal and marine-only deposits, which currently use the through-flux
-composition; this is **not** a conservation gap (the partition is exact for any
-number of sources) and is deferred given the cost/risk of threading the pit
-cascade. See ``docs/DESIGN_PROVENANCE.md`` §6.
+How it works:
+
+- **State** ``stratP[node, layer, class]`` — the per-class thickness in every
+  layer (Σ over classes == the layer thickness ``stratH``), seeded so each
+  initial layer and the bedrock carry the node's ``source`` class.
+- **Erosion** (``erodeStrat``) splits the eroded sediment by the consumed layers'
+  composition; eroded bedrock is attributed to the node's source class.
+- **Transport** (``_getSedFlux``) routes each class sub-flux through the same
+  upstream-integration operator as the total (linear, so the sub-fluxes sum to
+  the total exactly).
+- **Deposition** (``deposeStrat``) lays the deposit into the layer composition
+  with the arriving (routed) fractions.
+- **Advection & I/O** — ``stratP`` is advected with the pile under horizontal
+  tectonics and written to / restored from the stratal HDF5 (the ``stratP``
+  dataset).
+
+**Conservation** is structural: ``stratP`` partitions ``stratH`` exactly (to
+~3e-8) for any number of sources — with a single source every layer stays 100 %
+that class. The one approximation (the per-class *spatial attribution* of
+pit-internal and marine-only deposits, which use the through-flux composition) is
+**not** a conservation gap and is deferred — see ``docs/DESIGN_PROVENANCE.md``
+§6 (phase B2b).
+
+.. note::
+
+    The **standalone** tool (above) and the **in-model** tracers answer the same
+    question from opposite ends: the standalone post-processes an existing run
+    (flexible, approximate, no re-run); the in-model tracers are exact and
+    recycling-aware but require running with ``provenance:`` enabled.

@@ -1,7 +1,11 @@
 # DESIGN — sediment provenance & source-to-sink attribution (Cu prospectivity)
 
-Status: design + prototype (`gospl/analyse/provenance.py`). Standalone analysis on
-goSPL output; an in-model high-fidelity variant is scoped in §6.
+Status: **both approaches implemented.** Standalone post-processor
+(`gospl/analyse/provenance.py`); in-model tracers (Approach B, phases B0–B4,
+opt-in `provenance:`) carry N source classes through the model's own
+erosion/transport/deposition/stratigraphy — conservation-exact for any number of
+sources. Only the optional per-class pit/marine *attribution* refinement (B2b)
+remains. See §6 and `docs/tech_guide/provenance.rst`.
 
 ## 1. Problem
 
@@ -160,7 +164,7 @@ sediment-hosted Cu, facies/redox/diagenesis. Output is framed as a
 explicitly upstream of the metallogenic step. The strongest favourability layer
 combines **provenance × grain size × depositional setting**.
 
-## 6. In-model provenance tracers (Approach B) — scope
+## 6. In-model provenance tracers (Approach B) — implemented (B0–B4)
 
 Generalise dual lithology (`docs/DESIGN_DUAL_LITHOLOGY.md`) to N provenance
 classes:
