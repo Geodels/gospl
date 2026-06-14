@@ -200,13 +200,23 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   per-class eroded rate `provEro` (Σ over classes == the total uncompacted
   erosion) and accumulating `_provEroded`; `stratP` is reduced and re-normalised
   so Σ over classes == `stratH`. Tested in isolation (`test_provenance_erosion_split`).
-- **B2 — transport**: route the N provenance sub-fluxes `vSedP[c]` through the
-  same operator as the total in `_getSedFlux`/`_moveDownstream` (thread like
-  `vSedF`); snapshot `provFrac` = arriving composition.
-- **B3 — deposition**: `deposeStrat` writes the arriving composition into the new
-  layer's `stratP` (uniform — no sorting); accumulate `_provDeposited`.
-  **Conservation guard first** (`test_provenance_conservation`: per-class
-  `_provEroded` == `_provDeposited`, the analogue of `test_dual_fine_conservation`).
+- **B2 — transport** ✅ *(through-flux)*: route the N sub-fluxes `vSedP[c]` through
+  the upstream-integration operator `fMati` in `_getSedFlux` (Σ over classes ==
+  total flux, exact); `provFrac = vSedP/vSed` is the arriving composition,
+  `depoProvFrac` (no sorting bias — passive) is what `deposeStrat` lays down.
+- **B3 — deposition** ✅: `deposeStrat` adds `depo · depoProvFrac` to the new
+  layer's `stratP` (keeps Σ over classes == `stratH`) and accumulates
+  `_provDeposited`. Guarded by `test_provenance_conservation` — with a single
+  source, every layer stays 100 % that class after a full run (class-0 leakage ==
+  0; `stratP` partitions `stratH` to ~3e-8).
+- **B2b — cascade/marine composition refinement** *(remaining)*: B2 routes the
+  composition through `fMati` only, so pit-cascade redistribution
+  (`_moveDownstream`) and the marine path (`seaChange`) use the through-flux
+  composition rather than a per-pit/marine-routed one (the analogue of the dual
+  `_pitFineFraction`/`_marineFineFraction`). Negligible for single-source; for
+  multi-source it slightly mis-attributes pit-internal and marine-only deposits.
+  Thread `vSedP[c]` proportionally through `_moveDownstream` (no coarse-settles
+  bias) to make it exact.
 - **B4 — advection + I/O + restart**: advect `stratP` with the strata pile
   (second `strataonesed`-style call per class, like `stratHf`); write/read
   `stratP` to the stratal HDF5; per-pixel/per-basin provenance read directly off
