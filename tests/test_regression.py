@@ -914,6 +914,34 @@ def test_provenance_seeding(minimal_prov_model):
     assert np.isfinite(H).all()
 
 
+@pytest.mark.slow
+def test_provenance_erosion_split(minimal_prov_model):
+    """
+    Protects: Phase B1 — erodeStrat splits the eroded sediment by provenance.
+    Eroded bedrock is attributed to the node's source class, the per-class
+    eroded flux (provEro) sums to the total uncompacted erosion, and stratP
+    stays consistent (Σ over classes == stratH).
+    """
+    m = minimal_prov_model              # uniform bedrock source class 1, 2 classes
+    n = m.lpoints
+
+    # Impose a uniform erosion and run only the stratigraphic erosion step.
+    m.tmpL.setArray(np.full(n, -5.0))
+    m.dm.localToGlobal(m.tmpL, m.tmp)
+    m.erodeStrat()
+
+    # Eroded sediment is all source class 1 (no class-0 bedrock anywhere).
+    assert np.allclose(m.provEro[:, 0], 0.0)
+    assert (m.provEro[:, 1] >= -1.0e-12).all()
+    assert float(m.provEro[:, 1].max()) > 0.0, "no provenance eroded"
+    # Per-class eroded flux sums to the total uncompacted erosion (thCoarse,
+    # single-fraction here) — so the routed sub-fluxes will sum to the total.
+    assert np.allclose(m.provEro.sum(axis=1), m.thCoarse)
+    # stratP partitions stratH exactly after erosion.
+    top = m.stratStep + 1
+    assert np.allclose(m.stratP[:, :top, :].sum(axis=2), m.stratH[:, :top])
+
+
 def test_dual_lithology_layer_allocation():
     """
     Protects: DESIGN_DUAL_LITHOLOGY.md Phase 1 — the fine-fraction layer
