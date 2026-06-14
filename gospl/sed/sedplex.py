@@ -58,6 +58,18 @@ class SEDMesh(object):
         self._pitRetFine = np.zeros(1, dtype=np.float64)
         self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
 
+        # In-model provenance tracers (opt-in `provenance:`; DESIGN_PROVENANCE.md
+        # §6). One routed sub-flux per source class (vSedP[c], mirroring vSedF),
+        # the arriving/deposited per-node composition (provFrac/depoProvFrac),
+        # and per-class mass-balance diagnostics. Allocated only when provOn.
+        if self.provOn:
+            self.vSedP = [self.hGlobal.duplicate() for _ in range(self.provNb)]
+            self.vSedPLocal = self.hLocal.duplicate()
+            self.provFrac = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
+            self.depoProvFrac = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
+            self._provEroded = np.zeros(self.provNb, dtype=np.float64)
+            self._provDeposited = np.zeros(self.provNb, dtype=np.float64)
+
         # Get the maximum number of neighbours on the mesh
         maxnb = np.zeros(1, dtype=np.int64)
         maxnb[0] = setmaxnb(self.lpoints)

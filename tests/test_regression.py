@@ -866,6 +866,54 @@ def test_dual_lithology_opt_in():
     )
 
 
+def test_provenance_opt_in():
+    """
+    Protects: DESIGN_PROVENANCE.md §6 Phase 0 — in-model provenance tracers are
+    opt-in via the `provenance:` block (parsed in `_extraProvenance`, a
+    continuation of `_extraStrata`), and require stratigraphy.
+    """
+    # No block -> off.
+    p = _strata_parser(stratNb=5)
+    p._extraStrata()
+    assert p.provOn is False and p.provNb == 0
+
+    # On with stratigraphy -> parsed.
+    p = _strata_parser(stratNb=5)
+    p.input = {"provenance": {"classes": 3, "uniform": 0,
+                              "cu_weight": [1.0, 0.0, 0.3]}}
+    p._extraStrata()
+    assert p.provOn is True and p.provNb == 3
+    assert p._provSourceUniform == 0 and p._provSourceMap is None
+    assert np.allclose(p.prov_cu_weight, [1.0, 0.0, 0.3])
+
+    # On but stratigraphy off -> forced off.
+    p = _strata_parser(stratNb=0)
+    p.input = {"provenance": {"classes": 3}}
+    p._extraStrata()
+    assert p.provOn is False
+
+
+@pytest.mark.slow
+def test_provenance_seeding(minimal_prov_model):
+    """
+    Protects: Phase 0 provenance state — stratP is allocated (lpoints, stratNb,
+    n_classes) and seeded so every initial layer carries the node's bedrock
+    source class (Σ over classes == stratH). Passive in Phase 0, so the run is
+    unaffected; the conservation through erosion/deposition is a later phase.
+    """
+    m = minimal_prov_model
+    assert m.provOn and m.provNb == 2
+    assert m.stratP.shape == (m.lpoints, m.stratNb, 2)
+    assert (m.source_class == 1).all()                 # uniform class 1
+    # Seeded: all initial thickness in class 1, none in class 0.
+    assert np.allclose(m.stratP[:, :, 1], m.stratH)
+    assert np.allclose(m.stratP[:, :, 0], 0.0)
+    # Passive tracer in Phase 0 — the model still runs end to end.
+    m.runProcesses()
+    H = m.hLocal.getArray()
+    assert np.isfinite(H).all()
+
+
 def test_dual_lithology_layer_allocation():
     """
     Protects: DESIGN_DUAL_LITHOLOGY.md Phase 1 — the fine-fraction layer

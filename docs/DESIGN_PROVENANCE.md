@@ -179,7 +179,35 @@ classes:
   provenance % per pixel/basin directly, recycling-aware, exact.
 
 Deliver B opt-in (`provenance:` YAML block), inert when absent (byte-identical),
-mirroring the dual-lithology delivery discipline.
+mirroring the dual-lithology delivery discipline. Provenance is a **passive
+label** — unlike lithology it has no erodibility/diffusivity/porosity feedback
+and no depositional sorting, so there is no `_surfaceLithoK/D` or
+`_pitFineFraction` analogue; it simply rides the existing total-sediment routing.
+
+### Phases (in-model, branch per phase, PR into `dev`)
+
+- **B0 — foundation** ✅ *(done)*: `_extraProvenance` parser (`provenance:` →
+  `provOn`, `provNb`, source-class `uniform`/`source` map, `cu_weight`; requires
+  `stratNb > 0`); state `stratP[node, layer, class]` (per-class layer thickness,
+  Σ = `stratH`) seeded to the bedrock `source_class` in `readStratLayers`; routed
+  sub-flux vecs `vSedP[c]` + `provFrac`/`depoProvFrac` + `_provEroded`/
+  `_provDeposited` diagnostics in `sedplex`; `destroy_DMPlex` registration.
+  Passive (no hooks yet) ⇒ provenance-on is byte-identical to off. Tests:
+  `test_provenance_opt_in`, `test_provenance_seeding`.
+- **B1 — erosion split**: in `erodeStrat`, split the eroded solid by the consumed
+  layers' `stratP`; the bedrock sentinel contributes the node's `source_class`.
+  Accumulate `_provEroded`. (Mirrors the dual fine split.)
+- **B2 — transport**: route the N provenance sub-fluxes `vSedP[c]` through the
+  same operator as the total in `_getSedFlux`/`_moveDownstream` (thread like
+  `vSedF`); snapshot `provFrac` = arriving composition.
+- **B3 — deposition**: `deposeStrat` writes the arriving composition into the new
+  layer's `stratP` (uniform — no sorting); accumulate `_provDeposited`.
+  **Conservation guard first** (`test_provenance_conservation`: per-class
+  `_provEroded` == `_provDeposited`, the analogue of `test_dual_fine_conservation`).
+- **B4 — advection + I/O + restart**: advect `stratP` with the strata pile
+  (second `strataonesed`-style call per class, like `stratHf`); write/read
+  `stratP` to the stratal HDF5; per-pixel/per-basin provenance read directly off
+  `stratP`.
 
 ## 7. Phasing
 

@@ -54,6 +54,12 @@ class STRAMesh(object):
         # An optional `stratK` key in the npstrata file lets the user
         # impose a non-uniform multiplier on the initial layers.
         self.stratK = None
+        # In-model provenance tracers (opt-in `provenance:`; see
+        # DESIGN_PROVENANCE.md §6). stratP[node, layer, class] = thickness of
+        # each source-rock class in each layer (Σ over classes == stratH);
+        # source_class = per-vertex bedrock class. Allocated only when provOn.
+        self.stratP = None
+        self.source_class = None
 
         return
 
@@ -169,8 +175,42 @@ class STRAMesh(object):
                 self.stratHf[:, 0] = BEDROCK_SENTINEL * (1.0 - self.bedrock_coarse_frac)
                 self.phiF[:, 0] = self.phi0f
 
+        if getattr(self, "provOn", False):
+            self._initProvenance()
+
         return
-    
+
+    def _initProvenance(self):
+        """
+        Allocate and seed the provenance state (opt-in `provenance:`; Phase 0).
+
+        ``source_class`` (per-vertex bedrock class) is read from the ``uniform``
+        scalar or the ``source`` ``[file, key]`` map; ``stratP[node, layer,
+        class]`` is the per-class thickness in each layer, seeded so every
+        initial layer (and the bedrock sentinel) carries the node's bedrock
+        source class (Σ over classes == stratH). A passive tracer — no physics
+        feedback — so a provenance-on run is identical to provenance-off until
+        the erosion/transport/deposition hooks of later phases are added.
+        """
+        if self._provSourceMap is not None:
+            fname, key = self._provSourceMap[0], self._provSourceMap[1]
+            data = np.load(fname + ".npz")
+            self.source_class = data[key][self.locIDs].astype(np.int64)
+            del data
+        else:
+            self.source_class = np.full(
+                self.lpoints, int(self._provSourceUniform), dtype=np.int64
+            )
+        np.clip(self.source_class, 0, self.provNb - 1, out=self.source_class)
+
+        # Per-layer per-class thickness; each initial layer's full thickness is
+        # assigned to the node's bedrock source class.
+        self.stratP = np.zeros(
+            (self.lpoints, self.stratNb, self.provNb), dtype=np.float64
+        )
+        self.stratP[np.arange(self.lpoints), :, self.source_class] = self.stratH
+        return
+
     def _fillZeroPorosity(self, phiS):
         """
         Where ``phiS == 0`` (layer has been emptied or never deposited),

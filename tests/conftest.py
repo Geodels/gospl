@@ -173,6 +173,16 @@ def minimal_ice_dual_model():
 
 
 @pytest.fixture
+def minimal_prov_model():
+    """
+    Minimal model with in-model provenance tracers on (`provenance:`, Phase 0).
+    Exercises stratP allocation/seeding and the opt-in gating. See
+    minimal_prov.yml and docs/DESIGN_PROVENANCE.md §6.
+    """
+    return _instantiate("minimal_prov.yml")
+
+
+@pytest.fixture
 def minimal_ice_seed_model():
     """
     Minimal SIA model with a pre-existing ice thickness seeded from the input
