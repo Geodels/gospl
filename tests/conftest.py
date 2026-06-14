@@ -183,6 +183,25 @@ def minimal_prov_model():
 
 
 @pytest.fixture
+def minimal_prov_multi_model():
+    """
+    Minimal provenance model with TWO source classes from a per-vertex map.
+    The source map (`prov_src.npz`) is generated here from the mesh coordinates
+    (class 0 / 1 split by x) so no binary fixture is committed. See
+    minimal_prov2.yml.
+    """
+    import numpy as np
+
+    mesh = FIXTURES_DIR / "mesh.npz"
+    if not mesh.exists():
+        pytest.skip("mesh.npz fixture not present")
+    v = np.load(mesh)["v"]
+    rock = (v[:, 0] > v[:, 0].mean()).astype(np.int64)   # 2 classes, split by x
+    np.savez(FIXTURES_DIR / "prov_src.npz", rock=rock)
+    return _instantiate("minimal_prov2.yml")
+
+
+@pytest.fixture
 def minimal_ice_seed_model():
     """
     Minimal SIA model with a pre-existing ice thickness seeded from the input

@@ -29,6 +29,8 @@ tests/fixtures/minimal_ice_flex/
 tests/fixtures/minimal_ice_dual/
 tests/fixtures/minimal_ice_seed/
 tests/fixtures/minimal_prov/
+tests/fixtures/minimal_prov2/
+tests/fixtures/prov_src.npz
 *.so
 .eggs
 MANIFEST

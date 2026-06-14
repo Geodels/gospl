@@ -209,14 +209,19 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   `_provDeposited`. Guarded by `test_provenance_conservation` — with a single
   source, every layer stays 100 % that class after a full run (class-0 leakage ==
   0; `stratP` partitions `stratH` to ~3e-8).
-- **B2b — cascade/marine composition refinement** *(remaining)*: B2 routes the
-  composition through `fMati` only, so pit-cascade redistribution
-  (`_moveDownstream`) and the marine path (`seaChange`) use the through-flux
-  composition rather than a per-pit/marine-routed one (the analogue of the dual
-  `_pitFineFraction`/`_marineFineFraction`). Negligible for single-source; for
-  multi-source it slightly mis-attributes pit-internal and marine-only deposits.
-  Thread `vSedP[c]` proportionally through `_moveDownstream` (no coarse-settles
-  bias) to make it exact.
+- **B2b — cascade/marine composition refinement** *(optional accuracy, not
+  conservation)*: B2 routes the composition through `fMati` only, so pit-cascade
+  redistribution (`_moveDownstream`) and the marine path (`seaChange`) use the
+  through-flux composition rather than a per-pit/marine-routed one. **This is
+  NOT a conservation gap** — `depoProvFrac` always sums to one
+  (`Σ_c provFrac = Σ vSedP/vSed = 1`), so `stratP` partitions `stratH` exactly
+  (~3e-8) for *any* number of sources (verified by `test_provenance_multisource`).
+  B2b only refines the per-class *spatial attribution* of pit-internal and
+  marine-only deposits. Doing it means threading `vSedP[c]` proportionally
+  through `_moveDownstream` (no coarse-settles bias) and `seaChange` — the
+  highest-risk code path (the dual fine-flux threading has a buggy-revert
+  history) for a modest accuracy gain, so it is deferred unless exact
+  pit/marine attribution is needed.
 - **B4 — advection + I/O + restart** ✅: `stratalRecord` advects each class's
   `stratP[:,:,c]` with the same `strataonesed` interpolation as `stratHf`
   (re-normalised so Σ over classes == `stratH`); `_outputStrat` writes the

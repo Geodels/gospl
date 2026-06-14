@@ -167,8 +167,11 @@ Enabled by a ``provenance:`` block (requires stratigraphy)::
 sediment split by provenance (`erodeStrat`), each class sub-flux routed through
 the upstream-integration operator (`_getSedFlux`), and the deposit laid into the
 layer composition (`deposeStrat`), keeping Σ over classes == ``stratH``. With a
-single source every layer stays 100 % that class after a run (conservation
-guard). Remaining refinements: routing the composition through the pit cascade
-and the marine path (B2b — currently through-flux, slightly approximate for
-multi-source pit-internal / marine-only deposits), and ``stratP`` advection +
-HDF5 I/O (B4). See ``docs/DESIGN_PROVENANCE.md`` §6.
+single source every layer stays 100 % that class after a run, and with multiple
+sources the composition still partitions the layer thickness exactly
+(``stratP`` advected with the pile and written/restored from the stratal HDF5 —
+B4). The only remaining refinement (B2b) is the per-class *spatial attribution*
+of pit-internal and marine-only deposits, which currently use the through-flux
+composition; this is **not** a conservation gap (the partition is exact for any
+number of sources) and is deferred given the cost/risk of threading the pit
+cascade. See ``docs/DESIGN_PROVENANCE.md`` §6.

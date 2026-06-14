@@ -966,6 +966,36 @@ def test_provenance_conservation(minimal_prov_model):
 
 
 @pytest.mark.slow
+def test_provenance_multisource(minimal_prov_multi_model):
+    """
+    Protects: multi-source provenance (2 classes from a map) — both classes are
+    tracked, the per-layer composition still partitions the layer thickness
+    exactly (Σ over classes == stratH), and the attribution is spatially
+    sensible (each source dominates the strata over its own region).
+    """
+    m = minimal_prov_multi_model
+    assert m.provOn and m.provNb == 2
+    m.runProcesses()
+
+    top = m.stratStep + 1
+    H = m.stratH[:, :top]
+    P = m.stratP[:, :top, :]
+    # Conservation: provenance exactly partitions the stratigraphy.
+    assert float(np.abs(P.sum(axis=2) - H).sum()) / max(float(H.sum()), 1.0) < 1.0e-6
+    # Both source classes are present in the record.
+    assert float(P[:, :, 0].max()) > 0.0 and float(P[:, :, 1].max()) > 0.0
+    # Spatially sensible: each source's share dominates over its own region.
+    src = m.source_class
+    tot = P.sum(axis=2).sum(axis=1)
+    has = tot > 0
+    frac0 = np.divide(P[:, :, 0].sum(axis=1), tot, out=np.zeros_like(tot), where=has)
+    reg0 = has & (src == 0)
+    reg1 = has & (src == 1)
+    if reg0.any() and reg1.any():
+        assert frac0[reg0].mean() > frac0[reg1].mean()
+
+
+@pytest.mark.slow
 def test_provenance_output_io(minimal_prov_model):
     """
     Protects: Phase B4 (I/O) — the per-layer provenance composition stratP is
