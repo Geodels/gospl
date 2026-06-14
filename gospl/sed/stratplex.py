@@ -800,6 +800,22 @@ class STRAMesh(object):
                 nstratHf[onIDs, :] = loc_stratHf[indices[onIDs, 0], :]
                 nphiF[onIDs, :] = loc_phiF[indices[onIDs, 0], :]
 
+        provOn = getattr(self, "provOn", False)
+        if provOn:
+            # Advect each provenance class's per-layer thickness with the same
+            # interpolation (a bulk thickness, like stratHf). Linear weights
+            # preserve Σ over classes == stratH (re-imposed below after sync).
+            nstratP = np.zeros((self.lpoints, self.stratStep, self.provNb))
+            for c in range(self.provNb):
+                loc_P = np.ascontiguousarray(self.stratP[:, : self.stratStep, c])
+                nP, _, _ = strataonesed(
+                    self.lpoints, self.stratStep, indices, weights,
+                    loc_P, loc_stratZ, loc_phiS,
+                )
+                if len(onIDs) > 0:
+                    nP[onIDs, :] = loc_P[indices[onIDs, 0], :]
+                nstratP[:, :, c] = nP
+
         # Updates stratigraphic records after mesh advection on the edges of each partition
         # to ensure that all stratigraphic information on the adjacent nodes of the neighbouring
         # partition are equals on all processors sharing a common number of nodes.
@@ -822,5 +838,21 @@ class STRAMesh(object):
                 self.tmp.setArray(nphiF[:, k])
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 self.phiF[:, k] = self.tmpL.getArray().copy()
+
+            if provOn:
+                for c in range(self.provNb):
+                    self.tmp.setArray(nstratP[:, k, c])
+                    self.dm.globalToLocal(self.tmp, self.tmpL)
+                    self.stratP[:, k, c] = self.tmpL.getArray().copy()
+
+        if provOn:
+            # Re-impose Σ over classes == stratH after the interpolation drift.
+            top = self.stratStep
+            np.clip(self.stratP[:, :top, :], 0.0, None, out=self.stratP[:, :top, :])
+            psum = self.stratP[:, :top, :].sum(axis=2)
+            scale = np.divide(
+                self.stratH[:, :top], psum, out=np.ones_like(psum), where=psum > 0
+            )
+            self.stratP[:, :top, :] *= scale[:, :, None]
 
         return
