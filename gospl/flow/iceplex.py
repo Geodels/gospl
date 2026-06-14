@@ -594,7 +594,9 @@ class IceMesh(object):
         # the KSP solve is only accurate to its tolerance, so normalise by the
         # ACTUAL routed total (not Vtot) to make the weight sum to one exactly —
         # mass conservation then matches the melt-weighted path bit-for-bit.
-        dep_vol = f * L
+        # The analytical load is non-negative; clamp away sub-tolerance KSP
+        # residual noise so the deposition weight can never go slightly negative.
+        dep_vol = np.maximum(f * L, 0.0)
         total = MPI.COMM_WORLD.allreduce(
             float(np.sum(dep_vol[owned])), op=MPI.SUM
         )
