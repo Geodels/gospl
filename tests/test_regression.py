@@ -993,6 +993,13 @@ def test_provenance_multisource(minimal_prov_multi_model):
     reg1 = has & (src == 1)
     if reg0.any() and reg1.any():
         assert frac0[reg0].mean() > frac0[reg1].mean()
+    # B2b (marine): the recorded composition matches the eroded supply mix — the
+    # marine sink (the dominant deposition here) carries the basin-delivered
+    # provenance, so the deposited per-class ratio tracks the eroded ratio.
+    ero = m._provEroded
+    dep = m._provDeposited
+    if ero.sum() > 0 and dep.sum() > 0:
+        assert abs(dep[1] / dep.sum() - ero[1] / ero.sum()) < 1.0e-2
 
 
 @pytest.mark.slow
