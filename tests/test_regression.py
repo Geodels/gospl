@@ -942,6 +942,29 @@ def test_provenance_erosion_split(minimal_prov_model):
     assert np.allclose(m.stratP[:, :top, :].sum(axis=2), m.stratH[:, :top])
 
 
+@pytest.mark.slow
+def test_provenance_conservation(minimal_prov_model):
+    """
+    Protects: Phases B2+B3 — provenance is carried conservatively through the
+    full erosion -> transport -> deposition -> stratigraphy loop. With a single
+    source class, every stratigraphic layer must remain 100% that class after a
+    run (a leak would put thickness in another class or break Σ == stratH).
+    """
+    m = minimal_prov_model              # uniform bedrock source class 1
+    m.runProcesses()
+
+    top = m.stratStep + 1
+    H = m.stratH[:, :top]
+    P = m.stratP[:, :top, :]
+    # No spurious creation of the absent source class 0.
+    assert float(np.abs(P[:, :, 0]).max()) == 0.0
+    # All recorded sediment is attributed to the single source (class 1) and the
+    # provenance exactly partitions the layer thickness.
+    relH = max(float(H.sum()), 1.0)
+    assert float(np.abs(P[:, :, 1] - H).sum()) / relH < 1.0e-6
+    assert float(np.abs(P.sum(axis=2) - H).sum()) / relH < 1.0e-6
+
+
 def test_dual_lithology_layer_allocation():
     """
     Protects: DESIGN_DUAL_LITHOLOGY.md Phase 1 — the fine-fraction layer

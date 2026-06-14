@@ -131,6 +131,27 @@ class SEDMesh(object):
             # (marine) refine it.
             self.depoFineFrac = self.fineFrac.copy()
 
+        # Provenance: route each source class's eroded sub-flux through the SAME
+        # operator (linear, exact, Σ over classes == total). provFrac is the
+        # arriving per-node composition; depoProvFrac (no settling bias — a
+        # passive tracer) is what deposeStrat lays down. (Through-flux routing;
+        # the pit-cascade redistribution refinement is B2b.)
+        if self.provOn:
+            self.dm.globalToLocal(self.vSed, self.vSedLocal)
+            vtot = self.vSedLocal.getArray()
+            for c in range(self.provNb):
+                self.tmpL.setArray(self.provEro[:, c])
+                self.dm.localToGlobal(self.tmpL, self.tmp)
+                self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+                self._solve_KSP(False, self.fMati, self.tmp, self.vSedP[c])
+                self.dm.globalToLocal(self.vSedP[c], self.vSedPLocal)
+                self.provFrac[:, c] = np.divide(
+                    self.vSedPLocal.getArray(), vtot,
+                    out=np.zeros(self.lpoints), where=vtot > 0.0,
+                )
+            np.clip(self.provFrac, 0.0, 1.0, out=self.provFrac)
+            self.depoProvFrac = self.provFrac.copy()
+
         self.fMati.destroy()
 
         # Update local vector

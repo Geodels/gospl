@@ -347,6 +347,15 @@ class STRAMesh(object):
             self.phiF[ids, self.stratStep] = self.phi0f
         else:
             self.phiS[ids, self.stratStep] = self.phi0s
+        if getattr(self, "provOn", False):
+            # Lay the deposit into the layer's provenance composition (the
+            # arriving routed composition; a passive tracer, so no sorting).
+            # Keeps Σ over classes == stratH for the deposited thickness.
+            provDepo = depo[:, None] * self.depoProvFrac
+            self.stratP[:, self.stratStep, :] += provDepo
+            self._provDeposited += np.sum(
+                (provDepo * self.larea[:, None])[self.inIDs == 1], axis=0
+            )
         # Freshly deposited sediment carries the default erodibility (no
         # multiplier). If you want re-deposited sediment to keep its
         # source-layer K, this is the line to revisit.
