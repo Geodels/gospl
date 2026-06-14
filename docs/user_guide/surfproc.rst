@@ -474,6 +474,13 @@ Sediment provenance tracers
         label — it has no effect on erodibility, diffusivity or deposition, so a
         model without the block is unchanged.
 
+        The recorded composition is **conservation-exact for any number of
+        classes** (the per-class thicknesses always sum to the layer thickness),
+        and both depositional sinks carry the exact delivered source mix: marine
+        deposits take the basin-delivered composition and intracontinental
+        pit/lake deposits take each lake's cascade-retained mix (overspill
+        between chained lakes is mixed exactly).
+
         a. ``classes`` — number of source classes,
         b. ``source`` — a per-vertex integer class map ``[file, key]`` (values
            in ``[0, classes)``), **or**

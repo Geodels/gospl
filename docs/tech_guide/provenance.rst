@@ -176,19 +176,20 @@ How it works:
   upstream-integration operator as the total (linear, so the sub-fluxes sum to
   the total exactly).
 - **Deposition** (``deposeStrat``) lays the deposit into the layer composition
-  with the arriving (routed) fractions.
+  with the arriving (routed) fractions. Marine deposits take the basin-delivered
+  mix (``_marineProvFraction``) and continental pit/lake deposits take each pit's
+  cascade-retained mix (``_pitProvFraction``).
 - **Advection & I/O** — ``stratP`` is advected with the pile under horizontal
   tectonics and written to / restored from the stratal HDF5 (the ``stratP``
   dataset).
 
 **Conservation** is structural: ``stratP`` partitions ``stratH`` exactly for any
-number of sources — with a single source every layer stays 100 % that class. The
-**marine** sink (typically the dominant one) carries the basin-delivered source
-mix (``_marineProvFraction``), so the recorded composition matches the eroded
-supply to ~1e-6. The one remaining approximation — the per-class composition of
-**intracontinental pit** deposits, which still use the through-flux composition
-(overspill-chain mixing) — is **not** a conservation gap and is deferred; see
-``docs/DESIGN_PROVENANCE.md`` §6 (phase B2b).
+number of sources — with a single source every layer stays 100 % that class. Both
+sinks now carry the exact delivered source mix: the **marine** sink uses the
+basin-delivered composition (``_marineProvFraction``) and **intracontinental
+pit/lake** deposits use each pit's cascade-retained mix (``_pitProvFraction``),
+tracked through the overspill cascade so downstream-lake chains stay exact. The
+recorded composition matches the eroded supply to ~1e-6.
 
 .. note::
 

@@ -4,8 +4,8 @@ Status: **both approaches implemented.** Standalone post-processor
 (`gospl/analyse/provenance.py`); in-model tracers (Approach B, phases B0–B4,
 opt-in `provenance:`) carry N source classes through the model's own
 erosion/transport/deposition/stratigraphy — conservation-exact for any number of
-sources. Only the optional per-class pit/marine *attribution* refinement (B2b)
-remains. See §6 and `docs/tech_guide/provenance.rst`.
+sources, with exact per-class attribution in **both** sinks (marine and
+continental pit/lake) via B2b. See §6 and `docs/tech_guide/provenance.rst`.
 
 ## 1. Problem
 
@@ -222,14 +222,21 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   composition matches the eroded supply ratio to ~1e-6 and the partition becomes
   machine-exact (Σ over classes == `stratH`, ~1e-24). Domain-uniform, the same
   standard as the dual marine fraction.
-- **B2b — continental pit cascade** *(remaining, low residual)*: pit-internal
-  deposits still use the through-flux `provFrac` rather than the cascade-routed
-  composition (`_moveDownstream` overspill chains). **Not a conservation gap**
-  (`depoProvFrac` always sums to one). Small in practice — with marine done the
-  global deposited/eroded class ratios already agree to ~1e-6 — so threading
-  `vSedP[c]` proportionally through `_moveDownstream` (the highest-risk path,
-  dual fine-flux buggy-revert history) is deferred unless exact intracontinental-
-  lake attribution is needed.
+- **B2b — continental pit cascade** ✅ *(done)*: pit/lake deposits now carry each
+  pit's **cascade-retained** source mix rather than the through-flux composition.
+  `_distributeSediment` builds a per-class sub-flux `vSedP[c]·dt` and threads it
+  through `_moveDownstream` in lockstep with the total: each pit retains its mix
+  proportionally (`ret_frac = pitVol/inV`, so `ret_prov = inVp·ret_frac`) and
+  overspills the rest, routed through the same flow matrix as the total (linear),
+  so **downstream-lake chains** mix exactly. The per-pit retained provenance
+  accumulates in `_pitRetProv`; `_pitProvFraction` (called from `_updateSinks`)
+  sets `depoProvFrac[in_pit]` uniformly to `_pitRetProv/depo` — a passive-label
+  analogue of `_pitFineFraction` but **with no depocenter bias** (provenance is a
+  label, not a grain size), hence simpler than the dual case. Σ over classes of
+  `_pitRetProv` == the pit's retained volume, so `depoProvFrac` stays summed-to-1
+  and `stratP` partitions `stratH` machine-exactly. Guarded by
+  `test_provenance_pit_fraction` (the uniform-mix invariant) plus the existing
+  conservation tests (now run with pit attribution active).
 - **B4 — advection + I/O + restart** ✅: `stratalRecord` advects each class's
   `stratP[:,:,c]` with the same `strataonesed` interpolation as `stratHf`
   (re-normalised so Σ over classes == `stratH`); `_outputStrat` writes the
