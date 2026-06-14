@@ -539,6 +539,41 @@ class SEAMesh(object):
 
         return
 
+    def _marineProvFraction(self, sedFlux):
+        """
+        In-model provenance (B2b, marine): set the marine deposit's source
+        composition to the **domain-wide composition of sediment reaching the
+        sea** — ``ff_mar[c] = Σ(provFrac[c]·sedFlux) / Σ sedFlux`` — applied
+        uniformly (no depth bias: provenance is a passive label, unlike the
+        grain-size sorting in ``_marineFineFraction``).
+
+        This is the marine analogue of the through-flux ``provFrac`` used on
+        land: it replaces the (often near-zero) through-flux composition at
+        marine-only nodes with the basin-delivered mix, so marine sink deposits
+        carry the right provenance. ``Σ_c ff_mar == 1`` (since ``Σ_c provFrac ==
+        1`` where there is flux), so ``stratP`` still partitions ``stratH``.
+
+        Like the dual marine fraction this is **domain-uniform** — it gets the
+        right total per-class fraction into the marine record, not a per-river-
+        mouth spatial split (the same standard as dual lithology).
+
+        :arg sedFlux: marine input sediment volume per node (m^3).
+        """
+        owned = self.inIDs == 1
+        den = MPI.COMM_WORLD.allreduce(float(np.sum(sedFlux[owned])), op=MPI.SUM)
+        if den <= 0.0:
+            return
+        ffmar = np.zeros(self.provNb)
+        for c in range(self.provNb):
+            num = MPI.COMM_WORLD.allreduce(
+                float(np.sum((self.provFrac[:, c] * sedFlux)[owned])), op=MPI.SUM
+            )
+            ffmar[c] = num / den
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        marine = self.tmpL.getArray() > 0.0
+        self.depoProvFrac[marine, :] = ffmar
+        return
+
     def seaChange(self):
         """
         This function is the main entry point to perform marine river-induced deposition. It calls the private functions:
@@ -617,6 +652,8 @@ class SEAMesh(object):
                 fineFlux[np.invert(self.sinkIDs)] = 0.0
                 fineFlux[fineFlux < 0] = 0.0
                 self._marineFineFraction(hl, sedFlux, fineFlux)
+            if getattr(self, "provOn", False):
+                self._marineProvFraction(sedFlux)
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:

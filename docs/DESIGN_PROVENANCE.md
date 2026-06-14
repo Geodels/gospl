@@ -213,19 +213,23 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   `_provDeposited`. Guarded by `test_provenance_conservation` — with a single
   source, every layer stays 100 % that class after a full run (class-0 leakage ==
   0; `stratP` partitions `stratH` to ~3e-8).
-- **B2b — cascade/marine composition refinement** *(optional accuracy, not
-  conservation)*: B2 routes the composition through `fMati` only, so pit-cascade
-  redistribution (`_moveDownstream`) and the marine path (`seaChange`) use the
-  through-flux composition rather than a per-pit/marine-routed one. **This is
-  NOT a conservation gap** — `depoProvFrac` always sums to one
-  (`Σ_c provFrac = Σ vSedP/vSed = 1`), so `stratP` partitions `stratH` exactly
-  (~3e-8) for *any* number of sources (verified by `test_provenance_multisource`).
-  B2b only refines the per-class *spatial attribution* of pit-internal and
-  marine-only deposits. Doing it means threading `vSedP[c]` proportionally
-  through `_moveDownstream` (no coarse-settles bias) and `seaChange` — the
-  highest-risk code path (the dual fine-flux threading has a buggy-revert
-  history) for a modest accuracy gain, so it is deferred unless exact
-  pit/marine attribution is needed.
+- **B2b — marine composition** ✅ *(done)*: `seaChange._marineProvFraction` sets
+  the marine deposit's source composition to the **basin-delivered mix**
+  (`ff_mar[c] = Σ provFrac[c]·sedFlux / Σ sedFlux`, uniform — no depth bias, the
+  passive-label analogue of `_marineFineFraction`). This was the dominant sink
+  (≈79 % of deposition in the test) and was the weakest spot of B2 (marine-only
+  nodes had a near-zero through-flux composition). With it the recorded
+  composition matches the eroded supply ratio to ~1e-6 and the partition becomes
+  machine-exact (Σ over classes == `stratH`, ~1e-24). Domain-uniform, the same
+  standard as the dual marine fraction.
+- **B2b — continental pit cascade** *(remaining, low residual)*: pit-internal
+  deposits still use the through-flux `provFrac` rather than the cascade-routed
+  composition (`_moveDownstream` overspill chains). **Not a conservation gap**
+  (`depoProvFrac` always sums to one). Small in practice — with marine done the
+  global deposited/eroded class ratios already agree to ~1e-6 — so threading
+  `vSedP[c]` proportionally through `_moveDownstream` (the highest-risk path,
+  dual fine-flux buggy-revert history) is deferred unless exact intracontinental-
+  lake attribution is needed.
 - **B4 — advection + I/O + restart** ✅: `stratalRecord` advects each class's
   `stratP[:,:,c]` with the same `strataonesed` interpolation as `stratHf`
   (re-normalised so Σ over classes == `stratH`); `_outputStrat` writes the

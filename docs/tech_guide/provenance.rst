@@ -181,12 +181,14 @@ How it works:
   tectonics and written to / restored from the stratal HDF5 (the ``stratP``
   dataset).
 
-**Conservation** is structural: ``stratP`` partitions ``stratH`` exactly (to
-~3e-8) for any number of sources — with a single source every layer stays 100 %
-that class. The one approximation (the per-class *spatial attribution* of
-pit-internal and marine-only deposits, which use the through-flux composition) is
-**not** a conservation gap and is deferred — see ``docs/DESIGN_PROVENANCE.md``
-§6 (phase B2b).
+**Conservation** is structural: ``stratP`` partitions ``stratH`` exactly for any
+number of sources — with a single source every layer stays 100 % that class. The
+**marine** sink (typically the dominant one) carries the basin-delivered source
+mix (``_marineProvFraction``), so the recorded composition matches the eroded
+supply to ~1e-6. The one remaining approximation — the per-class composition of
+**intracontinental pit** deposits, which still use the through-flux composition
+(overspill-chain mixing) — is **not** a conservation gap and is deferred; see
+``docs/DESIGN_PROVENANCE.md`` §6 (phase B2b).
 
 .. note::
 
