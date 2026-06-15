@@ -2887,6 +2887,111 @@ def test_parallel_correctness(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# TEST 8b - Soil + temperature map: parallel partition-shape correctness
+# ---------------------------------------------------------------------------
+#
+# soilSPL.__init__ loads a temperature map (Norton et al. 2013 soil
+# production) to build `self.prodSoil`. The map is stored full-mesh
+# (mpoints) on disk and MUST be subset to the local partition via
+# `[self.locIDs]` — exactly as the sibling `soilFile` branch does. Before
+# the fix it was used un-subset, so `prodSoil` stayed global (mpoints) and
+# `_form_residual_soil` (line 122) tried to broadcast it against the local
+# `hSoil`/`rainVal` arrays. That ONLY works when MPIsize == 1 (lpoints ==
+# mpoints); in parallel it raises
+#     ValueError: operands could not be broadcast together
+#                 with shapes (mpoints,) (lpoints,)
+# A classic serial-only-tested path: invisible at n=1, fatal at n>1.
+#
+# This test spawns `mpirun -n 2` on the soil+temp fixture and asserts the
+# run completes — n=2 exposes exactly one partition boundary, enough to
+# trip the un-subset path. Same subprocess/env-scrub machinery as
+# test_parallel_correctness (nested-mpirun OMPI_*/PMIX_* leak guard).
+# ---------------------------------------------------------------------------
+
+_SOIL_TEMP_DRIVER = '''\
+"""Subprocess entry for test_soil_temp_parallel_shape: run the soil+temp
+model to completion and print a success sentinel on rank 0."""
+import sys
+from mpi4py import MPI
+from gospl.model import Model
+
+model = Model(sys.argv[1], verbose=False)
+try:
+    model.runProcesses()
+finally:
+    model.destroy()
+if MPI.COMM_WORLD.Get_rank() == 0:
+    print("SOIL_TEMP_PARALLEL_OK", flush=True)
+'''
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    _petsc4py_abi_mismatch(),
+    reason="petsc4py built against different Python ABI; segfaults on MPI "
+           "finalization — not a gospl bug (see test_parallel_correctness)",
+)
+def test_soil_temp_parallel_shape(tmp_path):
+    """
+    Protects: soilSPL.__init__ must subset the temperature map to the local
+    partition (`loadData[self.tempData][self.locIDs]`). Regression guard for
+    the parallel-only ValueError (global prodSoil broadcast against local
+    hSoil) that is invisible at n=1 and fatal at n>1.
+    """
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    yml_src = fixtures_dir / "minimal_soil_temp.yml"
+    mesh_src = fixtures_dir / "mesh.npz"
+    temp_src = fixtures_dir / "soiltemp.npz"
+    if not (yml_src.exists() and mesh_src.exists() and temp_src.exists()):
+        pytest.skip(
+            "soil+temp fixtures not present (minimal_soil_temp.yml / mesh.npz "
+            "/ soiltemp.npz)."
+        )
+
+    out_dir = tmp_path / "soiltemp"
+    out_dir.mkdir()
+    shutil.copy(yml_src, out_dir / "minimal_soil_temp.yml")
+    shutil.copy(mesh_src, out_dir / "mesh.npz")
+    shutil.copy(temp_src, out_dir / "soiltemp.npz")
+    driver = out_dir / "_soil_temp_driver.py"
+    driver.write_text(_SOIL_TEMP_DRIVER)
+
+    # Scrub inherited OpenMPI runtime env before spawning a nested mpirun
+    # (see test_parallel_correctness for the rationale).
+    child_env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("OMPI_", "PMIX_", "PRTE_", "OPAL_"))
+    }
+    if "OPAL_PREFIX" in os.environ:
+        child_env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
+
+    result = subprocess.run(
+        ["mpirun", "-n", "2", sys.executable, str(driver), "minimal_soil_temp.yml"],
+        cwd=out_dir,
+        timeout=600,
+        capture_output=True,
+        text=True,
+        env=child_env,
+    )
+    assert result.returncode == 0 and "SOIL_TEMP_PARALLEL_OK" in result.stdout, (
+        "Soil+temperature model failed under `mpirun -n 2`. If this is a "
+        "shape mismatch (global mpoints vs local lpoints), the temperature "
+        "map in soilSPL.__init__ is not subset to self.locIDs.\n"
+        f"(rc={result.returncode})\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # TEST 9 - Stratigraphy: deposition + compaction physics
 # ---------------------------------------------------------------------------
 #
