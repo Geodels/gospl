@@ -1,0 +1,74 @@
+#!/bin/bash
+###############################################################################
+# NCI Gadi (PBS) job for ONE point of a goSPL strong-scaling sweep.
+#
+# Submitted (with per-job overrides) by submit_sweep.sh, but also runnable on
+# its own:
+#
+#   qsub -l ncpus=8 -l mem=32GB \
+#        -v NCPUS=8,INPUT=/path/to/input.yml,STEPS=20,IO=off,MODE=native,OUTDIR=$PWD/scaling_results \
+#        scripts/scaling/gadi_scaling.pbs
+#
+# Variables (all overridable via `qsub -v`):
+#   NCPUS   MPI ranks to launch (default: $PBS_NCPUS)
+#   INPUT   goSPL input YAML (absolute path recommended)
+#   STEPS   timesteps to run (default 20)
+#   IO      on|off  — 'off' isolates compute from HDF5 output (default off)
+#   MODE    native|container (default native)
+#   OUTDIR  where scaling_p<N>.json is written (default $PWD/scaling_results)
+#   CONTAINER  .sif path when MODE=container
+#   DRIVER  path to run_scaling.py (default: alongside this script)
+#
+# Edit the #PBS -P project code and -l storage before submitting.
+###############################################################################
+#PBS -P <project>
+#PBS -q normal
+#PBS -l ncpus=48
+#PBS -l mem=190GB
+#PBS -l walltime=00:30:00
+#PBS -l wd
+#PBS -l storage=scratch/<project>+gdata/<project>
+#PBS -N gospl_scaling
+
+set -euo pipefail
+
+NCPUS="${NCPUS:-${PBS_NCPUS:-1}}"
+INPUT="${INPUT:?set INPUT to the goSPL input YAML}"
+STEPS="${STEPS:-20}"
+IO="${IO:-off}"
+MODE="${MODE:-native}"
+OUTDIR="${OUTDIR:-$PWD/scaling_results}"
+DRIVER="${DRIVER:-$(dirname "$0")/run_scaling.py}"
+
+# One thread per MPI rank (AGENTS.md container invariant 2; also correct native).
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+# Run goSPL from the input's directory so the YAML's relative mesh/output paths
+# resolve (matches hpc_setup/nciRun.pbs convention).
+cd "$(dirname "$INPUT")"
+INPUT_BASE="$(basename "$INPUT")"
+
+echo "[gadi_scaling] MODE=$MODE NCPUS=$NCPUS STEPS=$STEPS IO=$IO INPUT=$INPUT"
+
+if [ "$MODE" = "container" ]; then
+    module load singularity
+    CONTAINER="${CONTAINER:?set CONTAINER to the .sif path for MODE=container}"
+    mpirun -np "$NCPUS" \
+        singularity exec "$CONTAINER" \
+            python "$DRIVER" -i "$INPUT_BASE" --steps "$STEPS" --io "$IO" \
+                --outdir "$OUTDIR" --tag container
+else
+    # Native build — mirror hpc_setup/nciRun.pbs module + venv setup.
+    module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 \
+        netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
+    export PYTHONPATH="$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH"
+    # Activate your goSPL venv (edit the path):
+    source "${GOSPL_VENV:-$HOME/envi_gospl/bin/activate}"
+    mpirun -np "$NCPUS" \
+        python3 "$DRIVER" -i "$INPUT_BASE" --steps "$STEPS" --io "$IO" \
+            --outdir "$OUTDIR" --tag native
+fi
+
+echo "[gadi_scaling] done -> $OUTDIR/scaling_p$(printf '%04d' "$NCPUS").json"

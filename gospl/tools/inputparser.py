@@ -1948,9 +1948,17 @@ class ReadYaml(object):
             outDict = self.input["output"]
             self.outputDir = outDict.get("dir", "output")
             self.makedir = outDict.get("makedir", False)
+            # Opt-in wall-clock phase profiler (see gospl/tools/profiler.py).
+            self.profileFlag = outDict.get("profile", False)
+            # HDF5 output compression. `gzip` (default) keeps the historical
+            # behaviour; an int sets the gzip level (0-9); `none`/False writes
+            # uncompressed (faster I/O, larger files) — see outmesh._h5opts.
+            self.outCompress = outDict.get("compression", "gzip")
         except KeyError:
             self.outputDir = "output"
             self.makedir = False
+            self.profileFlag = False
+            self.outCompress = "gzip"
 
         if self.rStep > 0:
             self.makedir = False
