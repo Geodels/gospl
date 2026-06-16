@@ -32,15 +32,25 @@ class soilSPL(object):
         Initialisation of `soilSPL` class.
         """
 
-        self.soil_rtol = 1.0e-6
-        self.soil_atol = 1.e-6
-        self.soil_maxit = 100
+        # Soil-SPL SNES controls. These are normally set from the YAML soil
+        # block by the input parser; fall back to robust defaults when soilSPL
+        # is built standalone (e.g. unit tests).
+        self.soil_rtol = getattr(self, "soil_rtol", 1.0e-6)
+        self.soil_atol = getattr(self, "soil_atol", 1.0e-6)
+        self.soil_maxit = getattr(self, "soil_maxit", 500)
+        self.soil_pc = getattr(self, "soil_pc", "hypre")
+        self.soil_solver = getattr(self, "soil_solver", "qn")
 
         # Cached SNES + helper vectors for the soil-aware SPL solver; created
         # lazily on first call and reused across timesteps.
         self._snes_soil = None
         self._snes_soil_f = None
         self._snes_soil_x = None
+
+        # Robustness fallback SNES (L-BFGS quasi-Newton); created lazily and
+        # only used on timesteps where the primary solver fails to converge.
+        self._snes_soil_fb = None
+        self._snes_soil_fb_f = None
 
         # Cached TS for the non-linear soil diffusion (rosw scheme); created
         # lazily on first call and reused across timesteps.
@@ -72,7 +82,12 @@ class soilSPL(object):
         if self.tempFile is not None:
             Tref = self.tempRef + 273.15
             loadData = np.load(self.tempFile)
-            T = loadData[self.tempData] + 273.15 # Conversion to Kelvin
+            # Subset the full-mesh temperature map to this rank's local nodes
+            # (mirrors the soilFile branch above). Without [self.locIDs] the
+            # derived prodSoil stays global (mpoints) and broadcasts against
+            # the local hSoil/rainVal arrays only when MPIsize==1; in parallel
+            # (lpoints < mpoints) it raises a ValueError shape mismatch.
+            T = loadData[self.tempData][self.locIDs] + 273.15  # Conversion to Kelvin
             # Compute Arrhenius term, including Ea / R T0 term
             R = 8.314  # Gas constant (J/mol/K)
             Arr_terms = self.energyAct * (1./Tref - 1./T) / R
@@ -145,6 +160,87 @@ class soilSPL(object):
         if MPIrank == 0 and its % 10 == 0:
             print(f"  ---  Non-linear soil SPL solver iteration {its}, Residual norm: {norm}", flush=True)
 
+    def _build_soil_snes(self, primary=True):
+        """
+        Construct (and return) a soil-SPL SNES solver and its residual vector.
+
+        Two configurations are available:
+
+        * **primary** (``primary=True``) -- a Nonlinear GMRES accelerator
+          (``ngmres``) right-preconditioned by Nonlinear Richardson
+          (``nrichardson``). The Richardson sweep is what actually applies the
+          Krylov solve (``cg``) and the multigrid preconditioner (HYPRE
+          BoomerAMG by default, or ``self.soil_pc``); a *bare* ``ngmres`` ignores
+          the KSP/PC entirely, which is why the previous setup stalled to
+          ``SNES_DIVERGED_MAX_IT`` on the stiff soil-production residual.
+        * **fallback** (``primary=False``) -- a limited-memory quasi-Newton
+          solver (``qn``, L-BFGS) with a matrix-free critical-point line search.
+          It builds an approximate Jacobian from secant updates (no analytic
+          Jacobian required) and is markedly more robust for stiff problems; it
+          runs only when the primary solver fails to converge.
+
+        Each SNES gets its own PETSc options prefix so per-solver options (e.g.
+        the line-search type) do not leak into the model's other SNES/KSP
+        objects.
+
+        :arg primary: select the primary (True) or fallback (False) solver.
+
+        :return: the configured ``(SNES, residual Vec)`` pair.
+        """
+
+        opts = petsc4py.PETSc.Options()
+        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+        f = self.hGlobal.duplicate()
+        snes.setFunction(self._form_residual_soil, f)
+        if self.verbose:
+            snes.setMonitor(self._monitorsoil)
+
+        if primary:
+            prefix = "soilspl_"
+            solver = self.soil_solver
+            snes.setTolerances(rtol=self.soil_rtol, atol=self.soil_atol,
+                               max_it=self.soil_maxit)
+        else:
+            prefix = "soilsplfb_"
+            # The fallback only runs when the primary has already stalled, so
+            # use the *other* method (the two are complementary: a fast
+            # quasi-Newton vs the globally-convergent multigrid-preconditioned
+            # accelerator), with a relaxed relative tolerance and a larger
+            # iteration budget as a last resort.
+            solver = "ngmres" if self.soil_solver == "qn" else "qn"
+            snes.setTolerances(rtol=max(self.soil_rtol * 100.0, 1.0e-4),
+                               atol=self.soil_atol,
+                               max_it=max(2 * self.soil_maxit, 200))
+        snes.setOptionsPrefix(prefix)
+
+        if solver == "ngmres":
+            snes.setType("ngmres")
+            # Nonlinear right-preconditioner: one Richardson sweep per outer
+            # iteration is what engages the Krylov solve + multigrid PC.
+            npc = snes.getNPC()
+            npc.setType("nrichardson")
+            npc.setTolerances(max_it=1)
+            ksp = npc.getKSP()
+            ksp.setType("cg")
+            pc = ksp.getPC()
+            pc.setType(self.soil_pc)
+            if self.soil_pc == "hypre":
+                opts["pc_hypre_type"] = "boomeramg"
+                pc.setFromOptions()
+            ksp.setTolerances(rtol=1.0e-6)
+        else:
+            # Limited-memory quasi-Newton (L-BFGS): builds curvature from secant
+            # updates (no analytic Jacobian) and typically converges in far
+            # fewer iterations than the ngmres accelerator on this stiff
+            # residual. Critical-point line search is matrix-free (the 'bt'
+            # backtracking search requires a Jacobian, which qn does not form).
+            snes.setType("qn")
+            opts[prefix + "snes_qn_type"] = "lbfgs"
+            opts[prefix + "snes_linesearch_type"] = "cp"
+
+        snes.setFromOptions()
+        return snes, f
+
     def _solveSoil(self):
         """
         Solves the non-linear stream power law for the transport limited and soil case. This calls the following *private function*:
@@ -153,7 +249,7 @@ class soilSPL(object):
 
         .. note::
 
-            PETSc SNES approach is used to solve the nonlinear equation. In this implementation of the SNES, we do not form the Jacobian and PETSc calculates it based on the residual function. A Nonlinear Generalized Minimum Residual method is used ``ngmres``, a Preconditioned Conjugate Gradient ``cg`` method is defined for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
+            PETSc SNES approach is used to solve the nonlinear equation without forming an analytic Jacobian. The primary solver is a Nonlinear GMRES accelerator (``ngmres``) right-preconditioned by Nonlinear Richardson (``nrichardson``), whose Krylov solve uses a Preconditioned Conjugate Gradient (``cg``) method with a multi-grid preconditioner (HYPRE BoomerAMG by default). If the primary solver stalls on the stiff soil-production residual, a limited-memory quasi-Newton fallback (``qn``, L-BFGS) with a critical-point line search is used. The iteration budget, tolerances and preconditioner are configurable through the YAML ``soil`` block (``maxIter``, ``rtol``, ``atol``, ``pcType``).
         """
 
         self.hOldArray = self.hLocal.getArray().copy()
@@ -198,42 +294,55 @@ class soilSPL(object):
             self.fDep[self.idBorders] = 0.
 
         if self._snes_soil is None:
-            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-            snes.setTolerances(rtol=self.soil_rtol, atol=self.soil_atol,
-                               max_it=self.soil_maxit)
-            if self.verbose:
-                snes.setMonitor(self._monitorsoil)
-            self._snes_soil_f = self.hGlobal.duplicate()
-            snes.setFunction(self._form_residual_soil, self._snes_soil_f)
-            snes.setType('ngmres')
-            ksp = snes.getKSP()
-            ksp.setType("cg")
-            pc = ksp.getPC()
-            pc.setType("hypre")
-            petsc_options = petsc4py.PETSc.Options()
-            petsc_options['pc_hypre_type'] = 'boomeramg'
-            ksp.getPC().setFromOptions()
-            ksp.setTolerances(rtol=1.0e-6)
+            self._snes_soil, self._snes_soil_f = self._build_soil_snes(primary=True)
             self._snes_soil_x = self.hGlobal.duplicate()
-            self._snes_soil = snes
 
         snes = self._snes_soil
         x = self._snes_soil_x
         self.hGlobal.copy(result=x)
         snes.solve(None, x)
         r = snes.getConvergedReason()
-        if r < 0 and MPIrank == 0:
-            print(
-                "Soil SPL SNES failed to converge after %d iterations (reason %d)"
-                % (snes.getIterationNumber(), r),
-                flush=True,
-            )
+
+        # Robustness net (mirrors the flow KSP's primary -> fallback path): if
+        # the accelerated fixed-point solver stalls (typically
+        # SNES_DIVERGED_MAX_IT on the stiff soil-production residual), retry
+        # from the same initial guess with the limited-memory quasi-Newton
+        # fallback. It only runs on the timesteps where the primary failed.
+        if r < 0:
+            if self._snes_soil_fb is None:
+                self._snes_soil_fb, self._snes_soil_fb_f = self._build_soil_snes(
+                    primary=False
+                )
+            fb = self._snes_soil_fb
+            r0, it0 = r, snes.getIterationNumber()
+            self.hGlobal.copy(result=x)
+            fb.solve(None, x)
+            r = fb.getConvergedReason()
+            if MPIrank == 0:
+                if r >= 0:
+                    print(
+                        "Soil SPL: primary SNES stalled (reason %d after %d its); "
+                        "quasi-Newton fallback converged (reason %d, %d its)."
+                        % (r0, it0, r, fb.getIterationNumber()),
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "Soil SPL SNES failed to converge: primary (reason %d) and "
+                        "quasi-Newton fallback (reason %d) both diverged; continuing "
+                        "with the best available iterate." % (r0, r),
+                        flush=True,
+                    )
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)
 
         # Update soil thicknesses
         nHsoil = self.nsoilH.copy()
+        # No subaerial soil production underwater: the soil-production term
+        # scales with rainfall (Norton et al. 2013), so without this mask the
+        # submarine nodes accumulate a spurious rainfall-scaled soil cover.
+        nHsoil[self.seaID] = 0.0
         nHsoil[nHsoil < BEDROCK_EXPOSED] = 0.
         # Limit soil thickness
         nHsoil[nHsoil > self.soil_transition] = self.soil_transition

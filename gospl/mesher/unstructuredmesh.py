@@ -981,8 +981,10 @@ class UnstMesh(object):
         for name in (
             "_ksp_main", "_ksp_fallback",
             "_snes_ed", "_snes_ed_f", "_snes_ed_x",
+            "_snes_ed_fb", "_snes_ed_fb_f",
             "_snes_nl", "_snes_nl_f", "_snes_nl_x", "_snes_nl_J",
             "_snes_soil", "_snes_soil_f", "_snes_soil_x",
+            "_snes_soil_fb", "_snes_soil_fb_f",
             "_snes_hill", "_snes_hill_f", "_snes_hill_x",
             "_snes_ice", "_snes_ice_f", "_snes_ice_x",
             "_ts_marine", "_ts_marine_x",

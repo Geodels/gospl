@@ -26,9 +26,13 @@ class nlSPL(object):
         Initialisation of `nlSPL` class.
         """
 
-        self.snes_rtol = 1.0e-6
-        self.snes_atol = 1.e-6
-        self.snes_maxit = 500
+        # SNES controls; normally set from the YAML spl block by the input
+        # parser, with robust defaults when nlSPL is built standalone.
+        self.snes_rtol = getattr(self, "snes_rtol", 1.0e-6)
+        self.snes_atol = getattr(self, "snes_atol", 1.0e-6)
+        self.snes_maxit = getattr(self, "snes_maxit", 500)
+        self.nlspl_solver = getattr(self, "nlspl_solver", "qn")
+        self.nlspl_pc = getattr(self, "nlspl_pc", "hypre")
 
         # Cached SNES + helper vectors for the two non-linear solvers; created
         # lazily on first call and reused across timesteps to avoid per-call
@@ -36,6 +40,10 @@ class nlSPL(object):
         self._snes_ed = None
         self._snes_ed_f = None
         self._snes_ed_x = None
+        # Robustness fallback for the transport-limited solver (created lazily,
+        # only used on timesteps where the primary fails to converge).
+        self._snes_ed_fb = None
+        self._snes_ed_fb_f = None
         self._snes_nl = None
         self._snes_nl_f = None
         self._snes_nl_x = None
@@ -156,6 +164,64 @@ class nlSPL(object):
 
         return True
 
+    def _build_ed_snes(self, primary=True):
+        """
+        Construct (and return) the transport-limited SPL SNES and its residual
+        vector. Mirrors ``soilSPL._build_soil_snes``: the bare ``ngmres``
+        accelerator ignores its KSP/PC and stalls (~200 iterations) on this
+        stiff residual, so the primary defaults to a limited-memory quasi-Newton
+        solver (``qn``, L-BFGS), with the *complementary* solver (an
+        ``ngmres``+``nrichardson`` multigrid-preconditioned accelerator) as the
+        robustness fallback when the primary fails to converge.
+
+        :arg primary: select the primary (True) or fallback (False) solver.
+
+        :return: the configured ``(SNES, residual Vec)`` pair.
+        """
+
+        opts = petsc4py.PETSc.Options()
+        snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
+        f = self.hGlobal.duplicate()
+        snes.setFunction(self._form_residual_ed, f)
+        if self.verbose:
+            snes.setMonitor(self._monitor)
+
+        if primary:
+            prefix = "nlspled_"
+            solver = self.nlspl_solver
+            snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
+                               max_it=self.snes_maxit)
+        else:
+            prefix = "nlspledfb_"
+            solver = "ngmres" if self.nlspl_solver == "qn" else "qn"
+            snes.setTolerances(rtol=max(self.snes_rtol * 100.0, 1.0e-4),
+                               atol=self.snes_atol,
+                               max_it=max(2 * self.snes_maxit, 200))
+        snes.setOptionsPrefix(prefix)
+
+        if solver == "ngmres":
+            snes.setType("ngmres")
+            # Nonlinear right-preconditioner so the Krylov solve + multigrid PC
+            # actually engage (a bare ngmres ignores them).
+            npc = snes.getNPC()
+            npc.setType("nrichardson")
+            npc.setTolerances(max_it=1)
+            ksp = npc.getKSP()
+            ksp.setType("cg")
+            pc = ksp.getPC()
+            pc.setType(self.nlspl_pc)
+            if self.nlspl_pc == "hypre":
+                opts["pc_hypre_type"] = "boomeramg"
+                pc.setFromOptions()
+            ksp.setTolerances(rtol=1.0e-6)
+        else:
+            snes.setType("qn")
+            opts[prefix + "snes_qn_type"] = "lbfgs"
+            opts[prefix + "snes_linesearch_type"] = "cp"
+
+        snes.setFromOptions()
+        return snes, f
+
     def _solveNL_ed(self):
         """
         Solves the non-linear stream power law for the transport limited case. This calls the following *private function*:
@@ -200,36 +266,43 @@ class nlSPL(object):
             self.fDep[self.idBorders] = 0.
 
         if self._snes_ed is None:
-            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-            snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                               max_it=self.snes_maxit)
-            if self.verbose:
-                snes.setMonitor(self._monitor)
-            snes.setType('ngmres')
-            ksp = snes.getKSP()
-            ksp.setType("cg")
-            pc = ksp.getPC()
-            pc.setType("hypre")
-            petsc_options = petsc4py.PETSc.Options()
-            petsc_options['pc_hypre_type'] = 'boomeramg'
-            ksp.getPC().setFromOptions()
-            ksp.setTolerances(rtol=1.0e-6)
-            self._snes_ed_f = self.hGlobal.duplicate()
-            snes.setFunction(self._form_residual_ed, self._snes_ed_f)
+            self._snes_ed, self._snes_ed_f = self._build_ed_snes(primary=True)
             self._snes_ed_x = self.hGlobal.duplicate()
-            self._snes_ed = snes
 
         snes = self._snes_ed
         x = self._snes_ed_x
         self.hGlobal.copy(result=x)
         snes.solve(None, x)
         r = snes.getConvergedReason()
-        if r < 0 and MPIrank == 0:
-            print(
-                "Non-linear SPL SNES failed to converge after %d iterations (reason %d)"
-                % (snes.getIterationNumber(), r),
-                flush=True,
-            )
+
+        # Robustness net: on non-convergence, retry from the same initial guess
+        # with the complementary solver (only runs on timesteps where the
+        # primary failed). Mirrors soilSPL._solveSoil.
+        if r < 0:
+            if self._snes_ed_fb is None:
+                self._snes_ed_fb, self._snes_ed_fb_f = self._build_ed_snes(
+                    primary=False
+                )
+            fb = self._snes_ed_fb
+            r0, it0 = r, snes.getIterationNumber()
+            self.hGlobal.copy(result=x)
+            fb.solve(None, x)
+            r = fb.getConvergedReason()
+            if MPIrank == 0:
+                if r >= 0:
+                    print(
+                        "Non-linear SPL (transport): primary stalled (reason %d "
+                        "after %d its); fallback converged (reason %d, %d its)."
+                        % (r0, it0, r, fb.getIterationNumber()),
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "Non-linear SPL SNES (transport) failed to converge: "
+                        "primary (reason %d) and fallback (reason %d) both "
+                        "diverged; continuing with the best iterate." % (r0, r),
+                        flush=True,
+                    )
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)

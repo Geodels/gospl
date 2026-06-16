@@ -1,0 +1,48 @@
+name: minimal soil + temperature test
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 40
+    tout: 50
+    dt: 10.
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 1.0
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+# Soil-aware non-linear SPL with temperature-scaled soil production
+# (Norton et al. 2013). `tempMap` exercises the soilSPL.__init__ branch that
+# loads a full-mesh temperature map — the path that must subset to the local
+# partition (self.locIDs) or it breaks in parallel (regression test
+# test_soil_temp_parallel_shape).
+soil:
+    soilK: 8.0e-6
+    maxProd: 50.e-6
+    depthProd: 0.5
+    uniform: 1.0
+    tempMap: ['soiltemp', 't']
+    activation: 40.e3
+    tempRef: 15.0
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'soiltemp_out'

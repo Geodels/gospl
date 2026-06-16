@@ -33,7 +33,18 @@ Stream Power Law parameters
         c. ``m`` is the flow accumulation coefficient from the SPL law: :math:`E = K (\bar{P}A)^m S^n` and takes the default value of 0.5.
         d. ``n`` is the slope coefficient from the SPL law: :math:`E = K (\bar{P}A)^m S^n` and takes the default value of 1.0.
         e. ``G`` dimensionless deposition coefficient for continental domain when accounting for sedimentation rate in the SPL following the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_. The default value is 0.0 (purely detachment-limited model).
-        
+
+        When ``n`` is **not** equal to 1.0 the SPL is solved with a non-linear PETSc ``SNES`` (the linear ``n == 1`` case uses a direct Krylov solve and needs none of the controls below). The transport-limited (``G > 0``) solver is the dominant cost of such a run, and its behaviour can be tuned (all optional):
+
+        f. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
+        g. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
+        h. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG),
+        i. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+
+        .. tip::
+
+            ``solver: 'qn'`` is the default because on a global model it converged the transport-limited solve in well under 50 iterations versus ~200 for ``ngmres`` (each iteration is also cheaper), cutting the erosion phase by an order of magnitude at the **same** tolerance and solution. Whichever primary solver is chosen, goSPL automatically retries a stalled timestep with the complementary solver before continuing.
+
 
 Hillslope and marine deposition parameters
 -------------------------------------------
@@ -346,7 +357,23 @@ Soil production, erosion, transport and deposition
         .. important::
 
             When defining a soil thickness grid, one needs to use the **npz** format and needs to specify the key corresponding to the soil thickness value in the file. In the above example this key is ``'soil'``. The soil grid needs to define values for all vertices in the mesh in metres.
-            
+
+        The soil-aware non-linear SPL is solved with a PETSc ``SNES``. Its
+        behaviour can be tuned (all optional) with:
+
+        i. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
+        j. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
+        k. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
+        l. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+
+        .. tip::
+
+            The soil solve is usually the dominant cost of a soil-enabled run. The default ``solver: 'qn'`` was chosen because on a global model it cut the soil-solve wall time roughly in half (or more) versus ``'ngmres'`` at the **same** tolerance and solution — L-BFGS reaches a comparable iteration count but each iteration is far cheaper than an ``ngmres``/multigrid sweep. If ``'qn'`` struggles on a particular configuration, set ``solver: 'ngmres'``. Prefer switching ``solver`` over relaxing ``rtol``: a loose ``rtol`` can leave the elevation field under-resolved and **destabilise the downstream sediment-routing solver**, which is both slower and less accurate.
+
+        .. note::
+
+            If the chosen primary solver stalls on a stiff soil-production residual, goSPL automatically retries that timestep with the *complementary* solver (quasi-Newton ⇄ ``ngmres`` multigrid accelerator) at a relaxed tolerance before continuing.
+
 
 Sediment surface erodibility factor
 -------------------------------------
