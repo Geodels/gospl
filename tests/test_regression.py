@@ -3163,6 +3163,145 @@ def test_soil_temp_parallel_shape(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# TEST 8c - Cached diffusion operators: collective rebuild decision (np>1)
+# ---------------------------------------------------------------------------
+#
+# hillslope._hillSlope caches two coastline-gated diffusion operators — the
+# marine flow-direction smoother (smooth=2) and the linear soil-creep solve
+# (smooth=0). Each rebuilds its operator + redoes PCSetUp only when the sea
+# mask `seaID` moves. `seaID` is RANK-LOCAL, but `_buildDiffMat` assembly and
+# `PCSetUp` are COLLECTIVE. If the "did the coastline move?" test stays
+# rank-local, then once the partitions' coastlines drift apart one rank
+# rebuilds (entering collective Mat assembly / PCSetUp) while another reuses —
+# divergent collective paths — and the run DEADLOCKS at np>1. Serial is immune,
+# and a short run (e.g. test_parallel_correctness's 10 steps) never drifts the
+# masks apart, so this shipped undetected (surfaced on a long stratigraphy run).
+#
+# Reproducing the asymmetry via physics is mesh/partition-dependent and flaky,
+# so this guard constructs it directly: build both caches symmetrically, then
+# perturb `seaID` on rank 0 only and re-enter the cached paths. Pre-fix that
+# deadlocks; the collective `allreduce(..., op=MPI.LOR)` in `_hillSlope` makes
+# every rank agree, so it completes. A hang shows up as a subprocess timeout.
+# ---------------------------------------------------------------------------
+
+_CACHE_REBUILD_DRIVER = '''\
+"""Subprocess entry for test_parallel_cached_diffusion_rebuild.
+
+Build the cached linear-hillslope (smooth=0) and marine-smoother (smooth=2)
+operators symmetrically, then force an ASYMMETRIC coastline change (only rank 0's
+seaID mask moves) and re-enter both cached paths. With a rank-local rebuild
+decision this deadlocks at np>1; with the collective reduce it completes.
+"""
+import sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+model = Model(sys.argv[1], verbose=False, showlog=False)
+try:
+    h = model.hLocal.getArray()
+    # Symmetric seed -> first call rebuilds each cached operator on ALL ranks.
+    model.seaID = np.where(h <= model.sealevel)[0]
+    model._hillSlope(smooth=0)
+    model._hillSlope(smooth=2)
+    # Asymmetric change: ONLY rank 0's mask now differs from what it cached.
+    if rank == 0:
+        model.seaID = (
+            np.array([], dtype=int) if model.seaID.size > 0
+            else np.array([0], dtype=int)
+        )
+    # Pre-fix: rank 0 rebuilds (collective) while the others reuse -> deadlock.
+    model._hillSlope(smooth=0)
+    model._hillSlope(smooth=2)
+    comm.Barrier()
+finally:
+    model.destroy()
+if rank == 0:
+    print("CACHE_REBUILD_PARALLEL_OK", flush=True)
+'''
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    _petsc4py_abi_mismatch(),
+    reason="petsc4py built against different Python ABI; segfaults on MPI "
+           "finalization — not a gospl bug (see test_parallel_correctness)",
+)
+def test_parallel_cached_diffusion_rebuild(tmp_path):
+    """
+    Protects: AGENTS.md > MPI contract — the coastline-gated cached diffusion
+    operators in `hillslope._hillSlope` (smooth=0 linear soil creep, smooth=2
+    marine smoother) must decide whether to rebuild COLLECTIVELY. `seaID` is
+    rank-local, but the rebuild it gates (`_buildDiffMat` assembly + `PCSetUp`)
+    is collective, so the decision must be reduced across ranks
+    (`MPI.COMM_WORLD.allreduce(..., op=MPI.LOR)`). Without it, an asymmetric
+    coastline change (one rank's mask moves, another's does not) makes one rank
+    rebuild while another reuses → divergent collective paths → deadlock at
+    np>1 (invisible serially and on short runs).
+
+    The test forces that asymmetry deterministically at np=2 and asserts the
+    re-entry completes; a regression re-introduces the hang, which surfaces here
+    as a subprocess timeout.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    yml_src = fixtures_dir / "minimal.yml"
+    mesh_src = fixtures_dir / "mesh.npz"
+    if not (yml_src.exists() and mesh_src.exists()):
+        pytest.skip("minimal.yml / mesh.npz not present.")
+
+    out_dir = tmp_path / "cacherebuild"
+    out_dir.mkdir()
+    shutil.copy(yml_src, out_dir / "minimal.yml")
+    shutil.copy(mesh_src, out_dir / "mesh.npz")
+    driver = out_dir / "_cache_rebuild_driver.py"
+    driver.write_text(_CACHE_REBUILD_DRIVER)
+
+    # Scrub inherited OpenMPI runtime env before spawning a nested mpirun
+    # (see test_parallel_correctness for the rationale).
+    child_env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("OMPI_", "PMIX_", "PRTE_", "OPAL_"))
+    }
+    if "OPAL_PREFIX" in os.environ:
+        child_env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
+
+    try:
+        result = subprocess.run(
+            ["mpirun", "-n", "2", sys.executable, str(driver), "minimal.yml"],
+            cwd=out_dir,
+            timeout=180,
+            capture_output=True,
+            text=True,
+            env=child_env,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            "Cached-diffusion re-entry DEADLOCKED at np=2 (subprocess timed "
+            "out). The coastline-gated rebuild in hillslope._hillSlope "
+            "(smooth=0/2) must reduce the 'seaID changed' test across ranks "
+            "(MPI.COMM_WORLD.allreduce(..., op=MPI.LOR)) before it gates the "
+            "collective _buildDiffMat / PCSetUp."
+        )
+    assert result.returncode == 0 and "CACHE_REBUILD_PARALLEL_OK" in result.stdout, (
+        "Asymmetric-seaID cached-diffusion re-entry failed under `mpirun -n 2` "
+        f"(rc={result.returncode}).\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # TEST 9 - Stratigraphy: deposition + compaction physics
 # ---------------------------------------------------------------------------
 #
