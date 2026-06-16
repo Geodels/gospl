@@ -20,6 +20,7 @@ if "READTHEDOCS" not in os.environ:
     from .tools import GridProcess as _GridProcess
     from .mesher import Tectonics as _Tectonics
     from .tools import WriteMesh as _WriteMesh
+    from .tools import Profiler as _Profiler
 
 else:
 
@@ -87,7 +88,20 @@ else:
         def __init__(self):
             pass
 
+    class _Profiler(object):
+        def __init__(self, *args, **kwargs):
+            self.enabled = False
+
+        def phase(self, name):
+            from contextlib import nullcontext
+
+            return nullcontext()
+
+        def report(self, *args, **kwargs):
+            return None
+
 MPIrank = MPI.COMM_WORLD.Get_rank()
+MPIsize = MPI.COMM_WORLD.Get_size()
 
 
 class Model(
@@ -124,7 +138,7 @@ class Model(
     """
 
     def __init__(
-        self, filename, verbose=True, showlog=False, *args, **kwargs
+        self, filename, verbose=True, showlog=False, profile=False, *args, **kwargs
     ):
 
         self.showlog = showlog
@@ -134,6 +148,12 @@ class Model(
 
         # Read input dataset
         _ReadYaml.__init__(self, filename)
+
+        # Wall-clock phase profiler. Enabled by the `profile` kwarg OR the
+        # YAML `output: profile: true` flag (parsed in _readOut). When off it
+        # is a zero-overhead no-op. See gospl/tools/profiler.py.
+        prof_on = profile or bool(getattr(self, "profileFlag", False))
+        self.profiler = _Profiler(enabled=prof_on)
 
         # Stratigraphy initialisation
         _STRAMesh.__init__(self)
@@ -214,14 +234,18 @@ class Model(
 
         """
 
+        runStart = MPI.Wtime()
+
         while self.tNow <= self.tEnd:
             tstep = process_time()
 
             # Output time step
-            _Tectonics.updatePaleoZ(self)
-            _WriteMesh.visModel(self)
+            with self.profiler.phase("tectonics"):
+                _Tectonics.updatePaleoZ(self)
+            with self.profiler.phase("output"):
+                _WriteMesh.visModel(self)
             if self.tNow == self.tEnd:
-                return
+                break
 
             # Create new stratal layer
             newLayer = self.tNow >= self.saveStrat
@@ -230,55 +254,67 @@ class Model(
                 self.saveStrat += self.strat
 
             # Perform advection and tectonics
-            _Tectonics.getTectonics(self)
+            with self.profiler.phase("tectonics"):
+                _Tectonics.getTectonics(self)
 
             if not self.fast:
                 if self.iceOn:
                     # Compute ice accumulation
-                    _IceMesh.iceAccumulation(self)
+                    with self.profiler.phase("ice"):
+                        _IceMesh.iceAccumulation(self)
                 # Compute flow accumulation
-                _FAMesh.flowAccumulation(self)
+                with self.profiler.phase("flow"):
+                    _FAMesh.flowAccumulation(self)
 
                 # Perform River Incision/Deposition based on Stream Power Law (different flavors)
-                if self.cptSoil:
-                    # Non-linear coupled to soil production
-                    _soilSPL.erodepSPLsoil(self)
-                elif self.spl_n == 1.0:
-                    # Linear slope dependencies
-                    _SPL.erodepSPL(self)
-                else:
-                    # Non-linear slope dependencies
-                    _nlSPL.erodepSPLnl(self)
+                with self.profiler.phase("erosion"):
+                    if self.cptSoil:
+                        # Non-linear coupled to soil production
+                        _soilSPL.erodepSPLsoil(self)
+                    elif self.spl_n == 1.0:
+                        # Linear slope dependencies
+                        _SPL.erodepSPL(self)
+                    else:
+                        # Non-linear slope dependencies
+                        _nlSPL.erodepSPLnl(self)
 
                 # Glacial till: abrasion-produced till transported by ice and
                 # deposited (melt-out) as moraine in the ablation zone (SIA +
                 # till only; no-op otherwise). Done before fluvial deposition
                 # so the moraine is reworked by meltwater/rivers this step.
                 if self.iceOn:
-                    _IceMesh.glacialTill(self)
+                    with self.profiler.phase("till"):
+                        _IceMesh.glacialTill(self)
 
                 if not self.nodep:
                     # Downstream sediment deposition over the continents
-                    _FAMesh.flowAccumulation(self)
-                    _SEDMesh.sedChange(self)
+                    with self.profiler.phase("flow"):
+                        _FAMesh.flowAccumulation(self)
+                    with self.profiler.phase("sed"):
+                        _SEDMesh.sedChange(self)
                     if self.seaDepo:
                         # Downstream sediment deposition in marine environments
-                        _SEAMesh.seaChange(self)
+                        with self.profiler.phase("sea"):
+                            _SEAMesh.seaChange(self)
 
                 # Hillslope diffusion (linear and non-linear)
-                _hillSLP.getHillslope(self)
+                with self.profiler.phase("hillslope"):
+                    _hillSLP.getHillslope(self)
 
             if newLayer:
                 # Stratigraphic layer porosity and thicknesses under compaction
-                _STRAMesh.getCompaction(self)
+                with self.profiler.phase("strat"):
+                    _STRAMesh.getCompaction(self)
 
             # Apply flexural isostasy (local and global)
             if self.flexOn:
-                _GridProcess.applyFlexure(self)
+                with self.profiler.phase("flexure"):
+                    _GridProcess.applyFlexure(self)
 
             # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:
-                _UnstMesh.applyForces(self)
+                with self.profiler.phase("forcing"):
+                    _UnstMesh.applyForces(self)
 
             # Advance time
             self.tNow += self.dt
@@ -290,6 +326,10 @@ class Model(
                     flush=True,
                 )
 
+        # Cross-rank wall-clock profile + machine-readable profile.json
+        # (collective; a no-op when profiling is disabled).
+        self.profiler.report(self.outputDir, total_wall=MPI.Wtime() - runStart)
+
         return
 
     def destroy(self):
@@ -298,6 +338,23 @@ class Model(
 
         Safely quit model.
         """
+
+        # When `showlog` is set, dump the PETSc Log summary (KSP/SNES/TS solver
+        # timings, flop counts, MPI reductions) so solver-level performance is
+        # captured alongside the wall-clock phase profile. Best-effort: a
+        # missing viewer/log API must not break a clean shutdown.
+        if getattr(self, "showlog", False) and getattr(self, "log", None) is not None:
+            try:
+                import petsc4py
+
+                viewer = petsc4py.PETSc.Viewer().createASCII(
+                    os.path.join(self.outputDir, "petsc_log.txt"),
+                    comm=petsc4py.PETSc.COMM_WORLD,
+                )
+                petsc4py.PETSc.Log.view(viewer)
+                viewer.destroy()
+            except Exception:
+                pass
 
         _UnstMesh.destroy_DMPlex(self)
 

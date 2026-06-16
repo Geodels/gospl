@@ -36,6 +36,25 @@ class WriteMesh(object):
         self.step = 0
         self.stratStep = 1
         self.file = "gospl"
+
+        # HDF5 dataset compression options, applied to every create_dataset via
+        # `**self._h5opts`. Driven by the YAML `output: compression:` setting
+        # (parsed in inputparser._readOut -> self.outCompress):
+        #   "gzip" (default)  -> {"compression": "gzip"}  (historical behaviour)
+        #   int 0..9          -> gzip at that level (trade CPU for file size)
+        #   "none"/False/None -> {}  (uncompressed: fastest I/O, largest files)
+        # gzip is CPU-serial per dataset and can dominate wall-clock at scale
+        # and high output cadence; disabling it trades disk for speed.
+        comp = getattr(self, "outCompress", "gzip")
+        if comp in (None, False, "none", "None", ""):
+            self._h5opts = {}
+        elif isinstance(comp, bool):  # True -> default gzip
+            self._h5opts = {"compression": "gzip"}
+        elif isinstance(comp, int):
+            self._h5opts = {"compression": "gzip", "compression_opts": comp}
+        else:
+            self._h5opts = {"compression": comp}
+
         if MPIrank == 0:
             self._createOutputDir()
 
@@ -151,7 +170,7 @@ class WriteMesh(object):
                 "stratZ",
                 shape=(self.lpoints, self.stratStep + 1),
                 dtype="float32",
-                compression="gzip",
+                **self._h5opts,
             )
             f["stratZ"][:, : self.stratStep + 1] = self.stratZ[:, : self.stratStep + 1]
 
@@ -160,7 +179,7 @@ class WriteMesh(object):
                 "stratH",
                 shape=(self.lpoints, self.stratStep + 1),
                 dtype="float64",
-                compression="gzip",
+                **self._h5opts,
             )
             f["stratH"][:, : self.stratStep + 1] = self.stratH[:, : self.stratStep + 1]
 
@@ -169,7 +188,7 @@ class WriteMesh(object):
                 "phiS",
                 shape=(self.lpoints, self.stratStep + 1),
                 dtype="float64",
-                compression="gzip",
+                **self._h5opts,
             )
             f["phiS"][:, : self.stratStep + 1] = self.phiS[:, : self.stratStep + 1]
 
@@ -182,7 +201,7 @@ class WriteMesh(object):
                     "stratK",
                     shape=(self.lpoints, self.stratStep + 1),
                     dtype="float64",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["stratK"][:, : self.stratStep + 1] = self.stratK[
                     :, : self.stratStep + 1
@@ -196,7 +215,7 @@ class WriteMesh(object):
                     "stratHf",
                     shape=(self.lpoints, self.stratStep + 1),
                     dtype="float64",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["stratHf"][:, : self.stratStep + 1] = self.stratHf[
                     :, : self.stratStep + 1
@@ -205,7 +224,7 @@ class WriteMesh(object):
                     "phiF",
                     shape=(self.lpoints, self.stratStep + 1),
                     dtype="float64",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["phiF"][:, : self.stratStep + 1] = self.phiF[:, : self.stratStep + 1]
 
@@ -216,7 +235,7 @@ class WriteMesh(object):
                     "stratP",
                     shape=(self.lpoints, self.stratStep + 1, self.provNb),
                     dtype="float64",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["stratP"][:, : self.stratStep + 1, :] = self.stratP[
                     :, : self.stratStep + 1, :
@@ -259,14 +278,14 @@ class WriteMesh(object):
                     "coords",
                     shape=(self.lpoints, 3),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["coords"][:, :] = self.lcoords
                 f.create_dataset(
                     "cells",
                     shape=(len(self.lcells[:, 0]), 3),
                     dtype="int32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["cells"][:, :] = self.lcells + 1
             self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
@@ -287,21 +306,21 @@ class WriteMesh(object):
                 "elev",
                 shape=(self.lpoints, 1),
                 dtype="float32",
-                compression="gzip",
+                **self._h5opts,
             )
             f["elev"][:, 0] = self.hLocal.getArray()
             f.create_dataset(
                 "erodep",
                 shape=(self.lpoints, 1),
                 dtype="float32",
-                compression="gzip",
+                **self._h5opts,
             )
             f["erodep"][:, 0] = self.cumEDLocal.getArray()
             f.create_dataset(
                 "EDrate",
                 shape=(self.lpoints, 1),
                 dtype="float32",
-                compression="gzip",
+                **self._h5opts,
             )
             data = self.EbLocal.getArray().copy()
             f["EDrate"][:, 0] = data
@@ -310,14 +329,14 @@ class WriteMesh(object):
                     "waterFill",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["waterFill"][:, 0] = self.waterFilled
             f.create_dataset(
                 "fillFA",
                 shape=(self.lpoints, 1),
                 dtype="float32",
-                compression="gzip",
+                **self._h5opts,
             )
             data = self.fillFAL.getArray().copy()
             data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
@@ -328,7 +347,7 @@ class WriteMesh(object):
                 "FA",
                 shape=(self.lpoints, 1),
                 dtype="float32",
-                compression="gzip",
+                **self._h5opts,
             )
             data = self.FAL.getArray().copy()
             data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
@@ -341,7 +360,7 @@ class WriteMesh(object):
                     "iceH",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 data = self.iceHL.getArray().copy()
                 data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
@@ -355,7 +374,7 @@ class WriteMesh(object):
                     "iceUb",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["iceUb"][:, 0] = self.iceUbL.getArray().copy()
 
@@ -365,7 +384,7 @@ class WriteMesh(object):
                     "iceMelt",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["iceMelt"][:, 0] = self.iceMeltL.getArray().copy()
 
@@ -375,7 +394,7 @@ class WriteMesh(object):
                     "iceAbr",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["iceAbr"][:, 0] = self.iceAbrL.getArray().copy()
 
@@ -384,7 +403,7 @@ class WriteMesh(object):
                     "flexIso",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["flexIso"][:, 0] = self.localFlex
             if self.cptSoil:
@@ -392,7 +411,7 @@ class WriteMesh(object):
                     "soilH",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["soilH"][:, 0] = self.Lsoil.getArray().copy()
 
@@ -400,7 +419,7 @@ class WriteMesh(object):
                 "sedLoad",
                 shape=(self.lpoints, 1),
                 dtype="float32",
-                compression="gzip",
+                **self._h5opts,
             )
             data = self.vSedLocal.getArray().copy()
             data[data <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
@@ -413,7 +432,7 @@ class WriteMesh(object):
                     "sedLoadF",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 dataF = self.vSedFLocal.getArray().copy()
                 dataF[dataF <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
@@ -423,7 +442,7 @@ class WriteMesh(object):
                     "uplift",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["uplift"][:, 0] = self.upsub
             if self.rainVal is not None:
@@ -431,7 +450,7 @@ class WriteMesh(object):
                     "rain",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["rain"][:, 0] = self.rainVal
             if self.evapdata is not None and self.evapVal is not None:
@@ -439,7 +458,7 @@ class WriteMesh(object):
                     "evap",
                     shape=(self.lpoints, 1),
                     dtype="float32",
-                    compression="gzip",
+                    **self._h5opts,
                 )
                 f["evap"][:, 0] = self.evapVal
             if self.memclear:
