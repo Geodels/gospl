@@ -386,7 +386,7 @@ class WriteMesh(object):
                     dtype="float32",
                     **self._h5opts,
                 )
-                f["iceMelt"][:, 0] = self.iceMeltL.getArray().copy()
+                f["iceMelt"][:, 0] = self.iceMeltRiverL.getArray().copy()
 
                 # Glacial abrasion rate E_g = Kg|u_b|^l (m/yr); zero where
                 # abrasion is off (Kg = 0).

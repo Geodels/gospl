@@ -965,6 +965,7 @@ class UnstMesh(object):
         if self.iceOn:
             self.iceHL.destroy()
             self.iceMeltL.destroy()
+            self.iceMeltRiverL.destroy()
             self.iceUbL.destroy()
             self.iceAbrL.destroy()
             self.iceFAL.destroy()

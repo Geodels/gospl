@@ -87,6 +87,9 @@ class IceMesh(object):
             # and re-injected into the river FA source term in flowplex so
             # glacial discharge is not lost downstream.
             self.iceMeltL = self.hLocal.duplicate()
+            # Meltwater delivered to the rivers (discharge-conserving); distinct
+            # from iceMeltL (the precip-scaled ablation pattern used for till).
+            self.iceMeltRiverL = self.hLocal.duplicate()
             if self.flexOn:
                 self.iceFlex = self.hLocal.duplicate()
             # Basal sliding speed (m/yr) from the SIA solve; the driver for the
@@ -103,6 +106,7 @@ class IceMesh(object):
             self.iceFAG = self.hGlobal.duplicate()
             self.iceHL.set(0.0)
             self.iceMeltL.set(0.0)
+            self.iceMeltRiverL.set(0.0)
             self.iceUbL.set(0.0)
             self.iceAbrL.set(0.0)
             self.iceFAL.set(0.0)
@@ -184,8 +188,10 @@ class IceMesh(object):
         abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
         abr[self.seaID] = 0.0
         self.iceAbrL.setArray(abr)
-        melt_local = np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
-        self.iceMeltL.setArray(melt_local)
+        # Till melt-out pattern (precip-scaled ablation) and the river meltwater
+        # (discharge-conserving by default — see _glacialMeltwater).
+        self.iceMeltL.setArray(np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2))
+        self.iceMeltRiverL.setArray(self._glacialMeltwater(zbed, mdot))
         return
 
     def _iceFlowSIA(self, elaH, iceH, iceT):
@@ -390,10 +396,13 @@ class IceMesh(object):
         self.iceFAL.setArray(fa)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
 
-        # Capture ablation meltwater for the river coupling BEFORE smoothing,
-        # gated by ice presence (discharge reached the cell).
-        melt_local = np.maximum(-mdot, 0.0) * self.larea * (fa > 1.0e-8)
-        self.iceMeltL.setArray(melt_local)
+        # Ablation pattern for the till melt-out / deposition weight (precip-
+        # scaled, gated to ice presence — what the till machinery expects).
+        self.iceMeltL.setArray(np.maximum(-mdot, 0.0) * self.larea * (fa > 1.0e-8))
+        # Glacial meltwater delivered to the rivers (discharge-conserving by
+        # default: the routed accumulation released where the ice melts out, so
+        # Σ river-melt == Σ accumulation; closes the glacial water budget).
+        self.iceMeltRiverL.setArray(self._glacialMeltwater(zbed, mdot))
 
         # Smooth the discharge (robustness / morphology), then Bahr thickness.
         self.iceFAG.copy(result=self.tmp1)
@@ -466,6 +475,7 @@ class IceMesh(object):
                 self.iceUbL.set(0.)
                 self.iceAbrL.set(0.)
                 self.iceMeltL.set(0.)
+                self.iceMeltRiverL.set(0.)
                 self.iceFAL.set(0.)
                 self.iceFAG.set(0.)
                 if self.flexOn:
@@ -730,6 +740,87 @@ class IceMesh(object):
         self.depoFineFrac = saved_depoFineFrac
 
         return
+
+    def _glacialMeltwater(self, zbed, mdot):
+        r"""
+        Glacial meltwater volume (m^3/yr) delivered to the rivers.
+
+        Two models, selected by ``ice.melt_conserve``:
+
+        - **Discharge-conserving** (default): the accumulation (the water that
+          fell as ice above the ELA, :math:`\dot{m}^+\,A`) is routed down the
+          ice-surface flow network and **released as meltwater where the ice
+          melts out** (fraction :math:`f`, forced to 1 at the margin/terminus),
+          so :math:`\sum \mathrm{melt} = \sum \mathrm{accumulation}`. Over goSPL's
+          long timesteps a land-terminating glacier is ~steady, so all the ice
+          that accumulates leaves as meltwater at the snout — this closes the
+          glacial water budget (the precipitation removed from runoff above the
+          ELA returns downstream). Transport-with-loss on the ice network, same
+          MPI-correct flow-matrix / KSP machinery as ``_routeTill``.
+        - **Precip-scaled** (``melt_conserve: False``): the local ablation rate
+          :math:`\max(-\dot{m},0)\,A` where ice is present — cheaper, but it
+          loses water (the ablation generally under-returns the accumulation).
+        """
+        H = self.iceHL.getArray()
+        if not self.ice_melt_conserve:
+            return np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
+
+        # Halo-sync the thickness (ghosts needed for receivers / margin test).
+        self.dm.localToGlobal(self.iceHL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        H = self.tmpL.getArray().copy()
+        s = zbed + H                                       # ice surface
+        rcv, _, wght = mfdreceivers(1, self.flowExp, s, self.sealevel, self.gid)
+        rcv0 = rcv[:, 0].astype(petsc4py.PETSc.IntType)
+        w0 = wght[:, 0].copy()
+
+        thr = 1.0e-2
+        ice = H > thr
+        A = np.maximum(mdot, 0.0) * self.larea             # accumulation volume (m^3/yr)
+        # Melt-out fraction: ablation share of the ice column this step, =1 off-ice
+        # and at the margin (receiver ice-free) so all remaining ice melts out and
+        # the transport is exactly conservative (Σ melt = Σ accumulation).
+        abl = np.maximum(-mdot, 0.0) * self.dt
+        f = np.clip(abl / np.maximum(H, thr), 0.0, 1.0)
+        f[~ice] = 1.0
+        f[ice & (H[rcv0] <= thr)] = 1.0
+
+        outw = w0 * (1.0 - f)
+        outw[self.ghostIDs] = 0.0
+        if self.flatModel:
+            outw[self.idBorders] = 0.0
+
+        mat = self.iMat.copy()
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        nodes = indptr[:-1]
+        data = -outw
+        data[rcv0 == nodes] = 0.0
+        tmpMat = self._matrix_build()
+        tmpMat.assemblyBegin()
+        tmpMat.setValuesLocalCSR(indptr, rcv0, data)
+        tmpMat.assemblyEnd()
+        mat.axpy(1.0, tmpMat)
+        tmpMat.destroy()
+        mat.transpose()
+
+        self.tmpL.setArray(A)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._solve_KSP(True, mat, self.tmp, self.tmp1)
+        mat.destroy()
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        L = self.tmpL.getArray().copy()                    # ice flux through each cell
+        melt = f * L                                       # melt-out (m^3/yr)
+        melt[melt < 0.0] = 0.0
+
+        # The transport conserves analytically; the KSP solve is only accurate to
+        # its tolerance, so renormalise so the released meltwater equals the
+        # accumulation exactly (closing the water budget bit-for-bit).
+        owned = self.inIDs == 1
+        Mtot = MPI.COMM_WORLD.allreduce(float(np.sum(melt[owned])), op=MPI.SUM)
+        Atot = MPI.COMM_WORLD.allreduce(float(np.sum(A[owned])), op=MPI.SUM)
+        if Mtot > 0.0:
+            melt *= Atot / Mtot
+        return melt
 
     def _routeTill(self, Vero, Vtot, owned):
         r"""

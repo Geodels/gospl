@@ -506,13 +506,13 @@ class FAMesh(object):
             tmp = np.where(denom > 0.0, (hl - elaH) / safe, 0.0)
             tmp = np.clip(tmp, 0.0, 1.0)
             rainA = np.multiply(rainA, 1. - tmp)
-            # Re-inject glacial meltwater captured during the SIA solve:
-            # ablation-zone cells with ice present release the local melt
-            # rate (iceMeltL, set in iceplex._iceSIAFinalize) as liquid water
-            # into the river source. Without this, the meltwater produced by
-            # the ice model would be lost and downstream basins would
-            # under-predict discharge.
-            rainA = rainA + self.iceMeltL.getArray()
+            # Re-inject glacial meltwater (iceMeltRiverL, set in iceplex):
+            # discharge-conserving by default — the precipitation that fell as
+            # ice above the ELA is routed down-glacier and released here as
+            # liquid water where the ice melts out, so Σ meltwater == Σ glacial
+            # accumulation. Without this the meltwater would be lost and
+            # downstream basins would under-predict discharge.
+            rainA = rainA + self.iceMeltRiverL.getArray()
             rainA[self.seaID] = 0.
 
         #  Solve flow/ice accumulation

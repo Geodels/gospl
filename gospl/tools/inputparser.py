@@ -1790,6 +1790,13 @@ class ReadYaml(object):
             self.ice_meltfac = iceDict.get("melt", 10.0)     # ablation amplifier
             self.icewf = iceDict.get("fwidth", 1.5)          # Bahr width factor
             self.icewe = iceDict.get("eheight", 0.25)        # Bahr thickness factor
+            # Glacial-meltwater model for the river coupling. True (default):
+            # discharge-conserving — the accumulation (water that fell as ice) is
+            # routed down-glacier and released as meltwater where the ice melts
+            # out, so Σ meltwater == Σ accumulation (the steady-state, long-
+            # timescale assumption; closes the glacial water budget). False: the
+            # local precipitation-scaled ablation rate (loses water downstream).
+            self.ice_melt_conserve = bool(iceDict.get("melt_conserve", True))
 
             siaDict = iceDict.get("sia", {})
             self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
@@ -1862,6 +1869,7 @@ class ReadYaml(object):
             self.ice_meltfac = 10.0
             self.icewf = 1.5
             self.icewe = 0.25
+            self.ice_melt_conserve = True
             self.sia_Aglen = 1.0e-16
             self.sia_slide = 1.0e-3
             self.sia_glen = 3.0

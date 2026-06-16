@@ -150,6 +150,7 @@ Ice sheets and glacial erosion
 
             ice:
                 # flow_model: mfd          # 'mfd' (default, diagnostic) | 'sia'
+                # melt_conserve: True       # discharge-conserving river meltwater (default)
                 # Either constant glacial parameters
                 hterm: 1700.0
                 hela: 1850.0
@@ -188,6 +189,16 @@ Ice sheets and glacial erosion
         ice routing), ``eheight`` and ``fwidth`` (the Bahr thickness/width
         scaling factors :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`),
         and ``melt`` (an ablation amplifier). They are ignored under ``sia``.
+
+        ``melt_conserve`` (default ``True``, applies to both flow models) sets how
+        glacial meltwater is delivered to the rivers. ``True`` is
+        **discharge-conserving**: the precipitation that fell as ice above the ELA
+        is routed down-glacier and released as liquid meltwater where the ice
+        melts out, so the total meltwater equals the total accumulation — the
+        right assumption over goSPL's long (steady-state) timesteps, and it closes
+        the glacial water budget so downstream basins don't under-predict
+        discharge. ``False`` reverts to the local precipitation-scaled ablation
+        rate (cheaper, but it generally returns less water than fell as ice).
 
         The equilibrium-line / ice-cap geometry controls where ice accumulates
         and melts:

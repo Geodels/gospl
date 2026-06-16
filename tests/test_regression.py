@@ -542,6 +542,43 @@ def test_ice_lateral_erosion(minimal_ice_dual_model):
     assert A((dz[elat > 0] < -1.0e-9).sum()) > 0, "no wall cells lowered"
 
 
+def test_ice_meltwater_conserves(minimal_ice_sia_model):
+    """
+    Protects: the discharge-conserving glacial meltwater delivered to the rivers
+    (`ice.melt_conserve`, default True). The water that fell as ice above the ELA
+    must return downstream as meltwater — Σ river-meltwater == Σ accumulation —
+    so the glacial water budget is closed (vs the precip-scaled ablation, which
+    loses water). Distinct from `iceMeltL` (the till melt-out pattern).
+    """
+    from mpi4py import MPI
+    m = minimal_ice_sia_model
+    m.ice_flow_model = "mfd"
+    m.tNow = m.tStart
+    from gospl.flow.iceplex import IceMesh
+    IceMesh.iceAccumulation(m)
+
+    owned = m.inIDs == 1
+    _, _, _, _, mdot = m._iceSIAParams(2000.0, 3000.0)
+    A = MPI.COMM_WORLD.allreduce(
+        float(np.sum((np.maximum(mdot, 0.0) * m.larea)[owned])), op=MPI.SUM
+    )
+    W = MPI.COMM_WORLD.allreduce(
+        float(np.sum(m.iceMeltRiverL.getArray()[owned])), op=MPI.SUM
+    )
+    assert A > 0.0, "no accumulation; test vacuous"
+    assert np.isclose(W, A, rtol=1.0e-6), (
+        f"river meltwater {W:.4e} != accumulation {A:.4e} (water not conserved)"
+    )
+
+    # Legacy precip-scaled mode: meltwater is the local ablation (generally < A).
+    m.ice_melt_conserve = False
+    IceMesh.iceAccumulation(m)
+    W2 = MPI.COMM_WORLD.allreduce(
+        float(np.sum(m.iceMeltRiverL.getArray()[owned])), op=MPI.SUM
+    )
+    assert np.isfinite(W2) and W2 >= 0.0
+
+
 @pytest.mark.slow
 def test_ice_terminus_sea_level_floor(minimal_ice_sia_model):
     """
