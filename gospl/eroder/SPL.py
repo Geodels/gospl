@@ -352,11 +352,11 @@ class SPL(object):
 
     def _glacialAbrasion(self):
         r"""
-        Velocity-based glacial abrasion (SIA ice model, Phase 3).
+        Velocity-based glacial abrasion.
 
         Adds a bed-lowering term :math:`E_g = K_g\,|u_b|^{l}` (m/yr) to the
         erosion-deposition rate ``self.Eb`` as an incision (negative, the Eb
-        thickness-rate convention), where :math:`u_b` is the SIA basal sliding
+        thickness-rate convention), where :math:`u_b` is the basal sliding
         speed (``self.iceUbL``, Phase 2). The eroded material then flows into the
         sediment system through the standard ``Eb·dt`` → cumED / hGlobal /
         erodeStrat path in the SPL wrappers (no separate bookkeeping).

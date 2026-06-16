@@ -368,7 +368,7 @@ class WriteMesh(object):
                     data[self.seaID] = 1.0
                 f["iceH"][:, 0] = data
 
-                # SIA basal sliding speed (m/yr): the abrasion driver and a
+                # Basal sliding speed (m/yr): the abrasion driver and a
                 # diagnostic of ice dynamics.
                 f.create_dataset(
                     "iceUb",
@@ -398,7 +398,7 @@ class WriteMesh(object):
                 )
                 f["iceAbr"][:, 0] = self.iceAbrL.getArray().copy()
                 # Ice discharge (m^3/yr) from the diagnostic 'mfd' flow model
-                # (zero under the SIA flow model).
+                # (the ELA accumulation routed downhill).
                 f.create_dataset(
                     "iceFA",
                     shape=(self.lpoints, 1),

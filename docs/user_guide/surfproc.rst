@@ -133,15 +133,14 @@ Ice sheets and glacial erosion
     .. grid-item-card::
 
         Adding an ``ice`` section turns on goSPL's glacial model, driving glacial
-        abrasion, till transport and ice loading. Two flow models are available
-        via ``flow_model`` — a cheap, stable **diagnostic** (``mfd``, default):
-        the ELA accumulation is routed downhill into an ice discharge from which
-        a Bahr thickness and a bounded SIA sliding velocity are derived (no dynamics solve;
-        fast and robust at any resolution, suited to the **morphology of glacial
-        erosion**); or the full **Shallow-Ice-Approximation (SIA)** (``sia``): an
-        explicit, mass-conserving non-linear diffusion of the ice thickness
-        (physically richer, but stiff and over-thick for km-scale continental ice
-        at coarse resolution). The full algorithm is in the technical guide
+        abrasion, till transport and ice loading. It is a cheap, robust
+        **diagnostic glacial-erosion model**: the ELA accumulation is routed
+        downhill into an ice discharge, from which a Bahr ice thickness and a
+        bounded Glen-sliding velocity are derived (one linear solve, no
+        ice-dynamics time integration), then abrasion, till/moraine deposition,
+        meltwater and an ice load follow. It is fast and physical at any
+        resolution and over goSPL's long timesteps, suited to the **morphology of
+        glacial erosion**. The full algorithm is in the technical guide
         (:ref:`ice`).
 
         **Declaration example**:
@@ -149,7 +148,6 @@ Ice sheets and glacial erosion
         .. code:: yaml
 
             ice:
-                # flow_model: mfd          # 'mfd' (default, diagnostic) | 'sia'
                 # melt_conserve: True       # discharge-conserving river meltwater (default)
                 # Either constant glacial parameters
                 hterm: 1700.0
@@ -157,20 +155,15 @@ Ice sheets and glacial erosion
                 hice: 2100.0
                 # Or using a file to characterise glacial evolution
                 # evol: 'data/ice_evol.csv'
-                # hinit: ['input/ice0', 'H']   # optional pre-existing ice
-                # Diagnostic ('mfd') controls (ignored under flow_model: sia):
-                # icedir: 1                 # MFD flow directions for ice routing
-                # eheight: 0.25             # Bahr thickness factor
-                # fwidth: 1.5               # Bahr width factor
-                # melt: 10.                 # ablation amplifier
-                sia:
-                    Aglen: 1.0e-16
-                    slide: 1.0e-3
-                    glen: 3.0
-                    # cfl: 0.5            # explicit substep accuracy (optional)
-                    # max_substeps: 500   # substep cap per goSPL step (optional)
-                    # accum_factor: 1.0   # precip->ice accumulation fraction (optional)
-                    # accum_max: 2.0      # cap accumulation rate, m ice/yr (optional)
+                # Diagnostic controls (all optional):
+                icedir: 1                 # MFD flow directions for ice routing
+                eheight: 0.25             # Bahr thickness factor
+                fwidth: 1.5               # Bahr width factor
+                melt: 10.                 # ablation amplifier
+                slide: 1.0e-3             # basal sliding coefficient (Glen sliding law)
+                glen: 3.0                 # Glen sliding exponent n
+                # accum_factor: 1.0       # precip->ice accumulation fraction (optional)
+                # accum_max: 2.0          # cap accumulation rate, m ice/yr (optional)
                 abrasion:
                     Kg: 1.0e-4
                     l: 1.0
@@ -180,41 +173,38 @@ Ice sheets and glacial erosion
                     on: True          # default True (set False -> abrasion goes straight to rivers)
                     route: True       # default True (catchment-routed; False = global melt-spread)
 
-        ``flow_model`` selects how ice is computed: ``mfd`` (default) is the
-        diagnostic proxy (route the accumulation into an ice discharge, then a
-        Bahr thickness and a bounded sliding velocity — no dynamics solve); ``sia`` solves
-        the full Shallow-Ice-Approximation thickness. Both then drive the *same*
-        abrasion / till / loading machinery below. The diagnostic ``mfd`` adds
-        four optional controls: ``icedir`` (number of MFD flow directions for the
-        ice routing), ``eheight`` and ``fwidth`` (the Bahr thickness/width
-        scaling factors :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`),
-        and ``melt`` (an ablation amplifier). They are ignored under ``sia``.
+        Each goSPL step the model routes the ELA accumulation downhill on the
+        epsilon-filled bed into an ice discharge :math:`Q`, derives a Bahr ice
+        thickness :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`
+        and a bounded basal sliding velocity from Glen's sliding law, and then
+        drives the abrasion / till / loading machinery below — all in a single
+        linear solve, with no ice-thickness PDE time integration.
 
-        ``melt_conserve`` (default ``True``, applies to both flow models) sets how
-        glacial meltwater is delivered to the rivers. ``True`` is
-        **discharge-conserving**: the precipitation that fell as ice above the ELA
-        is routed down-glacier and released as liquid meltwater where the ice
-        melts out, so the total meltwater equals the total accumulation — the
-        right assumption over goSPL's long (steady-state) timesteps, and it closes
-        the glacial water budget so downstream basins don't under-predict
-        discharge. ``False`` reverts to the local precipitation-scaled ablation
-        rate (cheaper, but it generally returns less water than fell as ice).
+        ``melt_conserve`` (default ``True``) sets how glacial meltwater is
+        delivered to the rivers. ``True`` is **discharge-conserving**: the
+        precipitation that fell as ice above the ELA is routed down-glacier and
+        released as liquid meltwater where the ice melts out, so the total
+        meltwater equals the total accumulation — the right assumption over
+        goSPL's long (steady-state) timesteps, and it closes the glacial water
+        budget so downstream basins don't under-predict discharge. ``False``
+        reverts to the local precipitation-scaled ablation rate (cheaper, but it
+        generally returns less water than fell as ice).
 
         The equilibrium-line / ice-cap geometry controls where ice accumulates
         and melts:
 
-        a. ``hterm`` is the glacier terminus elevation (m) — no ice is kept below it. The effective floor is ``max(hterm, sea level)``: ice never persists below the (possibly time-varying) sea surface, and a ``hterm`` below sea level is raised to it. When omitted, the terminus defaults to the **sea-level position**, so the SIA dynamics and ablation set the actual terminus,
+        a. ``hterm`` is the glacier terminus elevation (m) — no ice is kept below it. The effective floor is ``max(hterm, sea level)``: ice never persists below the (possibly time-varying) sea surface, and a ``hterm`` below sea level is raised to it. When omitted, the terminus defaults to the **sea-level position**,
         b. ``hela`` is the equilibrium-line altitude (m) — ablation below, accumulation above,
         c. ``hice`` is the ice-cap altitude (m) — full precipitation is captured as ice above it.
 
-        The ``sia`` sub-block sets the flow physics (all optional, with the
-        defaults shown above):
+        The diagnostic flow controls are all optional, with the defaults shown
+        above:
 
-        d. ``Aglen`` is the Glen's-law rate factor (ice softness) controlling internal deformation,
-        e. ``slide`` is the basal-sliding coefficient,
-        f. ``glen`` is the Glen's-law exponent :math:`n` (usually 3),
-        g. ``cfl`` (default ``0.5``) sets the explicit-substep size as a fraction of the time for a cell to shed (or gain) its ice — an accuracy/cost knob, not a stability limit (the flux limiter keeps the solve stable and positive at any size); ``max_substeps`` (default ``500``) caps the substeps per goSPL step. Thick (km-scale) ice is genuinely stiff: it needs more substeps for accuracy, so lower ``cfl`` (e.g. ``0.1``) for thick ice, accepting a higher cost.
-        h. ``accum_factor`` (default ``1.0``) and ``accum_max`` (default unset) control the **accumulation** part of the surface mass balance only (ablation is untouched). Full precipitation is rarely all snow/ice, so ``accum_factor`` is a precipitation→ice conversion fraction and ``accum_max`` caps the accumulation rate (m ice/yr) at a realistic ceiling (real ice sheets accumulate ~0.1–2 m/yr). **Set these for high-precipitation runs** — converting several m/yr of rainfall directly to ice produces unphysically thick, expensive-to-solve ice.
+        d. ``icedir`` is the number of MFD flow directions used to route the ice accumulation into the discharge :math:`Q`,
+        e. ``eheight`` and ``fwidth`` are the Bahr thickness and width scaling factors in :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`,
+        f. ``melt`` is an ablation amplifier on the below-ELA melt rate,
+        g. ``slide`` is the basal-sliding coefficient (Glen sliding law) and ``glen`` the Glen sliding exponent :math:`n` (usually 3), setting the bounded basal velocity :math:`u_b \propto H^{n-1}|\nabla s|^{n-1}\nabla s` that drives abrasion,
+        h. ``accum_factor`` (default ``1.0``) and ``accum_max`` (default unset) control the **accumulation** part of the surface mass balance only (ablation is untouched). Full precipitation is rarely all snow/ice, so ``accum_factor`` is a precipitation→ice conversion fraction and ``accum_max`` caps the accumulation rate (m ice/yr) at a realistic ceiling (real ice sheets accumulate ~0.1–2 m/yr). **Set these for high-precipitation runs** — converting several m/yr of rainfall directly to ice produces unphysically thick ice.
 
         The ``abrasion`` sub-block enables velocity-based glacial erosion
         :math:`E_g = K_g\,|u_b|^{l}` (off by default, ``Kg: 0``):
@@ -247,17 +237,10 @@ Ice sheets and glacial erosion
         n. ``evol`` is the glacier characteristics over time (`csv` file). When
            used, ``hterm``, ``hela`` and ``hice`` are not required because they
            are defined in this file.
-        o. ``hinit`` (optional) is a **pre-existing ice thickness** (m) — a
-           uniform scalar or a per-vertex ``[file, key]`` map — used to seed the
-           ice at the start of the run; the SIA solve then evolves it. Without
-           it the ice grows in from zero. The equilibrium-line geometry
-           (``hela``/``hice``/``hterm``) is still required, as it drives the
-           evolution. On a restart the evolved ice thickness is restored
-           instead, so ``hinit`` only applies to a fresh start.
 
-        When flexural isostasy is enabled, the SIA ice thickness is automatically
-        used as the ice load contribution to the isostatic computation — no extra
-        parameters are needed.
+        When flexural isostasy is enabled, the diagnostic ice thickness is
+        automatically used as the ice load contribution to the isostatic
+        computation — no extra parameters are needed.
 
         .. important::
 
@@ -279,7 +262,8 @@ Ice sheets and glacial erosion
                 hela:  ['input/ela', 'ela']    # per-vertex ELA (e.g. latitude-varying)
                 hice:  ['input/ela', 'hice']   # ice-cap altitude must track hela
                 hterm: 0.                       # a global scalar floor is usually fine
-                sia: {Aglen: 1.0e-16, slide: 1.0e-3, glen: 3.0}
+                slide: 1.0e-3
+                glen: 3.0
 
         Only ``hela`` really needs a map; ``hice`` should follow it (it is the
         top of the accumulation band, so ``hice > hela`` everywhere), while
@@ -294,7 +278,8 @@ Ice sheets and glacial erosion
         .. code:: yaml
 
             ice:
-                sia: {Aglen: 1.0e-16, slide: 1.0e-3, glen: 3.0}
+                slide: 1.0e-3
+                glen: 3.0
                 glaciers:
                   - start: -120000.
                     hela:  ['input/ela_lgm', 'ela']

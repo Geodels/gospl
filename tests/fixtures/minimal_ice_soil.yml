@@ -33,7 +33,6 @@ soil:
     tempRef: 15.0
 
 ice:
-    flow_model: mfd
     hela: 2000.
     hice: 3000.
     hterm: 1500.

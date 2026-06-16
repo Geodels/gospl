@@ -4,11 +4,23 @@
 Ice sheets, glacial erosion and meltwater
 ==============================================
 
-goSPL represents glaciers with a **Shallow-Ice-Approximation (SIA) ice-sheet
-model**: the ice thickness is evolved as a non-linear diffusion of the ice
-surface, and the resulting flow drives glacial abrasion, till transport and
-flexural loading. The model is enabled by adding an ``ice`` section to the
-input file.
+goSPL represents glaciers with a cheap, robust **diagnostic glacial-erosion
+model**. Each step the ELA surface mass balance is routed downhill into an ice
+discharge, from which an ice thickness, a basal sliding velocity, glacial
+abrasion, till/moraine deposition, meltwater and an ice load are derived — one
+linear solve, no time integration. The model is enabled by adding an ``ice``
+section to the input file.
+
+.. note::
+
+   **Why a diagnostic, not full ice dynamics.** A true Shallow-Ice-Approximation
+   (SIA) thickness solve was implemented and then removed. The ice margin
+   :math:`H \ge 0` is a *free-boundary (obstacle) problem*, on which an implicit
+   ``F(H)=0`` thickness solve diverged on real continental runs; and an
+   ice-dynamics solve is stiff and **over-thickens km-scale continental ice at
+   coarse resolution** over goSPL's long (:math:`10^2`–:math:`10^4` yr)
+   timesteps. The diagnostic below is physical and robust at any resolution and
+   over those long steps, which is why it is the only model goSPL ships.
 
 Surface mass balance
 --------------------
@@ -24,7 +36,10 @@ ice-cap altitude (``hice``):
 
 Above the ice-cap altitude the cell accumulates the full local precipitation as
 ice; between the ELA and the ice cap the fraction ramps linearly from 0 to 1;
-below the ELA the ramp goes negative and the source becomes ablation (melt).
+below the ELA the ramp goes negative and the source becomes ablation (melt). The
+accumulation part is scaled by ``accum_factor`` (a precipitation→ice conversion
+fraction) and optionally capped at ``accum_max`` (m ice/yr); ablation is
+amplified by ``melt``.
 
 A degenerate-configuration guard zeroes the ice and returns immediately when
 ``hice <= hela`` or when the maximum surface elevation lies below the ELA.
@@ -40,125 +55,84 @@ A degenerate-configuration guard zeroes the ice and returns immediately when
    tropical summit glaciers and polar ice sheets simultaneously. See the
    :ref:`user guide <surfproc>` for the input syntax.
 
-Ice dynamics (SIA)
-------------------
+Ice routing and discharge
+-------------------------
 
-The ice thickness :math:`H` evolves as a non-linear diffusion of the ice surface
-:math:`s = z_\mathrm{bed} + H`:
+The accumulated ice is **routed downhill** on the epsilon-filled bed using a
+multiple-flow-direction (MFD) algorithm — the same flow-matrix / KSP machinery
+that builds the river flow accumulation, with the number of directions set by
+``icedir``. A single linear solve turns the per-cell accumulation into an **ice
+discharge** :math:`Q` (m\ :sup:`3`/yr) at each cell: the volume of ice passing
+through it per year. There is no time integration of an ice-thickness PDE.
 
-.. math::
+Ice thickness (Bahr scaling)
+----------------------------
 
-   \frac{\partial H}{\partial t} = \dot{m} - \nabla \cdot \mathbf{q},
-   \qquad
-   \mathbf{q} = -\left[\frac{2A(\rho_i g)^n}{n+2}\,H^{\,n+2} + a_s\,H^{\,n}\right]
-                |\nabla s|^{\,n-1}\,\nabla s
-
-The flux :math:`\mathbf{q}` combines Glen's-law internal **deformation** (rate
-factor :math:`A` = ``Aglen``, exponent :math:`n` = ``glen``, ice density
-:math:`\rho_i = 910\ \mathrm{kg\,m^{-3}}`) and basal **sliding** (coefficient
-:math:`a_s` = ``slide``). Its divergence is evaluated on the unstructured
-finite-volume mesh by the ``ice_flux`` Fortran kernel, using the same
-mass-conservative edge fluxes as the hillslope diffusion operator. Because the
-flux is computed on the *total* surface (bed + ice) it naturally fills and
-overflows closed basins.
-
-Explicit thickness solve
-------------------------
-
-Each goSPL time step the thickness is advanced by an **explicit, mass-conserving,
-positivity-preserving** integration of
+The **ice thickness** :math:`H` follows from a Bahr-type width–area (here
+discharge) scaling of the discharge:
 
 .. math::
 
-   \frac{\partial H}{\partial t} = \dot{m} - \nabla \cdot \mathbf{q}(H),
+   H = \mathrm{eheight}\,\cdot\,\mathrm{fwidth}\,\cdot\,Q^{\,0.3}
 
-split into one or more substeps :math:`H \leftarrow H + \Delta t_\mathrm{sub}
-(\dot{m} - \nabla \cdot \mathbf{q})`. The flux divergence comes from the
-``ice_flux_limiter`` / ``ice_flux_rscaled`` kernels, which cap each cell's
-outflux to the ice it actually holds,
+with the Bahr thickness factor ``eheight`` and width factor ``fwidth``. Thicker
+ice forms where the routed discharge is larger (the trunk of the ice stream),
+tapering to zero where there is no ice.
 
-.. math::
+Basal sliding velocity (Glen sliding law)
+-----------------------------------------
 
-   R(k) = \min\!\Big(1,\; \frac{H_k A_k}{\Delta t_\mathrm{sub}\,\text{outflux}_k}\Big),
-
-and scales every edge flux by the source cell's :math:`R`. Because the scaled
-flux is applied equal-and-opposite across each shared face, ice volume is
-conserved to machine precision; because a cell never exports more ice than it
-has, the free boundary :math:`H \ge 0` is preserved for **any** substep with no
-mass-injecting clamp.
-
-.. note::
-
-   The ice margin is a *free-boundary (obstacle) problem*, which makes an
-   implicit ``F(H)=0`` thickness solve ill-posed at the margin (it was tried,
-   and diverged on real runs). The flux limiter handles the boundary natively.
-   Positivity being unconditional, the substep size is an **accuracy** choice
-   set by ``sia.cfl`` (a fraction of the per-cell time to lose its ice), capped
-   by ``sia.max_substeps``. The stable substep at goSPL's km /
-   :math:`10^2`–:math:`10^4` yr resolution is :math:`10^3`–:math:`10^4` yr, so a
-   step typically needs only a handful of substeps (often one).
-
-Ice is removed below the terminus floor :math:`\max(h_\mathrm{term}, \text{sea
-level})` — so it never persists below the (possibly time-varying) sea surface,
-and an ``hterm`` below sea level is raised to it. When ``hterm`` is omitted the
-floor is simply the sea-level position, leaving the dynamics and ablation to set
-the terminus. The solver is validated against the analytical SIA dome: with zero
-surface mass balance the flux conserves ice volume to the numerical floor, even
-for a thick dome at a :math:`5\times10^4` yr step.
-
-From the converged thickness, goSPL derives the **basal sliding speed**
-:math:`u_b` (``ice_velocity`` kernel), which is written to the output as
-``iceUb`` and drives glacial abrasion.
-
-By default the ice grows in from zero. A **pre-existing ice thickness** can be
-seeded at the first step with ``hinit`` (a uniform scalar or a per-vertex map);
-the SIA solve then evolves it. The flexural reference is taken after seeding, so
-a pre-existing ice load does not shock the plate, and a restart restores the
-evolved thickness instead of re-seeding.
-
-Meltwater re-injection into the river network
----------------------------------------------
-
-Where the surface mass balance is negative and ice is present, the ablation rate
-is captured as liquid meltwater (m\ :sup:`3`/yr):
+From that thickness and the bed-surface slope, goSPL derives the **basal sliding
+velocity** :math:`u_b` from Glen's sliding law (the ``ice_velocity`` Fortran
+kernel):
 
 .. math::
 
-   \mathrm{m_i} = \max(-\dot{m}_i, 0)\;\Omega_i\;[H_i > 0]
+   u_b \;\propto\; H^{\,n-1}\,|\nabla s|^{\,n-1}\,\nabla s,
+   \qquad s = z_\mathrm{bed} + H
 
-The river accumulation step in ``flowAccumulation`` removes the precipitation
-that was captured as ice (above the ELA) from the river source and then adds
-this meltwater back, so cells downstream of glacier termini see the
-corresponding meltwater discharge instead of losing it.
+with sliding coefficient ``slide`` and Glen exponent :math:`n` = ``glen`` (usually
+3). The velocity is physically bounded. It is written to the output as ``iceUb``
+and drives glacial abrasion.
 
-Glacial abrasion
-----------------
+Glacial abrasion (vertical and lateral)
+---------------------------------------
 
-When ``abrasion.Kg > 0``, sliding ice abrades the bed at the rate
+When ``abrasion.Kg > 0``, sliding ice abrades the bed (deepening valleys) at the
+rate
 
 .. math::
 
    E_g = K_g\,|u_b|^{\,l}
 
-(``Kg`` and ``l`` in the ``ice`` block). The abrasion is masked to subaerial,
-ice-covered cells (no marine abrasion; :math:`u_b` is already zero where there
-is no ice). When **till handling is off**, :math:`E_g` is added directly to the
-erosion–deposition rate as an incision and flows into the fluvial sediment
-system through the standard erosion path in all SPL flavours (``SPL``,
-``nlSPL``, ``soilSPL``).
+(``Kg`` and ``l`` in the ``abrasion`` block). The abrasion is masked to
+subaerial, ice-covered cells (no marine abrasion; :math:`u_b` is already zero
+where there is no ice).
+
+An optional **lateral (valley-wall) erosion** term widens glaciated valleys
+toward a U-profile. With ``abrasion.Kl > 0``, each wall cell flanking fast ice is
+eroded at :math:`K_l\,|u_{b,\mathrm{neighbour}}|^{\,\mathrm{lat\_l}}`, tapered by
+how much of the wall is in contact with the neighbouring ice column. The eroded
+wall rock joins the same conserved till → moraine budget as the vertical
+abrasion. ``lat_l`` (default = ``l``) is its velocity exponent. Both ``Kg`` and
+``Kl`` default to ``0`` (abrasion off).
+
+When **till handling is off**, the abraded material is added directly to the
+erosion–deposition rate as an incision and flows into the fluvial sediment system
+through the standard erosion path in all SPL flavours (``SPL``, ``nlSPL``,
+``soilSPL``).
 
 Glacial till and moraine deposition
 -----------------------------------
 
-When ``till.on`` is set, the abraded material is not released straight into the
-rivers but carried as **till** by the ice and deposited where the ice melts out
-— the ablation zone / terminal moraine. The bed is lowered under fast-sliding
-ice and raised in the ablation zone, weighted by the local meltwater rate. Two
-modes are used depending on whether stratigraphy is active:
+When ``till.on`` is set (the default), the abraded rock is not released straight
+into the rivers but carried as **till** by the ice and deposited as **moraine**
+where the ice melts out — the ablation zone / terminus. Rock volume is conserved
+(rock is moved, not created or destroyed). Two modes are used depending on
+whether stratigraphy is active:
 
 - **Bulk bed** (no stratigraphy): the abraded volume is redistributed as a
-  bed-to-bed transport, so the net bed-volume change is exactly zero (rock is
-  moved, not created or destroyed).
+  bed-to-bed transport, so the net bed-volume change is exactly zero.
 - **Stratigraphic**: the till is removed from the stratigraphic layers it was
   abraded from and re-deposited as a fresh moraine layer in the ablation zone.
   Under **dual lithology** the moraine is split into coarse and fine fractions
@@ -167,14 +141,12 @@ modes are used depending on whether stratigraphy is active:
   uncompacted till and the compacted source rock.
 
 Independently of the bulk/stratigraphic split, the **deposition distribution**
-has two options. By default the till is spread across the ablation zone weighted
-by the local meltwater rate — adequate when a mesh cell aggregates a whole
-glacier (continental/global resolution). With ``till.route: True`` the till is
-instead **routed down the ice-surface flow network**: it is transported along
-steepest descent of the surface :math:`s = z_\mathrm{bed} + H` and melts out
-progressively toward each catchment's terminus, building moraine at the actual
-ice margins. This is a transport-with-loss solved with the same MPI-correct
-flow-matrix / KSP machinery as the river accumulation,
+has two options. With ``till.route: True`` (the default) the till is **routed
+down the ice-surface flow network**: it is transported along steepest descent of
+the surface :math:`s = z_\mathrm{bed} + H` and melts out progressively toward
+each catchment's terminus, building moraine at the actual ice margins. This is a
+transport-with-loss solved with the same MPI-correct flow-matrix / KSP machinery
+as the river accumulation,
 
 .. math::
    L_i = A_i + \sum_{u \to i} w_{ui}\,(1-f_u)\,L_u, \qquad D_i = f_i\,L_i,
@@ -182,16 +154,38 @@ flow-matrix / KSP machinery as the river accumulation,
 where :math:`A_i` is the local abraded volume, :math:`L_i` the till load passing
 through cell :math:`i`, and :math:`f_i = \min(1, \dot a_i \Delta t / H_i)` the
 melt-out fraction (forced to 1 at the ice margin so no till leaks onto bare
-ground). Routing is appropriate for high-resolution (sub-km) regional runs where
-individual glacier catchments and termini are resolved; at coarse resolution it
-reduces to near-local deposition. Both options conserve mass and are protected by
-dedicated tests.
+ground). With ``till.route: False`` the **global** abraded volume is instead
+spread across the whole ablation zone weighted by the local meltwater rate —
+cheaper (no extra solve) but it decouples erosion and deposition across separate
+ice masses. Both options conserve mass and are protected by dedicated tests.
+
+Meltwater re-injection into the river network
+---------------------------------------------
+
+By default (``melt_conserve: True``) the glacial meltwater delivered to the
+rivers is **discharge-conserving**. The precipitation that fell as ice above the
+ELA is routed down-glacier and released as liquid meltwater where the ice melts
+out, so the **total meltwater equals the total accumulation** — closing the
+glacial water budget so downstream basins do not under-predict discharge. The
+river accumulation step in ``flowAccumulation`` removes the precipitation that
+was captured as ice from the river source and adds this meltwater back, so cells
+downstream of glacier termini see the corresponding meltwater discharge instead
+of losing it.
+
+With ``melt_conserve: False`` goSPL reverts to the local precipitation-scaled
+ablation rate,
+
+.. math::
+
+   \mathrm{m_i} = \max(-\dot{m}_i, 0)\;\Omega_i\;[H_i > 0]
+
+which is cheaper but generally returns less water than fell as ice.
 
 Ice loading and flexure
 -----------------------
 
-When ``flexure`` is enabled, the SIA ice thickness is used as the ice load in
-the flexural-isostasy computation: the change in ice thickness between steps is
+When ``flexure`` is enabled, the diagnostic ice thickness is used as the ice load
+in the flexural-isostasy computation: the change in ice thickness between steps is
 converted to an equivalent load (scaled by :math:`\rho_i / \rho_c`) and applied
 through the existing flexure path, so a growing ice sheet drives isostatic
 subsidence and deglaciation drives rebound.
