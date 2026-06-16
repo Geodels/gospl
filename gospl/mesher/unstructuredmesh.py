@@ -967,6 +967,10 @@ class UnstMesh(object):
             self.iceMeltL.destroy()
             self.iceUbL.destroy()
             self.iceAbrL.destroy()
+            self.iceFAL.destroy()
+            self.iceFAG.destroy()
+            if getattr(self, "iceMat", None) is not None:
+                self.iceMat.destroy()
             if self.flexOn:
                 self.iceFlex.destroy()
 

@@ -132,17 +132,24 @@ Ice sheets and glacial erosion
 
     .. grid-item-card::
 
-        Adding an ``ice`` section turns on goSPL's **Shallow-Ice-Approximation
-        (SIA) ice-sheet model**: an explicit, mass-conserving non-linear
-        diffusion of the ice thickness driving glacial abrasion, till transport
-        and ice loading. The full algorithm is described in the technical guide
-        (:ref:`ice`).
+        Adding an ``ice`` section turns on goSPL's glacial model, driving glacial
+        abrasion, till transport and ice loading. Two flow models are available
+        via ``flow_model`` — the full **Shallow-Ice-Approximation (SIA)**
+        (``sia``, default): an explicit, mass-conserving non-linear diffusion of
+        the ice thickness; or a cheap, stable **diagnostic** (``mfd``): the ELA
+        accumulation is routed downhill into an ice discharge from which a Bahr
+        thickness and a balance velocity are derived — no dynamics solve. Use
+        ``mfd`` when the **morphology of glacial erosion** matters more than the
+        ice dynamics themselves (it is fast and robust at any resolution, where
+        the SIA becomes stiff for km-thick continental ice). The full algorithm
+        is described in the technical guide (:ref:`ice`).
 
         **Declaration example**:
 
         .. code:: yaml
 
             ice:
+                # flow_model: sia          # 'sia' (default) | 'mfd' (diagnostic)
                 # Either constant glacial parameters
                 hterm: 1700.0
                 hela: 1850.0
@@ -150,6 +157,11 @@ Ice sheets and glacial erosion
                 # Or using a file to characterise glacial evolution
                 # evol: 'data/ice_evol.csv'
                 # hinit: ['input/ice0', 'H']   # optional pre-existing ice
+                # Diagnostic ('mfd') controls (ignored under flow_model: sia):
+                # icedir: 1                 # MFD flow directions for ice routing
+                # eheight: 0.25             # Bahr thickness factor
+                # fwidth: 1.5               # Bahr width factor
+                # melt: 10.                 # ablation amplifier
                 sia:
                     Aglen: 1.0e-16
                     slide: 1.0e-3
@@ -164,6 +176,16 @@ Ice sheets and glacial erosion
                 till:
                     on: True
                     route: False
+
+        ``flow_model`` selects how ice is computed: ``sia`` (default) solves the
+        Shallow-Ice-Approximation thickness; ``mfd`` is the diagnostic proxy
+        (route the accumulation into an ice discharge, then a Bahr thickness and
+        a balance velocity — no dynamics solve). Both then drive the *same*
+        abrasion / till / loading machinery below. The diagnostic ``mfd`` adds
+        four optional controls: ``icedir`` (number of MFD flow directions for the
+        ice routing), ``eheight`` and ``fwidth`` (the Bahr thickness/width
+        scaling factors :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`),
+        and ``melt`` (an ablation amplifier). They are ignored under ``sia``.
 
         The equilibrium-line / ice-cap geometry controls where ice accumulates
         and melts:

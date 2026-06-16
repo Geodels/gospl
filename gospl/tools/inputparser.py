@@ -1770,6 +1770,27 @@ class ReadYaml(object):
                     self._checkMap(spec, "ice hinit")
                 self._iceInitSpec = (sc, spec)
 
+            # Ice flow model: 'sia' (default — the explicit, mass-conserving
+            # Shallow-Ice-Approximation thickness solve) or 'mfd' (a cheap,
+            # stable DIAGNOSTIC: route the ELA accumulation downhill as an ice
+            # discharge, derive a Bahr thickness and a balance-velocity, and
+            # drive the same glacial-erosion / till machinery — no dynamics
+            # solve, for when the morphology of glacial erosion matters more than
+            # the ice dynamics themselves). Default 'sia' preserves prior runs.
+            self.ice_flow_model = iceDict.get("flow_model", "sia")
+            if self.ice_flow_model not in ("sia", "mfd"):
+                if MPIrank == 0:
+                    print(
+                        "Ice flow_model '%s' not recognised; choices are 'sia' "
+                        "or 'mfd'." % self.ice_flow_model, flush=True,
+                    )
+                raise ValueError("Ice flow_model not recognised.")
+            # Diagnostic ('mfd') parameters (inert when flow_model == 'sia').
+            self.iceDir = int(iceDict.get("icedir", 1))      # MFD flow directions
+            self.ice_meltfac = iceDict.get("melt", 10.0)     # ablation amplifier
+            self.icewf = iceDict.get("fwidth", 1.5)          # Bahr width factor
+            self.icewe = iceDict.get("eheight", 0.25)        # Bahr thickness factor
+
             siaDict = iceDict.get("sia", {})
             self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
             self.sia_slide = siaDict.get("slide", 1.0e-3)    # sliding coefficient
@@ -1825,6 +1846,11 @@ class ReadYaml(object):
             elaH = None
             iceH = None
             iceT = None
+            self.ice_flow_model = "sia"
+            self.iceDir = 1
+            self.ice_meltfac = 10.0
+            self.icewf = 1.5
+            self.icewe = 0.25
             self.sia_Aglen = 1.0e-16
             self.sia_slide = 1.0e-3
             self.sia_glen = 3.0

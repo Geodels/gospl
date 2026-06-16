@@ -381,6 +381,40 @@ def test_ice_seed_and_evolve(minimal_ice_seed_model):
     assert float(H.max()) > 0.0, "seeded ice vanished entirely"
 
 
+def test_ice_mfd_diagnostic(minimal_ice_sia_model):
+    """
+    Protects: the diagnostic ('mfd') ice flow model — a non-dynamical glacial
+    driver. It routes the ELA accumulation into an ice discharge, derives a Bahr
+    thickness and a balance velocity, and feeds the velocity-based abrasion — with
+    no SIA solve. Must produce finite, non-negative ice with a positive velocity
+    and abrasion where ice forms, in a single routing solve (no substep loop).
+    """
+    from mpi4py import MPI
+    from gospl.flow.iceplex import IceMesh
+    m = minimal_ice_sia_model
+    m.ice_flow_model = "mfd"
+    m.ice_Kg = 1.0e-4          # enable abrasion
+    m.tNow = m.tStart
+    IceMesh.iceAccumulation(m)
+    H = m.iceHL.getArray()
+    ub = m.iceUbL.getArray()
+    fa = m.iceFAL.getArray()
+    abr = m.iceAbrL.getArray()
+    for arr in (H, ub, fa, abr):
+        assert np.isfinite(arr).all()
+        assert (arr >= -1.0e-9).all()
+    nice = MPI.COMM_WORLD.allreduce(int((H > 1.0).sum()), op=MPI.SUM)
+    assert nice > 0, "diagnostic mode formed no ice"
+    # Where there is ice, the balance velocity (and hence abrasion) is positive.
+    ubmax = MPI.COMM_WORLD.allreduce(float(ub.max()), op=MPI.MAX)
+    abrmax = MPI.COMM_WORLD.allreduce(float(abr.max()), op=MPI.MAX)
+    assert ubmax > 0.0 and abrmax > 0.0
+    # The discharge is a volume flux concentrated by routing (>> a single cell's
+    # local accumulation), i.e. ice converges downhill.
+    famax = MPI.COMM_WORLD.allreduce(float(fa.max()), op=MPI.MAX)
+    assert famax > 0.0
+
+
 @pytest.mark.slow
 def test_ice_terminus_sea_level_floor(minimal_ice_sia_model):
     """
