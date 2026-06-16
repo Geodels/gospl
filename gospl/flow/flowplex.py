@@ -125,6 +125,10 @@ class FAMesh(object):
             ksp.getPC().setType("asm")
             ksp.setTolerances(rtol=1.0e-6, divtol=1.e20)
             ksp.setInitialGuessNonzero(True)
+            # Same zero-pivot guard for the ASM sub-solver (see _solve_KSP).
+            ksp.setOptionsPrefix("flowaccfb_")
+            petsc4py.PETSc.Options()["flowaccfb_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setFromOptions()
             self._ksp_fallback = ksp
 
         ksp = self._ksp_fallback
@@ -135,7 +139,8 @@ class FAMesh(object):
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
             if MPIrank == 0:
                 print(
-                    "LinearSolver failed to converge after iterations",
+                    "Flow-accumulation KSP (fgmres/asm fallback) failed to "
+                    "converge after iterations",
                     ksp.getIterationNumber(),
                     flush=True,
                 )
@@ -170,6 +175,13 @@ class FAMesh(object):
             ksp.setType("richardson")
             ksp.getPC().setType("bjacobi")
             ksp.setTolerances(rtol=self.rtol)
+            # Shift zero/negative pivots in the per-rank ILU sub-solver so the
+            # block-Jacobi PCSetUp cannot fail (DIVERGED_PCSETUP_FAILED) on a
+            # degenerate / ocean-only partition at higher rank counts. Scoped
+            # by an options prefix so it touches only this solver.
+            ksp.setOptionsPrefix("flowacc_")
+            petsc4py.PETSc.Options()["flowacc_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setFromOptions()
             self._ksp_main = ksp
 
         ksp = self._ksp_main
