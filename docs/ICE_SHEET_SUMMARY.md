@@ -1,10 +1,18 @@
 # goSPL ice-sheet model — change summary
 
 goSPL's glacial capability has been replaced by a true **Shallow-Ice-
-Approximation (SIA) ice-sheet model**: an implicit non-linear diffusion of the
-ice thickness that drives glacial abrasion, till transport and flexural loading.
-It supersedes the previous MFD flow-routing proxy, which is removed — when an
-`ice` section is present, goSPL now runs the SIA model.
+Approximation (SIA) ice-sheet model**: an explicit, mass-conserving non-linear
+diffusion of the ice thickness that drives glacial abrasion, till transport and
+flexural loading. It supersedes the previous MFD flow-routing proxy, which is
+removed — when an `ice` section is present, goSPL now runs the SIA model.
+
+> **Note (2026-06-16).** The thickness solve was changed from implicit to
+> **explicit with a mass-conserving flux limiter** (`ice_flux_limiter` +
+> `ice_flux_rscaled`): the
+> implicit `SNES` diverged on the `H≥0` free boundary (an obstacle problem),
+> and the explicit CFL turned out benign at goSPL scales. See
+> `docs/DESIGN_ICE_SHEET.md` §9. The descriptions of the *solver* below are
+> historical; the dynamics, abrasion, till and loading are unchanged.
 
 The work was delivered across the design doc and PRs #423–#425 (dynamics +
 basal velocity, abrasion + till, flexural loading + output), then refined:

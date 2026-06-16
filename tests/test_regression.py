@@ -763,6 +763,75 @@ def test_ice_sia_volume_conservation(minimal_ice_sia_model):
     assert float(np.max(np.abs(H1 - H0))) > 0.0
 
 
+def test_ice_sia_explicit_stiff_conservation(minimal_ice_sia_model):
+    """
+    Protects: DESIGN_ICE_SHEET.md §9 — the explicit, flux-limited SIA solver is
+    mass-conserving AND positivity-preserving for a STIFF dome at a LARGE
+    timestep (the regime where the previous implicit SNES diverged, reason −9).
+    A thick dome on steep terrain, zero SMB and the terminus disabled must (a)
+    conserve ice volume to the flux-numerics floor — no mass-injecting clamp at
+    the free boundary — and (b) keep H ≥ 0 everywhere, in a handful of
+    substeps, across a range of dt.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    m.rainVal = np.zeros_like(m.rainVal)       # zero SMB -> pure redistribution
+    m.sealevel = -1.0e9                        # drop the terminus below all terrain
+    owned = m.inIDs == 1
+    larea = m.larea
+    zthr = float(zbed.max()) - 2000.0
+
+    for dt in (2000.0, 10000.0, 50000.0):
+        H0 = np.where(zbed > zthr, 1000.0, 0.0)
+        V0 = MPI.COMM_WORLD.allreduce(
+            float(np.sum((H0 * larea)[owned])), op=MPI.SUM
+        )
+        assert V0 > 0.0
+        m.iceHL.setArray(H0.copy())
+        m.dt = dt
+        m._iceFlowSIA(0.0, 1.0e6, -1.0e9)      # elaH, iceH, iceT
+        H1 = m.iceHL.getArray()
+        V1 = MPI.COMM_WORLD.allreduce(
+            float(np.sum((H1 * larea)[owned])), op=MPI.SUM
+        )
+        gmin = MPI.COMM_WORLD.allreduce(float(H1.min()), op=MPI.MIN)
+        assert abs(V1 - V0) / V0 < 1.0e-8, (
+            f"stiff SIA not conservative at dt={dt}: V0={V0:.4e} V1={V1:.4e}"
+        )
+        assert gmin >= -1.0e-9, f"negative ice thickness at dt={dt}: {gmin}"
+        assert float(np.max(np.abs(H1 - H0))) > 0.0  # ice actually moved
+        # The flux limiter bounds the substep count at ~1/cfl regardless of
+        # stiffness — guard against the thin-cell substep stall (it used to
+        # collapse to thousands of ~0.02 yr substeps and make no progress).
+        assert m._sia_nsub <= 1 + int(np.ceil(1.0 / m.sia_cfl)), (
+            f"too many substeps at dt={dt}: {m._sia_nsub}"
+        )
+
+
+def test_ice_sia_explicit_no_substep_stall(minimal_ice_sia_model):
+    """
+    Protects: the substep estimate must not stall under strong ablation on thin,
+    steep ice — those cells are bounded by the flux limiter / melt clamp, so they
+    must NOT drive the substep toward zero (the real-run failure: the solve hit
+    the substep cap making ~no progress). A thick dome with a low ELA (so low
+    cells ablate hard) and a large dt must finish in O(1/cfl) substeps, conserve
+    nothing-from-nothing (H ≥ 0), and stay finite.
+    """
+    m = minimal_ice_sia_model
+    zbed = m.hLocal.getArray().copy()
+    zthr = float(zbed.max()) - 2000.0
+    H0 = np.where(zbed > zthr, 800.0, 0.0)
+    m.iceHL.setArray(H0.copy())
+    m.dt = 10000.0
+    m.tNow = 0.0
+    m._iceFlowSIA(500.0, 2500.0, 0.0)   # low ELA -> strong ablation at depth
+    H = m.iceHL.getArray()
+    assert np.isfinite(H).all() and (H >= -1.0e-9).all()
+    assert m._sia_nsub < m.sia_max_substeps, "substep stall under ablation"
+    assert m._sia_nsub <= 1 + int(np.ceil(1.0 / m.sia_cfl))
+
+
 @pytest.mark.slow
 def test_ice_sia_flexure_loading(minimal_ice_flex_model):
     """

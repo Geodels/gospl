@@ -133,9 +133,10 @@ Ice sheets and glacial erosion
     .. grid-item-card::
 
         Adding an ``ice`` section turns on goSPL's **Shallow-Ice-Approximation
-        (SIA) ice-sheet model**: an implicit non-linear diffusion of the ice
-        thickness driving glacial abrasion, till transport and ice loading. The
-        full algorithm is described in the technical guide (:ref:`ice`).
+        (SIA) ice-sheet model**: an explicit, mass-conserving non-linear
+        diffusion of the ice thickness driving glacial abrasion, till transport
+        and ice loading. The full algorithm is described in the technical guide
+        (:ref:`ice`).
 
         **Declaration example**:
 
@@ -153,6 +154,8 @@ Ice sheets and glacial erosion
                     Aglen: 1.0e-16
                     slide: 1.0e-3
                     glen: 3.0
+                    # cfl: 0.5            # explicit substep accuracy (optional)
+                    # max_substeps: 500   # substep cap per goSPL step (optional)
                 abrasion:
                     Kg: 1.0e-4
                     l: 1.0
@@ -172,22 +175,23 @@ Ice sheets and glacial erosion
 
         d. ``Aglen`` is the Glen's-law rate factor (ice softness) controlling internal deformation,
         e. ``slide`` is the basal-sliding coefficient,
-        f. ``glen`` is the Glen's-law exponent :math:`n` (usually 3).
+        f. ``glen`` is the Glen's-law exponent :math:`n` (usually 3),
+        g. ``cfl`` (default ``0.5``) sets the explicit-substep size as a fraction of the time for a cell to shed its ice — an accuracy/cost knob, not a stability limit (the flux limiter keeps the solve stable and positive at any size); ``max_substeps`` (default ``500``) caps the substeps per goSPL step.
 
         The ``abrasion`` sub-block enables velocity-based glacial erosion
         :math:`E_g = K_g\,|u_b|^{l}` (off by default, ``Kg: 0``):
 
-        g. ``Kg`` is the abrasion coefficient (default ``0.0`` — set it to enable glacial erosion),
-        h. ``l`` is the basal-sliding-velocity exponent (default ``1.0``).
+        h. ``Kg`` is the abrasion coefficient (default ``0.0`` — set it to enable glacial erosion),
+        i. ``l`` is the basal-sliding-velocity exponent (default ``1.0``).
 
         The ``till`` sub-block controls glacial sediment (default off):
 
-        i. ``on`` — when ``True``, abraded rock is carried as **till** and
+        j. ``on`` — when ``True``, abraded rock is carried as **till** and
            deposited as a moraine where the ice melts out (the ablation zone),
            conserving the abraded volume. With stratigraphy on, the till is
            layered into the stratigraphic record and split into the coarse/fine
            lithology fractions when dual lithology is enabled.
-        j. ``route`` (default ``False``) — controls how the till is distributed.
+        k. ``route`` (default ``False``) — controls how the till is distributed.
            ``False`` spreads it across the whole ablation zone weighted by the
            meltwater rate (appropriate when a cell aggregates a glacier, i.e.
            continental/global resolution). ``True`` instead **routes the till

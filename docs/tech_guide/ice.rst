@@ -62,34 +62,49 @@ mass-conservative edge fluxes as the hillslope diffusion operator. Because the
 flux is computed on the *total* surface (bed + ice) it naturally fills and
 overflows closed basins.
 
-.. note::
+Explicit thickness solve
+------------------------
 
-   The diffusivity scales as :math:`H^{\,n+2}|\nabla s|^{\,n-1}`, so an explicit
-   integration would require a CFL time step orders of magnitude smaller than
-   goSPL's km / :math:`10^2`–:math:`10^4` yr resolution. goSPL therefore solves
-   the thickness **implicitly**.
-
-Implicit thickness solve
--------------------------
-
-Each goSPL time step the thickness is advanced with a single implicit
-(semi-implicit) solve of the backward-Euler residual
+Each goSPL time step the thickness is advanced by an **explicit, mass-conserving,
+positivity-preserving** integration of
 
 .. math::
 
-   F(H) = H - H_\mathrm{old} - \Delta t\,\big(\dot{m} - \nabla \cdot \mathbf{q}(H)\big) = 0,
+   \frac{\partial H}{\partial t} = \dot{m} - \nabla \cdot \mathbf{q}(H),
 
-using a cached, Jacobian-free PETSc ``SNES`` (``ngmres`` with a CG / HYPRE
-BoomerAMG inner solve) — the same non-linear-diffusion machinery as the
-non-linear hillslope solver. The scheme is unconditionally stable, so it takes
-the **full goSPL time step in one solve**. The free boundary :math:`H \ge 0` is
-enforced by clamping after convergence, and ice is removed below the terminus
-floor :math:`\max(h_\mathrm{term}, \text{sea level})` — so it never persists
-below the (possibly time-varying) sea surface, and an ``hterm`` below sea level
-is raised to it. When ``hterm`` is omitted the floor is simply the sea-level
-position, leaving the dynamics and ablation to set the terminus. The solver is
-validated against the analytical SIA dome: with zero surface mass balance the
-flux conserves ice volume to the numerical floor.
+split into one or more substeps :math:`H \leftarrow H + \Delta t_\mathrm{sub}
+(\dot{m} - \nabla \cdot \mathbf{q})`. The flux divergence comes from the
+``ice_flux_limiter`` / ``ice_flux_rscaled`` kernels, which cap each cell's
+outflux to the ice it actually holds,
+
+.. math::
+
+   R(k) = \min\!\Big(1,\; \frac{H_k A_k}{\Delta t_\mathrm{sub}\,\text{outflux}_k}\Big),
+
+and scales every edge flux by the source cell's :math:`R`. Because the scaled
+flux is applied equal-and-opposite across each shared face, ice volume is
+conserved to machine precision; because a cell never exports more ice than it
+has, the free boundary :math:`H \ge 0` is preserved for **any** substep with no
+mass-injecting clamp.
+
+.. note::
+
+   The ice margin is a *free-boundary (obstacle) problem*, which makes an
+   implicit ``F(H)=0`` thickness solve ill-posed at the margin (it was tried,
+   and diverged on real runs). The flux limiter handles the boundary natively.
+   Positivity being unconditional, the substep size is an **accuracy** choice
+   set by ``sia.cfl`` (a fraction of the per-cell time to lose its ice), capped
+   by ``sia.max_substeps``. The stable substep at goSPL's km /
+   :math:`10^2`–:math:`10^4` yr resolution is :math:`10^3`–:math:`10^4` yr, so a
+   step typically needs only a handful of substeps (often one).
+
+Ice is removed below the terminus floor :math:`\max(h_\mathrm{term}, \text{sea
+level})` — so it never persists below the (possibly time-varying) sea surface,
+and an ``hterm`` below sea level is raised to it. When ``hterm`` is omitted the
+floor is simply the sea-level position, leaving the dynamics and ablation to set
+the terminus. The solver is validated against the analytical SIA dome: with zero
+surface mass balance the flux conserves ice volume to the numerical floor, even
+for a thick dome at a :math:`5\times10^4` yr step.
 
 From the converged thickness, goSPL derives the **basal sliding speed**
 :math:`u_b` (``ice_velocity`` kernel), which is written to the output as

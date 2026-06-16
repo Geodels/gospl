@@ -22,6 +22,26 @@ python module _fortran
             double precision intent(in) :: glen
             double precision dimension(nb),intent(out),depend(nb) :: val
         end subroutine ice_flux
+        subroutine ice_flux_limiter(nb,hice,zbed,ad,as,glen,dt,rfac)
+            integer :: nb
+            double precision dimension(nb),intent(in),depend(nb) :: hice
+            double precision dimension(nb),intent(in),depend(nb) :: zbed
+            double precision intent(in) :: ad
+            double precision intent(in) :: as
+            double precision intent(in) :: glen
+            double precision intent(in) :: dt
+            double precision dimension(nb),intent(out),depend(nb) :: rfac
+        end subroutine ice_flux_limiter
+        subroutine ice_flux_rscaled(nb,hice,zbed,ad,as,glen,rfac,val)
+            integer :: nb
+            double precision dimension(nb),intent(in),depend(nb) :: hice
+            double precision dimension(nb),intent(in),depend(nb) :: zbed
+            double precision intent(in) :: ad
+            double precision intent(in) :: as
+            double precision intent(in) :: glen
+            double precision dimension(nb),intent(in),depend(nb) :: rfac
+            double precision dimension(nb),intent(out),depend(nb) :: val
+        end subroutine ice_flux_rscaled
         subroutine ice_velocity(nb,hice,zbed,as,glen,vel)
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: hice

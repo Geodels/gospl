@@ -16,7 +16,7 @@ delivery used for dual lithology (`docs/DESIGN_DUAL_LITHOLOGY.md`).
 
 | Decision | Choice |
 |---|---|
-| Ice dynamics | **True SIA**, solved **implicitly** (semi-implicit SNES) — ice-thickness evolution `∂H/∂t = ṁ − ∇·q`, wiring the dormant Glen's-law `ice_flux` Fortran kernel (deformation + sliding). Implicit is required at goSPL's km / 10²–10⁴ yr scale; explicit is reference-only (see §3). |
+| Ice dynamics | **True SIA**, `∂H/∂t = ṁ − ∇·q`, wiring the Glen's-law `ice_flux` Fortran kernel (deformation + sliding). **Solved explicitly with a mass-conserving flux limiter** (`ice_flux_limiter` + `ice_flux_rscaled`) — see §9. *(The original "implicit SNES is required" decision below was reversed: the implicit solve diverges on the free boundary and the explicit CFL turned out to be benign at goSPL scales. §3 is kept for the historical rationale; §9 is authoritative.)* |
 | Glacial erosion | **Velocity-based abrasion** `E = Kg·|u_b|^l` using the SIA basal/sliding velocity. |
 | Glacial deposition | **Ice-transported till** — abrasion produces till carried with the ice flux, deposited where ice thins/melts (terminus moraine, basal till), then reworked by meltwater. |
 | Surface mass balance | **Keep the ELA model** (`hela`/`hice` elevation bands; existing `iceAccumulation` source). |
@@ -135,3 +135,54 @@ Parsed in `inputparser._extraIce` (extend; mandatory-continuation contract).
 - Whether SIA-mode abrasion replaces or supplements the MFD `Ki·F^m` erosion.
 - Bedrock vs ice-surface gradient handling at margins / floating ice (marine-terminating glaciers — likely out of scope v1, grounded ice only).
 - Till: single lithology now; couple to dual-lithology fractions later (out of scope v1).
+
+---
+
+## 9. Solver: explicit flux-limited SIA (IMPLEMENTED 2026-06-16) — supersedes the "implicit" decision
+
+The implicit thickness solve (cached `ngmres` SNES on `F(H)=H−Hold−Δt(ṁ−∇·q)`)
+shipped first but **diverges (`reason −9`) on real continental runs**. A full
+solver investigation (branch `fix/sia-solver-investigation`) established two
+facts that reverse the §1/§3 "implicit is required" decision:
+
+1. **The `H≥0` free boundary is an obstacle problem, not a root-find.** At the
+   ice margin `H=0` but the residual is `≠0`, so *no* `F(H)=0` solver converges
+   there — `ngmres`, `qn`, `SNESVI`, and even an **exact-LU Newton step with an
+   FD-validated analytic Jacobian** all fail the line search at iteration 0.
+   Post-hoc `max(H,0)` clamping converges but **injects mass** (`dV/V≈0.8`);
+   not clamping conserves (`dV/V=5e-11`, GMRES — the operator is non-symmetric,
+   CG is invalid) but oscillates.
+
+2. **The explicit CFL is benign at goSPL scales.** §3 assumed "years–decades →
+   10²–10³ substeps → prohibitive". *Measured* CFL `dt` is **10³–10⁴ yr** (1000 m
+   dome ~35,700 yr; 1500 m ~4,400 yr), so explicit needs only 1–few substeps.
+
+**Implemented scheme** (`iceplex._iceFlowSIA`). The goSPL step is split into
+substeps `H ← H + Δt_sub (ṁ − ∇·q)`, with `∇·q` from two Fortran kernels:
+**`ice_flux_limiter`** builds the per-cell factor that caps a cell's total
+outflux to the ice it holds,
+
+> `R(k) = min(1, H_k·A_k / (Δt_sub·outflux_k))`,
+
+which is **halo-synced** (a ghost cell's stencil is incomplete on the neighbour
+rank, so the sync makes both ranks scale a shared face identically), then
+**`ice_flux_rscaled`** assembles the divergence with each edge flux scaled by the
+source cell's `R`, applied equal-and-opposite across each shared face. This makes
+the scheme **mass-conservative to machine precision (serial and MPI)** *and*
+**`H≥0` for any substep** — the free boundary needs no mass-injecting clamp (only
+post-ablation melt is clamped, which removes over-melt, never creates ice).
+The substep CFL rate is capped at `1/dt` so thin cells on steep slopes / under
+strong ablation (bounded by the limiter+clamp) cannot drive the substep to zero,
+bounding the substep count at ~`1/cfl` (no stall). Positivity being unconditional,
+`Δt_sub` is an **accuracy** choice: `sia.cfl` (default 0.5) of the per-cell time
+to lose its ice to flux+ablation, capped at `sia.max_substeps` (default 500).
+
+**Validation.** Zero-SMB redistribution conserves to `dV/V ~ 1e-16`–`5e-16` for
+domes at `dt` = 2,000 / 10,000 / 50,000 yr in ~`1/cfl` substeps, `H≥0` throughout
+(`test_ice_sia_explicit_stiff_conservation`); the original gentle-dome
+conservation and all other ice tests still pass.
+
+**Kept for the future.** The investigation's `ice_flux_jacobian` (analytic
+Jacobian) and `sia_diff_coeff` (lagged-diffusivity Picard operator) kernels live
+on `fix/sia-solver-investigation` for a possible future implicit obstacle / VI
+solver, should `Δt` larger than the (already large) CFL ever be needed.

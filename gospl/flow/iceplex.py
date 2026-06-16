@@ -7,6 +7,8 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import ice_flux
+    from gospl._fortran import ice_flux_limiter
+    from gospl._fortran import ice_flux_rscaled
     from gospl._fortran import ice_velocity
     from gospl._fortran import mfdreceivers
 
@@ -29,10 +31,16 @@ class IceMesh(object):
     where the ice flux :math:`\mathbf{q}` follows Glen's-law internal
     deformation plus basal sliding (the ``ice_flux`` Fortran kernel) and
     :math:`\dot{m}` is the equilibrium-line-altitude (ELA) surface mass balance.
-    The thickness is integrated **implicitly** with a cached Jacobian-free PETSc
-    ``SNES`` (unconditionally stable, so it takes the full goSPL timestep —
-    adequate at the km / :math:`10^2`–:math:`10^4` yr scale where explicit
-    sub-cycling is prohibitive).
+    The thickness is integrated **explicitly** with a mass-conserving,
+    positivity-preserving flux limiter (the ``ice_flux_limiter`` /
+    ``ice_flux_rscaled`` kernels cap each cell's outflux to the ice it holds, so
+    :math:`H\geq 0` for any substep and ice volume is conserved to machine
+    precision). The goSPL timestep is split
+    into accuracy-controlled substeps (``sia.cfl``); the measured stable substep
+    at goSPL's km resolution is :math:`10^3`–:math:`10^4` yr, so only a handful
+    of substeps are needed. The free boundary :math:`H\geq 0` (an obstacle
+    problem at the ice margin) is handled natively by the limiter rather than by
+    a post-hoc clamp, which would inject mass.
 
     From the converged thickness the model derives the basal sliding speed
     (driving velocity-based glacial abrasion :math:`E_g = K_g |u_b|^l`), the
@@ -94,11 +102,6 @@ class IceMesh(object):
             # totals reduced by the till-conservation test).
             self._tillEroded = 0.0
             self._tillDeposited = 0.0
-            # Cached SIA implicit-solver handles (created lazily on first use;
-            # destroyed in destroy_DMPlex).
-            self._snes_ice = None
-            self._snes_ice_f = None
-            self._snes_ice_x = None
 
         return
 
@@ -155,77 +158,111 @@ class IceMesh(object):
         self.iceMeltL.setArray(melt_local)
         return
 
-    def _form_residual_ice(self, snes, H, F):
-        """
-        SNES residual for the implicit SIA thickness solve (mirrors
-        ``hillslope._form_residual_nl_hillslope``):
-
-            F(H) = H − H_old − Δt (ṁ − ∇·q(H))
-
-        with `∇·q` from the ``ice_flux`` kernel on the clamped (≥0) thickness so
-        the flux stays physical during the nonlinear iterations.
-        """
-        self.dm.globalToLocal(H, self.tmpL)
-        Ha = self.tmpL.getArray()
-        Hc = np.maximum(Ha, 0.0)
-        div = ice_flux(
-            self.lpoints, Hc, self._sia_zbed, self._sia_ad, self._sia_as, self._sia_n
-        )
-        res = Ha - self._sia_Hold - self.dt * (self._sia_mdot - div)
-        F.setArray(res[self.glIDs])
-        return
-
     def _iceFlowSIA(self, elaH, iceH, iceT):
         r"""
-        SIA ice-thickness solve: implicit (semi-implicit) integration of
-        ``∂H/∂t = ṁ − ∇·q`` via a cached PETSc SNES, reusing the non-linear
-        hillslope pattern (``ngmres``, CG/HYPRE KSP, Jacobian-free).
-        Unconditionally stable in `dt`, so it takes the full goSPL timestep —
-        adequate for goSPL's km / 10²–10⁴ yr scale where explicit subcycling is
-        prohibitive. Free boundary `H≥0` by post-clamp; validated against the
-        analytical SIA dome (ice-volume conservation under zero mass balance).
+        SIA ice-thickness solve: explicit, mass-conserving, positivity-preserving
+        integration of ``∂H/∂t = ṁ − ∇·q``.
+
+        Each forward substep is ``H ← H + Δt_sub (ṁ − ∇·q)``. ``ice_flux_limiter``
+        builds the per-cell factor capping its outflux to the ice it holds; it is
+        halo-synced so a partition-boundary cell scales identically on both ranks,
+        then ``ice_flux_rscaled`` assembles the R-scaled divergence. The limiter
+        (i) conserves ice volume to machine precision — the scaled edge flux is
+        applied equal-and-opposite to the two cells of a shared face — and
+        (ii) keeps ``H ≥ 0`` for **any** substep, so the free
+        boundary at the ice margin (an obstacle problem) needs no mass-injecting
+        post-clamp. A clamp is applied only after surface ablation, which can
+        physically empty a cell (this removes over-melt, it never creates ice).
+
+        Because positivity is unconditional, the substep size ``Δt_sub`` is an
+        *accuracy* choice: it is set from a CFL-style fraction (``sia.cfl``) of
+        the per-cell time to lose its ice to flux + ablation, capped to
+        ``sia.max_substeps`` substeps. At goSPL's km resolution the stable
+        substep is :math:`10^3`–:math:`10^4` yr, so the full timestep usually
+        needs only a handful of substeps. Validated against the analytical SIA
+        dome (ice-volume conservation under zero mass balance).
         """
         n, ad, as_, zbed, mdot = self._iceSIAParams(elaH, iceH)
-        # Residual context (read by _form_residual_ice).
-        self._sia_n = n
-        self._sia_ad = ad
-        self._sia_as = as_
-        self._sia_zbed = zbed
-        self._sia_mdot = mdot
-        self._sia_Hold = self.iceHL.getArray().copy()
 
-        if self._snes_ice is None:
-            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-            snes.setTolerances(rtol=1.0e-6, atol=1.0e-6, max_it=100)
-            self._snes_ice_f = self.hGlobal.duplicate()
-            snes.setFunction(self._form_residual_ice, self._snes_ice_f)
-            snes.setType("ngmres")
-            ksp = snes.getKSP()
-            ksp.setType("cg")
-            pc = ksp.getPC()
-            pc.setType("hypre")
-            petsc4py.PETSc.Options()["pc_hypre_type"] = "boomeramg"
-            pc.setFromOptions()
-            ksp.setTolerances(rtol=1.0e-6)
-            self._snes_ice_x = self.hGlobal.duplicate()
-            self._snes_ice = snes
+        H = self.iceHL.getArray().copy()
+        cfl = self.sia_cfl
+        maxsub = self.sia_max_substeps
+        Hmin = 1.0  # m: thin-cell floor for the substep estimate (the limiter
+        #             guarantees positivity for thinner cells regardless)
+        tiny = 1.0e-30
 
-        snes = self._snes_ice
-        x = self._snes_ice_x
-        # Initial guess = previous ice thickness.
-        self.tmpL.setArray(self._sia_Hold)
-        self.dm.localToGlobal(self.tmpL, x)
-        snes.solve(None, x)
-        r = snes.getConvergedReason()
-        if r < 0 and MPIrank == 0:
+        remaining = self.dt
+        nsub = 0
+        while remaining > 1.0e-6 * self.dt and nsub < maxsub:
+            # Halo-sync the thickness so the neighbour stencil in ice_flux* sees
+            # up-to-date ghost values, then read back the synced local array.
+            # NB: use the scratch global vec `self.tmp`, never `self.hGlobal`
+            # (that holds the bed elevation read below as `zbed`).
+            self.tmpL.setArray(H)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            # Copy: `tmpL` is reused below for the rfac halo-sync, which would
+            # otherwise alias-clobber this thickness array.
+            H = self.tmpL.getArray().copy()
+
+            # Accuracy CFL: pick a substep so a cell loses at most `cfl` of its
+            # ice to (unlimited) outflux + ablation. Thin cells (H<=Hmin) are
+            # excluded — the flux limiter / melt clamp, not the substep, keep
+            # them non-negative.
+            raw = ice_flux(self.lpoints, H, zbed, ad, as_, n)
+            thick = H > Hmin
+            loss = np.where((raw > 0.0) & thick, raw, 0.0)
+            melt = np.where((mdot < 0.0) & thick, -mdot, 0.0)
+            rate = (loss + melt) / np.maximum(H, Hmin)
+            # A cell can physically lose at most its own ice in a step — the flux
+            # limiter caps the outflux and the melt clamp caps ablation — so a
+            # cell wanting to shed >=100% of its ice over the full step is already
+            # handled conservatively and must NOT drive the substep toward zero
+            # (that was a real stall: thin cells on steep slopes / under strong
+            # ablation gave rate->inf). Cap the rate against the FULL step `dt`
+            # (not `remaining`, which would shrink each substep and crawl
+            # geometrically); this bounds the substep count at ~1/cfl with no
+            # tail, while still resolving smoother cells more finely.
+            rate = np.minimum(rate, 1.0 / self.dt)
+            gmax = MPI.COMM_WORLD.allreduce(
+                float(rate.max()) if rate.size else 0.0, op=MPI.MAX
+            )
+            sub = remaining if gmax <= tiny else min(remaining, cfl / gmax)
+
+            # Flux limiter factor (caps each cell's outflux to its ice over the
+            # substep). Only owned cells have the full neighbour stencil, so
+            # halo-sync rfac to ghosts before the divergence — otherwise a
+            # limited (rfac<1) cell on a partition boundary would break
+            # conservation (the two ranks would scale the shared face differently).
+            rfac = ice_flux_limiter(self.lpoints, H, zbed, ad, as_, n, sub)
+            self.tmpL.setArray(rfac)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            rfac = self.tmpL.getArray()
+
+            # Conservative, positivity-preserving flux divergence for this substep.
+            val = ice_flux_rscaled(self.lpoints, H, zbed, ad, as_, n, rfac)
+            H = H + sub * (mdot - val)
+            # Only ablation can drive a cell negative (flux cannot); clamp it —
+            # this stops over-melt, it does not create ice.
+            H = np.maximum(H, 0.0)
+
+            remaining -= sub
+            nsub += 1
+
+        # Substeps taken this step (diagnostic; the limiter bounds this at ~1/cfl
+        # so it must not approach max_substeps — a regression guard for the
+        # thin-cell / strong-ablation substep stall).
+        self._sia_nsub = nsub
+        if nsub >= maxsub and remaining > 1.0e-6 * self.dt and MPIrank == 0:
             print(
-                "SIA implicit ice SNES failed to converge after %d iterations "
-                "(reason %d)" % (snes.getIterationNumber(), r),
+                "SIA explicit ice solve hit the substep cap (%d) with %.3g yr of "
+                "the %.3g yr step left; raise ice.sia.max_substeps or lower "
+                "ice.sia.cfl." % (maxsub, remaining, self.dt),
                 flush=True,
             )
 
-        self.dm.globalToLocal(x, self.tmpL)
-        self._iceSIAFinalize(self.tmpL.getArray().copy(), zbed, mdot, iceT, as_, n)
+        self._iceSIAFinalize(H, zbed, mdot, iceT, as_, n)
 
         return
 

@@ -1774,6 +1774,11 @@ class ReadYaml(object):
             self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
             self.sia_slide = siaDict.get("slide", 1.0e-3)    # sliding coefficient
             self.sia_glen = siaDict.get("glen", 3.0)         # Glen exponent n
+            # Explicit ice substep accuracy number (the mass-conserving flux
+            # limiter makes the scheme unconditionally positive, so this is an
+            # accuracy/cost knob, not a stability limit) and the substep cap.
+            self.sia_cfl = siaDict.get("cfl", 0.5)
+            self.sia_max_substeps = int(siaDict.get("max_substeps", 500))
 
             abrDict = iceDict.get("abrasion", {})
             self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
@@ -1815,6 +1820,8 @@ class ReadYaml(object):
             self.sia_Aglen = 1.0e-16
             self.sia_slide = 1.0e-3
             self.sia_glen = 3.0
+            self.sia_cfl = 0.5
+            self.sia_max_substeps = 500
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
             self.ice_till_on = False
