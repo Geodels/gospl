@@ -157,10 +157,10 @@ class SEAMesh(object):
             hsmth = hl.copy()
             hsmth[self.idBorders] = BOUNDARY_FLOW_SENTINEL
 
-        # The filled + eps is done on the global grid!
-        fillz = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
-        fillz[self.locIDs] = hsmth
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
+        # The filled + eps is done on the global grid, serially on rank 0, so
+        # assemble it there from the owned nodes only (hsmth is ghost-synced
+        # via _hillSlope's globalToLocal, so owned values are exact).
+        fillz = self._gatherGlobalOnRoot(hsmth)
         if MPIrank == 0:
             fillz = epsfill(minh, fillz)
         # Send elevation + eps to other processors

@@ -10,8 +10,6 @@ from mpi4py import MPI
 from scipy import spatial
 from time import process_time
 
-from gospl.tools.constants import MISSING_DATA_SENTINEL
-
 if "READTHEDOCS" not in os.environ:
     from gflex.f2d import F2D
     from gospl._fortran import flexure
@@ -504,17 +502,18 @@ class GridProcess(object):
 
         t0 = process_time()
 
-        # Get elevations from time of equilibrium and after erosion deposition
+        # Get elevations from time of equilibrium and after erosion deposition.
+        # Build the load locally (lpoints); the flexure solve is serial on rank
+        # 0, so the global field is assembled there from the owned nodes only.
         hl = self.hLocal.getArray().copy()
-        dZ = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
-        dZ[self.locIDs] = hl - self.hOldFlex.getArray()
+        local_dZ = hl - self.hOldFlex.getArray()
 
         # If glaciers exist then add corresponding equivalent sediment thickness
         if self.iceOn:
             dIce = self.iceHL.getArray() - self.iceFlex.getArray()
-            dZ[self.locIDs] += dIce * 910.0 / self.flex_rhos  # 910 kg/m3 ice density
+            local_dZ += dIce * 910.0 / self.flex_rhos  # 910 kg/m3 ice density
 
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, dZ, op=MPI.MAX)
+        dZ = self._gatherGlobalOnRoot(local_dZ)
         flexZ = None
 
         if self.flex_method == 'global':
@@ -583,11 +582,12 @@ class GridProcess(object):
 
         t0 = process_time()
 
-        # Get elevations from the unstructured mesh structure
+        # Get elevations from the unstructured mesh structure. The orographic
+        # precipitation solve is serial on rank 0, so assemble the global
+        # elevation there from the owned nodes only (no mpoints array /
+        # Allreduce on the other ranks).
         hl = self.hLocal.getArray().copy()
-        newZ = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
-        newZ[self.locIDs] = hl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, newZ, op=MPI.MAX)
+        newZ = self._gatherGlobalOnRoot(hl)
 
         if MPIrank == 0:
             # Build regular grid for flexure calculation
