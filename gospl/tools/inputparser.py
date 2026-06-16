@@ -14,7 +14,7 @@ MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
 # Sentinel for an unprescribed glacier terminus altitude (``ice.hterm``): the
 # effective terminus floor is then the sea-level position (see
-# iceplex._iceSIAFinalize). Any value safely below the lowest plausible sea
+# iceplex._iceFlowMFD). Any value safely below the lowest plausible sea
 # level works.
 TERMINUS_UNSET = -1.0e10
 
@@ -1725,9 +1725,10 @@ class ReadYaml(object):
         Parse ice flow variables.
         """
 
-        # When an `ice` section is present, goSPL runs the Shallow-Ice-
-        # Approximation (SIA) ice-sheet model: an implicit non-linear diffusion
-        # of ice thickness driving glacial abrasion, till transport and ice
+        # When an `ice` section is present, goSPL runs the diagnostic glacial
+        # model: the ELA accumulation is routed downhill into an ice discharge
+        # from which a thickness and a basal sliding velocity are derived (no
+        # ice-dynamics solve), driving glacial abrasion, till transport and ice
         # loading. See docs/DESIGN_ICE_SHEET.md.
         #
         # The glacier-geometry altitudes (terminus / ELA / ice-cap) can each be
@@ -1743,10 +1744,6 @@ class ReadYaml(object):
         self.termMesh = None
         self.elaMesh = None
         self.iceMesh = None
-        # Optional pre-existing ice thickness seeded at the first step (uniform
-        # scalar or per-vertex map). The SIA solve then evolves it; restart
-        # overrides it. None = start from no ice.
-        self._iceInitSpec = None
         useSeries = False
         try:
             iceDict = self.input["ice"]
@@ -1755,37 +1752,61 @@ class ReadYaml(object):
             glaciers = iceDict.get("glaciers")
             elaH = iceDict.get("hela", 2000.0)
             iceH = iceDict.get("hice", 2400.0)
-            # Terminus: the effective floor is max(hterm, sea level), applied in
-            # iceplex._iceSIAFinalize. The SIA dynamics + ablation set where the
-            # glacier actually ends; the clamp only stops land ice persisting
-            # below the (possibly time-varying) sea surface. The sentinel below
-            # means "not prescribed" -> defaults to the sea-level position.
+            # Terminus floor = max(hterm, sea level) (applied in iceplex): ice is
+            # never kept below the (possibly time-varying) sea surface. The
+            # sentinel means "not prescribed" -> the sea-level position.
             iceT = iceDict.get("hterm", TERMINUS_UNSET)
 
-            # Initial (pre-existing) ice thickness — scalar or [file, key] map.
-            hinit = iceDict.get("hinit")
-            if hinit is not None:
-                sc, spec = self._iceGeomField(hinit)
-                if spec is not None:
-                    self._checkMap(spec, "ice hinit")
-                self._iceInitSpec = (sc, spec)
-
-            siaDict = iceDict.get("sia", {})
-            self.sia_Aglen = siaDict.get("Aglen", 1.0e-16)   # Glen rate factor
-            self.sia_slide = siaDict.get("slide", 1.0e-3)    # sliding coefficient
-            self.sia_glen = siaDict.get("glen", 3.0)         # Glen exponent n
+            # Diagnostic glacial driver parameters. The ELA accumulation is routed
+            # downhill (`icedir` flow directions) into an ice discharge, from which
+            # a Bahr thickness (`eheight`*`fwidth`*Q^0.3) and a basal sliding
+            # velocity (Glen sliding law, `slide`/`glen`) are derived; these drive
+            # the glacial abrasion / till / loading machinery with no ice-dynamics
+            # solve (robust and physical at any resolution).
+            self.iceDir = int(iceDict.get("icedir", 1))      # MFD flow directions
+            self.ice_meltfac = iceDict.get("melt", 10.0)     # ablation amplifier
+            self.icewf = iceDict.get("fwidth", 1.5)          # Bahr width factor
+            self.icewe = iceDict.get("eheight", 0.25)        # Bahr thickness factor
+            self.ice_slide = iceDict.get("slide", 1.0e-3)    # basal sliding coeff
+            self.ice_glen = iceDict.get("glen", 3.0)         # Glen sliding exponent
+            # Glacial-meltwater model for the river coupling. True (default):
+            # discharge-conserving — the accumulation (water that fell as ice) is
+            # routed down-glacier and released as meltwater where the ice melts
+            # out, so Σ meltwater == Σ accumulation (the steady-state, long-
+            # timescale assumption; closes the glacial water budget). False: the
+            # local precipitation-scaled ablation rate (loses water downstream).
+            self.ice_melt_conserve = bool(iceDict.get("melt_conserve", True))
+            # Surface-mass-balance accumulation controls (applied to the positive
+            # ELA ramp only; ablation is unchanged). `accum_factor` is a
+            # precipitation->ice conversion fraction (full precipitation is rarely
+            # all snow/ice); `accum_max` caps the accumulation rate (m ice/yr) at a
+            # realistic ceiling. Defaults (1.0, no cap) keep the raw precip rate.
+            self.ice_accum_factor = float(iceDict.get("accum_factor", 1.0))
+            am = iceDict.get("accum_max", None)
+            self.ice_accum_max = None if am is None else float(am)
 
             abrDict = iceDict.get("abrasion", {})
             self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
             self.ice_abr_l = abrDict.get("l", 1.0)           # sliding-velocity exponent
+            # Lateral (valley-wall) glacial erosion — widens glaciated valleys
+            # toward a U-profile. Off by default (Kl = 0). `lat_l` defaults to the
+            # vertical-abrasion exponent `l`.
+            self.ice_Kl = abrDict.get("Kl", 0.0)
+            self.ice_lat_l = abrDict.get("lat_l", self.ice_abr_l)
 
             tillDict = iceDict.get("till", {})
-            self.ice_till_on = bool(tillDict.get("on", False))
-            # Catchment-aware till routing: when True, the abraded till is
-            # routed down the ice-surface flow network and melts out toward each
-            # terminus (for high-resolution regional runs); default False keeps
-            # the melt-weighted spreading across the whole ablation zone.
-            self.ice_till_route = bool(tillDict.get("route", False))
+            # Till on by default: when glacial abrasion is enabled (Kg > 0) the
+            # eroded rock is carried as till and deposited as moraine — the
+            # complete glacial sediment cycle. Set False to send abrasion
+            # straight to the fluvial system instead. (No cost when Kg == 0.)
+            self.ice_till_on = bool(tillDict.get("on", True))
+            # Catchment-aware till routing on by default: the till is routed down
+            # the ice-surface flow network and melts out toward each terminus, so
+            # deposition stays connected to the upstream erosion. Set False for
+            # the older melt-weighted spreading, which pools the GLOBAL abraded
+            # volume across all melt cells (it decouples erosion and deposition
+            # across separate ice masses — misleading on multi-glacier domains).
+            self.ice_till_route = bool(tillDict.get("route", True))
 
             # Use the per-vertex / time-series path when a `glaciers` series is
             # given or any top-level altitude is a map.
@@ -1812,13 +1833,21 @@ class ReadYaml(object):
             elaH = None
             iceH = None
             iceT = None
-            self.sia_Aglen = 1.0e-16
-            self.sia_slide = 1.0e-3
-            self.sia_glen = 3.0
+            self.iceDir = 1
+            self.ice_meltfac = 10.0
+            self.icewf = 1.5
+            self.icewe = 0.25
+            self.ice_slide = 1.0e-3
+            self.ice_glen = 3.0
+            self.ice_melt_conserve = True
+            self.ice_accum_factor = 1.0
+            self.ice_accum_max = None
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
-            self.ice_till_on = False
-            self.ice_till_route = False
+            self.ice_Kl = 0.0
+            self.ice_lat_l = 1.0
+            self.ice_till_on = True
+            self.ice_till_route = True
 
         # Legacy uniform / `evol` path builds the scalar time functions. In
         # series mode the geometry comes from _iceTimeSeries via _updateIce, so

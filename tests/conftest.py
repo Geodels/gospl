@@ -132,19 +132,19 @@ def minimal_dual_coarse_model():
 
 
 @pytest.fixture
-def minimal_ice_sia_model():
+def minimal_ice_model():
     """
-    Minimal model with the SIA ice-sheet model (opt-in via the `ice` section).
-    Exercises the dynamic ice-thickness evolution (ice_flux kernel). See
-    minimal_ice_sia.yml and docs/DESIGN_ICE_SHEET.md.
+    Minimal model with the diagnostic glacial model (opt-in via the `ice`
+    section). Exercises the routing-based ice diagnostic. See minimal_ice.yml
+    and docs/DESIGN_ICE_SHEET.md.
     """
-    return _instantiate("minimal_ice_sia.yml")
+    return _instantiate("minimal_ice.yml")
 
 
 @pytest.fixture
 def minimal_ice_till_model():
     """
-    Minimal SIA model with glacial abrasion + till on (`ice.abrasion.Kg`,
+    Minimal glacial model with abrasion + till on (`ice.abrasion.Kg`,
     `ice.till.on`). Exercises the till production/transport/deposition path.
     See minimal_ice_till.yml.
     """
@@ -154,7 +154,7 @@ def minimal_ice_till_model():
 @pytest.fixture
 def minimal_ice_flex_model():
     """
-    Minimal SIA model with global flexural isostasy on. Confirms the SIA ice
+    Minimal glacial model with global flexural isostasy on. Confirms the ice
     thickness feeds the existing ice-loading path in applyFlexure. See
     minimal_ice_flex.yml.
     """
@@ -164,12 +164,23 @@ def minimal_ice_flex_model():
 @pytest.fixture
 def minimal_ice_dual_model():
     """
-    Minimal SIA model with glacial abrasion + till on AND dual-lithology
+    Minimal glacial model with abrasion + till on AND dual-lithology
     stratigraphy. Exercises the strata coupling of glacial till
     (iceplex._glacialTillStrata): abraded rock removed from the pile and
     re-deposited as a moraine layer, split coarse/fine. See minimal_ice_dual.yml.
     """
     return _instantiate("minimal_ice_dual.yml")
+
+
+@pytest.fixture
+def minimal_ice_soil_model():
+    """
+    Minimal model combining the diagnostic ('mfd') glacial driver with the
+    soil-aware non-linear SPL (`soil:` block, cptSoil) + glacial abrasion + till.
+    Confirms glacial erosion/till coexists with soil production. See
+    minimal_ice_soil.yml.
+    """
+    return _instantiate("minimal_ice_soil.yml")
 
 
 @pytest.fixture
@@ -199,16 +210,6 @@ def minimal_prov_multi_model():
     rock = (v[:, 0] > v[:, 0].mean()).astype(np.int64)   # 2 classes, split by x
     np.savez(FIXTURES_DIR / "prov_src.npz", rock=rock)
     return _instantiate("minimal_prov2.yml")
-
-
-@pytest.fixture
-def minimal_ice_seed_model():
-    """
-    Minimal SIA model with a pre-existing ice thickness seeded from the input
-    (`ice.hinit`). Exercises the seed-and-evolve path: iceHL starts non-zero and
-    the SIA solve evolves it. See minimal_ice_seed.yml.
-    """
-    return _instantiate("minimal_ice_seed.yml")
 
 
 @pytest.fixture

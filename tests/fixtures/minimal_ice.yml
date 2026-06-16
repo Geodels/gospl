@@ -1,4 +1,4 @@
-name: minimal SIA ice-sheet test
+name: minimal diagnostic glacial test
 
 domain:
     npdata: ['mesh','v','c','z']
@@ -27,10 +27,6 @@ ice:
     hela: 2000.
     hice: 3000.
     hterm: 1500.
-    sia:
-        Aglen: 1.0e-16
-        slide: 1.0e-3
-        glen: 3.0
 
 sea:
     position: -100.
@@ -40,4 +36,4 @@ climate:
     uniform: 1
 
 output:
-    dir: 'minimal_ice_sia'
+    dir: 'minimal_ice'

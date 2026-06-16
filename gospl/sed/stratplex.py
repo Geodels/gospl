@@ -460,7 +460,7 @@ class STRAMesh(object):
         # IndexError (a middle all-zero row already gets a 0 count, so only
         # trailing ones crash). The sentinel makes a fully-consumed column
         # impossible for physical erosion, but a non-converged upstream solve
-        # (e.g. the SIA ice SNES feeding glacial abrasion `dz_ero`) can produce
+        # (e.g. glacial abrasion feeding `dz_ero`) can produce
         # a pathological demand that reaches here; padding keeps `erodeStrat`
         # crash-safe and treats those rows like any other fully-eroded node.
         eroLayNb = np.bincount(np.nonzero(cumThick)[0], minlength=len(nids)) - 1

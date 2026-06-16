@@ -1,45 +1,56 @@
 import os
+import gc
 import petsc4py
 import numpy as np
 
 from mpi4py import MPI
 from time import process_time
 
-if "READTHEDOCS" not in os.environ:
-    from gospl._fortran import ice_flux
-    from gospl._fortran import ice_velocity
-    from gospl._fortran import mfdreceivers
+from gospl.tools.constants import (
+    BOUNDARY_FLOW_SENTINEL,
+    MISSING_DATA_SENTINEL,
+)
 
-# Ice density (kg/m^3), used for the SIA deformation coefficient and loading.
-RHO_ICE = 910.0
+if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import ice_velocity
+    from gospl._fortran import ice_lateral_erosion
+    from gospl._fortran import mfdreceivers
+    from gospl._fortran import epsfill
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
 
 class IceMesh(object):
     r"""
-    Shallow-Ice-Approximation (SIA) ice-sheet model.
+    Diagnostic glacial-erosion model.
 
-    This class evolves the ice thickness :math:`H` as a non-linear diffusion of
-    the ice surface :math:`s = z_\mathrm{bed} + H`,
+    Rather than time-integrating an ice-dynamics PDE, this class derives a cheap,
+    stable diagnostic of the glacial state each step and uses it to drive glacial
+    erosion, sediment transport and ice loading. For the equilibrium-line-altitude
+    (ELA) surface mass balance :math:`\dot{m}`:
 
-    .. math::
-        \frac{\partial H}{\partial t} = \dot{m} - \nabla \cdot \mathbf{q},
+    1. The accumulation :math:`\dot{m}^+` is routed downhill on the
+       (epsilon-filled) bed using a multiple-flow-direction algorithm — the same
+       machinery as the river flow accumulation — into an **ice discharge**
+       :math:`Q` (m\ :sup:`3`/yr); one linear solve, no time integration.
+    2. The **ice thickness** follows a Bahr width–area scaling of the discharge,
+       :math:`H = e_h\, f_w\, Q^{0.3}`.
+    3. The **basal sliding velocity** comes from Glen's sliding law on that
+       thickness and the bed-surface slope (the ``ice_velocity`` kernel,
+       :math:`u_b \propto H^{n-1}|\nabla s|^{n-1}\nabla s`) — physically bounded,
+       so erosion does not spike at flow-convergence cells.
 
-    where the ice flux :math:`\mathbf{q}` follows Glen's-law internal
-    deformation plus basal sliding (the ``ice_flux`` Fortran kernel) and
-    :math:`\dot{m}` is the equilibrium-line-altitude (ELA) surface mass balance.
-    The thickness is integrated **implicitly** with a cached Jacobian-free PETSc
-    ``SNES`` (unconditionally stable, so it takes the full goSPL timestep —
-    adequate at the km / :math:`10^2`–:math:`10^4` yr scale where explicit
-    sub-cycling is prohibitive).
+    From these the model computes velocity-based glacial abrasion
+    (:math:`E_g = K_g |u_b|^l`, with an optional lateral valley-wall term for
+    U-shaping), ice-transported till deposited as moraine where the ice melts out
+    (conserving rock volume), the discharge-conserving glacial meltwater
+    re-injected into the river flow accumulation, and the ice load feeding the
+    flexural isostasy.
 
-    From the converged thickness the model derives the basal sliding speed
-    (driving velocity-based glacial abrasion :math:`E_g = K_g |u_b|^l`), the
-    ablation meltwater re-injected into the river flow accumulation, glacial
-    till (abraded rock transported and deposited as moraine in the ablation
-    zone, conserving rock volume), and the ice load feeding the flexural
-    isostasy.
+    The diagnostic is robust and physical at any resolution and over goSPL's long
+    (:math:`10^2`–:math:`10^4` yr) timesteps, where a true ice-dynamics solve is
+    stiff and over-thickens km-scale continental ice (see
+    ``docs/DESIGN_ICE_SHEET.md`` for the history).
 
     Useful links:
     - `Braun et al. (1999) <https://doi.org/10.3189/172756499781821797>`_
@@ -60,58 +71,47 @@ class IceMesh(object):
         """
 
         if self.iceOn:
+            # Diagnostic ice thickness (Bahr width-area scaling of the discharge).
             self.iceHL = self.hLocal.duplicate()
-            # Local meltwater field captured at the end of iceAccumulation
-            # and re-injected into the river FA source term in flowplex so
-            # glacial discharge is not lost downstream.
+            # Precip-scaled ablation pattern used as the till melt-out / moraine
+            # deposition weight.
             self.iceMeltL = self.hLocal.duplicate()
+            # Glacial meltwater delivered to the rivers (discharge-conserving),
+            # re-injected into the river FA source in flowplex so glacial
+            # discharge is not lost downstream. Distinct from iceMeltL.
+            self.iceMeltRiverL = self.hLocal.duplicate()
             if self.flexOn:
                 self.iceFlex = self.hLocal.duplicate()
-            # Basal sliding speed (m/yr) from the SIA solve; the driver for the
-            # velocity-based glacial abrasion law. Registered in destroy_DMPlex.
+            # Basal sliding speed (m/yr); the driver for the velocity-based
+            # glacial abrasion law. Registered in destroy_DMPlex.
             self.iceUbL = self.hLocal.duplicate()
             # Glacial abrasion rate E_g = Kg|u_b|^l (m/yr); a diagnostic output
             # field, populated every step from the basal velocity (zero where
             # abrasion is off, i.e. Kg = 0).
             self.iceAbrL = self.hLocal.duplicate()
+            # Ice discharge (m^3/yr): the ELA accumulation routed downhill;
+            # drives the Bahr thickness (and hence the sliding velocity).
+            self.iceFAL = self.hLocal.duplicate()
+            self.iceFAG = self.hGlobal.duplicate()
             self.iceHL.set(0.0)
             self.iceMeltL.set(0.0)
+            self.iceMeltRiverL.set(0.0)
             self.iceUbL.set(0.0)
             self.iceAbrL.set(0.0)
-            # Seed a pre-existing ice thickness on a fresh start; the SIA solve
-            # evolves it from there. On a restart (rStep > 0) readData restores
-            # the evolved iceH instead, so the seed is skipped. The flexure
-            # reference is taken AFTER this seed (first iceAccumulation), so a
-            # pre-existing ice load is not applied as a transient shock.
-            if self._iceInitSpec is not None and self.rStep == 0:
-                sc, spec = self._iceInitSpec
-                if spec is not None:
-                    h0 = self._loadIceMap(spec, "ice hinit")[self.locIDs]
-                else:
-                    h0 = np.full(self.lpoints, sc, dtype=np.float64)
-                self.iceHL.setArray(np.maximum(h0, 0.0))
+            self.iceFAL.set(0.0)
+            self.iceFAG.set(0.0)
             # Glacial-till mass-balance diagnostics (m^3, owned-node running
             # totals reduced by the till-conservation test).
             self._tillEroded = 0.0
             self._tillDeposited = 0.0
-            # Cached SIA implicit-solver handles (created lazily on first use;
-            # destroyed in destroy_DMPlex).
-            self._snes_ice = None
-            self._snes_ice_f = None
-            self._snes_ice_x = None
 
         return
 
-    def _iceSIAParams(self, elaH, iceH):
+    def _iceMassBalance(self, elaH, iceH):
         """
-        Shared SIA setup: Glen exponent `n`, deformation coeff `ad`, sliding
-        coeff `as`, bed elevation `zbed`, and the ELA surface mass balance
-        `mdot` (m ice/yr, no `meltfac`). Used by both SIA solvers.
+        Bed elevation `zbed` and the ELA surface mass balance `mdot`
+        (m ice/yr, no `meltfac`): accumulation above the ELA, ablation below.
         """
-        n = self.sia_glen
-        # Deformation coefficient ad = 2 A (rho_ice g)^n / (n+2) (SIA flux form).
-        ad = 2.0 * self.sia_Aglen * (RHO_ICE * self.gravity) ** n / (n + 2.0)
-        as_ = self.sia_slide
         zbed = self.hLocal.getArray().copy()              # bed elevation (fixed this step)
         # ELA mass-balance ramp (1 above the ice cap, 0 at the ELA, negative
         # below). elaH/iceH may be scalars (uniform) or per-vertex arrays
@@ -123,122 +123,147 @@ class IceMesh(object):
         ramp = np.where(denom > 0.0, (zbed - elaH) / safe, 0.0)
         ramp = np.minimum(ramp, 1.0)
         mdot = self.rainVal * ramp                        # surface mass balance (m ice/yr)
-        return n, ad, as_, zbed, mdot
+        # Scale / cap the ACCUMULATION (positive mdot) to realistic ice rates:
+        # full precipitation is rarely all snow/ice, so `accum_factor` converts
+        # precipitation to ice accumulation and `accum_max` caps it. Ablation
+        # (negative mdot) is left untouched. Defaults (1.0, None) are a no-op.
+        if self.ice_accum_factor != 1.0 or self.ice_accum_max is not None:
+            acc = np.maximum(mdot, 0.0) * self.ice_accum_factor
+            if self.ice_accum_max is not None:
+                acc = np.minimum(acc, self.ice_accum_max)
+            mdot = np.where(mdot > 0.0, acc, mdot)
+        return zbed, mdot
 
-    def _iceSIAFinalize(self, H, zbed, mdot, iceT, as_, n):
+    def _matrixIceFlow(self, dir_ice=1):
         """
-        Common post-solve steps for the SIA solve: terminus clamp, store the
-        ice thickness and the basal sliding speed (the abrasion driver), and
-        capture ablation meltwater (m^3/yr) for the river coupling.
+        Build the multiple-flow-direction (MFD) routing matrix for ice on the
+        (epsilon-filled) bed surface — used by the diagnostic ``mfd`` flow model
+        to accumulate the ELA mass balance into an ice discharge. Mirrors the
+        water flow-direction matrix; deterministic slope tie-break via ``gid``.
+        """
+        hl = self.hLocal.getArray().copy()
+        minh = self.hGlobal.min()[1] + 0.1
+        minh = max(minh, self.sealevel)
+        if self.flatModel:
+            hl[self.idBorders] = BOUNDARY_FLOW_SENTINEL
+        fillz = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
+        fillz[self.locIDs] = hl
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
+        if MPIrank == 0:
+            fillz = epsfill(minh, fillz)
+        fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
+        fillz = fillEPS[self.locIDs]
 
-        The terminus floor is ``max(hterm, sea level)``: ice is removed below
-        the prescribed terminus and, regardless, below the (possibly
-        time-varying) sea surface — no land ice persists offshore (there is no
-        marine-ice / calving model). When ``hterm`` is unprescribed (the
-        ``TERMINUS_UNSET`` sentinel) the floor is simply the sea-level position.
+        rcv, _, wght = mfdreceivers(
+            dir_ice, 1.0, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
+        )
+        if self.flatModel:
+            rcv[self.idBorders, :] = np.tile(self.idBorders, (dir_ice, 1)).T
+            wght[self.idBorders, :] = 0.0
+
+        self.iceMat = self.iMat.copy()
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        nodes = indptr[:-1]
+        for k in range(dir_ice):
+            tmpMat = self._matrix_build()
+            data = wght[:, k].copy()
+            data[rcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(
+                indptr, rcv[:, k].astype(petsc4py.PETSc.IntType), data,
+            )
+            tmpMat.assemblyEnd()
+            self.iceMat.axpy(-1.0, tmpMat)
+            tmpMat.destroy()
+        if self.memclear:
+            del data, indptr, nodes, hl, fillz, fillEPS, rcv, wght
+            gc.collect()
+        self.iceMat.transpose()
+        return
+
+    def _iceFlowMFD(self, elaH, iceH, iceT):
+        r"""
+        Diagnostic glacial driver (no ice-dynamics solve).
+
+        1. ELA surface mass balance (``_iceMassBalance``: accumulation above the
+           ELA, ablation below — including the ``accum_factor``/``accum_max``
+           controls).
+        2. Route the accumulation downhill through the MFD matrix into an **ice
+           discharge** ``iceFA`` (one linear solve; no time integration).
+        3. **Thickness** ``iceHL`` from a Bahr width–area scaling of the discharge.
+        4. **Basal sliding velocity** ``iceUbL`` from Glen's sliding law on that
+           thickness + bed-surface slope (``ice_velocity``), the abrasion driver
+           ``E_g = K_g |u_b|^l``. Physically bounded (``∝ H^{n-1}|∇s|^{n-1}∇s``),
+           unlike a raw balance velocity ``Q/(H·W)`` which blows up with catchment
+           size and spikes at flow-convergence cells.
+
+        No stiffness, no CFL — one routing solve per step.
         """
-        H = np.maximum(H, 0.0)
-        terminus = np.maximum(iceT, self.sealevel)
+        zbed, mdot = self._iceMassBalance(elaH, iceH)
+        terminus = max(iceT, self.sealevel)
+
+        # (2) Route the positive mass balance (accumulation) into a discharge.
+        # Source is a VOLUME rate (m^3/yr) = accumulation rate x cell area, so
+        # the routed `iceFA` is an ice discharge (m^3/yr).
+        self._matrixIceFlow(self.iceDir)
+        iceA = np.maximum(mdot, 0.0) * self.larea
+        self.tmpL.setArray(iceA)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._solve_KSP(True, self.iceMat, self.tmp, self.iceFAG)
+        self.dm.globalToLocal(self.iceFAG, self.iceFAL)
+        fa = self.iceFAL.getArray()
+        fa[fa < 0.0] = 0.0
+        fa[zbed < terminus] = 0.0
+        self.iceFAL.setArray(fa)
+        self.dm.localToGlobal(self.iceFAL, self.iceFAG)
+
+        # Ablation pattern for the till melt-out / deposition weight (precip-
+        # scaled, gated to ice presence — what the till machinery expects).
+        self.iceMeltL.setArray(np.maximum(-mdot, 0.0) * self.larea * (fa > 1.0e-8))
+        # Glacial meltwater delivered to the rivers (discharge-conserving by
+        # default: the routed accumulation released where the ice melts out, so
+        # Σ river-melt == Σ accumulation; closes the glacial water budget).
+        self.iceMeltRiverL.setArray(self._glacialMeltwater(zbed, mdot))
+
+        # Smooth the discharge (robustness / morphology), then Bahr thickness.
+        self.iceFAG.copy(result=self.tmp1)
+        smth = self._hillSlope(smooth=1)
+        smth[smth < 0.0] = 0.0
+        self.iceFAL.setArray(smth)
+        self.dm.localToGlobal(self.iceFAL, self.iceFAG)
+
+        # (3) Ice thickness: Bahr width–area scaling of the discharge.
+        H = self.icewe * self.icewf * np.power(smth, 0.3)
         H[zbed < terminus] = 0.0
+        H[H < 1.0e-1] = 0.0
         self.iceHL.setArray(H)
-        # Basal sliding speed from the converged thickness (steepest-descent
-        # SIA velocity); zero where there is no ice.
-        ub = ice_velocity(self.lpoints, H, zbed, as_, n)
-        ub[H <= 1.0e-2] = 0.0
+
+        # (4) Basal sliding velocity from the diagnostic thickness + bed-surface
+        # slope, via Glen's sliding law (``ice_velocity``: u_s ∝
+        # H^(n-1)|∇s|^(n-1)∇s). This is PHYSICALLY BOUNDED by thickness and slope
+        # — unlike a raw balance velocity Q/(H·W), which blows up with catchment
+        # size (Q grows with the upstream area while the cell width does not) and
+        # spikes at MFD flow-convergence cells, driving runaway abrasion and
+        # tens-of-km erosion/deposition spikes in downstream sinks.
+        ub = ice_velocity(self.lpoints, H, zbed, self.ice_slide, self.ice_glen)
+        ub[H <= 1.0] = 0.0
         self.iceUbL.setArray(ub)
-        # Glacial abrasion rate diagnostic E_g = Kg|u_b|^l (m/yr), subaerial
-        # only; matches the incision applied by _glacialAbrasion / glacialTill.
         abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
         abr[self.seaID] = 0.0
         self.iceAbrL.setArray(abr)
-        melt_local = np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
-        self.iceMeltL.setArray(melt_local)
-        return
-
-    def _form_residual_ice(self, snes, H, F):
-        """
-        SNES residual for the implicit SIA thickness solve (mirrors
-        ``hillslope._form_residual_nl_hillslope``):
-
-            F(H) = H − H_old − Δt (ṁ − ∇·q(H))
-
-        with `∇·q` from the ``ice_flux`` kernel on the clamped (≥0) thickness so
-        the flux stays physical during the nonlinear iterations.
-        """
-        self.dm.globalToLocal(H, self.tmpL)
-        Ha = self.tmpL.getArray()
-        Hc = np.maximum(Ha, 0.0)
-        div = ice_flux(
-            self.lpoints, Hc, self._sia_zbed, self._sia_ad, self._sia_as, self._sia_n
-        )
-        res = Ha - self._sia_Hold - self.dt * (self._sia_mdot - div)
-        F.setArray(res[self.glIDs])
-        return
-
-    def _iceFlowSIA(self, elaH, iceH, iceT):
-        r"""
-        SIA ice-thickness solve: implicit (semi-implicit) integration of
-        ``∂H/∂t = ṁ − ∇·q`` via a cached PETSc SNES, reusing the non-linear
-        hillslope pattern (``ngmres``, CG/HYPRE KSP, Jacobian-free).
-        Unconditionally stable in `dt`, so it takes the full goSPL timestep —
-        adequate for goSPL's km / 10²–10⁴ yr scale where explicit subcycling is
-        prohibitive. Free boundary `H≥0` by post-clamp; validated against the
-        analytical SIA dome (ice-volume conservation under zero mass balance).
-        """
-        n, ad, as_, zbed, mdot = self._iceSIAParams(elaH, iceH)
-        # Residual context (read by _form_residual_ice).
-        self._sia_n = n
-        self._sia_ad = ad
-        self._sia_as = as_
-        self._sia_zbed = zbed
-        self._sia_mdot = mdot
-        self._sia_Hold = self.iceHL.getArray().copy()
-
-        if self._snes_ice is None:
-            snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
-            snes.setTolerances(rtol=1.0e-6, atol=1.0e-6, max_it=100)
-            self._snes_ice_f = self.hGlobal.duplicate()
-            snes.setFunction(self._form_residual_ice, self._snes_ice_f)
-            snes.setType("ngmres")
-            ksp = snes.getKSP()
-            ksp.setType("cg")
-            pc = ksp.getPC()
-            pc.setType("hypre")
-            petsc4py.PETSc.Options()["pc_hypre_type"] = "boomeramg"
-            pc.setFromOptions()
-            ksp.setTolerances(rtol=1.0e-6)
-            self._snes_ice_x = self.hGlobal.duplicate()
-            self._snes_ice = snes
-
-        snes = self._snes_ice
-        x = self._snes_ice_x
-        # Initial guess = previous ice thickness.
-        self.tmpL.setArray(self._sia_Hold)
-        self.dm.localToGlobal(self.tmpL, x)
-        snes.solve(None, x)
-        r = snes.getConvergedReason()
-        if r < 0 and MPIrank == 0:
-            print(
-                "SIA implicit ice SNES failed to converge after %d iterations "
-                "(reason %d)" % (snes.getIterationNumber(), r),
-                flush=True,
-            )
-
-        self.dm.globalToLocal(x, self.tmpL)
-        self._iceSIAFinalize(self.tmpL.getArray().copy(), zbed, mdot, iceT, as_, n)
 
         return
 
     def iceAccumulation(self):
         """
-        Main Ice Accumulation Calculation.
+        Main glacial update.
 
-        This method evolves the ice thickness with the SIA solve
-        (:meth:`_iceFlowSIA`) using the ice-cap altitude, the equilibrium-line
-        altitude (ELA) and the glacier terminus. Each of these may be a uniform
-        scalar (time-varying) or a per-vertex map — the latter for global models
-        where the ELA varies strongly with latitude. It also snapshots the ice
-        load for the flexural isostasy when enabled.
+        Computes the diagnostic glacial state (:meth:`_iceFlowMFD`) from the
+        ice-cap altitude, the equilibrium-line altitude (ELA) and the glacier
+        terminus. Each of these may be a uniform scalar (time-varying) or a
+        per-vertex map — the latter for global models where the ELA varies
+        strongly with latitude. It also snapshots the ice load for the flexural
+        isostasy when enabled.
         """
 
         ti = process_time()
@@ -263,7 +288,7 @@ class IceMesh(object):
         # Uniform case keeps the cheap global short-circuit (byte-identical):
         # no ice when the whole surface is below the ELA, or for a degenerate
         # config where the ice-cap altitude is not above the ELA. With spatial
-        # maps these are per-node and handled robustly in _iceSIAParams.
+        # maps these are per-node and handled robustly in _iceMassBalance.
         if not spatial:
             max_elev = self.hGlobal.max()[1]
             if max_elev < elaH or iceH <= elaH:
@@ -271,26 +296,52 @@ class IceMesh(object):
                 self.iceUbL.set(0.)
                 self.iceAbrL.set(0.)
                 self.iceMeltL.set(0.)
+                self.iceMeltRiverL.set(0.)
+                self.iceFAL.set(0.)
+                self.iceFAG.set(0.)
                 if self.flexOn:
                     self.iceFlex.set(0.)
                 return
 
-        # Implicit SIA ice-thickness solve.
-        self._iceFlowSIA(elaH, iceH, iceT)
+        # Diagnostic glacial driver (routing proxy — glacial erosion morphology
+        # without an ice-dynamics solve).
+        self._iceFlowMFD(elaH, iceH, iceT)
 
         # At the first step, seed the flexure reference with the ice just
-        # solved so the initial load is not applied as a transient.
+        # diagnosed so the initial load is not applied as a transient.
         if self.flexOn and self.tNow == self.tStart:
             self.iceHL.copy(result=self.iceFlex)
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Glaciers Accumulation - SIA (%0.02f seconds)"
-                % (process_time() - ti),
+                "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti),
                 flush=True,
             )
 
         return
+
+    def _glacialLateralErosion(self):
+        r"""
+        Lateral glacial erosion rate (m/yr) — valley-wall abrasion by adjacent
+        fast ice, the explicit term that widens glaciated valleys toward a
+        U-profile (vertical abrasion alone only deepens the trough).
+
+        Returns a per-cell rate (≥0), nonzero only on subaerial 'wall' cells
+        (little ice of their own) standing within the ice column of a
+        faster-sliding neighbour — see the ``ice_lateral_erosion`` kernel. No-op
+        (zeros) unless ``ice.abrasion.Kl > 0``.
+        """
+        if self.ice_Kl <= 0.0:
+            return np.zeros(self.lpoints, dtype=np.float64)
+        H = self.iceHL.getArray()
+        ub = self.iceUbL.getArray()
+        zbed = self.hLocal.getArray()
+        elat = ice_lateral_erosion(
+            self.lpoints, H, zbed, np.maximum(ub, 0.0),
+            self.ice_Kl, self.ice_lat_l, 1.0,   # heps = 1 m ice-presence threshold
+        )
+        elat[self.seaID] = 0.0                  # no marine erosion
+        return elat
 
     def glacialTill(self):
         r"""
@@ -331,12 +382,17 @@ class IceMesh(object):
         identically by the bulk and stratigraphic paths, so conservation is
         unchanged.
         """
-        if not (self.iceOn and self.ice_till_on) or self.ice_Kg <= 0.0:
+        if not (self.iceOn and self.ice_till_on) or (
+            self.ice_Kg <= 0.0 and self.ice_Kl <= 0.0
+        ):
             return
 
         ti = process_time()
         ub = self.iceUbL.getArray()
+        # Vertical abrasion under sliding ice + lateral wall abrasion (U-shaping);
+        # both are bed-lowering routed into the same conserved till -> moraine.
         Eg = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)  # m/yr
+        Eg = Eg + self._glacialLateralErosion()
         Eg[self.seaID] = 0.0
         Vero = Eg * self.dt * self.larea                  # abraded volume (m^3) per cell
         owned = self.inIDs == 1
@@ -501,6 +557,87 @@ class IceMesh(object):
         self.depoFineFrac = saved_depoFineFrac
 
         return
+
+    def _glacialMeltwater(self, zbed, mdot):
+        r"""
+        Glacial meltwater volume (m^3/yr) delivered to the rivers.
+
+        Two models, selected by ``ice.melt_conserve``:
+
+        - **Discharge-conserving** (default): the accumulation (the water that
+          fell as ice above the ELA, :math:`\dot{m}^+\,A`) is routed down the
+          ice-surface flow network and **released as meltwater where the ice
+          melts out** (fraction :math:`f`, forced to 1 at the margin/terminus),
+          so :math:`\sum \mathrm{melt} = \sum \mathrm{accumulation}`. Over goSPL's
+          long timesteps a land-terminating glacier is ~steady, so all the ice
+          that accumulates leaves as meltwater at the snout — this closes the
+          glacial water budget (the precipitation removed from runoff above the
+          ELA returns downstream). Transport-with-loss on the ice network, same
+          MPI-correct flow-matrix / KSP machinery as ``_routeTill``.
+        - **Precip-scaled** (``melt_conserve: False``): the local ablation rate
+          :math:`\max(-\dot{m},0)\,A` where ice is present — cheaper, but it
+          loses water (the ablation generally under-returns the accumulation).
+        """
+        H = self.iceHL.getArray()
+        if not self.ice_melt_conserve:
+            return np.maximum(-mdot, 0.0) * self.larea * (H > 1.0e-2)
+
+        # Halo-sync the thickness (ghosts needed for receivers / margin test).
+        self.dm.localToGlobal(self.iceHL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        H = self.tmpL.getArray().copy()
+        s = zbed + H                                       # ice surface
+        rcv, _, wght = mfdreceivers(1, self.flowExp, s, self.sealevel, self.gid)
+        rcv0 = rcv[:, 0].astype(petsc4py.PETSc.IntType)
+        w0 = wght[:, 0].copy()
+
+        thr = 1.0e-2
+        ice = H > thr
+        A = np.maximum(mdot, 0.0) * self.larea             # accumulation volume (m^3/yr)
+        # Melt-out fraction: ablation share of the ice column this step, =1 off-ice
+        # and at the margin (receiver ice-free) so all remaining ice melts out and
+        # the transport is exactly conservative (Σ melt = Σ accumulation).
+        abl = np.maximum(-mdot, 0.0) * self.dt
+        f = np.clip(abl / np.maximum(H, thr), 0.0, 1.0)
+        f[~ice] = 1.0
+        f[ice & (H[rcv0] <= thr)] = 1.0
+
+        outw = w0 * (1.0 - f)
+        outw[self.ghostIDs] = 0.0
+        if self.flatModel:
+            outw[self.idBorders] = 0.0
+
+        mat = self.iMat.copy()
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        nodes = indptr[:-1]
+        data = -outw
+        data[rcv0 == nodes] = 0.0
+        tmpMat = self._matrix_build()
+        tmpMat.assemblyBegin()
+        tmpMat.setValuesLocalCSR(indptr, rcv0, data)
+        tmpMat.assemblyEnd()
+        mat.axpy(1.0, tmpMat)
+        tmpMat.destroy()
+        mat.transpose()
+
+        self.tmpL.setArray(A)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._solve_KSP(True, mat, self.tmp, self.tmp1)
+        mat.destroy()
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        L = self.tmpL.getArray().copy()                    # ice flux through each cell
+        melt = f * L                                       # melt-out (m^3/yr)
+        melt[melt < 0.0] = 0.0
+
+        # The transport conserves analytically; the KSP solve is only accurate to
+        # its tolerance, so renormalise so the released meltwater equals the
+        # accumulation exactly (closing the water budget bit-for-bit).
+        owned = self.inIDs == 1
+        Mtot = MPI.COMM_WORLD.allreduce(float(np.sum(melt[owned])), op=MPI.SUM)
+        Atot = MPI.COMM_WORLD.allreduce(float(np.sum(A[owned])), op=MPI.SUM)
+        if Mtot > 0.0:
+            melt *= Atot / Mtot
+        return melt
 
     def _routeTill(self, Vero, Vtot, owned):
         r"""

@@ -965,8 +965,13 @@ class UnstMesh(object):
         if self.iceOn:
             self.iceHL.destroy()
             self.iceMeltL.destroy()
+            self.iceMeltRiverL.destroy()
             self.iceUbL.destroy()
             self.iceAbrL.destroy()
+            self.iceFAL.destroy()
+            self.iceFAG.destroy()
+            if getattr(self, "iceMat", None) is not None:
+                self.iceMat.destroy()
             if self.flexOn:
                 self.iceFlex.destroy()
 
@@ -986,7 +991,6 @@ class UnstMesh(object):
             "_snes_soil", "_snes_soil_f", "_snes_soil_x",
             "_snes_soil_fb", "_snes_soil_fb_f",
             "_snes_hill", "_snes_hill_f", "_snes_hill_x",
-            "_snes_ice", "_snes_ice_f", "_snes_ice_x",
             "_ts_marine", "_ts_marine_x",
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
         ):

@@ -1,4 +1,4 @@
-name: minimal SIA ice with pre-existing (seeded) ice thickness
+name: minimal ice (mfd) + soil-aware SPL test
 
 domain:
     npdata: ['mesh','v','c','z']
@@ -9,7 +9,7 @@ domain:
 
 time:
     start: 0.
-    end: 100
+    end: 40
     tout: 50
     dt: 10.
 
@@ -17,21 +17,30 @@ spl:
     K: 4.0e-6
     d: 0.
     m: 0.5
-    G: 0.
+    G: 1.0
 
 diffusion:
     hillslopeKa: 0.01
     hillslopeKm: 0.2
 
+soil:
+    soilK: 8.0e-6
+    maxProd: 50.e-6
+    depthProd: 0.5
+    uniform: 1.0
+    tempMap: ['soiltemp', 't']
+    activation: 40.e3
+    tempRef: 15.0
+
 ice:
     hela: 2000.
     hice: 3000.
     hterm: 1500.
-    hinit: 50.            # pre-existing 50 m ice everywhere, evolved by the SIA
-    sia:
-        Aglen: 1.0e-16
-        slide: 1.0e-3
-        glen: 3.0
+    abrasion:
+        Kg: 1.0e-3
+        l: 1.0
+    till:
+        on: True
 
 sea:
     position: -100.
@@ -41,4 +50,4 @@ climate:
     uniform: 1
 
 output:
-    dir: 'minimal_ice_seed'
+    dir: 'ice_soil_out'

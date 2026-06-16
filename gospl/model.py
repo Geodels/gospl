@@ -279,7 +279,7 @@ class Model(
                         _nlSPL.erodepSPLnl(self)
 
                 # Glacial till: abrasion-produced till transported by ice and
-                # deposited (melt-out) as moraine in the ablation zone (SIA +
+                # deposited (melt-out) as moraine in the ablation zone (glacial
                 # till only; no-op otherwise). Done before fluvial deposition
                 # so the moraine is reworked by meltwater/rivers this step.
                 if self.iceOn:

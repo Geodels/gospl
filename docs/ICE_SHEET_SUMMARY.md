@@ -1,111 +1,103 @@
 # goSPL ice-sheet model — change summary
 
-goSPL's glacial capability has been replaced by a true **Shallow-Ice-
-Approximation (SIA) ice-sheet model**: an implicit non-linear diffusion of the
-ice thickness that drives glacial abrasion, till transport and flexural loading.
-It supersedes the previous MFD flow-routing proxy, which is removed — when an
-`ice` section is present, goSPL now runs the SIA model.
+goSPL's glacial capability is a cheap, robust **diagnostic glacial-erosion
+model**. When an `ice` section is present, each goSPL step routes the ELA
+accumulation downhill into an ice discharge, from which a Bahr ice thickness and
+a bounded Glen-sliding velocity are derived (one linear solve, no ice-thickness
+PDE time integration); these drive glacial abrasion, till/moraine deposition,
+discharge-conserving meltwater and flexural ice loading.
 
-The work was delivered across the design doc and PRs #423–#425 (dynamics +
-basal velocity, abrasion + till, flexural loading + output), then refined:
+> **Why a diagnostic, not full ice dynamics.** A true Shallow-Ice-Approximation
+> (SIA) thickness solve was implemented and then removed. The ice margin `H ≥ 0`
+> is a free-boundary (obstacle) problem on which the implicit `F(H)=0` thickness
+> solve diverged on real continental runs, and an ice-dynamics solve is stiff and
+> **over-thickens km-scale continental ice at coarse resolution** over goSPL's
+> long (10²–10⁴ yr) timesteps. The diagnostic is physical and robust at any
+> resolution and over those long steps, so it is the only model goSPL ships. See
+> `docs/DESIGN_ICE_SHEET.md`.
 
-- **#426** — the MFD proxy and the explicit SIA reference scheme removed, leaving
-  the implicit SIA as the single model; glacial till coupled to the
-  stratigraphic / dual-lithology fractions; `iceMelt` / `iceAbr` outputs added;
-  per-vertex / time-series ELA maps (the `glaciers` series) for global runs;
-  optional `hinit` seed-and-evolve initial ice.
-- **#427** — terminus floor = `max(hterm, sea level)`, defaulting to the
-  sea-level position.
-- **#428** — opt-in catchment-aware till routing (`till.route`) for
-  high-resolution regional runs.
-- **#429** — `scripts/ela_from_temperature.py` helper deriving ELA maps from
-  paleo-climate temperature.
+Status: **implemented / shipped**. Full design and rationale:
+`docs/DESIGN_ICE_SHEET.md`. User/technical/API docs:
+`docs/user_guide/surfproc.rst`, `docs/tech_guide/ice.rst`,
+`docs/api_ref/ice_ref.rst`.
 
 Mapped to the roadmap item *"glacial and ice-sheet model and associated
 erosion / deposition and loading"*:
 
 | Roadmap sub-item | Status |
 |---|---|
-| Ice dynamics (real flow, not a routing proxy) | ✅ implicit SIA |
-| Glacial erosion | ✅ velocity-based abrasion |
-| Glacial deposition | ✅ till → moraine (bulk + stratigraphic / dual lithology) |
+| Ice flow (routed discharge → Bahr thickness → Glen sliding velocity) | ✅ diagnostic |
+| Glacial erosion | ✅ velocity-based abrasion (vertical + optional lateral / U-shaping) |
+| Glacial deposition | ✅ till → moraine (bulk + stratigraphic / dual lithology), volume-conserving |
 | Loading | ⚠️ existing flexure leveraged, **no new flexure code** (see §4) |
-
-Full design and rationale: `docs/DESIGN_ICE_SHEET.md`. User/technical/API docs:
-`docs/user_guide/surfproc.rst`, `docs/tech_guide/ice.rst`,
-`docs/api_ref/ice_ref.rst`.
 
 ---
 
-## 1. Ice dynamics — implicit SIA
+## 1. Ice flow — routed discharge, Bahr thickness, Glen sliding velocity
 
-The ice thickness `H` evolves as a non-linear diffusion of the ice surface
-`s = z_bed + H`:
+Each step, in `gospl/flow/iceplex.py`:
 
-> `∂H/∂t = ṁ − ∇·q`, with `q = −[2A(ρ_i g)ⁿ/(n+2)·H^(n+2) + a_s·H^n]·|∇s|^(n−1)·∇s`
-
-combining Glen's-law internal **deformation** (`Aglen`, exponent `glen`) and
-basal **sliding** (`slide`). The flux divergence is evaluated on the
-unstructured finite-volume mesh by a dormant-but-now-wired `ice_flux` Fortran
-kernel, using the same mass-conservative edge fluxes as the hillslope diffusion
-operator (so it runs unchanged on the spherical/planar Voronoi mesh and fills /
-overflows closed basins because it acts on the total bed + ice surface).
-
-Because the SIA diffusivity scales as `H^(n+2)|∇s|^(n−1)`, an explicit scheme
-would need a CFL step orders of magnitude below goSPL's km / 10²–10⁴ yr
-resolution. The thickness is therefore advanced **implicitly**, with a cached
-Jacobian-free PETSc `SNES` (`ngmres` + CG / HYPRE BoomerAMG) on the
-backward-Euler residual `F(H) = H − H_old − Δt(ṁ − ∇·q(H))` — the same
-non-linear-diffusion machinery as the non-linear hillslope solver. It is
-unconditionally stable and takes the **full goSPL time step in one solve**. The
-free boundary `H ≥ 0` is a post-clamp; ice is removed below the terminus
-`hterm`.
-
-The **surface mass balance** keeps the ELA proxy: `ṁ = P·min(1,(η−hela)/(hice−hela))`
-(accumulation above the ELA, ablation below). The **basal sliding speed** `u_b`
-is derived from the converged thickness (`ice_velocity` kernel) and exported.
+1. The ELA surface mass balance `mdot` is computed (accumulation above the ELA
+   `hela`, full accumulation at the ice-cap altitude `hice`, ablation below),
+   with the accumulation scaled by `accum_factor` / capped by `accum_max` and
+   ablation amplified by `melt`.
+2. The accumulation is **routed downhill** on the epsilon-filled bed by a
+   multiple-flow-direction (MFD) algorithm (`icedir` directions) — the same
+   flow-matrix / KSP machinery as the river flow accumulation — into an **ice
+   discharge** `Q` (m³/yr). One linear solve, no time integration.
+3. **Ice thickness** from a Bahr discharge scaling: `H = eheight·fwidth·Q^0.3`.
+4. **Basal sliding velocity** `u_b ∝ H^(n-1)|∇s|^(n-1)∇s` from Glen's sliding law
+   on that thickness and the bed-surface slope (`slide`, `glen`; the
+   `ice_velocity` Fortran kernel) — physically bounded, exported as `iceUb`.
 
 ## 2. Glacial erosion — velocity-based abrasion
 
-Sliding ice abrades the bed at `E_g = K_g·|u_b|^l` (`abrasion.Kg`, `abrasion.l`;
-off by default). It is masked to subaerial, ice-covered cells. With till
-handling off, `E_g` is an incision added to the erosion–deposition rate and
-flows into the fluvial sediment system through the standard erosion path in all
-three SPL flavours (`SPL`, `nlSPL`, `soilSPL`).
-
-This **replaces** the previous stream-power glacial term `Ki·Fⁱᶜᵉ^m`, which is
-removed along with the MFD ice-flow field it consumed.
+Sliding ice abrades the bed (deepening valleys) at `E_g = Kg·|u_b|^l`
+(`abrasion.Kg`, `abrasion.l`; off by default). It is masked to subaerial,
+ice-covered cells. An optional **lateral (valley-wall) erosion** term
+`Kl·u_b_neighbour^lat_l` (`abrasion.Kl`, `abrasion.lat_l`; off by default) erodes
+the walls flanking fast ice, **widening valleys toward a U-profile**; the eroded
+wall rock joins the same conserved till budget. With till handling off, the
+abraded material is an incision added to the erosion–deposition rate and flows
+into the fluvial sediment system through the standard erosion path in all three
+SPL flavours (`SPL`, `nlSPL`, `soilSPL`).
 
 ## 3. Glacial deposition — till and moraine
 
-With `till.on`, abraded rock is carried as **till** by the ice and deposited
-where the ice melts out — the ablation zone / terminal moraine — weighted by the
-local meltwater rate. Two conservation-guarded modes:
+With `till.on` (default `True`), abraded rock is carried as **till** by the ice
+and deposited as **moraine** where the ice melts out. Two conservation-guarded
+modes:
 
 - **Bulk bed** (no stratigraphy): the abraded volume is redistributed as a
-  bed-to-bed transport, so the net bed-volume change is exactly zero (rock
-  moved, not created).
+  bed-to-bed transport, so the net bed-volume change is exactly zero (rock moved,
+  not created).
 - **Stratigraphic / dual lithology**: the till is removed from the stratigraphic
   layers it was abraded from (`erodeStrat`) and re-deposited as a fresh moraine
   layer in the ablation zone (`deposeStrat`), split into coarse/fine carrying the
   abraded (ice-mixed) fine fraction. Conservation is on the *solid* phase per
-  fraction — the fine deposited equals the fine eroded, keeping the
-  dual-lithology budget balanced — and the bed bulks up by the
-  uncompacted-till vs compacted-rock porosity contrast.
+  fraction, and the bed bulks up by the uncompacted-till vs compacted-rock
+  porosity contrast.
 
-**Meltwater** generated by ablation is captured (`m = max(−ṁ,0)·area·[H>0]`) and
-re-injected into the river flow accumulation, so cells downstream of glacier
-termini see the corresponding discharge instead of losing it.
+Independently, `till.route` (default `True`) routes the till down the ice-surface
+flow network and melts it out toward each catchment's terminus (correct on
+multi-glacier / global domains); `False` spreads the global abraded volume across
+the ablation zone weighted by the meltwater rate. Both conserve mass.
+
+**Meltwater** is **discharge-conserving** by default (`melt_conserve: True`): the
+precipitation that fell as ice above the ELA is released as liquid meltwater
+where the ice melts out, so total meltwater == total accumulation, and it is
+re-injected into the river flow accumulation. With `melt_conserve: False` the
+local precipitation-scaled ablation rate `m = max(−mdot,0)·area·[H>0]` is used
+instead.
 
 ## 4. Loading — existing flexure leveraged
 
 No flexure source was modified. goSPL's **existing** flexural isostasy (FD/FFT
-gFlex for planar models, spherical-harmonic shell for global) now receives the
-SIA ice thickness as the ice load: the change in thickness between steps is
-converted to an equivalent load (scaled by `ρ_i/ρ_c`) and applied through the
+gFlex for planar models, spherical-harmonic shell for global) receives the
+diagnostic ice thickness as the ice load: the change in thickness between steps
+is converted to an equivalent load (scaled by `ρ_i/ρ_c`) and applied through the
 existing path, so a growing ice sheet drives isostatic subsidence and
-deglaciation drives rebound. There is no new flexure mechanism — see the
-appendix of `DUAL_LITHOLOGY_SUMMARY.md` for the flexure-method overview.
+deglaciation drives rebound.
 
 ---
 
@@ -114,17 +106,13 @@ appendix of `DUAL_LITHOLOGY_SUMMARY.md` for the flexure-method overview.
 | Field | File / attribute | Meaning |
 |---|---|---|
 | `iceH` | mesh HDF5 / XDMF | ice thickness (m); restored on restart |
-| `iceUb` | mesh HDF5 / XDMF | basal sliding speed (m/yr); abrasion driver and dynamics diagnostic |
-| `iceMelt` | mesh HDF5 / XDMF | ablation meltwater (m³/yr) re-injected into the rivers — glacial discharge contribution |
+| `iceUb` | mesh HDF5 / XDMF | basal sliding speed (m/yr); abrasion driver |
+| `iceMelt` | mesh HDF5 / XDMF | ablation meltwater (m³/yr) re-injected into the rivers |
 | `iceAbr` | mesh HDF5 / XDMF | glacial abrasion rate `E_g = Kg·|u_b|^l` (m/yr); zero when abrasion is off |
-
-The old `iceFA` (MFD ice flow accumulation) output is removed.
 
 ## Configuration
 
-The `ice` section is the opt-in. SIA is the only model, so the previous
-`flow_model` / `solver` selectors and the MFD-only keys (`Ki`, `icedir`, `melt`,
-`diff`, `fwidth`, `eheight`) are gone:
+The `ice` section is the opt-in. The valid keys are:
 
 ```yaml
 ice:
@@ -132,65 +120,53 @@ ice:
     hice: 2100.0          # ice-cap altitude (m)
     hterm: 1700.0         # glacier terminus (m); floor = max(hterm, sea level),
                           #   defaults to sea level if omitted  [or evol: <csv>]
-    sia:
-        Aglen: 1.0e-16    # Glen rate factor
-        slide: 1.0e-3     # basal sliding coefficient
-        glen:  3.0        # Glen exponent n
+    icedir: 1             # MFD flow directions for the ice routing
+    eheight: 0.25         # Bahr thickness factor
+    fwidth: 1.5           # Bahr width factor
+    melt: 10.             # ablation amplifier
+    slide: 1.0e-3         # basal sliding coefficient (Glen sliding law)
+    glen:  3.0            # Glen sliding exponent n
+    accum_factor: 1.0     # precipitation -> ice accumulation fraction
+    accum_max: 2.0        # (optional) cap on accumulation rate (m ice/yr)
+    melt_conserve: True   # discharge-conserving river meltwater (default)
     abrasion:
-        Kg: 1.0e-4        # abrasion coefficient (0 = off)
+        Kg: 1.0e-4        # vertical abrasion coefficient (0 = off)
         l:  1.0           # sliding-velocity exponent
+        Kl: 0.0           # lateral (valley-wall) erosion coefficient (0 = off)
+        lat_l: 1.0        # lateral velocity exponent (defaults to l)
     till:
-        on: True          # carry abraded rock as till / moraine
-        route: False      # True = route to termini (high-res); False = melt-spread
+        on: True          # carry abraded rock as till / moraine (default True)
+        route: True       # catchment-routed (default True); False = melt-spread
 ```
 
 `hela`/`hice`/`hterm` accept a uniform scalar (as above), a per-vertex map
 `[file, key]`, or a `glaciers` time series of either — see the user guide for
-the spatial/time-varying ELA syntax used by global models. An optional `hinit`
-(scalar or map) seeds a pre-existing ice thickness on a fresh start, which the
-SIA solve then evolves (the ELA geometry still drives the evolution); a restart
-restores the evolved thickness instead.
+the spatial/time-varying ELA syntax used by global models.
 
 ## Validation
 
-Seven regression tests guard the model (`tests/test_regression.py`,
-`tests/fixtures/minimal_ice_*.yml`):
-
-| Test | Protects |
-|---|---|
-| `test_ice_opt_in` | parsing: ice off without the section, SIA params with it |
-| `test_ice_sia_runs_and_invariants` | end-to-end run; H ≥ 0, finite, no ice below terminus/ELA; valid basal velocity |
-| `test_ice_sia_volume_conservation` | SIA flux conserves ice volume under zero mass balance (Halfar-style) |
-| `test_ice_glacial_abrasion` | `E_g = −K_g·u_b` exactly where ice slides; no-op when `Kg=0` |
-| `test_ice_glacial_till_conserves` | bulk till: eroded == deposited, net bed-volume change ≈ 0 |
-| `test_ice_glacial_till_dual_lithology` | stratigraphic till: per-fraction solid conserved; moraine carries fine |
-| `test_ice_sia_flexure_loading` | SIA ice load drives isostatic subsidence; `iceUb` written |
+Regression tests guard the model (`tests/test_regression.py`,
+`tests/fixtures/minimal_ice_*.yml`): ice off/on parsing; end-to-end run
+invariants (H ≥ 0, finite, no ice below terminus/ELA, valid basal velocity);
+glacial-abrasion sign (`E_g = Kg·u_b`) and no-op when `Kg=0`; bulk till
+conservation (eroded == deposited, net bed-volume change ≈ 0); stratigraphic /
+dual-lithology till (per-fraction solid conserved, moraine carries fine); and
+ice-load flexural subsidence with `iceUb` written.
 
 ---
 
 ## Scope notes
 
-- **ELA mass balance retained.** Accumulation/ablation is the elevation-ramp ELA
-  proxy, not an energy-balance or PDD melt model. It is the established goSPL
-  forcing and is adequate for the long-term, landscape-to-global mass budget
-  the model targets; a climate-driven SMB would be the upgrade for studies where
-  the melt physics itself is the object of interest.
+- **ELA mass balance.** Accumulation/ablation is the elevation-ramp ELA proxy,
+  not an energy-balance or PDD melt model — the established goSPL forcing,
+  adequate for the long-term landscape-to-global mass budget the model targets.
 - **Spatially / temporally varying ELA.** For global runs, `hela`, `hice` and
   `hterm` can each be a per-vertex map and/or a `glaciers` time series (like the
-  precipitation `climate` block), so the ELA varies with latitude (tropical vs
-  polar) and through time — a single global scalar cannot represent both. The
-  mass-balance ramp is evaluated per node with its local ELA. Uniform scalars
-  and the `evol` CSV remain unchanged. The `scripts/ela_from_temperature.py`
-  helper derives `hela`/`hice` maps from a paleo-climate temperature history by
-  lapse-rate inversion (it sets the ELA *position*; ablation stays
-  precipitation-scaled).
-- **Till routing.** By default till is deposited across the ablation zone
-  weighted by the meltwater rate — matched to coarse resolution where a cell
-  aggregates many glacial elements. For high-resolution (sub-km) regional runs,
-  `till.route: True` instead routes the till down the ice-surface flow network
-  and melts it out toward each catchment's terminus, building moraine at the
-  actual ice margins. Both conserve mass.
-- **Scalar SIA coefficients.** `Aglen` / `slide` are uniform (no spatial
-  thermomechanical coupling). Spatially-variable softness/sliding would matter
-  only for studies resolving thermal regime or till rheology, below the scope
-  here.
+  precipitation `climate` block), so the ELA varies with latitude and through
+  time. Uniform scalars and the `evol` CSV remain unchanged. The
+  `scripts/ela_from_temperature.py` helper derives `hela`/`hice` maps from a
+  paleo-climate temperature history by lapse-rate inversion (it sets the ELA
+  *position*; ablation stays precipitation-scaled).
+- **Till routing.** `till.route: True` (default) routes till down the ice-surface
+  flow network to each catchment's terminus; `False` spreads it across the
+  ablation zone weighted by the meltwater rate. Both conserve mass.

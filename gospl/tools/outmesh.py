@@ -368,7 +368,7 @@ class WriteMesh(object):
                     data[self.seaID] = 1.0
                 f["iceH"][:, 0] = data
 
-                # SIA basal sliding speed (m/yr): the abrasion driver and a
+                # Basal sliding speed (m/yr): the abrasion driver and a
                 # diagnostic of ice dynamics.
                 f.create_dataset(
                     "iceUb",
@@ -386,7 +386,7 @@ class WriteMesh(object):
                     dtype="float32",
                     **self._h5opts,
                 )
-                f["iceMelt"][:, 0] = self.iceMeltL.getArray().copy()
+                f["iceMelt"][:, 0] = self.iceMeltRiverL.getArray().copy()
 
                 # Glacial abrasion rate E_g = Kg|u_b|^l (m/yr); zero where
                 # abrasion is off (Kg = 0).
@@ -397,6 +397,15 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["iceAbr"][:, 0] = self.iceAbrL.getArray().copy()
+                # Ice discharge (m^3/yr) from the diagnostic 'mfd' flow model
+                # (the ELA accumulation routed downhill).
+                f.create_dataset(
+                    "iceFA",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["iceFA"][:, 0] = self.iceFAL.getArray().copy()
 
             if self.flexOn:
                 f.create_dataset(
@@ -735,6 +744,15 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/iceAbr</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceFA">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceFA</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

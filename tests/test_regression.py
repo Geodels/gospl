@@ -256,13 +256,13 @@ def _ice_parser():
 
 def test_ice_opt_in():
     """
-    Protects: the SIA ice-sheet model is opt-in via the presence of an `ice`
-    section; with no `ice` block ice is off, and when present the SIA / abrasion
+    Protects: the glacial model is opt-in via the presence of an `ice`
+    section; with no `ice` block ice is off, and when present the glacial / abrasion
     / till parameters are parsed with sensible defaults.
 
     Invariants:
       1. No `ice` block -> iceOn False.
-      2. `ice` block present -> iceOn True with default SIA params.
+      2. `ice` block present -> iceOn True with default glacial params.
       3. `ice` with sia / abrasion / till -> all parameters parsed.
     """
     # ---- Case 1: no ice block ----
@@ -275,29 +275,34 @@ def test_ice_opt_in():
     p.input = {"ice": {"hela": 1500.0, "hice": 2000.0}}
     p._readIce()
     assert p.iceOn is True
-    assert p.sia_Aglen == 1.0e-16 and p.sia_glen == 3.0
-    assert p.ice_Kg == 0.0 and p.ice_till_on is False
-    assert p.ice_till_route is False          # melt-weighted spreading by default
+    assert p.ice_slide == 1.0e-3 and p.ice_glen == 3.0
+    # Abrasion off by default (Kg=0); till + catchment routing ON by default
+    # (so enabling abrasion gives the complete, spatially-coherent glacial cycle).
+    assert p.ice_Kg == 0.0 and p.ice_Kl == 0.0
+    assert p.ice_till_on is True
+    assert p.ice_till_route is True
+    assert p.ice_melt_conserve is True
     # Terminus is unprescribed -> sentinel, resolved to the sea-level position
     # at runtime (so ice is not silently truncated above sea level).
     assert float(p.iceT(p.tStart)) < -1.0e9
 
-    # ---- Case 3: full SIA parameters ----
+    # ---- Case 3: full glacial parameters ----
     p = _ice_parser()
     p.input = {
         "ice": {
             "hela": 1500.0,
             "hice": 2000.0,
-            "sia": {"Aglen": 2.0e-16, "slide": 5.0e-3, "glen": 3.0},
+            "slide": 5.0e-3,
+            "glen": 3.0,
             "abrasion": {"Kg": 1.0e-4, "l": 1.5},
-            "till": {"on": True, "route": True},
+            "till": {"on": True, "route": False},
         }
     }
     p._readIce()
     assert p.iceOn is True
-    assert p.sia_Aglen == 2.0e-16 and p.sia_slide == 5.0e-3 and p.sia_glen == 3.0
+    assert p.ice_slide == 5.0e-3 and p.ice_glen == 3.0
     assert p.ice_Kg == 1.0e-4 and p.ice_abr_l == 1.5
-    assert p.ice_till_route is True           # catchment routing opted in
+    assert p.ice_till_route is False          # melt-spread opted in
     assert p.ice_till_on is True
 
 
@@ -342,13 +347,13 @@ def test_ice_geom_time_series_parsing(tmp_path):
 
 
 @pytest.mark.slow
-def test_ice_geom_time_series_steps(minimal_ice_sia_model):
+def test_ice_geom_time_series_steps(minimal_ice_model):
     """
     Protects: _updateIce selects the active interval for the current time and
     materialises the per-vertex glacier-geometry fields, stepping them as time
     advances (the time-dependent analogue of the precipitation maps).
     """
-    m = minimal_ice_sia_model
+    m = minimal_ice_model
     m._iceTimeSeries = [
         {"start": 0.0, "hela": (2000.0, None), "hice": (3000.0, None), "hterm": (1500.0, None)},
         {"start": 50.0, "hela": (1000.0, None), "hice": (2000.0, None), "hterm": (500.0, None)},
@@ -364,71 +369,242 @@ def test_ice_geom_time_series_steps(minimal_ice_sia_model):
     assert np.allclose(m.elaMesh, 1000.0) and np.allclose(m.termMesh, 500.0)
 
 
-@pytest.mark.slow
-def test_ice_seed_and_evolve(minimal_ice_seed_model):
+def test_ice_mfd_diagnostic(minimal_ice_model):
     """
-    Protects: a pre-existing ice thickness given via `ice.hinit` seeds iceHL on a
-    fresh start (before any solve), and the SIA solve then evolves it.
+    Protects: the diagnostic ('mfd') ice flow model — a non-dynamical glacial
+    driver. It routes the ELA accumulation into an ice discharge, derives a Bahr
+    thickness and a balance velocity, and feeds the velocity-based abrasion — with
+    no ice-dynamics solve. Must produce finite, non-negative ice with a positive velocity
+    and abrasion where ice forms, in a single routing solve (no substep loop).
     """
-    m = minimal_ice_seed_model
-    # The seed is applied during model init, before any time step.
-    assert np.allclose(m.iceHL.getArray(), 50.0), "hinit did not seed iceHL"
-
-    m.runProcesses()
+    from mpi4py import MPI
+    from gospl.flow.iceplex import IceMesh
+    m = minimal_ice_model
+    m.ice_Kg = 1.0e-4          # enable abrasion
+    m.tNow = m.tStart
+    IceMesh.iceAccumulation(m)
     H = m.iceHL.getArray()
-    # Still a valid ice field after evolving the seed.
-    assert np.isfinite(H).all() and (H >= -1.0e-9).all()
-    assert float(H.max()) > 0.0, "seeded ice vanished entirely"
+    ub = m.iceUbL.getArray()
+    fa = m.iceFAL.getArray()
+    abr = m.iceAbrL.getArray()
+    for arr in (H, ub, fa, abr):
+        assert np.isfinite(arr).all()
+        assert (arr >= -1.0e-9).all()
+    nice = MPI.COMM_WORLD.allreduce(int((H > 1.0).sum()), op=MPI.SUM)
+    assert nice > 0, "diagnostic mode formed no ice"
+    # Where there is ice, the balance velocity (and hence abrasion) is positive.
+    ubmax = MPI.COMM_WORLD.allreduce(float(ub.max()), op=MPI.MAX)
+    abrmax = MPI.COMM_WORLD.allreduce(float(abr.max()), op=MPI.MAX)
+    assert ubmax > 0.0 and abrmax > 0.0
+    # The discharge is a volume flux concentrated by routing (>> a single cell's
+    # local accumulation), i.e. ice converges downhill.
+    famax = MPI.COMM_WORLD.allreduce(float(fa.max()), op=MPI.MAX)
+    assert famax > 0.0
+
+
+def test_ice_mfd_dual_strata_till(minimal_ice_dual_model):
+    """
+    Protects: the diagnostic ('mfd') glacial driver end-to-end with dual
+    lithology + stratigraphy + till. Driving the SAME erosion/till machinery from
+    the cheap routing proxy must: form ice, abrade the bed, route
+    abraded rock into till deposited as moraine, conserve the solid AND the fine
+    (dual-lithology) budgets, and update the stratigraphic pile.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_dual_model
+    assert m.iceOn and m.ice_till_on and m.ice_Kg > 0.0
+    assert m.stratLith and m.stratNb > 0
+
+    te0, td0 = m._tillEroded, m._tillDeposited
+    stratH0 = m.stratH.copy()
+
+    m.runProcesses()                  # mfd ice -> abrasion -> till -> dual strata
+
+    # (A) The diagnostic driver formed ice, slid, and abraded.
+    g = lambda a, op=MPI.MAX: MPI.COMM_WORLD.allreduce(float(a), op=op)
+    assert g(m.iceHL.getArray().max()) > 1.0, "mfd formed no ice"
+    assert g(m.iceUbL.getArray().max()) > 0.0, "no basal velocity"
+    assert g(m.iceAbrL.getArray().max()) > 0.0, "no abrasion"
+
+    # (B) Till solid produced and conserved over the run (glacial-only counters;
+    # the shared fine budget is exercised by fluvial transport too, so it is
+    # checked in isolation below).
+    dte = MPI.COMM_WORLD.allreduce(m._tillEroded - te0, op=MPI.SUM)
+    dtd = MPI.COMM_WORLD.allreduce(m._tillDeposited - td0, op=MPI.SUM)
+    assert dte > 0.0, "no till produced under the mfd driver"
+    assert np.isclose(dte, dtd, rtol=1.0e-9), "till solid eroded != deposited"
+
+    # (C) Stratigraphy updated by the glacial run.
+    dH = (m.stratH - stratH0).sum(axis=1)
+    assert float(np.abs(dH).max()) > 0.0, "stratigraphy not updated"
+
+    # (D) Dual-lithology coupling: an isolated, deterministic glacialTill (fast
+    # ice up high, melt band lower) must conserve the FINE budget and lay a
+    # fine-bearing moraine into the stratigraphy.
+    zbed = m.hLocal.getArray().copy()
+    m.iceUbL.setArray(np.where(zbed > 2500.0, 0.1, 0.0))
+    m.iceMeltL.setArray(np.where((zbed > 1500.0) & (zbed < 2000.0), 1.0, 0.0))
+    fe0, fd0 = m._fineEroded, m._fineDeposited
+    stratHf0 = m.stratHf.copy()
+    m.glacialTill()
+    dfe = MPI.COMM_WORLD.allreduce(m._fineEroded - fe0, op=MPI.SUM)
+    dfd = MPI.COMM_WORLD.allreduce(m._fineDeposited - fd0, op=MPI.SUM)
+    assert dfe > 0.0, "no fine abraded; dual-lithology coupling inactive"
+    assert np.isclose(dfe, dfd, rtol=1.0e-6), "fine eroded != fine deposited"
+    dHf = (m.stratHf - stratHf0).sum(axis=1)
+    abl = (zbed > 1500.0) & (zbed < 2000.0)
+    assert float(dHf[abl].max()) > 0.0, "moraine carries no fine fraction"
+
+
+def test_ice_soil_combined(minimal_ice_soil_model):
+    """
+    Protects: the diagnostic ('mfd') glacial driver works alongside the
+    soil-aware non-linear SPL (`soilSPL`, `cptSoil`). `_glacialAbrasion` is hooked
+    into `erodepSPLsoil` and `glacialTill` runs in `runProcesses` regardless of
+    eroder, both driven by the mfd-set `iceUbL`/`iceMeltL`. The combined run must
+    complete, keep the soil layer and the glacial till both active, and conserve
+    the till solid.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_soil_model
+    assert m.cptSoil and m.iceOn
+    assert m.ice_till_on and m.ice_Kg > 0.0
+    te0, td0 = m._tillEroded, m._tillDeposited
+    m.runProcesses()                  # soilSPL erosion + mfd glacial abrasion + till
+
+    g = lambda a, op=MPI.MAX: MPI.COMM_WORLD.allreduce(float(a), op=op)
+    # Glacial driver active under the soil-coupled eroder.
+    assert g(m.iceUbL.getArray().max()) > 0.0, "no basal velocity"
+    assert g(m.iceAbrL.getArray().max()) > 0.0, "no abrasion"
+    # Soil layer is live (finite, non-negative thicknesses).
+    soil = m.Lsoil.getArray()
+    assert np.isfinite(soil).all() and (soil >= -1.0e-9).all()
+    # Glacial till produced and the solid conserved.
+    dte = MPI.COMM_WORLD.allreduce(m._tillEroded - te0, op=MPI.SUM)
+    dtd = MPI.COMM_WORLD.allreduce(m._tillDeposited - td0, op=MPI.SUM)
+    assert dte > 0.0, "no till produced under soilSPL"
+    assert np.isclose(dte, dtd, rtol=1.0e-9), "till solid eroded != deposited"
+
+
+def test_ice_lateral_erosion(minimal_ice_dual_model):
+    """
+    Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall
+    abrasion by adjacent fast ice (U-shaping). Off by default (Kl=0); when on it
+    must erode subaerial wall cells (little ice of their own, flanking fast ice),
+    feed that rock into the conserved till budget, and lower those wall cells.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_dual_model
+    A = lambda a: MPI.COMM_WORLD.allreduce(int(a), op=MPI.SUM)
+
+    # Off by default: no wall erosion.
+    m.ice_Kl = 0.0
+    m.tNow = m.tStart
+    from gospl.flow.iceplex import IceMesh
+    IceMesh.iceAccumulation(m)
+    assert A((m._glacialLateralErosion() > 0).sum()) == 0
+
+    # On: wall cells erode, conserved into till.
+    m.ice_Kl = 5.0e-2
+    elat = m._glacialLateralErosion()
+    nwall = A((elat > 0).sum())
+    assert nwall > 0, "lateral erosion eroded no wall cells"
+    # Lateral cells carry little ice of their own but a positive rate.
+    H = m.iceHL.getArray()
+    assert (H[elat > 0] <= 1.0 + 1.0e-9).all(), "lateral erosion hit thick-ice cells"
+
+    z0 = m.hLocal.getArray().copy()
+    te0, td0 = m._tillEroded, m._tillDeposited
+    m.glacialTill()
+    dz = m.hLocal.getArray() - z0
+    dte = MPI.COMM_WORLD.allreduce(m._tillEroded - te0, op=MPI.SUM)
+    dtd = MPI.COMM_WORLD.allreduce(m._tillDeposited - td0, op=MPI.SUM)
+    assert dte > 0.0 and np.isclose(dte, dtd, rtol=1.0e-9), "till not conserved with lateral erosion"
+    # At least some wall cells were lowered (valley widening).
+    assert A((dz[elat > 0] < -1.0e-9).sum()) > 0, "no wall cells lowered"
+
+
+def test_ice_meltwater_conserves(minimal_ice_model):
+    """
+    Protects: the discharge-conserving glacial meltwater delivered to the rivers
+    (`ice.melt_conserve`, default True). The water that fell as ice above the ELA
+    must return downstream as meltwater — Σ river-meltwater == Σ accumulation —
+    so the glacial water budget is closed (vs the precip-scaled ablation, which
+    loses water). Distinct from `iceMeltL` (the till melt-out pattern).
+    """
+    from mpi4py import MPI
+    m = minimal_ice_model
+    m.tNow = m.tStart
+    from gospl.flow.iceplex import IceMesh
+    IceMesh.iceAccumulation(m)
+
+    owned = m.inIDs == 1
+    _, mdot = m._iceMassBalance(2000.0, 3000.0)
+    A = MPI.COMM_WORLD.allreduce(
+        float(np.sum((np.maximum(mdot, 0.0) * m.larea)[owned])), op=MPI.SUM
+    )
+    W = MPI.COMM_WORLD.allreduce(
+        float(np.sum(m.iceMeltRiverL.getArray()[owned])), op=MPI.SUM
+    )
+    assert A > 0.0, "no accumulation; test vacuous"
+    assert np.isclose(W, A, rtol=1.0e-6), (
+        f"river meltwater {W:.4e} != accumulation {A:.4e} (water not conserved)"
+    )
+
+    # Legacy precip-scaled mode: meltwater is the local ablation (generally < A).
+    m.ice_melt_conserve = False
+    IceMesh.iceAccumulation(m)
+    W2 = MPI.COMM_WORLD.allreduce(
+        float(np.sum(m.iceMeltRiverL.getArray()[owned])), op=MPI.SUM
+    )
+    assert np.isfinite(W2) and W2 >= 0.0
 
 
 @pytest.mark.slow
-def test_ice_terminus_sea_level_floor(minimal_ice_sia_model):
+def test_ice_terminus_sea_level_floor(minimal_ice_model):
     """
-    Protects: the terminus floor is max(hterm, sea level) — no land ice persists
-    below the sea surface, and a prescribed hterm below sea level is raised to
-    sea level. The unprescribed default resolves to the sea-level position.
+    Protects: the terminus floor is max(hterm, sea level) — no ice is kept below
+    the sea surface, and a prescribed hterm below sea level is raised to sea
+    level. The unprescribed default resolves to the sea-level position. The clamp
+    is applied in the diagnostic driver _iceFlowMFD.
     """
-    m = minimal_ice_sia_model
+    m = minimal_ice_model
     zbed = m.hLocal.getArray().copy()
-    n = m.lpoints
-    H_in = np.full(n, 100.0)            # ice everywhere to start
-    mdot0 = np.zeros(n)
 
     # Sea level at 500 m; terminus unprescribed (sentinel) -> floor = sea level.
     m.sealevel = 500.0
-    m._iceSIAFinalize(H_in.copy(), zbed, mdot0, -1.0e10, m.sia_slide, m.sia_glen)
-    H = m.iceHL.getArray()
-    assert (H[zbed < 500.0] == 0.0).all(), "ice kept below sea level"
-    if (zbed >= 500.0).any():
-        assert (H[zbed >= 500.0] > 0.0).any(), "ice wrongly removed above sea level"
+    m._iceFlowMFD(2000.0, 3000.0, -1.0e10)     # elaH, iceH, iceT (sentinel)
+    assert (m.iceHL.getArray()[zbed < 500.0] == 0.0).all(), "ice kept below sea level"
 
     # Prescribed hterm BELOW sea level is raised to sea level (floor stays 500).
-    m._iceSIAFinalize(H_in.copy(), zbed, mdot0, 100.0, m.sia_slide, m.sia_glen)
-    H = m.iceHL.getArray()
-    assert (H[zbed < 500.0] == 0.0).all(), "hterm below sea level not raised to sea level"
+    m._iceFlowMFD(2000.0, 3000.0, 100.0)
+    assert (m.iceHL.getArray()[zbed < 500.0] == 0.0).all(), (
+        "hterm below sea level not raised to sea level"
+    )
 
     # Prescribed hterm ABOVE sea level is respected (floor = hterm = 800).
-    m._iceSIAFinalize(H_in.copy(), zbed, mdot0, 800.0, m.sia_slide, m.sia_glen)
-    H = m.iceHL.getArray()
-    assert (H[zbed < 800.0] == 0.0).all(), "prescribed terminus above sea level not honoured"
+    m._iceFlowMFD(2000.0, 3000.0, 800.0)
+    assert (m.iceHL.getArray()[zbed < 800.0] == 0.0).all(), (
+        "prescribed terminus above sea level not honoured"
+    )
 
 
 @pytest.mark.slow
-def test_ice_spatial_smb(minimal_ice_sia_model):
+def test_ice_spatial_smb(minimal_ice_model):
     """
-    Protects: the SIA surface mass balance is per-vertex when the ELA / ice-cap
+    Protects: the surface mass balance is per-vertex when the ELA / ice-cap
     altitude are maps (the tropical-vs-polar fix). A constant-array ELA must
     reproduce the uniform-scalar result exactly, and a spatially-high ELA must
     suppress accumulation locally.
     """
-    m = minimal_ice_sia_model
+    m = minimal_ice_model
     npts = m.lpoints
 
     # Array path with constant fields == scalar path (byte-identical SMB).
-    _, _, _, _, mdot_scalar = m._iceSIAParams(2000.0, 3000.0)
+    _, mdot_scalar = m._iceMassBalance(2000.0, 3000.0)
     elaA = np.full(npts, 2000.0)
     iceA = np.full(npts, 3000.0)
-    _, _, _, _, mdot_arr = m._iceSIAParams(elaA, iceA)
+    _, mdot_arr = m._iceMassBalance(elaA, iceA)
     assert np.allclose(mdot_scalar, mdot_arr), "array SMB must match scalar SMB"
 
     # Spatially-high ELA suppresses accumulation: split the domain and raise the
@@ -439,51 +615,48 @@ def test_ice_spatial_smb(minimal_ice_sia_model):
     # Keep the unblocked accumulation band identical to the scalar reference
     # (hela=2000, hice=3000) so it must reproduce that SMB exactly.
     iceS = np.where(blocked, elaS + 800.0, 3000.0)
-    _, _, _, _, mdot_s = m._iceSIAParams(elaS, iceS)
+    _, mdot_s = m._iceMassBalance(elaS, iceS)
     assert (mdot_s[blocked] <= 0.0).all(), "no accumulation where the ELA is out of reach"
     # Where the ELA is normal, the SMB matches the uniform-ELA result.
     assert np.allclose(mdot_s[~blocked], mdot_scalar[~blocked])
 
 
 @pytest.mark.slow
-def test_ice_sia_runs_and_invariants(minimal_ice_sia_model):
+def test_ice_runs_and_invariants(minimal_ice_model):
     """
-    Protects: DESIGN_ICE_SHEET.md Phase 1 — the SIA ice-sheet model runs
-    end-to-end (the dynamic ice_flux thickness evolution) and preserves the
-    physical invariants of a free-boundary ice solve.
+    Protects: the diagnostic glacial model runs
+    end-to-end (the diagnostic glacial driver) and preserves the
+    physical invariants of the glacial state.
 
     Invariants after a run:
-      - ice thickness non-negative and finite everywhere (free boundary, no
-        blow-up from the explicit subcycling);
+      - ice thickness non-negative and finite everywhere;
       - ice actually forms (max H > 0);
-      - no ice below the glacier terminus elevation (terminus clamp);
-      - ice only where it can accumulate (above the ELA region).
+      - no ice below the glacier terminus elevation (terminus clamp).
+    (Ice DOES extend below the ELA — the discharge routes downhill into the
+    ablation zone toward the terminus, as a real glacier does.)
     """
-    model = minimal_ice_sia_model
+    model = minimal_ice_model
     assert model.iceOn is True
 
     model.runProcesses()
 
     H = model.iceHL.getArray()
     zbed = model.hLocal.getArray()
-    elaH = float(model.elaH(model.tNow))
     iceT = float(model.iceT(model.tNow))
 
-    assert np.isfinite(H).all(), "SIA ice thickness went non-finite (blow-up)."
+    assert np.isfinite(H).all(), "ice thickness went non-finite (blow-up)."
     assert (H >= -1.0e-9).all(), "Negative ice thickness (free boundary violated)."
-    assert float(H.max()) > 0.0, "SIA produced no ice."
+    assert float(H.max()) > 0.0, "produced no ice."
     assert not (H[zbed < iceT] > 1.0e-6).any(), "Ice below the glacier terminus."
-    # Ice only where accumulation is possible (at/above the ELA).
-    assert not (H[zbed < elaH] > 1.0e-6).any(), "Ice below the ELA."
 
-    # Basal sliding speed (Phase 2): finite, non-negative, and confined to ice.
+    # Basal sliding speed: finite, non-negative, and confined to ice.
     ub = model.iceUbL.getArray()
     assert np.isfinite(ub).all() and (ub >= -1.0e-12).all()
     assert not (ub[H <= 1.0e-2] > 0.0).any(), "Basal velocity where there is no ice."
 
 
 @pytest.mark.slow
-def test_ice_glacial_abrasion(minimal_ice_sia_model):
+def test_ice_glacial_abrasion(minimal_ice_model):
     """
     Protects: DESIGN_ICE_SHEET.md Phase 3 — velocity-based glacial abrasion
     E = Kg·|u_b|^l adds incision to Eb exactly where ice slides (and only there),
@@ -492,7 +665,8 @@ def test_ice_glacial_abrasion(minimal_ice_sia_model):
     Drives _glacialAbrasion with a known basal-velocity field so the result is
     analytic: Eb = −Kg·u_b (l=1) on the sliding cells, 0 elsewhere.
     """
-    m = minimal_ice_sia_model
+    m = minimal_ice_model
+    m.ice_till_on = False          # test the direct-to-fluvial abrasion path
     zbed = m.hLocal.getArray().copy()
     ub = np.where(zbed > 2000.0, 0.1, 0.0)     # 0.1 m/yr sliding above 2000 m
     m.iceUbL.setArray(ub.copy())
@@ -532,7 +706,7 @@ def test_ice_glacial_till_conserves(minimal_ice_till_model):
     """
     m = minimal_ice_till_model
     assert m.iceOn and m.ice_till_on and m.ice_Kg > 0.0
-    # Full SIA + till run must not break.
+    # Full glacial + till run must not break.
     m.runProcesses()
 
     # Deterministic conservation check: fast ice up high, ablation band lower.
@@ -574,7 +748,7 @@ def test_ice_glacial_till_conserves(minimal_ice_till_model):
 
 @pytest.mark.slow
 @pytest.mark.slow
-def test_ice_till_routing(minimal_ice_sia_model):
+def test_ice_till_routing(minimal_ice_model):
     """
     Protects: catchment-aware till routing (iceplex._routeTill, `till.route`).
     Abraded till is transported down the ice-surface flow network and melts out
@@ -586,7 +760,7 @@ def test_ice_till_routing(minimal_ice_sia_model):
     from mpi4py import MPI
     from gospl._fortran import mfdreceivers
 
-    m = minimal_ice_sia_model
+    m = minimal_ice_model
     zbed = m.hLocal.getArray().copy()
     n = m.lpoints
     owned = m.inIDs == 1
@@ -630,14 +804,14 @@ def test_ice_till_routing(minimal_ice_sia_model):
 
 
 @pytest.mark.slow
-def test_ice_till_routing_conserves(minimal_ice_sia_model):
+def test_ice_till_routing_conserves(minimal_ice_model):
     """
     Protects: glacialTill with `till.route` is mass-conserving end-to-end (bulk
     bed mode) — abraded rock routed down-ice and deposited at the termini leaves
     the net bed-volume change zero (eroded == deposited).
     """
     from mpi4py import MPI
-    m = minimal_ice_sia_model
+    m = minimal_ice_model
     m.ice_till_on = True
     m.ice_till_route = True
     m.ice_Kg = 1.0e-3
@@ -689,7 +863,7 @@ def test_ice_glacial_till_dual_lithology(minimal_ice_dual_model):
     m = minimal_ice_dual_model
     assert m.iceOn and m.ice_till_on and m.ice_Kg > 0.0
     assert m.stratLith and m.stratNb > 0
-    # Full SIA + till + dual-lithology run must not break.
+    # Full glacial + till + dual-lithology run must not break.
     m.runProcesses()
 
     # Deterministic check: fast ice up high (abrasion), melt band lower
@@ -732,41 +906,38 @@ def test_ice_glacial_till_dual_lithology(minimal_ice_dual_model):
     assert float(dHf[abl].max()) > 0.0, "moraine carries no fine fraction"
 
 
-@pytest.mark.slow
-def test_ice_sia_volume_conservation(minimal_ice_sia_model):
+def test_ice_accumulation_scale_cap(minimal_ice_model):
     """
-    Protects: DESIGN_ICE_SHEET.md Phase 6 — the SIA ice flux is mass-conservative
-    (it redistributes ice, it does not create or destroy it). Halfar-style check:
-    with zero surface mass balance and the terminus clamp disabled, stepping an
-    ice dome must conserve ice volume to the flux-numerics floor.
+    Protects: the SMB accumulation controls. `accum_factor` scales and `accum_max`
+    caps the POSITIVE (accumulation) surface mass balance only; ablation (negative
+    mdot) is untouched. Defaults (1.0, None) are a no-op.
     """
-    from mpi4py import MPI
-    m = minimal_ice_sia_model
-    zbed = m.hLocal.getArray().copy()
-    m.rainVal = np.zeros_like(m.rainVal)       # zero SMB -> pure flux redistribution
-    m.iceT = lambda t: 0.0                     # disable terminus clamp
-    H0 = np.where(zbed > 2500.0, 300.0, 0.0)
-    owned = m.inIDs == 1
-    larea = m.larea
+    m = minimal_ice_model
+    # Baseline accumulation (no scaling).
+    m.ice_accum_factor, m.ice_accum_max = 1.0, None
+    _, mdot0 = m._iceMassBalance(2000.0, 3000.0)
+    acc0 = mdot0[mdot0 > 0.0]
+    abl0 = mdot0[mdot0 < 0.0]
 
-    V0 = MPI.COMM_WORLD.allreduce(float(np.sum((H0 * larea)[owned])), op=MPI.SUM)
-    m.iceHL.setArray(H0.copy())
-    m._iceFlowSIA(0.0, 1000.0, 0.0)            # elaH, iceH, iceT
-    H1 = m.iceHL.getArray()
-    V1 = MPI.COMM_WORLD.allreduce(float(np.sum((H1 * larea)[owned])), op=MPI.SUM)
+    # Halve the accumulation; ablation unchanged.
+    m.ice_accum_factor, m.ice_accum_max = 0.5, None
+    _, mdot1 = m._iceMassBalance(2000.0, 3000.0)
+    assert np.allclose(mdot1[mdot1 > 0.0], 0.5 * acc0) if acc0.size else True
+    assert np.allclose(mdot1[mdot1 < 0.0], abl0) if abl0.size else True
 
-    assert V0 > 0.0
-    assert abs(V1 - V0) / V0 < 1.0e-4, (
-        f"SIA flux not volume-conserving: V0={V0:.4e} V1={V1:.4e}"
-    )
-    # The flux actually moved ice (not a frozen field).
-    assert float(np.max(np.abs(H1 - H0))) > 0.0
+    # Cap the accumulation; nothing above the cap, ablation unchanged.
+    if acc0.size:
+        cap = 0.5 * float(acc0.max())
+        m.ice_accum_factor, m.ice_accum_max = 1.0, cap
+        _, mdot2 = m._iceMassBalance(2000.0, 3000.0)
+        assert float(mdot2[mdot2 > 0.0].max()) <= cap + 1.0e-12
+        assert np.allclose(mdot2[mdot2 < 0.0], abl0)
 
 
 @pytest.mark.slow
-def test_ice_sia_flexure_loading(minimal_ice_flex_model):
+def test_ice_flexure_loading(minimal_ice_flex_model):
     """
-    Protects: DESIGN_ICE_SHEET.md Phase 5 — the SIA ice thickness feeds the
+    Protects: the diagnostic ice thickness feeds the
     existing flexural-isostasy ice load (applyFlexure converts the iceHL change
     to an equivalent sediment load). The run produces a finite flexural field
     with subsidence (negative deflection) under the load.
