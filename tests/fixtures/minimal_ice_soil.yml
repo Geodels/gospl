@@ -1,0 +1,54 @@
+name: minimal ice (mfd) + soil-aware SPL test
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 40
+    tout: 50
+    dt: 10.
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 1.0
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+soil:
+    soilK: 8.0e-6
+    maxProd: 50.e-6
+    depthProd: 0.5
+    uniform: 1.0
+    tempMap: ['soiltemp', 't']
+    activation: 40.e3
+    tempRef: 15.0
+
+ice:
+    flow_model: mfd
+    hela: 2000.
+    hice: 3000.
+    hterm: 1500.
+    abrasion:
+        Kg: 1.0e-3
+        l: 1.0
+    till:
+        on: True
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'ice_soil_out'

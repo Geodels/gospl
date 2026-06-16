@@ -173,6 +173,17 @@ def minimal_ice_dual_model():
 
 
 @pytest.fixture
+def minimal_ice_soil_model():
+    """
+    Minimal model combining the diagnostic ('mfd') glacial driver with the
+    soil-aware non-linear SPL (`soil:` block, cptSoil) + glacial abrasion + till.
+    Confirms glacial erosion/till coexists with soil production. See
+    minimal_ice_soil.yml.
+    """
+    return _instantiate("minimal_ice_soil.yml")
+
+
+@pytest.fixture
 def minimal_prov_model():
     """
     Minimal model with in-model provenance tracers on (`provenance:`, Phase 0).

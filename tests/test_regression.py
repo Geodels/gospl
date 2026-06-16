@@ -470,6 +470,36 @@ def test_ice_mfd_dual_strata_till(minimal_ice_dual_model):
     assert float(dHf[abl].max()) > 0.0, "moraine carries no fine fraction"
 
 
+def test_ice_soil_combined(minimal_ice_soil_model):
+    """
+    Protects: the diagnostic ('mfd') glacial driver works alongside the
+    soil-aware non-linear SPL (`soilSPL`, `cptSoil`). `_glacialAbrasion` is hooked
+    into `erodepSPLsoil` and `glacialTill` runs in `runProcesses` regardless of
+    eroder, both driven by the mfd-set `iceUbL`/`iceMeltL`. The combined run must
+    complete, keep the soil layer and the glacial till both active, and conserve
+    the till solid.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_soil_model
+    assert m.cptSoil and m.iceOn and m.ice_flow_model == "mfd"
+    assert m.ice_till_on and m.ice_Kg > 0.0
+    te0, td0 = m._tillEroded, m._tillDeposited
+    m.runProcesses()                  # soilSPL erosion + mfd glacial abrasion + till
+
+    g = lambda a, op=MPI.MAX: MPI.COMM_WORLD.allreduce(float(a), op=op)
+    # Glacial driver active under the soil-coupled eroder.
+    assert g(m.iceUbL.getArray().max()) > 0.0, "no basal velocity"
+    assert g(m.iceAbrL.getArray().max()) > 0.0, "no abrasion"
+    # Soil layer is live (finite, non-negative thicknesses).
+    soil = m.Lsoil.getArray()
+    assert np.isfinite(soil).all() and (soil >= -1.0e-9).all()
+    # Glacial till produced and the solid conserved.
+    dte = MPI.COMM_WORLD.allreduce(m._tillEroded - te0, op=MPI.SUM)
+    dtd = MPI.COMM_WORLD.allreduce(m._tillDeposited - td0, op=MPI.SUM)
+    assert dte > 0.0, "no till produced under soilSPL"
+    assert np.isclose(dte, dtd, rtol=1.0e-9), "till solid eroded != deposited"
+
+
 @pytest.mark.slow
 def test_ice_terminus_sea_level_floor(minimal_ice_sia_model):
     """
