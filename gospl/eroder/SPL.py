@@ -200,7 +200,8 @@ class SPL(object):
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
             if MPIrank == 0:
                 print(
-                    "LinearSolver failed to converge after iterations",
+                    "Detachment-limited SPL KSP (TFQMR/fieldsplit) failed to "
+                    "converge after iterations",
                     ksp.getIterationNumber(),
                     flush=True,
                 )
