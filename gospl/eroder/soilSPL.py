@@ -72,7 +72,12 @@ class soilSPL(object):
         if self.tempFile is not None:
             Tref = self.tempRef + 273.15
             loadData = np.load(self.tempFile)
-            T = loadData[self.tempData] + 273.15 # Conversion to Kelvin
+            # Subset the full-mesh temperature map to this rank's local nodes
+            # (mirrors the soilFile branch above). Without [self.locIDs] the
+            # derived prodSoil stays global (mpoints) and broadcasts against
+            # the local hSoil/rainVal arrays only when MPIsize==1; in parallel
+            # (lpoints < mpoints) it raises a ValueError shape mismatch.
+            T = loadData[self.tempData][self.locIDs] + 273.15  # Conversion to Kelvin
             # Compute Arrhenius term, including Ea / R T0 term
             R = 8.314  # Gas constant (J/mol/K)
             Arr_terms = self.energyAct * (1./Tref - 1./T) / R
