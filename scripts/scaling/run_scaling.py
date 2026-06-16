@@ -91,7 +91,18 @@ def main(argv=None):
 
     # ---- bound the run -------------------------------------------------------
     if args.steps and args.steps > 0:
-        model.tEnd = model.tStart + args.steps * model.dt
+        # Cap the run at `steps` timesteps, but never extend past the input's
+        # own end time: the forcing interpolants (sea level, tectonics, rain)
+        # are only defined over the YAML's time range, so running beyond it
+        # raises a scipy "above the interpolation range" ValueError.
+        capped = model.tStart + args.steps * model.dt
+        model.tEnd = min(model.tEnd, capped)
+        if rank == 0 and capped > model.tEnd:
+            print(
+                "[scaling] --steps %d (%.0f) exceeds the input end time; "
+                "capping at tEnd=%.0f" % (args.steps, capped, model.tEnd),
+                flush=True,
+            )
     if args.io == "off":
         # Push every output trigger past the (shortened) end time so visModel
         # and the stratal writer never fire. The single step-0 write that
