@@ -156,6 +156,8 @@ Ice sheets and glacial erosion
                     glen: 3.0
                     # cfl: 0.5            # explicit substep accuracy (optional)
                     # max_substeps: 500   # substep cap per goSPL step (optional)
+                    # accum_factor: 1.0   # precip->ice accumulation fraction (optional)
+                    # accum_max: 2.0      # cap accumulation rate, m ice/yr (optional)
                 abrasion:
                     Kg: 1.0e-4
                     l: 1.0
@@ -176,22 +178,23 @@ Ice sheets and glacial erosion
         d. ``Aglen`` is the Glen's-law rate factor (ice softness) controlling internal deformation,
         e. ``slide`` is the basal-sliding coefficient,
         f. ``glen`` is the Glen's-law exponent :math:`n` (usually 3),
-        g. ``cfl`` (default ``0.5``) sets the explicit-substep size as a fraction of the time for a cell to shed its ice — an accuracy/cost knob, not a stability limit (the flux limiter keeps the solve stable and positive at any size); ``max_substeps`` (default ``500``) caps the substeps per goSPL step.
+        g. ``cfl`` (default ``0.5``) sets the explicit-substep size as a fraction of the time for a cell to shed (or gain) its ice — an accuracy/cost knob, not a stability limit (the flux limiter keeps the solve stable and positive at any size); ``max_substeps`` (default ``500``) caps the substeps per goSPL step. Thick (km-scale) ice is genuinely stiff: it needs more substeps for accuracy, so lower ``cfl`` (e.g. ``0.1``) for thick ice, accepting a higher cost.
+        h. ``accum_factor`` (default ``1.0``) and ``accum_max`` (default unset) control the **accumulation** part of the surface mass balance only (ablation is untouched). Full precipitation is rarely all snow/ice, so ``accum_factor`` is a precipitation→ice conversion fraction and ``accum_max`` caps the accumulation rate (m ice/yr) at a realistic ceiling (real ice sheets accumulate ~0.1–2 m/yr). **Set these for high-precipitation runs** — converting several m/yr of rainfall directly to ice produces unphysically thick, expensive-to-solve ice.
 
         The ``abrasion`` sub-block enables velocity-based glacial erosion
         :math:`E_g = K_g\,|u_b|^{l}` (off by default, ``Kg: 0``):
 
-        h. ``Kg`` is the abrasion coefficient (default ``0.0`` — set it to enable glacial erosion),
-        i. ``l`` is the basal-sliding-velocity exponent (default ``1.0``).
+        i. ``Kg`` is the abrasion coefficient (default ``0.0`` — set it to enable glacial erosion),
+        j. ``l`` is the basal-sliding-velocity exponent (default ``1.0``).
 
         The ``till`` sub-block controls glacial sediment (default off):
 
-        j. ``on`` — when ``True``, abraded rock is carried as **till** and
+        k. ``on`` — when ``True``, abraded rock is carried as **till** and
            deposited as a moraine where the ice melts out (the ablation zone),
            conserving the abraded volume. With stratigraphy on, the till is
            layered into the stratigraphic record and split into the coarse/fine
            lithology fractions when dual lithology is enabled.
-        k. ``route`` (default ``False``) — controls how the till is distributed.
+        l. ``route`` (default ``False``) — controls how the till is distributed.
            ``False`` spreads it across the whole ablation zone weighted by the
            meltwater rate (appropriate when a cell aggregates a glacier, i.e.
            continental/global resolution). ``True`` instead **routes the till
@@ -202,10 +205,10 @@ Ice sheets and glacial erosion
 
         The glacier geometry can instead be read from a file:
 
-        j. ``evol`` is the glacier characteristics over time (`csv` file). When
+        m. ``evol`` is the glacier characteristics over time (`csv` file). When
            used, ``hterm``, ``hela`` and ``hice`` are not required because they
            are defined in this file.
-        k. ``hinit`` (optional) is a **pre-existing ice thickness** (m) — a
+        n. ``hinit`` (optional) is a **pre-existing ice thickness** (m) — a
            uniform scalar or a per-vertex ``[file, key]`` map — used to seed the
            ice at the start of the run; the SIA solve then evolves it. Without
            it the ice grows in from zero. The equilibrium-line geometry

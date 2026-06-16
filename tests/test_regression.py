@@ -835,6 +835,34 @@ def test_ice_sia_explicit_no_substep_stall(minimal_ice_sia_model):
     assert m._sia_nsub < m.sia_max_substeps // 4, "substep stall under ablation"
 
 
+def test_ice_sia_accumulation_scale_cap(minimal_ice_sia_model):
+    """
+    Protects: the SMB accumulation controls. `accum_factor` scales and `accum_max`
+    caps the POSITIVE (accumulation) surface mass balance only; ablation (negative
+    mdot) is untouched. Defaults (1.0, None) are a no-op.
+    """
+    m = minimal_ice_sia_model
+    # Baseline accumulation (no scaling).
+    m.sia_accum_factor, m.sia_accum_max = 1.0, None
+    _, _, _, _, mdot0 = m._iceSIAParams(2000.0, 3000.0)
+    acc0 = mdot0[mdot0 > 0.0]
+    abl0 = mdot0[mdot0 < 0.0]
+
+    # Halve the accumulation; ablation unchanged.
+    m.sia_accum_factor, m.sia_accum_max = 0.5, None
+    _, _, _, _, mdot1 = m._iceSIAParams(2000.0, 3000.0)
+    assert np.allclose(mdot1[mdot1 > 0.0], 0.5 * acc0) if acc0.size else True
+    assert np.allclose(mdot1[mdot1 < 0.0], abl0) if abl0.size else True
+
+    # Cap the accumulation; nothing above the cap, ablation unchanged.
+    if acc0.size:
+        cap = 0.5 * float(acc0.max())
+        m.sia_accum_factor, m.sia_accum_max = 1.0, cap
+        _, _, _, _, mdot2 = m._iceSIAParams(2000.0, 3000.0)
+        assert float(mdot2[mdot2 > 0.0].max()) <= cap + 1.0e-12
+        assert np.allclose(mdot2[mdot2 < 0.0], abl0)
+
+
 @pytest.mark.slow
 def test_ice_sia_flexure_loading(minimal_ice_flex_model):
     """

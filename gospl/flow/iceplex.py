@@ -132,6 +132,15 @@ class IceMesh(object):
         ramp = np.where(denom > 0.0, (zbed - elaH) / safe, 0.0)
         ramp = np.minimum(ramp, 1.0)
         mdot = self.rainVal * ramp                        # surface mass balance (m ice/yr)
+        # Scale / cap the ACCUMULATION (positive mdot) to realistic ice rates:
+        # full precipitation is rarely all snow/ice, so `accum_factor` converts
+        # precipitation to ice accumulation and `accum_max` caps it. Ablation
+        # (negative mdot) is left untouched. Defaults (1.0, None) are a no-op.
+        if self.sia_accum_factor != 1.0 or self.sia_accum_max is not None:
+            acc = np.maximum(mdot, 0.0) * self.sia_accum_factor
+            if self.sia_accum_max is not None:
+                acc = np.minimum(acc, self.sia_accum_max)
+            mdot = np.where(mdot > 0.0, acc, mdot)
         return n, ad, as_, zbed, mdot
 
     def _iceSIAFinalize(self, H, zbed, mdot, iceT, as_, n):

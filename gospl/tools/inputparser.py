@@ -1779,6 +1779,14 @@ class ReadYaml(object):
             # accuracy/cost knob, not a stability limit) and the substep cap.
             self.sia_cfl = siaDict.get("cfl", 0.5)
             self.sia_max_substeps = int(siaDict.get("max_substeps", 500))
+            # Surface-mass-balance accumulation controls (applied to the positive
+            # ELA ramp only; ablation is unchanged). `accum_factor` is a
+            # precipitation->ice conversion fraction (full precipitation is rarely
+            # all snow/ice); `accum_max` caps the accumulation rate (m ice/yr) at a
+            # realistic ceiling. Defaults (1.0, no cap) preserve prior behaviour.
+            self.sia_accum_factor = float(siaDict.get("accum_factor", 1.0))
+            am = siaDict.get("accum_max", None)
+            self.sia_accum_max = None if am is None else float(am)
 
             abrDict = iceDict.get("abrasion", {})
             self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
@@ -1822,6 +1830,8 @@ class ReadYaml(object):
             self.sia_glen = 3.0
             self.sia_cfl = 0.5
             self.sia_max_substeps = 500
+            self.sia_accum_factor = 1.0
+            self.sia_accum_max = None
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
             self.ice_till_on = False
