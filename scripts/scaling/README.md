@@ -82,6 +82,35 @@ mpirun -n 1 python scripts/scaling/run_scaling.py \
    → console table, `results/scaling/scaling_summary.{csv,md}`, and
    `scaling_speedup.png` / `scaling_phases.png`.
 
+### Preconfigured instances (do20, untracked)
+
+`gadi_scaling.pbs` / `submit_sweep.sh` are the generic, project-agnostic
+harness. Alongside them live a couple of **do20-preconfigured instances** of the
+same harness for specific campaigns — they hardcode `#PBS -P do20`, the
+`scratch/do20+gdata/do20` storage, and a default input path, so a do20 user just
+edits the input and submits. They are **left untracked** in git (machine-/
+project-specific run config, not part of the published harness):
+
+| File | Campaign |
+|---|---|
+| `gadi_earth.pbs` + `submit_earth_ab.sh` | A/B-compare two goSPL builds (baseline vs `#447` gather-to-root) on the "Global soil 10 km" earth input — validates the per-rank-RSS / flexure+sea win at high rank counts. |
+| `gadi_ice.pbs` + `submit_ice_sweep.sh` | Single-build **strong-scaling sweep of the diagnostic-ice run**. The local workstation sweep is memory-bandwidth bound past ~4 cores (dominant phases sea/sed/flow/erosion; ice itself ~9%), so the multi-node Gadi points are where the real verdict lives. |
+
+```bash
+# ice strong-scaling sweep (do20): intra-node ramp + 1/2/4 nodes, jobs chained
+INPUT=/scratch/do20/$USER/scaling/ice.yml \
+GOSPL_VENV=$HOME/envi_gospl/bin/activate \
+  ./submit_ice_sweep.sh                       # ranks 1 2 4 8 16 24 48 96 192
+
+python analyze_scaling.py $PWD/ice_scaling -o results/ice_scaling
+```
+
+`submit_ice_sweep.sh` defaults `DEPEND=1` (chains jobs one-at-a-time for clean
+timing), sizes mem `n×4 GB` sub-node / `nodes×190 GB` multi-node with a 16 GB
+floor for the small-rank init, and tags every record `ice`. The input must carry
+an `ice:` block (the diagnostic glacial model — there is no `flow_model`/`sia`
+selector). Container mode: add `MODE=container CONTAINER=<.sif>`.
+
 ## Reading the results
 
 - **Efficiency falling off a cliff at some p** → that's where communication /
