@@ -176,8 +176,8 @@ Ice sheets and glacial erosion
                     # Kl: 0.0          # lateral (valley-wall) erosion coeff -> U-shaping
                     # lat_l: 1.0        # lateral velocity exponent (defaults to l)
                 till:
-                    on: True
-                    route: False
+                    on: True          # default True (set False -> abrasion goes straight to rivers)
+                    route: True       # default True (catchment-routed; False = global melt-spread)
 
         ``flow_model`` selects how ice is computed: ``mfd`` (default) is the
         diagnostic proxy (route the accumulation into an ice discharge, then a
@@ -212,21 +212,24 @@ Ice sheets and glacial erosion
         j. ``l`` is the basal-sliding-velocity exponent (default ``1.0``),
         k. ``Kl`` is the **lateral** (valley-wall) erosion coefficient (default ``0.0`` = off). Vertical abrasion only deepens the trough; ``Kl > 0`` adds erosion of the *walls* flanking fast ice — each wall cell (little ice of its own) is abraded at ``Kl·u_b,neighbour^{lat\_l}``, tapered by how much of the wall is in contact with the neighbouring ice column — which **widens glaciated valleys toward a U-profile**. The eroded wall rock joins the same conserved till → moraine budget. ``lat_l`` (default = ``l``) is its velocity exponent.
 
-        The ``till`` sub-block controls glacial sediment (default off):
+        The ``till`` sub-block controls glacial sediment (on by default, but
+        inert until abrasion is enabled with ``Kg > 0``):
 
-        l. ``on`` — when ``True``, abraded rock is carried as **till** and
+        l. ``on`` (default ``True``) — abraded rock is carried as **till** and
            deposited as a moraine where the ice melts out (the ablation zone),
            conserving the abraded volume. With stratigraphy on, the till is
            layered into the stratigraphic record and split into the coarse/fine
-           lithology fractions when dual lithology is enabled.
-        m. ``route`` (default ``False``) — controls how the till is distributed.
-           ``False`` spreads it across the whole ablation zone weighted by the
-           meltwater rate (appropriate when a cell aggregates a glacier, i.e.
-           continental/global resolution). ``True`` instead **routes the till
-           down the ice-surface flow network** and melts it out toward each
-           catchment's terminus, building moraine at the actual ice margins — for
-           high-resolution (sub-km) regional runs where individual glacier
-           catchments and termini are resolved. Both conserve mass.
+           lithology fractions when dual lithology is enabled. Set ``False`` to
+           instead send abrasion straight into the fluvial sediment system.
+        m. ``route`` (default ``True``) — controls how the till is distributed.
+           ``True`` **routes the till down the ice-surface flow network** and
+           melts it out toward each catchment's terminus, so deposition stays
+           connected to the upstream erosion (correct on multi-glacier / global
+           domains). ``False`` instead spreads the **global** abraded volume
+           across the whole ablation zone weighted by the meltwater rate — cheaper
+           (no extra solve) but it decouples erosion and deposition across
+           separate ice masses, so prefer it only on a single-ice-mass domain.
+           Both conserve mass.
 
         The glacier geometry can instead be read from a file:
 

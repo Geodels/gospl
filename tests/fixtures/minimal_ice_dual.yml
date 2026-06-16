@@ -45,6 +45,7 @@ ice:
         l: 1.0
     till:
         on: True
+        route: False   # melt-weighted spreading (default is now route: True)
 
 sea:
     position: -100.

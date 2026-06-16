@@ -276,8 +276,11 @@ def test_ice_opt_in():
     p._readIce()
     assert p.iceOn is True
     assert p.sia_Aglen == 1.0e-16 and p.sia_glen == 3.0
-    assert p.ice_Kg == 0.0 and p.ice_till_on is False
-    assert p.ice_till_route is False          # melt-weighted spreading by default
+    # Abrasion off by default (Kg=0); till + catchment routing ON by default
+    # (so enabling abrasion gives the complete, spatially-coherent glacial cycle).
+    assert p.ice_Kg == 0.0 and p.ice_Kl == 0.0
+    assert p.ice_till_on is True
+    assert p.ice_till_route is True
     # Terminus is unprescribed -> sentinel, resolved to the sea-level position
     # at runtime (so ice is not silently truncated above sea level).
     assert float(p.iceT(p.tStart)) < -1.0e9
@@ -651,6 +654,7 @@ def test_ice_glacial_abrasion(minimal_ice_sia_model):
     analytic: Eb = −Kg·u_b (l=1) on the sliding cells, 0 elsewhere.
     """
     m = minimal_ice_sia_model
+    m.ice_till_on = False          # test the direct-to-fluvial abrasion path
     zbed = m.hLocal.getArray().copy()
     ub = np.where(zbed > 2000.0, 0.1, 0.0)     # 0.1 m/yr sliding above 2000 m
     m.iceUbL.setArray(ub.copy())

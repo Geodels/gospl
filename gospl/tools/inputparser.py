@@ -1819,12 +1819,18 @@ class ReadYaml(object):
             self.ice_lat_l = abrDict.get("lat_l", self.ice_abr_l)
 
             tillDict = iceDict.get("till", {})
-            self.ice_till_on = bool(tillDict.get("on", False))
-            # Catchment-aware till routing: when True, the abraded till is
-            # routed down the ice-surface flow network and melts out toward each
-            # terminus (for high-resolution regional runs); default False keeps
-            # the melt-weighted spreading across the whole ablation zone.
-            self.ice_till_route = bool(tillDict.get("route", False))
+            # Till on by default: when glacial abrasion is enabled (Kg > 0) the
+            # eroded rock is carried as till and deposited as moraine — the
+            # complete glacial sediment cycle. Set False to send abrasion
+            # straight to the fluvial system instead. (No cost when Kg == 0.)
+            self.ice_till_on = bool(tillDict.get("on", True))
+            # Catchment-aware till routing on by default: the till is routed down
+            # the ice-surface flow network and melts out toward each terminus, so
+            # deposition stays connected to the upstream erosion. Set False for
+            # the older melt-weighted spreading, which pools the GLOBAL abraded
+            # volume across all melt cells (it decouples erosion and deposition
+            # across separate ice masses — misleading on multi-glacier domains).
+            self.ice_till_route = bool(tillDict.get("route", True))
 
             # Use the per-vertex / time-series path when a `glaciers` series is
             # given or any top-level altitude is a map.
@@ -1867,8 +1873,8 @@ class ReadYaml(object):
             self.ice_abr_l = 1.0
             self.ice_Kl = 0.0
             self.ice_lat_l = 1.0
-            self.ice_till_on = False
-            self.ice_till_route = False
+            self.ice_till_on = True
+            self.ice_till_route = True
 
         # Legacy uniform / `evol` path builds the scalar time functions. In
         # series mode the geometry comes from _iceTimeSeries via _updateIce, so
