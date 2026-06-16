@@ -136,7 +136,7 @@ Ice sheets and glacial erosion
         abrasion, till transport and ice loading. Two flow models are available
         via ``flow_model`` — a cheap, stable **diagnostic** (``mfd``, default):
         the ELA accumulation is routed downhill into an ice discharge from which
-        a Bahr thickness and a balance velocity are derived (no dynamics solve;
+        a Bahr thickness and a bounded SIA sliding velocity are derived (no dynamics solve;
         fast and robust at any resolution, suited to the **morphology of glacial
         erosion**); or the full **Shallow-Ice-Approximation (SIA)** (``sia``): an
         explicit, mass-conserving non-linear diffusion of the ice thickness
@@ -179,7 +179,7 @@ Ice sheets and glacial erosion
 
         ``flow_model`` selects how ice is computed: ``mfd`` (default) is the
         diagnostic proxy (route the accumulation into an ice discharge, then a
-        Bahr thickness and a balance velocity — no dynamics solve); ``sia`` solves
+        Bahr thickness and a bounded sliding velocity — no dynamics solve); ``sia`` solves
         the full Shallow-Ice-Approximation thickness. Both then drive the *same*
         abrasion / till / loading machinery below. The diagnostic ``mfd`` adds
         four optional controls: ``icedir`` (number of MFD flow directions for the

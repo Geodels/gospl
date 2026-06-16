@@ -96,8 +96,8 @@ class IceMesh(object):
             # abrasion is off, i.e. Kg = 0).
             self.iceAbrL = self.hLocal.duplicate()
             # Ice discharge (m^3/yr) for the diagnostic 'mfd' flow model — the
-            # ELA accumulation routed downhill; drives the Bahr thickness and the
-            # balance velocity. Unused (zero) under the SIA flow model.
+            # ELA accumulation routed downhill; drives the Bahr thickness (and
+            # hence the sliding velocity). Unused (zero) under the SIA flow model.
             self.iceFAL = self.hLocal.duplicate()
             self.iceFAG = self.hGlobal.duplicate()
             self.iceHL.set(0.0)
@@ -362,8 +362,11 @@ class IceMesh(object):
         2. Route the accumulation downhill through the MFD matrix into an **ice
            discharge** ``iceFA`` (one linear solve; no time integration).
         3. **Thickness** ``iceHL`` from a Bahr width–area scaling of the discharge.
-        4. **Basal balance velocity** ``iceUbL = discharge / (thickness · width)``,
-           the abrasion driver ``E_g = K_g |u_b|^l``.
+        4. **Basal sliding velocity** ``iceUbL`` from the SIA sliding law on that
+           thickness + bed-surface slope (``ice_velocity``), the abrasion driver
+           ``E_g = K_g |u_b|^l``. Physically bounded (``∝ H^{n-1}|∇s|^{n-1}∇s``),
+           unlike a raw balance velocity ``Q/(H·W)`` which blows up with catchment
+           size and spikes at flow-convergence cells.
 
         No stiffness, no CFL — one routing solve per step. Suited to studying the
         morphology of glacial erosion/deposition rather than the ice dynamics.
@@ -404,10 +407,15 @@ class IceMesh(object):
         H[H < 1.0e-1] = 0.0
         self.iceHL.setArray(H)
 
-        # (4) Basal balance velocity u_b = discharge / (thickness · width), with
-        # width ~ sqrt(cell area); zero where there is effectively no ice.
-        width = np.sqrt(np.maximum(self.larea, 1.0))
-        ub = np.where(H > 1.0, smth / (np.maximum(H, 1.0) * width), 0.0)
+        # (4) Basal sliding velocity from the diagnostic thickness + bed-surface
+        # slope, via the SIA sliding law (``ice_velocity``: u_s ∝
+        # H^(n-1)|∇s|^(n-1)∇s). This is PHYSICALLY BOUNDED by thickness and slope
+        # — unlike a raw balance velocity Q/(H·W), which blows up with catchment
+        # size (Q grows with the upstream area while the cell width does not) and
+        # spikes at MFD flow-convergence cells, driving runaway abrasion and
+        # tens-of-km erosion/deposition spikes in downstream sinks.
+        ub = ice_velocity(self.lpoints, H, zbed, self.sia_slide, self.sia_glen)
+        ub[H <= 1.0] = 0.0
         self.iceUbL.setArray(ub)
         abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
         abr[self.seaID] = 0.0
