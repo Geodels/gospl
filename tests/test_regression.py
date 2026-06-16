@@ -500,6 +500,45 @@ def test_ice_soil_combined(minimal_ice_soil_model):
     assert np.isclose(dte, dtd, rtol=1.0e-9), "till solid eroded != deposited"
 
 
+def test_ice_lateral_erosion(minimal_ice_dual_model):
+    """
+    Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall
+    abrasion by adjacent fast ice (U-shaping). Off by default (Kl=0); when on it
+    must erode subaerial wall cells (little ice of their own, flanking fast ice),
+    feed that rock into the conserved till budget, and lower those wall cells.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_dual_model
+    m.ice_flow_model = "mfd"
+    A = lambda a: MPI.COMM_WORLD.allreduce(int(a), op=MPI.SUM)
+
+    # Off by default: no wall erosion.
+    m.ice_Kl = 0.0
+    m.tNow = m.tStart
+    from gospl.flow.iceplex import IceMesh
+    IceMesh.iceAccumulation(m)
+    assert A((m._glacialLateralErosion() > 0).sum()) == 0
+
+    # On: wall cells erode, conserved into till.
+    m.ice_Kl = 5.0e-2
+    elat = m._glacialLateralErosion()
+    nwall = A((elat > 0).sum())
+    assert nwall > 0, "lateral erosion eroded no wall cells"
+    # Lateral cells carry little ice of their own but a positive rate.
+    H = m.iceHL.getArray()
+    assert (H[elat > 0] <= 1.0 + 1.0e-9).all(), "lateral erosion hit thick-ice cells"
+
+    z0 = m.hLocal.getArray().copy()
+    te0, td0 = m._tillEroded, m._tillDeposited
+    m.glacialTill()
+    dz = m.hLocal.getArray() - z0
+    dte = MPI.COMM_WORLD.allreduce(m._tillEroded - te0, op=MPI.SUM)
+    dtd = MPI.COMM_WORLD.allreduce(m._tillDeposited - td0, op=MPI.SUM)
+    assert dte > 0.0 and np.isclose(dte, dtd, rtol=1.0e-9), "till not conserved with lateral erosion"
+    # At least some wall cells were lowered (valley widening).
+    assert A((dz[elat > 0] < -1.0e-9).sum()) > 0, "no wall cells lowered"
+
+
 @pytest.mark.slow
 def test_ice_terminus_sea_level_floor(minimal_ice_sia_model):
     """

@@ -173,6 +173,8 @@ Ice sheets and glacial erosion
                 abrasion:
                     Kg: 1.0e-4
                     l: 1.0
+                    # Kl: 0.0          # lateral (valley-wall) erosion coeff -> U-shaping
+                    # lat_l: 1.0        # lateral velocity exponent (defaults to l)
                 till:
                     on: True
                     route: False
@@ -206,17 +208,18 @@ Ice sheets and glacial erosion
         The ``abrasion`` sub-block enables velocity-based glacial erosion
         :math:`E_g = K_g\,|u_b|^{l}` (off by default, ``Kg: 0``):
 
-        i. ``Kg`` is the abrasion coefficient (default ``0.0`` — set it to enable glacial erosion),
-        j. ``l`` is the basal-sliding-velocity exponent (default ``1.0``).
+        i. ``Kg`` is the (vertical) abrasion coefficient (default ``0.0`` — set it to enable glacial erosion),
+        j. ``l`` is the basal-sliding-velocity exponent (default ``1.0``),
+        k. ``Kl`` is the **lateral** (valley-wall) erosion coefficient (default ``0.0`` = off). Vertical abrasion only deepens the trough; ``Kl > 0`` adds erosion of the *walls* flanking fast ice — each wall cell (little ice of its own) is abraded at ``Kl·u_b,neighbour^{lat\_l}``, tapered by how much of the wall is in contact with the neighbouring ice column — which **widens glaciated valleys toward a U-profile**. The eroded wall rock joins the same conserved till → moraine budget. ``lat_l`` (default = ``l``) is its velocity exponent.
 
         The ``till`` sub-block controls glacial sediment (default off):
 
-        k. ``on`` — when ``True``, abraded rock is carried as **till** and
+        l. ``on`` — when ``True``, abraded rock is carried as **till** and
            deposited as a moraine where the ice melts out (the ablation zone),
            conserving the abraded volume. With stratigraphy on, the till is
            layered into the stratigraphic record and split into the coarse/fine
            lithology fractions when dual lithology is enabled.
-        l. ``route`` (default ``False``) — controls how the till is distributed.
+        m. ``route`` (default ``False``) — controls how the till is distributed.
            ``False`` spreads it across the whole ablation zone weighted by the
            meltwater rate (appropriate when a cell aggregates a glacier, i.e.
            continental/global resolution). ``True`` instead **routes the till
@@ -227,10 +230,10 @@ Ice sheets and glacial erosion
 
         The glacier geometry can instead be read from a file:
 
-        m. ``evol`` is the glacier characteristics over time (`csv` file). When
+        n. ``evol`` is the glacier characteristics over time (`csv` file). When
            used, ``hterm``, ``hela`` and ``hice`` are not required because they
            are defined in this file.
-        n. ``hinit`` (optional) is a **pre-existing ice thickness** (m) — a
+        o. ``hinit`` (optional) is a **pre-existing ice thickness** (m) — a
            uniform scalar or a per-vertex ``[file, key]`` map — used to seed the
            ice at the start of the run; the SIA solve then evolves it. Without
            it the ice grows in from zero. The equilibrium-line geometry

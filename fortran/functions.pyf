@@ -50,6 +50,16 @@ python module _fortran
             double precision intent(in) :: glen
             double precision dimension(nb),intent(out),depend(nb) :: vel
         end subroutine ice_velocity
+        subroutine ice_lateral_erosion(nb,hice,zbed,ub,kl,lexp,heps,elat)
+            integer :: nb
+            double precision dimension(nb),intent(in),depend(nb) :: hice
+            double precision dimension(nb),intent(in),depend(nb) :: zbed
+            double precision dimension(nb),intent(in),depend(nb) :: ub
+            double precision intent(in) :: kl
+            double precision intent(in) :: lexp
+            double precision intent(in) :: heps
+            double precision dimension(nb),intent(out),depend(nb) :: elat
+        end subroutine ice_lateral_erosion
 
         subroutine hillslp_nl(nb,elev,kd,exp,n,val)
             integer :: nb

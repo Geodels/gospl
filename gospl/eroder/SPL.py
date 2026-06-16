@@ -361,17 +361,22 @@ class SPL(object):
         sediment system through the standard ``Eb·dt`` → cumED / hGlobal /
         erodeStrat path in the SPL wrappers (no separate bookkeeping).
 
-        No-op unless ice is on with ``Kg > 0``. Masked to subaerial cells
-        (abrasion is subglacial; no marine abrasion) and to ice presence
-        (``iceUbL`` is already zero where there is no ice).
+        No-op unless ice is on with ``Kg > 0`` or ``Kl > 0`` (the latter adds
+        lateral valley-wall erosion via ``_glacialLateralErosion``). Masked to
+        subaerial cells (abrasion is subglacial; no marine abrasion) and to ice
+        presence (``iceUbL`` is already zero where there is no ice).
         """
         # When till handling is on, abrasion is routed to till (deposited as
         # moraine in the ablation zone) by iceplex.glacialTill instead of
         # straight into the fluvial sediment system — mutually exclusive here.
-        if not self.iceOn or self.ice_Kg <= 0.0 or self.ice_till_on:
+        if not self.iceOn or self.ice_till_on or (
+            self.ice_Kg <= 0.0 and self.ice_Kl <= 0.0
+        ):
             return
         ub = self.iceUbL.getArray()
+        # Vertical abrasion under sliding ice + lateral valley-wall abrasion.
         abr = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)
+        abr = abr + self._glacialLateralErosion()
         abr[self.seaID] = 0.0
         self.tmpL.setArray(-abr)                 # incision (negative), local
         self.dm.localToGlobal(self.tmpL, self.tmp)

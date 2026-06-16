@@ -16,6 +16,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import ice_flux_limiter
     from gospl._fortran import ice_flux_rscaled
     from gospl._fortran import ice_velocity
+    from gospl._fortran import ice_lateral_erosion
     from gospl._fortran import mfdreceivers
     from gospl._fortran import epsfill
 
@@ -492,6 +493,29 @@ class IceMesh(object):
 
         return
 
+    def _glacialLateralErosion(self):
+        r"""
+        Lateral glacial erosion rate (m/yr) — valley-wall abrasion by adjacent
+        fast ice, the explicit term that widens glaciated valleys toward a
+        U-profile (vertical abrasion alone only deepens the trough).
+
+        Returns a per-cell rate (≥0), nonzero only on subaerial 'wall' cells
+        (little ice of their own) standing within the ice column of a
+        faster-sliding neighbour — see the ``ice_lateral_erosion`` kernel. No-op
+        (zeros) unless ``ice.abrasion.Kl > 0``.
+        """
+        if self.ice_Kl <= 0.0:
+            return np.zeros(self.lpoints, dtype=np.float64)
+        H = self.iceHL.getArray()
+        ub = self.iceUbL.getArray()
+        zbed = self.hLocal.getArray()
+        elat = ice_lateral_erosion(
+            self.lpoints, H, zbed, np.maximum(ub, 0.0),
+            self.ice_Kl, self.ice_lat_l, 1.0,   # heps = 1 m ice-presence threshold
+        )
+        elat[self.seaID] = 0.0                  # no marine erosion
+        return elat
+
     def glacialTill(self):
         r"""
         Glacial till — production, transport and deposition.
@@ -531,12 +555,17 @@ class IceMesh(object):
         identically by the bulk and stratigraphic paths, so conservation is
         unchanged.
         """
-        if not (self.iceOn and self.ice_till_on) or self.ice_Kg <= 0.0:
+        if not (self.iceOn and self.ice_till_on) or (
+            self.ice_Kg <= 0.0 and self.ice_Kl <= 0.0
+        ):
             return
 
         ti = process_time()
         ub = self.iceUbL.getArray()
+        # Vertical abrasion under sliding ice + lateral wall abrasion (U-shaping);
+        # both are bed-lowering routed into the same conserved till -> moraine.
         Eg = self.ice_Kg * np.power(np.maximum(ub, 0.0), self.ice_abr_l)  # m/yr
+        Eg = Eg + self._glacialLateralErosion()
         Eg[self.seaID] = 0.0
         Vero = Eg * self.dt * self.larea                  # abraded volume (m^3) per cell
         owned = self.inIDs == 1

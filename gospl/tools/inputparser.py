@@ -1812,6 +1812,11 @@ class ReadYaml(object):
             abrDict = iceDict.get("abrasion", {})
             self.ice_Kg = abrDict.get("Kg", 0.0)             # abrasion coeff (0 = off)
             self.ice_abr_l = abrDict.get("l", 1.0)           # sliding-velocity exponent
+            # Lateral (valley-wall) glacial erosion — widens glaciated valleys
+            # toward a U-profile. Off by default (Kl = 0). `lat_l` defaults to the
+            # vertical-abrasion exponent `l`.
+            self.ice_Kl = abrDict.get("Kl", 0.0)
+            self.ice_lat_l = abrDict.get("lat_l", self.ice_abr_l)
 
             tillDict = iceDict.get("till", {})
             self.ice_till_on = bool(tillDict.get("on", False))
@@ -1860,6 +1865,8 @@ class ReadYaml(object):
             self.sia_accum_max = None
             self.ice_Kg = 0.0
             self.ice_abr_l = 1.0
+            self.ice_Kl = 0.0
+            self.ice_lat_l = 1.0
             self.ice_till_on = False
             self.ice_till_route = False
 

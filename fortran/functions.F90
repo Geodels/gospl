@@ -959,6 +959,61 @@ subroutine ice_velocity(nb, hice, zbed, as, glen, vel)
 
 end subroutine ice_velocity
 
+subroutine ice_lateral_erosion(nb, hice, zbed, ub, kl, lexp, heps, elat)
+!*****************************************************************************
+! Lateral glacial erosion of valley WALLS by adjacent fast-sliding ice — the
+! explicit term that widens glaciated valleys toward a U-profile (the per-cell
+! vertical abrasion alone only deepens the trough).
+!
+! A 'wall' cell k (little ice of its own, hice(k) <= heps) is eroded by each
+! neighbour i that carries ice (hice(i) > heps) and whose ice surface rises
+! above the wall bed. The rate uses the neighbour's basal sliding speed ub(i),
+! tapered by how much of the wall is in contact with that ice column:
+!   taper = min( (zbed(i)+hice(i) - zbed(k)) / hice(i), 1 )   (0 above the ice top)
+!   elat(k) = kl * ( max_i ub(i)*taper )^lexp                  (m/yr, >= 0)
+! Marine cells are left to the caller to mask. Uses the finite-volume neighbour
+! arrays (FVnNb/FVnID/FVvDist) so only true edges contribute.
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+    double precision, intent(in) :: hice(nb)
+    double precision, intent(in) :: zbed(nb)
+    double precision, intent(in) :: ub(nb)
+    double precision, intent(in) :: kl
+    double precision, intent(in) :: lexp
+    double precision, intent(in) :: heps
+    double precision, intent(out) :: elat(nb)
+
+    integer :: k, p, i
+    double precision :: ub_eff, contact, taper, cand
+
+    elat = 0.
+    do k = 1, nb
+      if(FVarea(k)>0 .and. hice(k)<=heps)then
+        ub_eff = 0.
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0.)then
+            i = FVnID(k,p)+1
+            if(hice(i)>heps)then
+              contact = zbed(i) + hice(i) - zbed(k)
+              if(contact>0.)then
+                taper = min(contact/hice(i), 1.0)
+                cand = ub(i)*taper
+                if(cand>ub_eff) ub_eff = cand
+              endif
+            endif
+          endif
+        enddo
+        if(ub_eff>0.) elat(k) = kl*ub_eff**lexp
+      endif
+    enddo
+
+    return
+
+end subroutine ice_lateral_erosion
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!                                                  !!
 !!   HILLSLOPE AND ADVECTION PROCESSES FUNCTIONS    !!
