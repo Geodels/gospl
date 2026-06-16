@@ -33,7 +33,18 @@ Stream Power Law parameters
         c. ``m`` is the flow accumulation coefficient from the SPL law: :math:`E = K (\bar{P}A)^m S^n` and takes the default value of 0.5.
         d. ``n`` is the slope coefficient from the SPL law: :math:`E = K (\bar{P}A)^m S^n` and takes the default value of 1.0.
         e. ``G`` dimensionless deposition coefficient for continental domain when accounting for sedimentation rate in the SPL following the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_. The default value is 0.0 (purely detachment-limited model).
-        
+
+        When ``n`` is **not** equal to 1.0 the SPL is solved with a non-linear PETSc ``SNES`` (the linear ``n == 1`` case uses a direct Krylov solve and needs none of the controls below). The transport-limited (``G > 0``) solver is the dominant cost of such a run, and its behaviour can be tuned (all optional):
+
+        f. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
+        g. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
+        h. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG),
+        i. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+
+        .. tip::
+
+            ``solver: 'qn'`` is the default because on a global model it converged the transport-limited solve in well under 50 iterations versus ~200 for ``ngmres`` (each iteration is also cheaper), cutting the erosion phase by an order of magnitude at the **same** tolerance and solution. Whichever primary solver is chosen, goSPL automatically retries a stalled timestep with the complementary solver before continuing.
+
 
 Hillslope and marine deposition parameters
 -------------------------------------------

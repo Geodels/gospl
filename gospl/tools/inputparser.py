@@ -417,12 +417,26 @@ class ReadYaml(object):
             self.fDepa = splDict.get("G", 0.0)
             self.spl_m = splDict.get("m", 0.5)
             self.spl_n = splDict.get("n", 1.0)
+            # Non-linear SPL (spl_n != 1) SNES controls. The transport-limited
+            # (G>0) solver is otherwise a bare ngmres accelerator that stalls on
+            # the stiff residual, so the primary defaults to 'qn' (L-BFGS) with
+            # the same complementary-fallback robustness net as the soil solver.
+            self.snes_maxit = int(splDict.get("maxIter", 500))
+            self.snes_rtol = float(splDict.get("rtol", 1.0e-6))
+            self.snes_atol = float(splDict.get("atol", 1.0e-6))
+            self.nlspl_solver = str(splDict.get("solver", "qn"))
+            self.nlspl_pc = str(splDict.get("pcType", "hypre"))
         except KeyError:
             self.K = 1.0e-12
             self.coeffd = 0.0
             self.fDepa = 0.0
             self.spl_m = 0.5
             self.spl_n = 1.0
+            self.snes_maxit = 500
+            self.snes_rtol = 1.0e-6
+            self.snes_atol = 1.0e-6
+            self.nlspl_solver = "qn"
+            self.nlspl_pc = "hypre"
 
         return
 
