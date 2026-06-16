@@ -117,8 +117,22 @@ def main(argv=None):
     model.runProcesses()
     run_wall = MPI.Wtime() - t0
 
-    # Phase breakdown (collective: every rank calls reduce()).
-    stats = model.profiler.reduce(total_wall=run_wall)
+    # Phase breakdown (collective: every rank calls reduce()). Tolerate gospl
+    # builds that predate the wall-clock profiler (no `model.profiler`): the
+    # sweep still reports wall time / speedup / RSS, just without the per-phase
+    # split. All ranks run the same build, so this branch is consistent across
+    # the communicator and the collective reduce stays balanced.
+    profiler = getattr(model, "profiler", None)
+    if profiler is not None:
+        stats = profiler.reduce(total_wall=run_wall)
+    else:
+        if rank == 0:
+            print(
+                "[scaling] this gospl build has no wall-clock profiler; "
+                "recording totals only (no per-phase breakdown).",
+                flush=True,
+            )
+        stats = {}
 
     # Peak memory across ranks.
     rss = _peak_rss_mb()
