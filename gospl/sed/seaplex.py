@@ -198,26 +198,31 @@ class SEAMesh(object):
         self.dMat1 = self.zMat.copy()
         if not self.flatModel and self.Gmar > 0.:
             self.dMat2 = self.iMat.copy()
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-        nodes = indptr[:-1]
+        nodes = np.arange(self.lpoints, dtype=petsc4py.PETSc.IntType)
 
-        for k in range(0, 12):
-            # Flow direction matrix for a specific direction
-            tmpMat = self._matrix_build()
-            data = wght[:, k].copy()
-            data[rcv[:, k].astype(petsc4py.PETSc.IntType) == nodes] = 0.0
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                rcv[:, k].astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-            # Add the weights from each direction
-            self.dMat1.axpy(1.0, tmpMat)
-            if not self.flatModel and self.Gmar > 0.:
-                self.dMat2.axpy(-1.0, tmpMat)
-            tmpMat.destroy()
+        # Assemble all 12 flow directions in a single CSR pass instead of 12
+        # build+axpy iterations. ADD_VALUES makes receivers shared by several
+        # directions sum exactly as the per-direction axpy loop did, so the
+        # assembled matrix is identical; this just replaces 12 matrix builds +
+        # 12 sparse axpys (the dominant cost of this step) with one build and
+        # one (or two) axpy.
+        rcvFlat = rcv.astype(petsc4py.PETSc.IntType)
+        data = wght.copy()
+        data[rcvFlat == nodes[:, None]] = 0.0
+        indptr = np.arange(0, self.lpoints * 12 + 1, 12, dtype=petsc4py.PETSc.IntType)
+        offMat = self._matrix_build(nnz=(12, 12))
+        offMat.assemblyBegin()
+        offMat.setValuesLocalCSR(
+            indptr,
+            rcvFlat.ravel(),
+            data.ravel(),
+            addv=petsc4py.PETSc.InsertMode.ADD_VALUES,
+        )
+        offMat.assemblyEnd()
+        self.dMat1.axpy(1.0, offMat)
+        if not self.flatModel and self.Gmar > 0.:
+            self.dMat2.axpy(-1.0, offMat)
+        offMat.destroy()
 
         if self.memclear:
             del data, indptr, nodes
