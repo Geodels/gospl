@@ -48,7 +48,7 @@ Rule: use `MPI.COMM_WORLD` for raw collectives (Allreduce/bcast/Allgatherv); use
 ## KSP / SNES / TS lifecycle contract
 PETSc solvers in goSPL follow two intentional patterns. **Use the right one for new code.**
 
-### CACHED — hot-path solvers (8 sites)
+### CACHED — hot-path solvers (9 sites)
 Solvers that run **every timestep** are created lazily on first use, stored as `self._X`, and reused across the entire simulation. Avoids the ~5-10 ms create+destroy churn per call, which compounds over thousands of timesteps. Each site's inline docstring confirms the rationale.
 
 | File | Method | Cached attribute | Solver |
@@ -61,6 +61,7 @@ Solvers that run **every timestep** are created lazily on first use, stored as `
 | `eroder/soilSPL.py` | `diffuseSoil` | `self._ts_soil` | TS (rosw soil diffusion) |
 | `sed/hillslope.py` | `_hillSlopeNL` | `self._snes_hill` | SNES (non-linear hillslope) |
 | `sed/hillslope.py` | `_diffuseImplicit` | `self._ts_marine` | TS (rosw marine + lake diffusion) |
+| `sed/hillslope.py` | `_solveSmooth` | `self._ksp_smooth` (+ cached operator `self._smoothMat`) | KSP (richardson+bjacobi, `marsmooth_` prefix, factor-shift) for the marine flow-direction smoother (`_hillSlope(smooth=2)`). Operator is mesh-size-based + timestep-independent so it is built once and the PC **reused**; rebuilt only when the coastline (`seaID`) moves (`_smooth_pc_ready` guards the reuse). |
 
 **Selectable solver + complementary fallback** (soilSPL `_solveSoil`, nlSPL `_solveNL_ed`): built by a `_build_*_snes(primary=)` helper. The primary defaults to `qn` (L-BFGS + critical-point line search, set via the YAML `solver:` key). A *bare* `ngmres` ignores its configured KSP/PC and **stalls or diverges** on these stiff residuals (this was the historical default; it cost soil ~2.4× and nlSPL-transport ~10×, and diverged outright on the SIA — which is why SIA is now solved explicitly, see "Ice sheet"). On non-convergence the solve retries from the same initial guess with the **complementary** solver (`qn` ⇄ `ngmres`+`nrichardson`+hypre); if both fail it warns and continues with the best iterate (never crashes). Each SNES carries its own options prefix (`soilspl_`/`soilsplfb_`/`nlspled_`/`nlspledfb_`) so line-search options don't leak between solvers. The `_fb` fallback SNES **and** its `_f` residual vec are cached and are in the `destroy_DMPlex` list. YAML knobs (`soil:` / `spl:` blocks): `maxIter`, `rtol`, `atol`, `pcType`, `solver`. **Linear** coupled SPL deposition (`SPL._coupledEDSystem`) instead uses a **Schur-complement** fieldsplit (`spl_ed_` prefix, defaults injected into the options DB guarded by `hasName` so `PETSC_OPTIONS` override) — ~60× fewer Krylov iterations than the old additive split, solution unchanged.
 
@@ -258,6 +259,8 @@ All sentinels and threshold values are defined in `gospl/tools/constants.py` and
 | `BEDROCK_SENTINEL` | `1.0e6` | Infinite-bedrock layer-0 sentinel thickness; offset cancels in cumsum arithmetic. |
 | `BOUNDARY_FLOW_SENTINEL` | `-1.0e6` | Mfd no-data marker passed to `mfdreceivers`/`mfdrcvrs`; **distinct from `MISSING_DATA_SENTINEL`** — kept two orders apart so a mix-up is obvious in diagnostics. |
 | `GRAPH_OUTLIER_CAP` | `1.0e7` | Upper-bound clamp in `pitfilling._performFilling`; entries above this are rewritten to `MISSING_DATA_SENTINEL`. |
+| `MARINE_SMOOTH_N_LAND` | `1.0` | Dimensionless smoothing strength for emergent land in the marine flow-direction smoother (`hillslope._hillSlope(smooth=2)`). |
+| `MARINE_SMOOTH_N_SEA` | `5.0` | Dimensionless smoothing strength for the seafloor in the same smoother (heavier than land). Per-node `Kd = N·cell_area`, so the smoothing is timestep- and resolution-independent (replaces the old `Cd·dt`, `Cd∈{1e5,5e6}` m²/yr, whose effective strength `v≈Cd·dt/Δx²` silently varied with both `dt` and mesh resolution — `~1e-3` on the coarse fixtures, `~55` on a 30 km/`dt=1e4` run). Used only to derive marine flow directions in `seaplex._matOcean`; never alters elevation. |
 
 **Same value, different role — DO NOT replace these with the listed constants:**
 - `1.0e-8` at `sed/stratplex.py:219` (thickness numerical-noise floor).

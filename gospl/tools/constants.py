@@ -98,3 +98,30 @@ BOUNDARY_FLOW_SENTINEL = -1.0e6
 # see the sentinel-filter comment in pitfilling.py for the full
 # rationale.
 GRAPH_OUTLIER_CAP = 1.0e7
+
+# Dimensionless diffusion numbers for the marine-morphology smoothing used
+# ONLY to derive coherent marine flow directions in sed/seaplex.py::_matOcean
+# (_hillSlope(smooth=2)). This smoothing never alters elevation — it produces a
+# de-noised bathymetry so the multiple-flow-direction kernel routes marine
+# sediment down the large-scale seafloor slope instead of trapping it in small
+# local minima.
+#
+# The smoothing solves one implicit diffusion step (I - L) h_s = h with a
+# per-node coefficient Kd = N * cell_area (m^2). Because the FV Laplacian
+# stencil scales as Kd / Δx^2, folding the cell area into Kd makes N a
+# dimensionless smoothing strength that is BOTH timestep-independent AND
+# mesh-resolution-independent — replacing the former hard-coded Kd = Cd*dt with
+# Cd in {1e5 (land), 5e6 (sea)} m^2/yr, which scaled with dt and with 1/Δx^2 so
+# the effective smoothing silently varied with the timestep and the mesh.
+#
+# The seafloor (SEA) is smoothed more heavily than emergent land (5x here):
+# routing only needs coherent bathymetric directions, while coastal land just
+# needs to stay continuous for the pit-fill + flow-direction pass. These are
+# moderate de-noising strengths (v ~ N per neighbour) — enough to make the
+# seafloor monotone toward sinks without flattening the large-scale slope;
+# increase for stronger smoothing. NB the marine routing (and hence the
+# downstream conservation residual on a coarse mesh) is sensitive to this, so
+# retune against the dual/marine conservation tests if you change it. See
+# AGENTS.md > Magic numbers.
+MARINE_SMOOTH_N_LAND = 1.0
+MARINE_SMOOTH_N_SEA = 5.0

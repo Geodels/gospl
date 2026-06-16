@@ -992,6 +992,7 @@ class UnstMesh(object):
             "_snes_soil_fb", "_snes_soil_fb_f",
             "_snes_hill", "_snes_hill_f", "_snes_hill_x",
             "_ts_marine", "_ts_marine_x",
+            "_smoothMat", "_ksp_smooth",
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
         ):
             obj = getattr(self, name, None)
