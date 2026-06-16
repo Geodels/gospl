@@ -78,6 +78,22 @@ def main(argv=None):
         default="",
         help="optional label stored in the record (e.g. 'native' / 'container')",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="run the model verbose (per-phase prints + solver monitors, e.g. "
+        "the soil SNES iteration count) — for diagnostics, not timing runs",
+    )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="ATTR=VALUE",
+        help="override a model attribute after construction (repeatable), e.g. "
+        "--set soil_solver=qn --set soil_rtol=1e-4. Values are coerced to "
+        "int/float/bool when possible, else kept as a string. Handy for tuning "
+        "sweeps without editing the YAML.",
+    )
     args = parser.parse_args(argv)
 
     comm = MPI.COMM_WORLD
@@ -86,8 +102,30 @@ def main(argv=None):
 
     # ---- model construction (counts as "init", measured separately) ----------
     t0 = MPI.Wtime()
-    model = Model(args.input, verbose=False, profile=True)
+    model = Model(args.input, verbose=args.verbose, profile=True)
     init_wall = MPI.Wtime() - t0
+
+    # ---- attribute overrides (applied before runProcesses; lazily-built
+    #      solvers such as the soil SNES read these on first use) --------------
+    def _coerce(text):
+        low = text.strip().lower()
+        if low in ("true", "false"):
+            return low == "true"
+        for cast in (int, float):
+            try:
+                return cast(text)
+            except ValueError:
+                pass
+        return text
+
+    for item in args.set:
+        attr, sep, value = item.partition("=")
+        if not sep:
+            raise SystemExit("--set expects ATTR=VALUE, got %r" % item)
+        val = _coerce(value)
+        setattr(model, attr.strip(), val)
+        if rank == 0:
+            print("[scaling] override %s = %r" % (attr.strip(), val), flush=True)
 
     # ---- bound the run -------------------------------------------------------
     if args.steps and args.steps > 0:
