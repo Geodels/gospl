@@ -62,6 +62,17 @@ class hillSLP(object):
         self._smooth_seaID = None
         self._smooth_pc_ready = False
 
+        # Cached LINEAR-hillslope operator (_hillSlope smooth=0) + its KSP. Same
+        # invariance as the marine smoother: with constant Cda/Cdm (no dual
+        # lithology) the operator (I - Cd*dt*L) depends only on the fixed mesh
+        # and the land/sea mask, so it is built once, the PC reused, and rebuilt
+        # only when the coastline moves. NOT used under dual lithology (Cd is
+        # then step-varying via _surfaceLithoD).
+        self._hillMat = None
+        self._ksp_hill_lin = None
+        self._hill_seaID = None
+        self._hill_pc_ready = False
+
         return
 
     def _hillSlope(self, smooth=0):
@@ -120,20 +131,17 @@ class hillSLP(object):
             self.dm.globalToLocal(self.tmp, self.tmpL)
             return self.tmpL.getArray().copy()
 
-        # --- smooth=0 (linear soil creep) / smooth=1 (ice-surface smoothing) ---
-        # The diffusivity is the physical Ka/Km (optionally lithology-scaled),
-        # which can vary each step, so the operator is rebuilt every call.
-        Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
-        Cd[self.seaID] = self.Cdm
-        # Dual-lithology (Phase 7): scale the diffusivity by the surface
-        # composition so fines diffuse faster (1.0 everywhere when single-
-        # fraction / no contrast, so behaviour is unchanged).
-        if self.stratLith:
-            Cd = Cd * self._surfaceLithoD()
-        diffMat = self._buildDiffMat(Cd * self.dt)
-
-        # Get elevation values for considered time step
+        # --- smooth=1: ice-surface smoothing (always rebuilt; ice path) ---
+        # The diffusivity is the physical Ka/Km (optionally lithology-scaled).
         if smooth == 1:
+            Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
+            Cd[self.seaID] = self.Cdm
+            # Dual-lithology (Phase 7): scale the diffusivity by the surface
+            # composition so fines diffuse faster (1.0 everywhere when single-
+            # fraction / no contrast, so behaviour is unchanged).
+            if self.stratLith:
+                Cd = Cd * self._surfaceLithoD()
+            diffMat = self._buildDiffMat(Cd * self.dt)
             if self.tmp1.max()[1] > 0:
                 self._solve_KSP(True, diffMat, self.tmp1, self.tmp)
             else:
@@ -142,10 +150,41 @@ class hillSLP(object):
             self.dm.globalToLocal(self.tmp, self.tmpL)
             return self.tmpL.getArray().copy()
 
-        # smooth == 0
+        # --- smooth=0: linear soil creep (updates elevation) ---
         self.hGlobal.copy(result=self.hOld)
-        self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
-        diffMat.destroy()
+        if self.stratLith:
+            # Dual lithology makes Cd step-varying (surface composition evolves),
+            # so the operator is rebuilt every step and uses the shared flow KSP.
+            Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
+            Cd[self.seaID] = self.Cdm
+            Cd = Cd * self._surfaceLithoD()
+            diffMat = self._buildDiffMat(Cd * self.dt)
+            self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
+            diffMat.destroy()
+        else:
+            # Constant Cda/Cdm ⇒ the operator (I - Cd*dt*L) is mesh+mask-
+            # invariant: cache it and reuse the factorised PC, rebuilding only
+            # when the coastline (seaID) moves. Mirrors the marine smoother
+            # (smooth=2); bit-faithful to the previous per-step build+solve.
+            if self._hillMat is None or not np.array_equal(
+                self.seaID, self._hill_seaID
+            ):
+                Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
+                Cd[self.seaID] = self.Cdm
+                if self._hillMat is not None:
+                    self._hillMat.destroy()
+                self._hillMat = self._buildDiffMat(Cd * self.dt)
+                self._hill_seaID = self.seaID.copy()
+                self._hill_pc_ready = False
+            if self._ksp_hill_lin is None:
+                self._ksp_hill_lin = self._makeDiffusionKSP("hilllin_")
+            ksp = self._ksp_hill_lin
+            ksp.setOperators(self._hillMat, self._hillMat)
+            ksp.getPC().setReusePreconditioner(self._hill_pc_ready)
+            self._hill_pc_ready = True
+            ksp.solve(self.hOld, self.hGlobal)
+            petsc4py.PETSc.garbage_cleanup()
+
         # Update cumulative erosion/deposition and elevation
         self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
         self.cumED.axpy(1.0, self.tmp)
@@ -212,6 +251,32 @@ class hillSLP(object):
 
         return diffMat
 
+    def _makeDiffusionKSP(self, prefix):
+        """
+        Create a cached KSP for a linear diffusion / smoothing solve: PETSc
+        Richardson + block-Jacobi (matching ``flowplex._solve_KSP``), nonzero
+        initial guess, with the per-rank ILU pivots shifted so the block-Jacobi
+        ``PCSetUp`` cannot fail on a degenerate / ocean-only partition. The
+        options prefix scopes that shift (and any user override) to this solver
+        only. Shared by the cached marine smoother (``_solveSmooth``) and the
+        cached linear hillslope (``_hillSlope`` smooth=0).
+
+        :arg prefix: PETSc options prefix for this KSP (e.g. ``"marsmooth_"``).
+
+        :return: the configured PETSc KSP (caller caches and owns it).
+        """
+
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType("richardson")
+        ksp.getPC().setType("bjacobi")
+        ksp.setTolerances(rtol=self.rtol)
+        ksp.setInitialGuessNonzero(True)
+        ksp.setOptionsPrefix(prefix)
+        petsc4py.PETSc.Options()[f"{prefix}sub_pc_factor_shift_type"] = "nonzero"
+        ksp.setFromOptions()
+
+        return ksp
+
     def _solveSmooth(self, rhs, sol):
         """
         Solve one implicit step of the cached marine-smoothing diffusion
@@ -229,17 +294,7 @@ class hillSLP(object):
         """
 
         if self._ksp_smooth is None:
-            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
-            ksp.setType("richardson")
-            ksp.getPC().setType("bjacobi")
-            ksp.setTolerances(rtol=self.rtol)
-            ksp.setInitialGuessNonzero(True)
-            # Shift zero/negative ILU pivots so the block-Jacobi PCSetUp cannot
-            # fail on a degenerate / ocean-only partition (mirrors _solve_KSP).
-            ksp.setOptionsPrefix("marsmooth_")
-            petsc4py.PETSc.Options()["marsmooth_sub_pc_factor_shift_type"] = "nonzero"
-            ksp.setFromOptions()
-            self._ksp_smooth = ksp
+            self._ksp_smooth = self._makeDiffusionKSP("marsmooth_")
 
         ksp = self._ksp_smooth
         ksp.setOperators(self._smoothMat, self._smoothMat)
