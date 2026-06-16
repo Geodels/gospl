@@ -346,7 +346,18 @@ Soil production, erosion, transport and deposition
         .. important::
 
             When defining a soil thickness grid, one needs to use the **npz** format and needs to specify the key corresponding to the soil thickness value in the file. In the above example this key is ``'soil'``. The soil grid needs to define values for all vertices in the mesh in metres.
-            
+
+        The soil-aware non-linear SPL is solved with a PETSc ``SNES``. Its
+        behaviour can be tuned (all optional) with:
+
+        i. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
+        j. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
+        k. ``pcType`` is the preconditioner for the Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions).
+
+        .. note::
+
+            The primary solver is a Nonlinear GMRES accelerator (``ngmres``) right-preconditioned by Nonlinear Richardson (``nrichardson``); if it stalls on a stiff soil-production residual, goSPL automatically retries that timestep with a more robust limited-memory quasi-Newton (L-BFGS) fallback before continuing.
+
 
 Sediment surface erodibility factor
 -------------------------------------
