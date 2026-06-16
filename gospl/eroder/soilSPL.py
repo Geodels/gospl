@@ -39,6 +39,7 @@ class soilSPL(object):
         self.soil_atol = getattr(self, "soil_atol", 1.0e-6)
         self.soil_maxit = getattr(self, "soil_maxit", 500)
         self.soil_pc = getattr(self, "soil_pc", "hypre")
+        self.soil_solver = getattr(self, "soil_solver", "qn")
 
         # Cached SNES + helper vectors for the soil-aware SPL solver; created
         # lazily on first call and reused across timesteps.
@@ -195,9 +196,24 @@ class soilSPL(object):
             snes.setMonitor(self._monitorsoil)
 
         if primary:
-            snes.setOptionsPrefix("soilspl_")
+            prefix = "soilspl_"
+            solver = self.soil_solver
             snes.setTolerances(rtol=self.soil_rtol, atol=self.soil_atol,
                                max_it=self.soil_maxit)
+        else:
+            prefix = "soilsplfb_"
+            # The fallback only runs when the primary has already stalled, so
+            # use the *other* method (the two are complementary: a fast
+            # quasi-Newton vs the globally-convergent multigrid-preconditioned
+            # accelerator), with a relaxed relative tolerance and a larger
+            # iteration budget as a last resort.
+            solver = "ngmres" if self.soil_solver == "qn" else "qn"
+            snes.setTolerances(rtol=max(self.soil_rtol * 100.0, 1.0e-4),
+                               atol=self.soil_atol,
+                               max_it=max(2 * self.soil_maxit, 200))
+        snes.setOptionsPrefix(prefix)
+
+        if solver == "ngmres":
             snes.setType("ngmres")
             # Nonlinear right-preconditioner: one Richardson sweep per outer
             # iteration is what engages the Krylov solve + multigrid PC.
@@ -213,17 +229,14 @@ class soilSPL(object):
                 pc.setFromOptions()
             ksp.setTolerances(rtol=1.0e-6)
         else:
-            snes.setOptionsPrefix("soilsplfb_")
-            # Relax the relative tolerance and grant a larger iteration budget:
-            # the fallback only runs when the primary has already stalled.
-            snes.setTolerances(rtol=max(self.soil_rtol * 100.0, 1.0e-4),
-                               atol=self.soil_atol,
-                               max_it=max(2 * self.soil_maxit, 200))
-            snes.setType("qn")
-            opts["soilsplfb_snes_qn_type"] = "lbfgs"
-            # Critical-point line search: robust and matrix-free (the 'bt'
+            # Limited-memory quasi-Newton (L-BFGS): builds curvature from secant
+            # updates (no analytic Jacobian) and typically converges in far
+            # fewer iterations than the ngmres accelerator on this stiff
+            # residual. Critical-point line search is matrix-free (the 'bt'
             # backtracking search requires a Jacobian, which qn does not form).
-            opts["soilsplfb_snes_linesearch_type"] = "cp"
+            snes.setType("qn")
+            opts[prefix + "snes_qn_type"] = "lbfgs"
+            opts[prefix + "snes_linesearch_type"] = "cp"
 
         snes.setFromOptions()
         return snes, f

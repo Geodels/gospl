@@ -352,11 +352,16 @@ Soil production, erosion, transport and deposition
 
         i. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
         j. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
-        k. ``pcType`` is the preconditioner for the Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions).
+        k. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
+        l. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+
+        .. tip::
+
+            The soil solve is usually the dominant cost of a soil-enabled run. The default ``solver: 'qn'`` was chosen because on a global model it cut the soil-solve wall time roughly in half (or more) versus ``'ngmres'`` at the **same** tolerance and solution — L-BFGS reaches a comparable iteration count but each iteration is far cheaper than an ``ngmres``/multigrid sweep. If ``'qn'`` struggles on a particular configuration, set ``solver: 'ngmres'``. Prefer switching ``solver`` over relaxing ``rtol``: a loose ``rtol`` can leave the elevation field under-resolved and **destabilise the downstream sediment-routing solver**, which is both slower and less accurate.
 
         .. note::
 
-            The primary solver is a Nonlinear GMRES accelerator (``ngmres``) right-preconditioned by Nonlinear Richardson (``nrichardson``); if it stalls on a stiff soil-production residual, goSPL automatically retries that timestep with a more robust limited-memory quasi-Newton (L-BFGS) fallback before continuing.
+            If the chosen primary solver stalls on a stiff soil-production residual, goSPL automatically retries that timestep with the *complementary* solver (quasi-Newton ⇄ ``ngmres`` multigrid accelerator) at a relaxed tolerance before continuing.
 
 
 Sediment surface erodibility factor
