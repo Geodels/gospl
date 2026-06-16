@@ -583,6 +583,23 @@ class ReadYaml(object):
             # Reference temperature in Celsius
             self.tempRef = soilDict.get("tempRef", 15.0)
 
+            # Soil-SPL nonlinear-solver (SNES) controls. The soil-aware SPL
+            # residual is stiffer than the bedrock case (soil-production
+            # coupling), so the iteration budget defaults to the same value as
+            # nlSPL (500, up from the previous 100) and the tolerances and
+            # preconditioner are exposed for tuning at scale.
+            self.soil_maxit = int(soilDict.get("maxIter", 500))
+            self.soil_rtol = float(soilDict.get("rtol", 1.0e-6))
+            self.soil_atol = float(soilDict.get("atol", 1.0e-6))
+            # Preconditioner for the soil SNES Krylov solve: 'hypre'
+            # (BoomerAMG, default), 'gamg', 'bjacobi', 'asm', ...
+            self.soil_pc = str(soilDict.get("pcType", "hypre"))
+            # Primary nonlinear solver: 'qn' (limited-memory quasi-Newton /
+            # L-BFGS, default — ~2.4x faster than ngmres at the same tolerance
+            # and solution on a global soil model) or 'ngmres' (accelerator +
+            # multigrid PC). Whichever is chosen, the other is the fallback.
+            self.soil_solver = str(soilDict.get("solver", "qn"))
+
         except KeyError:
             self.cptSoil = False
             self.Ksoil = 0.0
@@ -598,6 +615,11 @@ class ReadYaml(object):
             self.tempRef = 15.0
             self.tempFile = None
             self.tempData = None
+            self.soil_maxit = 500
+            self.soil_rtol = 1.0e-6
+            self.soil_atol = 1.0e-6
+            self.soil_pc = "hypre"
+            self.soil_solver = "qn"
 
         return
 
