@@ -450,8 +450,20 @@ class STRAMesh(object):
             self.stratP[nids, : self.stratStep + 1, :] = tmpp
 
         # Erode remaining stratal layers
-        # Get non-zero top layer number
-        eroLayNb = np.bincount(np.nonzero(cumThick)[0]) - 1
+        # Get non-zero top layer number. `minlength=len(nids)` is required: a
+        # node whose entire column was consumed (every layer in `boolMask`, i.e.
+        # the erosion demand exceeded the total pile *including* the
+        # BEDROCK_SENTINEL infinite-bedrock floor) contributes no nonzero row to
+        # `np.nonzero(cumThick)[0]`. Without minlength, `bincount` silently
+        # truncates such an all-zero row when it is the LAST node, so `eroLayNb`
+        # comes back one short and the fancy-index below raises a broadcast
+        # IndexError (a middle all-zero row already gets a 0 count, so only
+        # trailing ones crash). The sentinel makes a fully-consumed column
+        # impossible for physical erosion, but a non-converged upstream solve
+        # (e.g. the SIA ice SNES feeding glacial abrasion `dz_ero`) can produce
+        # a pathological demand that reaches here; padding keeps `erodeStrat`
+        # crash-safe and treats those rows like any other fully-eroded node.
+        eroLayNb = np.bincount(np.nonzero(cumThick)[0], minlength=len(nids)) - 1
         eroVal = cumThick[np.arange(len(nids)), eroLayNb] + ero[nids]
 
         self.thCoarse = np.zeros(self.lpoints)
