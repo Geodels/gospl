@@ -64,6 +64,11 @@ class UnstMesh(object):
         self.memclear = False
         self.southPts = None
 
+        # Cached Gatherv metadata (per-rank owned counts/displacements and the
+        # assembled owned global ids on rank 0) for `_gatherGlobalOnRoot`; the
+        # partition is fixed for the run so it is computed once on first use.
+        self._rootGather = None
+
         # Define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
 
@@ -505,6 +510,76 @@ class UnstMesh(object):
             self.readStratLayers()
 
         return
+
+    def _gatherGlobalOnRoot(self, local_full):
+        r"""
+        Assemble a full-mesh (``mpoints``) array on rank 0 from the *owned*
+        nodes of a local (``lpoints``) array. Returns the global array on rank
+        0 and ``None`` on every other rank.
+
+        This replaces the ``np.zeros(self.mpoints) + sentinel;
+        arr[self.locIDs] = local; Allreduce(MPI.MAX)`` idiom for fields that
+        are only consumed on rank 0 (the serial flexure / orography solves).
+        With it, non-root ranks never allocate an ``mpoints``-sized array, and
+        the data moved is a single ``Gatherv`` of the owned values
+        (~``mpoints`` total) instead of an ``mpoints``-sized ``Allreduce`` on
+        every rank — both the per-rank memory and the communication cost of
+        these phases stop growing with the global mesh size on every process.
+
+        The owned nodes (``self.glIDs``) — not ``self.locIDs`` — are gathered:
+        each global vertex is owned by exactly one rank, so they tile
+        ``0..mpoints-1`` with no overlap, and the result is identical to the
+        ``MAX`` reduction because a ghost node always carries the same value as
+        its owner.
+
+        :arg local_full: an ``lpoints`` (local, with ghosts) array.
+
+        :return: the assembled ``mpoints`` array on rank 0, ``None`` elsewhere.
+        """
+
+        comm = MPI.COMM_WORLD
+        vals = np.ascontiguousarray(local_full[self.glIDs], dtype=np.float64)
+
+        # Partition-invariant gather metadata: compute once and reuse.
+        if self._rootGather is None:
+            counts = np.array(comm.allgather(vals.size), dtype="i")
+            displs = np.zeros_like(counts)
+            displs[1:] = np.cumsum(counts)[:-1]
+            gids = np.ascontiguousarray(self.locIDs[self.glIDs], dtype=np.int64)
+            all_gids = (
+                np.empty(int(counts.sum()), dtype=np.int64)
+                if MPIrank == 0
+                else None
+            )
+            comm.Gatherv(
+                gids,
+                [all_gids, counts, displs, MPI.INT64_T] if MPIrank == 0 else None,
+                root=0,
+            )
+            if MPIrank == 0:
+                # Sanity: the owned nodes must tile the global mesh exactly.
+                if all_gids.size != self.mpoints or np.unique(all_gids).size != self.mpoints:
+                    raise RuntimeError(
+                        "owned nodes do not tile the global mesh "
+                        "(%d gathered, %d unique, mpoints=%d)"
+                        % (all_gids.size, np.unique(all_gids).size, self.mpoints)
+                    )
+            self._rootGather = (counts, displs, all_gids)
+
+        counts, displs, all_gids = self._rootGather
+        recv = (
+            np.empty(int(counts.sum()), dtype=np.float64) if MPIrank == 0 else None
+        )
+        comm.Gatherv(
+            vals,
+            [recv, counts, displs, MPI.DOUBLE] if MPIrank == 0 else None,
+            root=0,
+        )
+        if MPIrank == 0:
+            gathered = np.empty(self.mpoints, dtype=np.float64)
+            gathered[all_gids] = recv
+            return gathered
+        return None
 
     def _set_DMPlex_boundary_points(self, label):
         """
