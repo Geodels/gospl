@@ -15,6 +15,12 @@ if "READTHEDOCS" not in os.environ:
 # Ice density (kg/m^3), used for the SIA deformation coefficient and loading.
 RHO_ICE = 910.0
 
+# Reference thickness (m) for the accumulation substep limit: ice growing from
+# zero in the accumulation zone is resolved in increments scaled to this depth so
+# the SIA flux can drain it as it thickens (rather than one giant substep dumping
+# the whole step's accumulation before any flow — which produces runaway ice).
+ICE_HREF = 100.0
+
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
 
@@ -175,12 +181,16 @@ class IceMesh(object):
         physically empty a cell (this removes over-melt, it never creates ice).
 
         Because positivity is unconditional, the substep size ``Δt_sub`` is an
-        *accuracy* choice: it is set from a CFL-style fraction (``sia.cfl``) of
-        the per-cell time to lose its ice to flux + ablation, capped to
-        ``sia.max_substeps`` substeps. At goSPL's km resolution the stable
-        substep is :math:`10^3`–:math:`10^4` yr, so the full timestep usually
-        needs only a handful of substeps. Validated against the analytical SIA
-        dome (ice-volume conservation under zero mass balance).
+        *accuracy* choice (``sia.cfl``), capped to ``sia.max_substeps`` substeps.
+        It resolves two rates: the per-cell time to lose ice to flux+ablation
+        (capped — the limiter/clamp keep those safe), and the time to *gain* ice
+        by accumulation relative to a reference depth ``ICE_HREF`` (NOT capped —
+        ice growing from zero must thicken gradually so the SIA flux can drain it
+        as it builds; otherwise one giant substep dumps a whole step's
+        accumulation before any flow, producing runaway km-thick ice). For modest
+        accumulation only a handful of substeps are needed; high accumulation
+        (m/yr) over a large ``dt`` is genuinely stiff and needs many. Validated
+        against the analytical SIA dome (volume conservation under zero balance).
         """
         n, ad, as_, zbed, mdot = self._iceSIAParams(elaH, iceH)
 
@@ -205,25 +215,29 @@ class IceMesh(object):
             # otherwise alias-clobber this thickness array.
             H = self.tmpL.getArray().copy()
 
-            # Accuracy CFL: pick a substep so a cell loses at most `cfl` of its
-            # ice to (unlimited) outflux + ablation. Thin cells (H<=Hmin) are
-            # excluded — the flux limiter / melt clamp, not the substep, keep
-            # them non-negative.
+            # Accuracy CFL: pick a substep so a cell changes by at most `cfl` of
+            # its ice per substep. Two contributions:
             raw = ice_flux(self.lpoints, H, zbed, ad, as_, n)
             thick = H > Hmin
+            # (1) flux outflux + ablation loss. A cell can lose at most its own
+            #     ice in a step — the flux limiter caps the outflux and the melt
+            #     clamp caps ablation — so a cell shedding >=100% of its ice is
+            #     already handled conservatively and must NOT drive the substep to
+            #     zero (a real stall: thin cells on steep slopes / strong ablation
+            #     gave rate->inf). Cap this rate against the FULL `dt` (not
+            #     `remaining`, which would shrink and crawl geometrically).
             loss = np.where((raw > 0.0) & thick, raw, 0.0)
             melt = np.where((mdot < 0.0) & thick, -mdot, 0.0)
-            rate = (loss + melt) / np.maximum(H, Hmin)
-            # A cell can physically lose at most its own ice in a step — the flux
-            # limiter caps the outflux and the melt clamp caps ablation — so a
-            # cell wanting to shed >=100% of its ice over the full step is already
-            # handled conservatively and must NOT drive the substep toward zero
-            # (that was a real stall: thin cells on steep slopes / under strong
-            # ablation gave rate->inf). Cap the rate against the FULL step `dt`
-            # (not `remaining`, which would shrink each substep and crawl
-            # geometrically); this bounds the substep count at ~1/cfl with no
-            # tail, while still resolving smoother cells more finely.
-            rate = np.minimum(rate, 1.0 / self.dt)
+            loss_rate = np.minimum((loss + melt) / np.maximum(H, Hmin), 1.0 / self.dt)
+            # (2) accumulation gain. This is NOT capped: a thin/zero cell in the
+            #     accumulation zone must add ice gradually so the growing ice can
+            #     flow and drain as it thickens — otherwise one giant substep dumps
+            #     the whole step's accumulation before any drainage (the cause of
+            #     runaway km-thick ice). The reference thickness `ICE_HREF` sets how
+            #     finely growth from zero is resolved.
+            acc = np.where(mdot > 0.0, mdot, 0.0)
+            acc_rate = acc / np.maximum(H, ICE_HREF)
+            rate = loss_rate + acc_rate
             gmax = MPI.COMM_WORLD.allreduce(
                 float(rate.max()) if rate.size else 0.0, op=MPI.MAX
             )
