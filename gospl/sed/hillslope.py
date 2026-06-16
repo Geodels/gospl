@@ -117,9 +117,15 @@ class hillSLP(object):
         # mesh and the land/sea mask, so it is cached and its preconditioner
         # reused; it is rebuilt only when the coastline (seaID) moves.
         if smooth == 2:
-            if self._smoothMat is None or not np.array_equal(
+            # The rebuild test is rank-local (seaID is per-partition), but the
+            # rebuild + PCSetUp it gates are COLLECTIVE — so the decision MUST be
+            # reduced across ranks (logical OR), or one rank rebuilds while
+            # another reuses and the collective Mat assembly / PCSetUp deadlocks.
+            rebuild = self._smoothMat is None or not np.array_equal(
                 self.seaID, self._smooth_seaID
-            ):
+            )
+            rebuild = MPI.COMM_WORLD.allreduce(rebuild, op=MPI.LOR)
+            if rebuild:
                 Cd = np.full(self.lpoints, MARINE_SMOOTH_N_LAND, dtype=np.float64)
                 Cd[self.seaID] = MARINE_SMOOTH_N_SEA
                 if self._smoothMat is not None:
@@ -166,9 +172,14 @@ class hillSLP(object):
             # invariant: cache it and reuse the factorised PC, rebuilding only
             # when the coastline (seaID) moves. Mirrors the marine smoother
             # (smooth=2); bit-faithful to the previous per-step build+solve.
-            if self._hillMat is None or not np.array_equal(
+            # Collective rebuild decision (see smooth=2 above): seaID is rank-
+            # local but _buildDiffMat + PCSetUp are collective, so reduce the
+            # "coastline moved" test across ranks or the solve deadlocks at np>1.
+            rebuild = self._hillMat is None or not np.array_equal(
                 self.seaID, self._hill_seaID
-            ):
+            )
+            rebuild = MPI.COMM_WORLD.allreduce(rebuild, op=MPI.LOR)
+            if rebuild:
                 Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
                 Cd[self.seaID] = self.Cdm
                 if self._hillMat is not None:
