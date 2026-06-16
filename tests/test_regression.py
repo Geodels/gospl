@@ -415,6 +415,61 @@ def test_ice_mfd_diagnostic(minimal_ice_sia_model):
     assert famax > 0.0
 
 
+def test_ice_mfd_dual_strata_till(minimal_ice_dual_model):
+    """
+    Protects: the diagnostic ('mfd') glacial driver end-to-end with dual
+    lithology + stratigraphy + till. Driving the SAME erosion/till machinery from
+    the cheap routing proxy (no SIA solve) must: form ice, abrade the bed, route
+    abraded rock into till deposited as moraine, conserve the solid AND the fine
+    (dual-lithology) budgets, and update the stratigraphic pile.
+    """
+    from mpi4py import MPI
+    m = minimal_ice_dual_model
+    m.ice_flow_model = "mfd"          # diagnostic driver instead of the SIA
+    assert m.iceOn and m.ice_till_on and m.ice_Kg > 0.0
+    assert m.stratLith and m.stratNb > 0
+
+    te0, td0 = m._tillEroded, m._tillDeposited
+    stratH0 = m.stratH.copy()
+
+    m.runProcesses()                  # mfd ice -> abrasion -> till -> dual strata
+
+    # (A) The diagnostic driver formed ice, slid, and abraded.
+    g = lambda a, op=MPI.MAX: MPI.COMM_WORLD.allreduce(float(a), op=op)
+    assert g(m.iceHL.getArray().max()) > 1.0, "mfd formed no ice"
+    assert g(m.iceUbL.getArray().max()) > 0.0, "no basal velocity"
+    assert g(m.iceAbrL.getArray().max()) > 0.0, "no abrasion"
+
+    # (B) Till solid produced and conserved over the run (glacial-only counters;
+    # the shared fine budget is exercised by fluvial transport too, so it is
+    # checked in isolation below).
+    dte = MPI.COMM_WORLD.allreduce(m._tillEroded - te0, op=MPI.SUM)
+    dtd = MPI.COMM_WORLD.allreduce(m._tillDeposited - td0, op=MPI.SUM)
+    assert dte > 0.0, "no till produced under the mfd driver"
+    assert np.isclose(dte, dtd, rtol=1.0e-9), "till solid eroded != deposited"
+
+    # (C) Stratigraphy updated by the glacial run.
+    dH = (m.stratH - stratH0).sum(axis=1)
+    assert float(np.abs(dH).max()) > 0.0, "stratigraphy not updated"
+
+    # (D) Dual-lithology coupling: an isolated, deterministic glacialTill (fast
+    # ice up high, melt band lower) must conserve the FINE budget and lay a
+    # fine-bearing moraine into the stratigraphy.
+    zbed = m.hLocal.getArray().copy()
+    m.iceUbL.setArray(np.where(zbed > 2500.0, 0.1, 0.0))
+    m.iceMeltL.setArray(np.where((zbed > 1500.0) & (zbed < 2000.0), 1.0, 0.0))
+    fe0, fd0 = m._fineEroded, m._fineDeposited
+    stratHf0 = m.stratHf.copy()
+    m.glacialTill()
+    dfe = MPI.COMM_WORLD.allreduce(m._fineEroded - fe0, op=MPI.SUM)
+    dfd = MPI.COMM_WORLD.allreduce(m._fineDeposited - fd0, op=MPI.SUM)
+    assert dfe > 0.0, "no fine abraded; dual-lithology coupling inactive"
+    assert np.isclose(dfe, dfd, rtol=1.0e-6), "fine eroded != fine deposited"
+    dHf = (m.stratHf - stratHf0).sum(axis=1)
+    abl = (zbed > 1500.0) & (zbed < 2000.0)
+    assert float(dHf[abl].max()) > 0.0, "moraine carries no fine fraction"
+
+
 @pytest.mark.slow
 def test_ice_terminus_sea_level_floor(minimal_ice_sia_model):
     """

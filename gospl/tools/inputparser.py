@@ -1770,14 +1770,14 @@ class ReadYaml(object):
                     self._checkMap(spec, "ice hinit")
                 self._iceInitSpec = (sc, spec)
 
-            # Ice flow model: 'sia' (default — the explicit, mass-conserving
-            # Shallow-Ice-Approximation thickness solve) or 'mfd' (a cheap,
-            # stable DIAGNOSTIC: route the ELA accumulation downhill as an ice
-            # discharge, derive a Bahr thickness and a balance-velocity, and
-            # drive the same glacial-erosion / till machinery — no dynamics
-            # solve, for when the morphology of glacial erosion matters more than
-            # the ice dynamics themselves). Default 'sia' preserves prior runs.
-            self.ice_flow_model = iceDict.get("flow_model", "sia")
+            # Ice flow model: 'mfd' (default — a cheap, stable DIAGNOSTIC: route
+            # the ELA accumulation downhill as an ice discharge, derive a Bahr
+            # thickness and a balance velocity, and drive the glacial-erosion /
+            # till machinery without a dynamics solve; robust and physical at any
+            # resolution, suited to glacial-erosion morphology) or 'sia' (the
+            # explicit, mass-conserving Shallow-Ice-Approximation thickness solve,
+            # which is stiff and over-thickens km-scale continental ice).
+            self.ice_flow_model = iceDict.get("flow_model", "mfd")
             if self.ice_flow_model not in ("sia", "mfd"):
                 if MPIrank == 0:
                     print(

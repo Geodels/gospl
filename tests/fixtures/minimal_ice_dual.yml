@@ -32,6 +32,7 @@ strata:
     fine_diff_factor: 2.0
 
 ice:
+    flow_model: sia      # pin SIA (default is now mfd) for this SIA test
     hela: 2000.
     hice: 3000.
     hterm: 1500.

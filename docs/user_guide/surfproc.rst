@@ -134,22 +134,22 @@ Ice sheets and glacial erosion
 
         Adding an ``ice`` section turns on goSPL's glacial model, driving glacial
         abrasion, till transport and ice loading. Two flow models are available
-        via ``flow_model`` — the full **Shallow-Ice-Approximation (SIA)**
-        (``sia``, default): an explicit, mass-conserving non-linear diffusion of
-        the ice thickness; or a cheap, stable **diagnostic** (``mfd``): the ELA
-        accumulation is routed downhill into an ice discharge from which a Bahr
-        thickness and a balance velocity are derived — no dynamics solve. Use
-        ``mfd`` when the **morphology of glacial erosion** matters more than the
-        ice dynamics themselves (it is fast and robust at any resolution, where
-        the SIA becomes stiff for km-thick continental ice). The full algorithm
-        is described in the technical guide (:ref:`ice`).
+        via ``flow_model`` — a cheap, stable **diagnostic** (``mfd``, default):
+        the ELA accumulation is routed downhill into an ice discharge from which
+        a Bahr thickness and a balance velocity are derived (no dynamics solve;
+        fast and robust at any resolution, suited to the **morphology of glacial
+        erosion**); or the full **Shallow-Ice-Approximation (SIA)** (``sia``): an
+        explicit, mass-conserving non-linear diffusion of the ice thickness
+        (physically richer, but stiff and over-thick for km-scale continental ice
+        at coarse resolution). The full algorithm is in the technical guide
+        (:ref:`ice`).
 
         **Declaration example**:
 
         .. code:: yaml
 
             ice:
-                # flow_model: sia          # 'sia' (default) | 'mfd' (diagnostic)
+                # flow_model: mfd          # 'mfd' (default, diagnostic) | 'sia'
                 # Either constant glacial parameters
                 hterm: 1700.0
                 hela: 1850.0
@@ -177,10 +177,10 @@ Ice sheets and glacial erosion
                     on: True
                     route: False
 
-        ``flow_model`` selects how ice is computed: ``sia`` (default) solves the
-        Shallow-Ice-Approximation thickness; ``mfd`` is the diagnostic proxy
-        (route the accumulation into an ice discharge, then a Bahr thickness and
-        a balance velocity — no dynamics solve). Both then drive the *same*
+        ``flow_model`` selects how ice is computed: ``mfd`` (default) is the
+        diagnostic proxy (route the accumulation into an ice discharge, then a
+        Bahr thickness and a balance velocity — no dynamics solve); ``sia`` solves
+        the full Shallow-Ice-Approximation thickness. Both then drive the *same*
         abrasion / till / loading machinery below. The diagnostic ``mfd`` adds
         four optional controls: ``icedir`` (number of MFD flow directions for the
         ice routing), ``eheight`` and ``fwidth`` (the Bahr thickness/width
