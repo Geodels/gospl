@@ -23,7 +23,8 @@ tests/fixtures/incising/
 tests/fixtures/minimal_strat/
 tests/fixtures/minimal_dual/
 tests/fixtures/minimal_dual_coarse/
-tests/fixtures/minimal_ice_sia/
+tests/fixtures/minimal_ice/
+tests/fixtures/ice_soil_out/
 tests/fixtures/minimal_ice_till/
 tests/fixtures/minimal_ice_flex/
 tests/fixtures/minimal_ice_dual/
@@ -36,7 +37,3 @@ tests/fixtures/prov_src.npz
 MANIFEST
 .ipynb_checkpoints
 fortran/meshparams.mod
-tests/fixtures/minimal_ice_sia/
-tests/fixtures/minimal_ice_mfd/
-tests/fixtures/minimal_ice_till/
-tests/fixtures/minimal_ice_flex/
