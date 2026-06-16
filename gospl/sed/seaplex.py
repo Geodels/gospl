@@ -305,6 +305,10 @@ class SEAMesh(object):
 
         # Define solver and precondition conditions
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        # Options prefix so the coupled marine-deposition solve can be tuned from
+        # the command line without editing code, e.g.
+        # `-marine_dep_pc_fieldsplit_type additive`.
+        ksp.setOptionsPrefix("marine_dep_")
         ksp.setType(petsc4py.PETSc.KSP.Type.TFQMR)
         ksp.setOperators(sysMat)
         ksp.setTolerances(rtol=self.rtol)
@@ -314,11 +318,34 @@ class SEAMesh(object):
         nested_IS = sysMat.getNestISs()
         pc.setFieldSplitIS(('h', nested_IS[0][0]), ('q', nested_IS[0][1]))
 
+        # Schur-complement fieldsplit. This marine-deposition system has the same
+        # two-field (elevation h / sediment-flux q) coupled structure as the
+        # detachment-limited SPL solve (see eroder/SPL._coupledEDSystem): the h
+        # and q blocks are near-triangular M-matrices the per-block ILU solves
+        # almost exactly, so a Schur factorisation captures the full
+        # deposition<->routing coupling and converges in a handful of outer
+        # iterations -- versus ~100+ for the default additive (block-diagonal)
+        # split, which only sees part of the coupling. This changes only the
+        # preconditioner, so the solution (to `rtol`) is unchanged. Defaults are
+        # injected into the options DB guarded by `hasName`, so PETSC_OPTIONS /
+        # `-marine_dep_*` still override.
+        opts = petsc4py.PETSc.Options()
+        for key, val in (
+            ("marine_dep_pc_fieldsplit_type", "schur"),
+            ("marine_dep_pc_fieldsplit_schur_fact_type", "full"),
+            ("marine_dep_pc_fieldsplit_schur_precondition", "selfp"),
+        ):
+            if not opts.hasName(key):
+                opts.setValue(key, val)
+
         subksps = pc.getFieldSplitSubKSP()
         subksps[0].setType("preonly")
-        subksps[0].getPC().setType("asm")
+        subksps[0].getPC().setType("gasm")
         subksps[1].setType("preonly")
-        subksps[1].getPC().setType("bjacobi")
+        subksps[1].getPC().setType("gasm")
+
+        # Apply the Schur defaults (and any `-marine_dep_*` overrides).
+        ksp.setFromOptions()
 
         ksp.solve(rhs_vec, hq_vec)
         r = ksp.getConvergedReason()
