@@ -13,9 +13,11 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from gflex.f2d import F2D
     from gospl._fortran import flexure
+    from gospl._fortran import jacobiancoeff
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
+MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 
 class GridProcess(object):
@@ -50,6 +52,10 @@ class GridProcess(object):
             # previous step's converged DH-grid deflection seeds the next solve
             # (loads evolve slowly ⇒ far fewer Anderson iterations). Rank-0 only.
             self._flex_w_prev = None
+            # Cached FV negative-Laplacian for the parallel mixed-FV biharmonic
+            # solver (method == 'fem'); geometry-only, so built once. See
+            # _cmptFlexFEM.
+            self._flexLm = None
             # Step counter driving the flexure interval (`flex_interval`): the
             # load reference (hOldFlex) is snapshotted at interval starts and
             # flexure applied at interval ends, so the load accumulates in
@@ -60,8 +66,11 @@ class GridProcess(object):
             self.oroEPS = np.finfo(float).eps
 
         if self.flexOn or self.oroOn:
-            # Build regular grid for flexure or orographic precipitation calculation
-            if MPIrank == 0 and self.flex_method != 'global':
+            # Build regular grid for the FD/FFT flexure or orographic
+            # precipitation calculation. The 'global' (spherical-harmonic) and
+            # 'fem' (parallel mixed-FV biharmonic) flexure methods do not use
+            # the regular grid.
+            if MPIrank == 0 and self.flex_method not in ('global', 'fem'):
                 self._buildRegGrid()
             if MPIrank == 0 and self.flexOn and self.flex_method == 'global':
                 self._buildDHGrid()
@@ -508,6 +517,170 @@ class GridProcess(object):
 
         return -w_dh
 
+    def _cmptFlexFEM(self, dzLocal):
+        r"""
+        **Phase 0 — parallel mixed finite-volume biharmonic flexure**
+        (opt-in ``flexure: method: 'fem'``; constant elastic thickness for now).
+
+        Replaces the serial spherical-harmonic (``'global'``, pyshtools) and FD
+        (``'FD'``, gflex) solvers with a single PETSc solve **on the DMPlex** —
+        fully parallel, no gather-to-root, no external SH/FD dependency.
+
+        Solves the thin-spherical-shell plate on an elastic (asthenospheric)
+        foundation
+
+        .. math::
+          D_0\,(\nabla^4 + \tfrac{4}{R^2}\nabla^2)\,w + \Delta\rho\,g\,w = q,
+          \qquad q = \rho_s\,g\,\mathrm{(erodep)}
+
+        (the :math:`+\tfrac{4}{R^2}\nabla^2` term is the spherical-shell
+        correction matching the ``'global'`` spectral operator ``P_l``) via the
+        Ciarlet–Raviart **mixed form**: with the finite-volume negative-Laplacian
+        ``Lm`` (``= -∇²``, the hillslope FV stencil) and auxiliary moment
+        ``M := Lm·w``, it becomes the 2-field coupled linear system
+
+        .. math::
+          \begin{bmatrix} L_m & -I \\ \Delta\rho g\,I &
+          D_0 L_m - \tfrac{4 D_0}{R^2} I \end{bmatrix}
+          \begin{bmatrix} w \\ M \end{bmatrix} =
+          \begin{bmatrix} 0 \\ q \end{bmatrix}
+
+        solved with a ``fieldsplit`` Schur preconditioner — the same machinery as
+        :meth:`eroder.SPL.SPL._coupledEDSystem`. The foundation term
+        :math:`\Delta\rho g\,w` makes the system non-singular; the area-weighted
+        mean of ``w`` is removed afterwards to match the spectral solver dropping
+        spherical-harmonic degree 0.
+
+        .. note::
+            Phase-0 scaffold: constant ``flex_eet`` only (varying Te = Phase 1),
+            no flat-model boundary conditions (Phase 2), AD-HOC KSP rebuilt each
+            call (caching the step-invariant operator = Phase 3). ``Lm`` is
+            geometry-only and cached in ``self._flexLm``.
+
+        :arg dzLocal: local (lpoints) elevation change = surface load thickness (m).
+
+        :return: local (lpoints) flexural deflection (m), same sign convention as
+            ``_cmptFlexGlobal`` (negative = subsidence under deposition).
+        """
+
+        if MPIrank == 0 and not getattr(self, "_fem_warned", False):
+            print(
+                "[flexure] WARNING: method='fem' is EXPERIMENTAL (Phase-0 scaffold): "
+                "constant elastic thickness only, no flat-model boundary conditions, "
+                "and the fieldsplit-Schur preconditioner is not yet tuned for large "
+                "meshes (slow at scale). Use 'global' or 'FD' for production runs.",
+                flush=True,
+            )
+            self._fem_warned = True
+
+        # ---- constants (constant-Te Phase 0) ----
+        Te0 = float(self.flex_eet)
+        D0 = self.young * Te0 ** 3 / (12.0 * (1.0 - self.nu ** 2))
+        kfound = self.flex_rhoa * self.gravity          # Δρ·g (rho_infill = 0)
+        shift = -4.0 * D0 / self.radius ** 2            # spherical-shell term
+
+        # ---- FV negative-Laplacian Lm (= -∇²); geometry only ⇒ cache ----
+        if self._flexLm is None:
+            coeffs = jacobiancoeff(
+                self.hLocal.getArray(),
+                np.ones(self.lpoints),
+                np.zeros(self.lpoints),
+            )
+            self._flexLm = self._assembleDiffMatCSR(coeffs)
+        Lm = self._flexLm
+
+        # ---- assemble the 2-field nested operator ----
+        # Field order (M, w): the (0,0) block must be INVERTIBLE for the Schur
+        # factorisation. The bare Laplacian Lm (= -∇²) is singular (constant
+        # nullspace), so we put A_MM = D0·Lm - (4D0/R²)·I there — the shell/
+        # foundation shift regularises the nullspace. System (M, w):
+        #   A_MM·M + Δρg·w = q        (the plate equation)
+        #   -M     + Lm·w  = 0        (definition M = Lm·w)
+        A_MM = Lm.copy()
+        A_MM.scale(D0)
+        A_MM.shift(shift)                               # D0·Lm - (4D0/R²)·I
+        A_Mw = self._matrix_build_diag(kfound * np.ones(self.lpoints))   # Δρg·I
+        A_wM = self._matrix_build_diag(-np.ones(self.lpoints))           # -I
+        sysMat = petsc4py.PETSc.Mat().createNest(
+            mats=[[A_MM, A_Mw], [A_wM, Lm]], comm=MPIcomm
+        )
+        sysMat.assemblyBegin()
+        sysMat.assemblyEnd()
+
+        # ---- RHS [q, 0] (M-row carries the load, w-row is the definition) ----
+        self.tmpL.setArray(dzLocal * self.flex_rhos * self.gravity)
+        self.dm.localToGlobal(self.tmpL, self.tmp)      # self.tmp = q (global)
+        zeroG = self.hGlobal.duplicate()
+        zeroG.set(0.0)
+        rhs = petsc4py.PETSc.Vec().createNest([self.tmp, zeroG], comm=MPIcomm)
+        rhs.setUp()
+        sol = rhs.duplicate()
+
+        # ---- fieldsplit Schur KSP (mirrors _coupledEDSystem; opts-prefixed) ----
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setOptionsPrefix("flexfem_")
+        ksp.setType(petsc4py.PETSc.KSP.Type.FGMRES)
+        ksp.setOperators(sysMat)
+        ksp.setTolerances(rtol=self.flex_tol * 1.0e-2)  # tighter than the SH it replaces
+        pc = ksp.getPC()
+        pc.setType("fieldsplit")
+        nested_IS = sysMat.getNestISs()
+        pc.setFieldSplitIS(('m', nested_IS[0][0]), ('w', nested_IS[0][1]))
+        opts = petsc4py.PETSc.Options()
+        for key, val in (
+            ("flexfem_pc_fieldsplit_type", "schur"),
+            ("flexfem_pc_fieldsplit_schur_fact_type", "full"),
+            ("flexfem_pc_fieldsplit_schur_precondition", "selfp"),
+        ):
+            if not opts.hasName(key):
+                opts.setValue(key, val)
+        subksps = pc.getFieldSplitSubKSP()
+        subksps[0].setType("preonly")
+        subksps[0].getPC().setType("gasm")
+        subksps[1].setType("preonly")
+        subksps[1].getPC().setType("gasm")
+        ksp.setFromOptions()
+
+        ksp.solve(rhs, sol)
+        r = ksp.getConvergedReason()
+        if r < 0 and MPIrank == 0:
+            print(
+                "[femflex] KSP failed to converge (reason %d) after %d its"
+                % (r, ksp.getIterationNumber()),
+                flush=True,
+            )
+
+        # ---- extract w (field 1); remove area-weighted mean (SH degree-0 drop) ----
+        wG = sol.getSubVector(nested_IS[0][1])
+        self.dm.globalToLocal(wG, self.tmpL)
+        w = self.tmpL.getArray().copy()
+        sol.restoreSubVector(nested_IS[0][1], wG)
+
+        owned = self.inIDs == 1
+        loc_num = float(np.sum((w * self.larea)[owned]))
+        loc_den = float(np.sum(self.larea[owned]))
+        gnum = MPI.COMM_WORLD.allreduce(loc_num, op=MPI.SUM)
+        gden = MPI.COMM_WORLD.allreduce(loc_den, op=MPI.SUM)
+        w -= gnum / gden
+
+        # ---- clean up (AD-HOC lifecycle; Lm is cached) ----
+        A_MM.destroy()
+        A_Mw.destroy()
+        A_wM.destroy()
+        for IS in nested_IS[0] + nested_IS[1]:
+            IS.destroy()
+        subksps[0].destroy()
+        subksps[1].destroy()
+        pc.destroy()
+        ksp.destroy()
+        sysMat.destroy()
+        rhs.destroy()
+        sol.destroy()
+        zeroG.destroy()
+        petsc4py.PETSc.garbage_cleanup()
+
+        return -w
+
     def applyFlexure(self):
         r"""
         This function computes the flexural isostasy equilibrium based on topographic change. It is a simple routine that accounts for flexural isostatic rebound associated with erosional loading/unloading.
@@ -533,6 +706,22 @@ class GridProcess(object):
         if self.iceOn:
             dIce = self.iceHL.getArray() - self.iceFlex.getArray()
             local_dZ += dIce * 910.0 / self.flex_rhos  # 910 kg/m3 ice density
+
+        # Parallel mixed-FV biharmonic flexure (opt-in `method: 'fem'`): solved
+        # directly on the DMPlex with no gather-to-root, no pyshtools / gflex.
+        # Returns the local deflection; apply it and return early.
+        if self.flex_method == 'fem':
+            tmpFlex = self._cmptFlexFEM(local_dZ)
+            self.localFlex += tmpFlex
+            self.hLocal.setArray(hl + tmpFlex)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Compute Flexural Isostasy [fem] (%0.02f seconds)"
+                    % (process_time() - t0),
+                    flush=True,
+                )
+            return
 
         dZ = self._gatherGlobalOnRoot(local_dZ)
         flexZ = None
