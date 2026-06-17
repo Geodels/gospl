@@ -83,7 +83,7 @@ Used for global mesh, the horizontal advection (advect: `interp`) often correspo
 Flexural isostasy
 ---------------------------------
 
-The flexural isostasy in goSPL is computed on a **regular grid**, and therefore required to perform a series of interpolation from and to the goSPL unstructured mesh.
+goSPL provides two flexural-isostasy solvers, selected by ``flexure: method``: a **parallel finite-volume biharmonic** solve performed directly on the unstructured mesh for 2D simulations (``'fem'``), and a **spherical-harmonic** solve for global (sphere) simulations (``'global'``). Neither uses a regular grid for the flexure itself — the 2D solve works node-by-node on the mesh, and the global solve works in the spherical-harmonic domain.
 
 
 .. figure:: ../images/flex.png
@@ -98,9 +98,9 @@ Flexural isostasy for 2D simulations
 
 When running goSPL in 2D, it is possible to compute the flexural isostasy equilibrium based on topographic change. The function accounts for flexural isostatic rebound associated with erosional loading/unloading by solving the thin-elastic-plate biharmonic equation with a parallel finite-volume scheme directly on the unstructured mesh (``flexure: method: 'fem'``), supporting spatially-variable elastic thickness.
 
-.. important::
+.. note::
 
-  The approach is performed in serial and therefore can be relatively slow depending on the simulation size.
+  The 2D solve runs **in parallel** directly on the mesh (no gather-to-root, no regular grid) and caches its operator and factorisation across time steps — only the surface load changes between steps — so it stays fast even on small meshes. Spatially-varying elastic thickness is handled in a single linear solve.
 
 It takes an initial (at time :math:`t`) and final topography (at time :math:`t + \Delta t`) (*i.e.* before and after erosion/deposition) and returns a corrected final topography that includes the effect of erosional/depositional unloading/loading. 
 
