@@ -408,7 +408,12 @@ class PITFill(object):
             graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
             graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
 
-        # Build global spillover graph on master
+        # Build global spillover graph on master. SERIAL on rank 0 (the
+        # depression-merge graph) + a Reduce-to-root and a bcast — the suspected
+        # non-scaling part of `flow`. Timed as "flow_pitgraph" (no-op when
+        # profiling off) to confirm whether it (vs the parallel solves) drives
+        # the high-rank flow plateau.
+        self.profiler.start("flow_pitgraph")
         if MPIrank == 0:
             mgraph = -np.ones((total, 5), dtype=float)
         else:
@@ -421,6 +426,7 @@ class PITFill(object):
 
         # Send filled graph dataset to each processors
         graph = MPI.COMM_WORLD.bcast(ggraph, root=0)
+        self.profiler.stop("flow_pitgraph")
 
         # Drain pit on local boundaries and towards mesh edges
         keep = graph[:, 2].astype(int) == MPIrank
