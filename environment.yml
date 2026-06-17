@@ -19,7 +19,6 @@ dependencies:
   - hdf5 * mpi_openmpi*
   - vtk-base
   - ruamel.yaml
-  - gflex>=1.1.0,<2.0
   - pyshtools
   - cython
   - c-compiler

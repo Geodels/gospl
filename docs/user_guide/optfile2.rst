@@ -94,25 +94,25 @@ Tectonic forcing parameters
 Flexural isostasy definition
 -----------------------------------
 
-This function computes the flexural isostasy equilibrium based on topographic change. It accounts for flexural isostatic rebound associated with erosional loading/unloading.
+This function computes the flexural isostasy equilibrium based on topographic change. It accounts for flexural isostatic rebound associated with erosional loading/unloading, solving the thin-elastic-plate biharmonic equation
+:math:`D\,\nabla^4 w + \Delta\rho\,g\,w = q` with :math:`D = E\,T_e^3/[12(1-\nu^2)]`.
 
-.. important::
+goSPL provides two solvers, selected by ``method``:
 
-  It is computed on a regular grid (in X,Y in 2D or lon/lat for global simulation) and is limited in terms of parallelisation.
+- ``'fem'`` (**flat / 2D models, default**) — a parallel finite-volume biharmonic solve **directly on the unstructured mesh**: no regular grid, no gather-to-root, no external dependency, and spatially-varying elastic thickness handled in a single linear solve. This is the only flat-model solver (it replaced the former gFlex ``'FD'`` and ``'FFT'`` approaches).
+- ``'global'`` — a spherical-harmonic solve for global (sphere) models, run serially on the root rank.
 
 .. grid:: 1
     :padding: 3
 
-    .. grid-item-card::  
-        
-        **Declaration example**:
+    .. grid-item-card::
+
+        **Declaration example** (flat / 2D model):
 
         .. code:: yaml
 
-            flexure: 
-              method: 'FD'
-              regdx: 1000.
-              ninterp: 4
+            flexure:
+              method: 'fem'
               thick: 30.e3
               rhoc: 2300.0
               rhoa: 3300.0
@@ -123,48 +123,48 @@ This function computes the flexural isostasy equilibrium based on topographic ch
               bcS: "Mirror"
               bcW: "0Slope0Shear"
 
-        Used to consider flexural isostasy (*i.e.* not global scale) where:
+        where:
 
-        a. ``method``: the approach used is either 'FD' in 2D or 'global' for global model.  
-        b. ``regdx``: the resolution of the regular grid used to perform the flexural isostasy calculation,
-        c. ``ninterp``: the number of points used to perform the interpolation between goSPL unstructured mesh and the regular grid (not used for the 'global' ``method``) 
-        d. ``thick`` effective elastic plate thickness in m,
-        e. ``rhoc`` crust density in kg/m3,
-        f. ``rhoa`` asthenospheric density in kg/m3.
-        g. ``young``  Young's Modulus in Pa.
-        h. ``nu`` Poisson ratio.
-        i. ``bcN``, ``bcE``, ``bcS``, ``bcW`` North, East, South and West boundary conditions.
+        a. ``method``: ``'fem'`` for flat/2D models (default) or ``'global'`` for global (spherical) models.
+        b. ``thick`` effective elastic plate thickness :math:`T_e` in m (uniform; spatially/temporally variable :math:`T_e` is set with the ``temap`` key below).
+        c. ``rhoc`` sediment/crust (load) density in kg/m³,
+        d. ``rhoa`` asthenospheric (mantle) density in kg/m³,
+        e. ``young``  Young's Modulus in Pa,
+        f. ``nu`` Poisson ratio,
+        g. ``bcN``, ``bcE``, ``bcS``, ``bcW`` North, East, South and West boundary conditions (``'fem'`` only — see the boundary-condition note below).
 
-        For the **global** ``method`` (spherical-harmonic solve), the following
-        additional keys are available:
+        The following keys apply to **both** methods:
 
-        j. ``res_deg``: resolution (degrees) of the Driscoll–Healy grid on which the spherical-harmonic flexure is solved (default ``0.25``). The flexural deflection is long-wavelength, so a coarser grid (e.g. ``0.5`` or ``1.0``) is markedly cheaper with little change to the result — the cheapest speed-up for the (serial) global solve.
-        k. ``interval``: apply flexure only every ``interval`` goSPL steps, accumulating the load in between (default ``1`` = every step). Useful when flexure dominates the wall time; the elastic response is instantaneous so this only coarsens the temporal resolution of the loading history.
-        l. ``maxIter``: maximum Anderson/Picard iterations for the **varying-Te** (``temap``) iterative solve (default ``50``).
-        m. ``tol``: relative convergence tolerance ``|dw|/|w|`` for that iteration (default ``5.e-4``).
-        n. ``relax``: under-relaxation factor (0–1) for the varying-Te update (default ``1.0``; lower damps strong Te contrasts).
+        h. ``interval``: apply flexure only every ``interval`` goSPL steps, accumulating the load in between (default ``1`` = every step). The elastic response is instantaneous, so this only coarsens the temporal resolution of the loading history.
+
+        For the ``'global'`` ``method`` (spherical-harmonic solve) the following additional keys are available:
+
+        i. ``ninterp``: number of source points for the mesh ↔ Driscoll–Healy grid interpolation (default ``4``; unused by ``'fem'``).
+        j. ``res_deg``: resolution (degrees) of the Driscoll–Healy grid (default ``0.25``). The deflection is long-wavelength, so a coarser grid (e.g. ``0.5`` or ``1.0``) is markedly cheaper with little change to the result — the cheapest speed-up for the serial global solve.
+        k. ``maxIter``: maximum Anderson/Picard iterations for the **varying-Te** (``temap``) iterative solve (default ``50``).
+        l. ``tol``: relative convergence tolerance ``|dw|/|w|`` for that iteration (default ``5.e-4``).
+        m. ``relax``: under-relaxation factor (0–1) for the varying-Te update (default ``1.0``; lower damps strong Te contrasts).
+
+        .. note::
+
+          The varying-Te global solve warm-starts each step from the previous step's converged deflection, so after the first step it typically needs noticeably fewer iterations. With a constant ``thick`` (no ``temap``) the global solve is a single spectral pass and ``maxIter``/``tol``/``relax`` are unused.
 
         .. note::
 
-          The varying-Te global solve warm-starts each step from the previous step's converged deflection, so after the first step it typically needs noticeably fewer iterations (the load evolves slowly). With a constant ``thick`` (no ``temap``) the global solve is a single spectral pass and ``maxIter``/``tol``/``relax`` are unused.
+          For flat/2D (``'fem'``) models the per-side boundary conditions ``bcN/bcE/bcS/bcW`` (default ``0Slope0Shear``) can be:
+
+            - ``0Slope0Shear``: zero slope and zero shear at the edge (``∂w/∂n = 0``, ``∂³w/∂n³ = 0``) — the natural boundary; use it (or ``Mirror``) when the load is far from the edge.
+            - ``Mirror``: reflective/symmetry boundary. For a thin plate this is identical to ``0Slope0Shear`` and uses the same (natural) treatment.
+            - ``0Displacement0Slope``: clamped edge (``w = 0`` and ``∂w/∂n = 0``).
+
+          ``0Moment0Shear`` and ``Periodic`` are not available with the ``'fem'`` solver.
 
         .. note::
-  
-          For non-global simulation, the user needs to specify the boundary conditions for the flexural isostasy calculation. Similar conditions to `gFlex <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_ are possible:
-            
-            - `0Displacement0Slope` 0-displacement-0-slope boundary condition
 
-            - `0Moment0Shear`: Broken plate boundary condition second and third derivatives of vertical displacement are 0. This is like the end of a diving board.
-            - `0Slope0Shear`: First and third derivatives of vertical displacement are zero. While this does not lend itsellf so easily to physical meaning, it is helpful to aid in efforts to make boundary condition effects disappear (i.e. to emulate the NoOutsideLoads cases)
-            - `Mirror`: Load and elastic thickness structures reflected at boundary.
-            - `Periodic``: Wrap-around boundary condition: must be applied to both North and South and/or both East and West. This causes, for example, the edge of the eastern and western limits of the domain to act like they are next to each other in an infinite loop.
-
-.. warning::
-
-    In case where **flexure** and **orographic rain** capabilities are defined in the same simulation, you will need to have the same grid resolution (``regdx``) for each definition.
+          The ``'fem'`` solver caches its operator and factorisation and reuses them every step (serial direct LU / parallel MUMPS), so it is fast even on small meshes; only the surface load changes between steps. The boundary discretisation differs from the former gFlex solver by ~10 % only where the flexural wavelength approaches the domain size (the deflection reaches the edges); they agree closely otherwise.
 
 
-In addition, it is possible to define variable lithospheric elastic thicknesses by using the ``temap`` key below where specific maps could be added through time during the run.
+In addition, it is possible to define a spatially-variable (and time-varying) lithospheric elastic thickness with the ``temap`` key below, where specific maps can be added through time during the run. This works with both ``'fem'`` and ``'global'`` methods (for ``'fem'`` the varying :math:`T_e` is still a single linear solve).
 
 .. grid:: 1
     :padding: 3

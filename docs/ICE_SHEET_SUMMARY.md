@@ -92,8 +92,8 @@ instead.
 
 ## 4. Loading — existing flexure leveraged
 
-No flexure source was modified. goSPL's **existing** flexural isostasy (FD/FFT
-gFlex for planar models, spherical-harmonic shell for global) receives the
+No flexure source was modified. goSPL's flexural isostasy (the parallel FV
+biharmonic for planar models, spherical-harmonic shell for global) receives the
 diagnostic ice thickness as the ice load: the change in thickness between steps
 is converted to an equivalent load (scaled by `ρ_i/ρ_c`) and applied through the
 existing path, so a growing ice sheet drives isostatic subsidence and

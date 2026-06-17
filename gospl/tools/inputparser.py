@@ -1623,22 +1623,24 @@ class ReadYaml(object):
         Parse flexural isostasy variables.
         """
 
-        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets flexOn=False, flex_method='FD' on missing "flexure")
+        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets flexOn=False, flex_method='fem' on missing "flexure")
         try:
             flexDict = self.input["flexure"]
             self.flexOn = True
-            self.flex_method = flexDict.get("method", 'FD')
+            # 'fem'  -> parallel FV biharmonic on the flat DMPlex (default)
+            # 'global' -> spherical-harmonic solve (global models)
+            self.flex_method = flexDict.get("method", 'fem')
 
-            if self.flex_method != 'global' and self.flex_method != 'FD' and self.flex_method != 'FFT':
+            if self.flex_method not in ('global', 'fem'):
                 print(
                     "Method {} is not in the list of possible methods".format(
                         self.flex_method), flush=True,
                 )
                 raise ValueError(
-                    "Method name for flexure is not recognised choices are FD, FFT or global."
+                    "Method name for flexure is not recognised: choices are 'fem' (flat) or 'global'."
                 )
-            self.reg_dx = flexDict.get("regdx", 1000.0)
-            # raise ValueError("Flexure definition: regular grid spacing is required.")
+            # Number of source points for the global ('global') DH-grid
+            # interpolation (KDTree in _buildDHGrid); unused by 'fem'.
             self.rgrd_interp = flexDict.get("ninterp", 4)
             self.flex_rhoa = flexDict.get("rhoa", 3300.0)
             self.flex_eet = flexDict.get("thick", 10000.0)
@@ -1647,7 +1649,7 @@ class ReadYaml(object):
 
         except KeyError:
             self.flexOn = False
-            self.flex_method = 'FD'
+            self.flex_method = 'fem'
 
         self._extraFlex()
 

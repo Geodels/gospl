@@ -51,7 +51,6 @@ Native virtual-environment install (Gadi)
     python3 -m pip install ruamel.yaml
     python3 -m pip install numpy-indexed
     python3 -m pip install pyshtools
-    python3 -m pip install gflex         # 1.2+
     python3 -m pip install meson_python  # 0.16+
 
     # Install goSPL from the goSPL repository (cd into your clone)

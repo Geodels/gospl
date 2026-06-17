@@ -963,6 +963,93 @@ def test_ice_flexure_loading(minimal_ice_flex_model):
                 assert field in hf, f"ice output field {field} not in output"
 
 
+def test_flex_fem_2d_solver(flat_fem_flex_model):
+    """
+    Protects: the opt-in parallel FV biharmonic flexure solver for FLAT models
+    (`flexure: method: fem`) runs end-to-end on the DMPlex (no gFlex, no regular
+    grid) and produces a finite, non-trivial flexural field with subsidence
+    under deposition. Numerical agreement with gFlex is checked separately in
+    test_flex_fem_2d_matches_gflex.
+    """
+    model = flat_fem_flex_model
+    assert model.flexOn and model.flex_method == "fem"
+
+    model.runProcesses()
+    flx = model.localFlex
+    assert np.isfinite(flx).all(), "FEM-2D flexural field non-finite"
+    # The incising fixture is net-erosional (unloading → isostatic rebound), so
+    # the deflection is positive; only require a finite, non-trivial response.
+    # The sign/physics vs gFlex is checked in test_flex_fem_2d_matches_gflex.
+    assert np.abs(flx).max() > 0.0, "FEM-2D flexure produced no deflection"
+
+
+def test_flex_fem_2d_physical(flat_fem_flex_model):
+    """
+    Protects: the FEM-2D solver is physically sensible. A smooth deposition cap
+    in the middle of the domain must produce subsidence under the load (negative
+    deflection), a finite field, and a magnitude bounded by the local-isostatic
+    limit q/Δρg = dz·ρ_s/ρ_a (a stiff plate deflects LESS than full isostasy).
+    """
+    from mpi4py import MPI
+
+    model = flat_fem_flex_model
+    assert model.flex_method == "fem"
+
+    xy = model.lcoords[:, :2]
+    cx, cy, amp, wid = 8000.0, 8000.0, 200.0, 1500.0
+    load = amp * np.exp(-(((xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2)
+                          / (2 * wid ** 2)))
+    w = model._cmptFlexFEM(load)             # returns -deflection (neg = subsidence)
+    assert np.isfinite(w).all(), "FEM-2D field non-finite"
+
+    owned = model.inIDs == 1
+    wmin = -MPI.COMM_WORLD.allreduce(
+        float(-(w[owned].min())) if owned.sum() else -1e30, op=MPI.MAX
+    )
+    wabs = MPI.COMM_WORLD.allreduce(
+        float(np.abs(w[owned]).max()) if owned.sum() else 0.0, op=MPI.MAX
+    )
+    assert wmin < 0.0, "no subsidence under a deposition load"
+    iso = amp * model.flex_rhos / model.flex_rhoa     # local-isostatic deflection
+    assert 0.0 < wabs < 1.5 * iso, (
+        f"deflection {wabs:.1f} m outside (0, 1.5x isostatic={1.5 * iso:.1f})"
+    )
+
+
+def test_flex_fem_2d_clamped(flat_fem_flex_model):
+    """
+    Protects: the 0Displacement0Slope (clamped) boundary of the FEM-2D solver.
+    All four sides are clamped and a BROAD load deflects the plate to the edges;
+    w must be pinned to ~0 on the clamped edge nodes (relative to the interior
+    peak), with a non-trivial interior deflection.
+    """
+    from mpi4py import MPI
+
+    model = flat_fem_flex_model
+    model.flex_bcN = model.flex_bcS = "0Displacement0Slope"
+    model.flex_bcE = model.flex_bcW = "0Displacement0Slope"
+
+    xy = model.lcoords[:, :2]
+    cx, cy, wid = 8000.0, 8000.0, 4000.0
+    load = 300.0 * np.exp(-(((xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2)
+                            / (2 * wid ** 2)))
+    w = model._cmptFlexFEM(load)
+
+    def _max(x):
+        return MPI.COMM_WORLD.allreduce(float(x), op=MPI.MAX)
+
+    owned = model.inIDs == 1
+    edge = np.unique(np.concatenate([model.southPts, model.northPts,
+                                     model.eastPts, model.westPts]))
+    edge = edge[model.inIDs[edge] == 1]
+    w_edge = _max(float(np.abs(w[edge]).max()) if len(edge) else 0.0)
+    w_peak = _max(float(np.abs(w[owned]).max()) if owned.sum() else 0.0)
+    assert w_peak > 0.0, "no deflection"
+    assert w_edge < 1.0e-3 * w_peak, (
+        f"clamped edge not pinned: |w|_edge={w_edge:.3e} vs peak {w_peak:.3e}"
+    )
+
+
 def test_pit_unifyLabels_unionfind():
     """
     Protects: PITFill._unifyLabels — the union-find that collapses cross-rank

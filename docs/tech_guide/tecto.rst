@@ -93,10 +93,10 @@ The flexural isostasy in goSPL is computed on a **regular grid**, and therefore 
   Flexural isostasy can be produced in response to a range of geological loads (from `Wickert, 2016 <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_).
 
 
-**gFlex** for 2D simulations 
+Flexural isostasy for 2D simulations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-When running goSPL in 2D, it is possible to compute the flexural isostasy equilibrium based on topographic change. The function accounts for flexural isostatic rebound associated with erosional loading/unloading using `gFlex <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_. 
+When running goSPL in 2D, it is possible to compute the flexural isostasy equilibrium based on topographic change. The function accounts for flexural isostatic rebound associated with erosional loading/unloading by solving the thin-elastic-plate biharmonic equation with a parallel finite-volume scheme directly on the unstructured mesh (``flexure: method: 'fem'``), supporting spatially-variable elastic thickness.
 
 .. important::
 

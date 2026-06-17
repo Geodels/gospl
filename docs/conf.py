@@ -295,7 +295,7 @@ epub_exclude_files = ["search.html"]
 # -- Mock the compiled / MPI-linked dependencies that Read the Docs cannot
 # install or load, so autodoc can import every gospl module to extract its
 # docstrings. autodoc_mock_imports also covers SUBMODULES (e.g. vtk.util,
-# gflex.f2d), which the previous manual ``sys.modules[m] = Mock()`` approach did
+# vtk.util), which the previous manual ``sys.modules[m] = Mock()`` approach did
 # not — and that manual approach also shadowed packages docs/requirements.txt
 # DOES install (numpy, scipy, pandas, numpy-indexed, ruamel.yaml), breaking
 # e.g. ``from scipy.special import ...`` and rendering most API pages empty.
@@ -307,7 +307,6 @@ autodoc_mock_imports = [
     "mpi4py",
     "petsc4py",
     "vtk",
-    "gflex",
     "pyshtools",
     "gospl._fortran",
 ]
