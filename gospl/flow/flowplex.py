@@ -469,10 +469,17 @@ class FAMesh(object):
         t0 = process_time()
 
         # Compute depressions information
+        # Sub-phase profiling (no-op when profiling off): pit-filling vs flow-
+        # direction build vs the FA KSP solve vs the downstream-routing loop,
+        # to localise the high-rank `flow` plateau. These nest under the "flow"
+        # phase, so they double-count there (shows as negative "unaccounted").
+        self.profiler.start("flow_fill")
         self.fillElevation(sed=False)
+        self.profiler.stop("flow_fill")
         pitVol = self.pitParams[:, 0].copy()
 
         # Build flow direction and downstream matrix
+        self.profiler.start("flow_dir")
         hl = self.hLocal.getArray().copy()
 
         self._buildFlowDirection(hl, False)
@@ -518,10 +525,14 @@ class FAMesh(object):
         #  Solve flow/ice accumulation
         self.bL.setArray(rainA)
         self.dm.localToGlobal(self.bL, self.bG)
+        self.profiler.stop("flow_dir")
+        self.profiler.start("flow_ksp")
         self._solve_KSP(True, self.fMat, self.bG, self.FAG)
         self.dm.globalToLocal(self.FAG, self.FAL)
+        self.profiler.stop("flow_ksp")
 
         # Volume of water flowing downstream
+        self.profiler.start("flow_dist")
         self.waterFilled = hl.copy()
         if (pitVol > 0.0).any():
             FA = self.FAL.getArray().copy() * self.dt
@@ -556,6 +567,7 @@ class FAMesh(object):
 
         # Get water level
         self.waterFilled -= hl
+        self.profiler.stop("flow_dist")
 
         if MPIrank == 0 and self.verbose:
             print(
