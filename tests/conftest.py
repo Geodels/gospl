@@ -184,6 +184,18 @@ def flat_fem_flex_model():
 
 
 @pytest.fixture
+def cyclic_cyl_model():
+    """
+    Flat model with a CYCLIC (periodic) boundary pair (`bc: '0c0c'` → E/W
+    cyclic, N/S open). The mesh is a cylinder (the periodic axis mapped to a
+    circle), which is intrinsically flat, so its FV geometry equals a periodic
+    strip's and the seam cells link the two edges in the neighbour graph. See
+    cyclic_cyl.yml / cyclic_cyl.npz.
+    """
+    return _instantiate("cyclic_cyl.yml")
+
+
+@pytest.fixture
 def minimal_ice_dual_model():
     """
     Minimal glacial model with abrasion + till on AND dual-lithology

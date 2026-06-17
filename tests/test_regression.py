@@ -1050,6 +1050,48 @@ def test_flex_fem_2d_clamped(flat_fem_flex_model):
     )
 
 
+def test_cyclic_boundary(cyclic_cyl_model):
+    """
+    Protects: the cyclic (periodic) flow/sediment boundary option (`bc: '0c0c'`
+    → E/W cyclic, N/S open) on a cylinder mesh. Checks that:
+      - the cyclic edges parse to the cyclic flag (2), open edges to 0;
+      - the FV neighbour graph wraps across the seam (the cylinder's seam cells
+        link the two periodic edges) — this is what makes flow/sediment route
+        across the boundary;
+      - the cyclic seam is NOT given the open-outflow sentinel (it is not a
+        drain — only the genuinely open N/S edges are);
+      - the model runs end-to-end with finite flow accumulation.
+    """
+    model = cyclic_cyl_model
+    assert model.flatModel
+    # bc '0c0c' = [S=0 open, E=c cyclic→2, N=0 open, W=c cyclic→2]
+    assert (model.east, model.west) == (2, 2), "E/W should be cyclic (2)"
+    assert (model.south, model.north) == (0, 0), "N/S should be open (0)"
+
+    # Cross-seam wrap: nodes on the θ≈0 seam (x≈xmax) have FV neighbours on the
+    # θ≈2π side (x≈xmax, opposite embedding-z sign) — i.e. the graph is periodic.
+    xmax = model.lcoords[:, 0].max()
+    seam = np.where(np.isclose(model.lcoords[:, 0], xmax, atol=1.0))[0]
+    ng = model.FVmesh_ngbID
+    cross = 0
+    for s in seam:
+        nbrs = ng[s][ng[s] >= 0]
+        for n in nbrs:
+            if (abs(model.lcoords[n, 0] - xmax) < 200.0
+                    and abs(model.lcoords[n, 2] + model.lcoords[s, 2]) < 200.0):
+                cross += 1
+    assert cross > 0, "no cross-seam FV links — mesh is not periodic / not wrapping"
+
+    model.runProcesses()
+
+    # The cyclic seam must not be drained like an open edge (no deep sentinel).
+    h = model.hLocal.getArray()
+    assert (h[seam] > -1.0e6).all(), "cyclic seam was forced to the open sentinel"
+
+    fa = model.FAL.getArray()
+    assert np.isfinite(fa).all() and fa.max() > 0.0, "flow accumulation invalid"
+
+
 def test_pit_unifyLabels_unionfind():
     """
     Protects: PITFill._unifyLabels — the union-find that collapses cross-rank

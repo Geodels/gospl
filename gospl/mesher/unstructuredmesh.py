@@ -438,10 +438,16 @@ class UnstMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nib, op=MPI.MAX)
         if nib[0] > 0:
             self.flatModel = True
-            self.south = int(self.boundCond[0])
-            self.east = int(self.boundCond[1])
-            self.north = int(self.boundCond[2])
-            self.west = int(self.boundCond[3])
+            # 0 = open (outflow), 1 = closed (wall), 2 = cyclic (periodic).
+            # Open is the only case given special treatment below; closed and
+            # cyclic both leave the edge untouched — for cyclic the wrap is
+            # provided by the (required) periodic input mesh, whose cells already
+            # connect the two seam edges in the FV neighbour graph.
+            _bc = {'0': 0, '1': 1, 'c': 2}
+            self.south = _bc[self.boundCond[0]]
+            self.east = _bc[self.boundCond[1]]
+            self.north = _bc[self.boundCond[2]]
+            self.west = _bc[self.boundCond[3]]
             xmin = self.mCoords[:, 0].min()
             xmax = self.mCoords[:, 0].max()
             ymin = self.mCoords[:, 1].min()

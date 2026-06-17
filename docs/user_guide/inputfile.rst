@@ -41,7 +41,17 @@ Initial mesh definition and simulation declaration
         
         In addition the following optional parameters could be set:
 
-        c. boundary conditions (``bc``) when not running a global model. Each integer corresponds to an edge defined in the following order: south, east, north, and west. The integer is set to either 0 for open or to 1 for fixed boundaries.
+        c. boundary conditions (``bc``) when not running a global model: a 4-character string, one per edge in the order **south, east, north, west**. Each character is:
+
+           - ``0`` — **open** (outflow): water and the sediment it carries drain out across that edge.
+           - ``1`` — **closed** (fixed wall): no flux; flow and sediment accumulate against the edge.
+           - ``c`` — **cyclic** (periodic): flow and sediment wrap from one edge to the opposite one.
+
+           Cyclic edges must be set as an **opposite pair** — both ``south`` and ``north``, *or* both ``east`` and ``west`` — and **at most one pair** may be cyclic (so up to two periodic edges, never all four). For example ``'0c0c'`` makes east/west periodic with open north/south, and ``'c1c1'`` makes south/north periodic with closed east/west.
+
+           .. important::
+
+              A cyclic run **requires a periodic input mesh** in that direction: the mesh must be a **cylinder** (the periodic axis wrapped onto a circle whose circumference is the domain width), so that its cells genuinely connect the two seam edges. A cylinder is intrinsically flat, so its finite-volume geometry is identical to a periodic flat strip's; goSPL detects the cylinder's two open ends as the (non-periodic) boundary and routes flow/sediment across the seam through the wrapping cells. goSPL does **not** synthesise the wrap from an ordinary flat mesh (a planar wrap would have incorrect seam geometry). This works in parallel.
         d. the ``fast`` key allows you to run a model without applying any surface processes on top. This is used to check your input files prior to run your simulation with all options. By default it is set to *False*.
         e. ``seadepo`` performing marine deposition or not. By default it is set to *True*.
         f. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file (**.npz** format with the erosion deposition defined with the key ``ed``) containing for each vertex of the mesh the cumulative erosion deposition values in metres. 
