@@ -96,12 +96,80 @@ class PITFill(object):
         :arg df: Pandas Dataframe containing depression numbers which have to be combined.
 
         :return: df sorted pandas dataframe containing depression numbers.
+
+        .. note::
+            Superseded by :meth:`_unifyLabels` (union-find). Kept for reference
+            / the standalone sort_ids kernel; no longer on the hot path.
         """
 
         df["p2"] = sort_ids(df["p1"].values.astype(int), df["p2"].values.astype(int))
         df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
 
         return df
+
+    def _unifyLabels(self, df, label):
+        """
+        Collapse cross-processor depression-label equivalence pairs into one
+        canonical id per connected component using union-find (disjoint-set),
+        then apply the mapping to ``label``.
+
+        ``df`` holds the global equivalence pairs ``(p1, p2)`` with ``p1 < p2``
+        (two labels that are the same depression across a tile border). Each
+        connected component is collapsed to its MINIMUM label by keeping the
+        smaller label as the set root — matching the previous iterative
+        ``sort_ids`` fixpoint, but in a single deterministic O(N α(N)) pass.
+        Determinism (root = min, independent of pair order) is what makes the
+        result identical regardless of the domain partition.
+
+        :arg df: Dataframe of equivalence pairs, columns ``p1`` < ``p2``.
+        :arg label: local depression-label array (globally-offset ids).
+
+        :return: ``label`` with every label remapped to its component minimum.
+        """
+
+        pairs = df[["p1", "p2"]].values.astype(np.int64)
+
+        # Union-find over the (sparse, globally-offset) labels that appear in a
+        # pair. Most mesh labels never cross a border, so the structure is small.
+        parent = {}
+
+        def find(x):
+            root = x
+            while parent[root] != root:
+                root = parent[root]
+            while parent[x] != root:  # path compression
+                parent[x], x = root, parent[x]
+            return root
+
+        for a, b in pairs:
+            a, b = int(a), int(b)
+            if a not in parent:
+                parent[a] = a
+            if b not in parent:
+                parent[b] = b
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                # smaller label becomes the root → component minimum is canonical
+                if ra < rb:
+                    parent[rb] = ra
+                else:
+                    parent[ra] = rb
+
+        if not parent:
+            return label
+
+        # Vectorised remap: only labels appearing in a pair change; all others
+        # (the vast majority, plus the -1 border sentinel) pass through.
+        keys = np.fromiter(sorted(parent), dtype=np.int64, count=len(parent))
+        vals = np.fromiter((find(int(k)) for k in keys), dtype=np.int64,
+                           count=len(keys))
+        idx = np.searchsorted(keys, label)
+        idx_clip = np.clip(idx, 0, len(keys) - 1)
+        hit = keys[idx_clip] == label
+        out = label.copy()
+        out[hit] = vals[idx_clip[hit]]
+
+        return out
 
     def _offsetGlobal(self, lgth):
         """
@@ -232,12 +300,20 @@ class PITFill(object):
             )
         t0 = process_time()
 
-        # Send depression IDs globally
-        offset, _ = self._offsetGlobal(len(df))
-        combIds = -np.ones((np.amax(offset), 2), dtype=int)
-        if len(df) > 0:
-            combIds[offset[MPIrank] : offset[MPIrank + 1], :] = df.values
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, combIds, op=MPI.MAX)
+        # Gather every rank's equivalence pairs onto all ranks. Allgatherv of
+        # the real pairs (Barnes-style) replaces a padded Allreduce(MAX) over a
+        # (total, 2) array — same content, no -1 padding to move. All ranks then
+        # run the identical union-find.
+        offset, total = self._offsetGlobal(len(df))
+        sendbuf = (
+            df.values.astype(np.int64).ravel()
+            if len(df) > 0
+            else np.empty(0, dtype=np.int64)
+        )
+        counts = (np.diff(offset) * 2).astype(int)
+        recvbuf = np.empty(int(total) * 2, dtype=np.int64)
+        MPI.COMM_WORLD.Allgatherv(sendbuf, [recvbuf, counts])
+        combIds = recvbuf.reshape(-1, 2)
         df = self._buildPitDataframe(combIds[:, 0], combIds[:, 1])
         df = df[(df["p1"] >= 0) & (df["p2"] >= 0)]
         if MPIrank == 0 and self.verbose:
@@ -246,24 +322,15 @@ class PITFill(object):
             )
         t0 = process_time()
 
-        # Sorting label transfer between processors
-        if len(df) > 1:
-            sorting = True
-            stp = 0
-            while sorting:
-                df2 = self._sortingPits(df)
-                sorting = not df.equals(df2)
-                df = df2.copy()
-                stp += 1
-                if stp > 1000:
-                    if MPIrank == 0:
-                        print(
-                            "Pit sorting did not converge after 1000 iterations; continuing.",
-                            flush=True,
-                        )
-                    break
-        for k in range(len(df)):
-            label[label == df["p2"].iloc[k]] = df["p1"].iloc[k]
+        # Collapse the cross-processor label-equivalence pairs (p1 < p2) into a
+        # single canonical id per connected component with union-find. This is
+        # Barnes-style label unification: the canonical id is the MINIMUM label
+        # in each component, identical to the previous iterative sort_ids
+        # fixpoint but in a single deterministic pass — no convergence loop (the
+        # old code iterated up to 1000 times) and no partition-dependent
+        # ordering, which removes the instability that forced the serial path.
+        if len(df) > 0:
+            label = self._unifyLabels(df, label)
         if MPIrank == 0 and self.verbose:
             print(
                 "Sorting pits (%0.02f seconds)" % (process_time() - t0)
