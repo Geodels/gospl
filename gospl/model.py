@@ -239,6 +239,12 @@ class Model(
         while self.tNow <= self.tEnd:
             tstep = process_time()
 
+            # Flexure interval counter (see GridProcess + flex_interval): the
+            # load reference is snapshotted at interval starts (in the eroder)
+            # and flexure applied at interval ends below.
+            if self.flexOn:
+                self.flexCount += 1
+
             # Output time step
             with self.profiler.phase("tectonics"):
                 _Tectonics.updatePaleoZ(self)
@@ -306,8 +312,12 @@ class Model(
                 with self.profiler.phase("strat"):
                     _STRAMesh.getCompaction(self)
 
-            # Apply flexural isostasy (local and global)
-            if self.flexOn:
+            # Apply flexural isostasy (local and global). With flex_interval > 1
+            # the load accumulates and flexure is solved only at interval ends
+            # (interval = 1 → every step, the default/unchanged behaviour).
+            if self.flexOn and (
+                self.flexCount % self.flex_interval == self.flex_interval - 1
+            ):
                 with self.profiler.phase("flexure"):
                     _GridProcess.applyFlexure(self)
 

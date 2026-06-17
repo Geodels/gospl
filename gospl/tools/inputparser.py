@@ -1670,8 +1670,25 @@ class ReadYaml(object):
             self.flex_bcS = flexDict.get("bcS", "0Slope0Shear")
             self.flex_bcE = flexDict.get("bcE", "0Slope0Shear")
             self.flex_bcW = flexDict.get("bcW", "0Slope0Shear")
+            # Global varying-Te flexure: iterative (Anderson/Picard) solve
+            # controls + how often flexure is applied. Defaults reproduce the
+            # previous hard-coded behaviour (every step, max_iter=50, tol=5e-4,
+            # relax=1.0). See tools/addprocess._cmptFlexGlobal and the flexure
+            # phase in model.runProcesses.
+            self.flex_max_iter = int(flexDict.get("maxIter", 50))
+            self.flex_tol = float(flexDict.get("tol", 5.0e-4))
+            self.flex_relax = float(flexDict.get("relax", 1.0))
+            # Apply flexure every `interval` goSPL steps (the load accumulates in
+            # between). 1 = every step (default, unchanged behaviour).
+            self.flex_interval = int(flexDict.get("interval", 1))
         except KeyError:
             self.flexOn = False
+
+        if getattr(self, "flexOn", False):
+            self.flex_max_iter = max(1, self.flex_max_iter)
+            self.flex_tol = max(1.0e-12, self.flex_tol)
+            self.flex_relax = min(1.0, max(1.0e-3, self.flex_relax))
+            self.flex_interval = max(1, self.flex_interval)
 
         return
 

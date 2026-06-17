@@ -46,6 +46,16 @@ class GridProcess(object):
                 self.boundflex = self.boundflex.replace('1', '0')
                 self.boundflex = self.boundflex.replace('2', '1')
             self.flexTe_dh = None
+            # Warm-start cache for the varying-Te iterative SH solve: the
+            # previous step's converged DH-grid deflection seeds the next solve
+            # (loads evolve slowly ⇒ far fewer Anderson iterations). Rank-0 only.
+            self._flex_w_prev = None
+            # Step counter driving the flexure interval (`flex_interval`): the
+            # load reference (hOldFlex) is snapshotted at interval starts and
+            # flexure applied at interval ends, so the load accumulates in
+            # between. -1 so the first step (incremented to 0) is an interval
+            # start; interval=1 reproduces every-step behaviour exactly.
+            self.flexCount = -1
         if self.oroOn:
             self.oroEPS = np.finfo(float).eps
 
@@ -436,9 +446,17 @@ class GridProcess(object):
             if self.verbose:
                 print(f"[shflex] constant Te = {Te0:.1f} m -> single-pass solve")
         else:
-            # Constant-Te0 solution is much closer to the fixed point than
-            # zero, so convergence starts immediately.
-            w_dh = _sh_solve(q_dh)
+            # Warm-start: the previous step's converged deflection is usually
+            # the closest available guess (loads evolve slowly between steps),
+            # so it cuts Anderson iterations vs restarting from the constant-Te0
+            # solution. The iteration is a contraction, so the converged result
+            # is unchanged regardless of the initial guess. Fall back to the
+            # constant-Te0 solution on the first step / if the grid changed.
+            w_prev = getattr(self, "_flex_w_prev", None)
+            if w_prev is not None and w_prev.shape == q_dh.shape:
+                w_dh = w_prev
+            else:
+                w_dh = _sh_solve(q_dh)
             F_hist = []   # F(w_k)        - Anderson history
             g_hist = []   # F(w_k) - w_k  - residuals
             rel = np.nan
@@ -485,6 +503,9 @@ class GridProcess(object):
                     print(f"[shflex] warning: did not converge in {max_iter} "
                           f"iters (rel={rel:.2e})")
 
+            # Cache the converged deflection to warm-start the next step.
+            self._flex_w_prev = w_dh.copy()
+
         return -w_dh
 
     def applyFlexure(self):
@@ -524,7 +545,12 @@ class GridProcess(object):
                 erodep_dh = self._unstr2dh(dZ)
                 te_dh = self.flexTe_dh if self.tedata is not None \
                     else float(self.flex_eet)
-                wflex_dh = self._cmptFlexGlobal(erodep_dh, te_dh)
+                wflex_dh = self._cmptFlexGlobal(
+                    erodep_dh, te_dh,
+                    max_iter=self.flex_max_iter,
+                    flex_tol=self.flex_tol,
+                    relax=self.flex_relax,
+                )
                 flexZ = self._dh2unstr(wflex_dh)
 
         if MPIrank == 0 and self.flex_method != 'global':
