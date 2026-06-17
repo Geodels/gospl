@@ -11,8 +11,6 @@ from scipy import spatial
 from time import process_time
 
 if "READTHEDOCS" not in os.environ:
-    from gflex.f2d import F2D
-    from gospl._fortran import flexure
     from gospl._fortran import jacobiancoeff
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -43,10 +41,6 @@ class GridProcess(object):
         if self.flexOn:
             self.rho_water = 1030.0
             self.localFlex = np.zeros(self.lpoints)
-            if self.flex_method == 'FFT':
-                self.boundflex = self.boundCond.replace('0', '2')
-                self.boundflex = self.boundflex.replace('1', '0')
-                self.boundflex = self.boundflex.replace('2', '1')
             self.flexTe_dh = None
             # Warm-start cache for the varying-Te iterative SH solve: the
             # previous step's converged DH-grid deflection seeds the next solve
@@ -71,14 +65,10 @@ class GridProcess(object):
             self.oroEPS = np.finfo(float).eps
 
         if self.flexOn or self.oroOn:
-            # Build regular grid for the FD/FFT flexure or orographic
-            # precipitation calculation. The 'global' (spherical-harmonic) and
-            # 'fem' (parallel mixed-FV biharmonic, flat) flexure methods solve
-            # directly on the mesh, but orography still needs the regular grid.
-            needRegGrid = self.oroOn or (
-                self.flexOn and self.flex_method not in ('global', 'fem')
-            )
-            if MPIrank == 0 and needRegGrid:
+            # The regular grid is now only used by orographic precipitation; both
+            # flexure methods solve directly on the mesh ('fem' = parallel FV
+            # biharmonic on the flat DMPlex, 'global' = spherical-harmonic).
+            if MPIrank == 0 and self.oroOn:
                 self._buildRegGrid()
             if MPIrank == 0 and self.flexOn and self.flex_method == 'global':
                 self._buildDHGrid()
@@ -187,10 +177,10 @@ class GridProcess(object):
                 del loadData
                 if MPIrank == 0:
                     self.flexTe_dh = self._unstr2dh(self.flexTe)
-            elif self.flex_method == 'fem':
-                # Parallel FV biharmonic (flat): Te is needed per LOCAL mesh node
-                # (no regular grid). Uniform value or per-vertex map indexed by
-                # this rank's owned+ghost nodes.
+            else:
+                # Parallel FV biharmonic (flat, 'fem'): Te is needed per LOCAL
+                # mesh node (no regular grid). Uniform value or per-vertex map
+                # indexed by this rank's owned+ghost nodes.
                 if self.tedata["tUni"][nb] == 0.:
                     loadData = np.load(self.tedata.at[nb, "tMap"])
                     teVal = loadData[self.tedata.at[nb, "tKey"]]
@@ -198,87 +188,8 @@ class GridProcess(object):
                     self.flexTe_local = teVal[self.locIDs]
                 else:
                     self.flexTe_local = self.tedata.at[nb, "tUni"] * np.ones(self.lpoints)
-            elif self.tedata["tUni"][nb] == 0.:
-                loadData = np.load(self.tedata.at[nb, "tMap"])
-                teVal = loadData[self.tedata.at[nb, "tKey"]]
-                del loadData
-                self.flexTe = np.sum(self.regWeights * teVal[self.regIDs][:, :], axis=1) / self.regSumWeights
-                if len(self.regOnIDs) > 0:
-                    self.flexTe[self.regOnIDs] = teVal[self.regIDs[self.regOnIDs, 0]]
-                self.flexTe = self.flexTe.reshape(self.reg_ny, self.reg_nx)
-            else:
-                self.flexTe = self.tedata.at[nb, "tUni"] * np.ones((self.reg_ny, self.reg_nx))
 
         return
-
-    def _cptFlex2D(self, dZ):
-        """
-        Compute the flexural response for 2D cases.
-        """
-
-        # Build regular grid for flexure calculation
-        if self.xIndices is None:
-            self._buildRegGrid()
-
-        # Interpolate values on the flexural regular grid
-        regDiff = np.sum(self.regWeights * dZ[self.regIDs][:, :], axis=1) / self.regSumWeights
-        if len(self.regOnIDs) > 0:
-            regDiff[self.regOnIDs] = dZ[self.regIDs[self.regOnIDs, 0]]
-        regDiff = regDiff.reshape(self.reg_ny, self.reg_nx)
-
-        if self.flex_method == 'FFT':
-            nFlex = flexure(regDiff, self.reg_ny, self.reg_nx, self.reg_yl, self.reg_xl,
-                            self.young, self.nu, self.flex_rhos, self.flex_rhoa,
-                            self.flex_eet, self.gravity, int(self.boundflex))
-
-            # Interpolate back to goSPL mesh
-            flexZ = self._regInterp(nFlex)
-
-        elif self.flex_method == 'FD':
-            simflex = F2D()
-            simflex.Quiet = True
-
-            simflex.Method = "FD"
-            simflex.PlateSolutionType = "vWC1994"
-            simflex.Solver = "direct"
-
-            # gFlex parameters
-            simflex.g = self.gravity
-            simflex.E = self.young
-            simflex.nu = self.nu
-            simflex.rho_m = self.flex_rhoa
-            simflex.rho_fill = 0.
-            simflex.dx = self.reg_dx
-            simflex.dy = self.reg_dx
-
-            # Boundary conditions
-            simflex.BC_E = self.flex_bcE
-            simflex.BC_W = self.flex_bcW
-            simflex.BC_S = self.flex_bcN
-            simflex.BC_N = self.flex_bcS
-
-            # Assign elastic thickness grid
-            if self.tedata is not None:
-                self._updateTe()
-                simflex.Te = self.flexTe.copy()
-            else:
-                simflex.Te = self.flex_eet * np.ones(regDiff.shape)
-
-            # Compute loads
-            simflex.qs = self.flex_rhos * self.gravity * regDiff
-
-            # Run gFlex
-            simflex.initialize()
-            simflex.run()
-            simflex.finalize()
-
-            # Interpolate back to goSPL mesh
-            flexZ = self._regInterp(simflex.w)
-
-            del simflex
-            gc.collect()
-
-        return flexZ
 
     def _buildDHGrid(self):
         """
@@ -539,13 +450,14 @@ class GridProcess(object):
     def _cmptFlexFEM(self, dzLocal):
         r"""
         **Parallel finite-volume biharmonic flexure for FLAT (2D) models**
-        (opt-in ``flexure: method: 'fem'``).
+        (``flexure: method: 'fem'`` — the flat-model flexure solver).
 
-        Replaces the serial gFlex (``'FD'``) / FFT solvers — and their
-        unstructured→regular→unstructured regridding — with a single PETSc solve
-        **directly on the DMPlex**: fully parallel, no gather-to-root, no regular
-        grid, no gFlex dependency, and **varying elastic thickness in one linear
-        solve** (no iteration over rigidity contrast).
+        Solves the plate equation with a single PETSc solve **directly on the
+        DMPlex**: fully parallel, no gather-to-root, no regular grid, and
+        **varying elastic thickness in one linear solve** (no iteration over the
+        rigidity contrast). It replaced the former serial gFlex (``'FD'``) and
+        FFT solvers, which gathered the load to one rank, solved on a regular
+        grid, and interpolated back.
 
         Solves the thin-plate-on-elastic-foundation equation with a spatially
         varying rigidity :math:`D(x)=E\,T_e(x)^3/[12(1-\nu^2)]`
@@ -566,11 +478,15 @@ class GridProcess(object):
         :math:`\Delta\rho g\,I` (a positive diagonal) makes the operator
         well-posed — it pins the absolute deflection, so there is **no nullspace
         and no mean removal** (unlike the closed-sphere spectral solver). The
-        solver is options-prefixed (``flexfem_``) so a direct LU can be requested
-        for validation.
+        solver defaults to a cached DIRECT factorisation — serial PETSc LU,
+        parallel MUMPS — reused every step (only the RHS changes); it is
+        options-prefixed (``flexfem_``) so an iterative Krylov method can be
+        requested for meshes too large to factorise.
 
-        Validated against gFlex (``'FD'``) on a flat mesh where the deflection
-        decays inside the domain: correlation 0.998, amplitude within ~1.5 %.
+        When this solver replaced gFlex it agreed with it on a flat mesh where the
+        deflection decays inside the domain: correlation 0.998 (natural BC), 0.9996
+        (clamped). Where the flexural wavelength approaches the domain size the two
+        boundary discretisations differ by ~10 %.
 
         .. note::
             Boundary conditions (per side, from ``flex_bcN/S/E/W``):
@@ -582,9 +498,8 @@ class GridProcess(object):
               ``zeroRows`` on that side's nodes); the natural ``w'=0`` from the
               inner FV Laplacian completes the clamp.
 
-            Sides map geographically (no gFlex N/S swap). Validated vs gFlex with
-            the same BC: natural corr 0.998, clamped corr 0.9996. Other gFlex BCs
-            (``0Moment0Shear``, ``Periodic``) are not yet implemented.
+            Sides map geographically. ``0Moment0Shear`` and ``Periodic`` are not
+            implemented.
 
             The operator ``A`` and its KSP are CACHED and reused across steps:
             the geometry (``Lm``) is fixed and, for constant or piecewise-constant
@@ -600,15 +515,6 @@ class GridProcess(object):
         :return: local (lpoints) flexural deflection (m), same sign convention as
             ``_cmptFlexGlobal`` (negative = subsidence under deposition).
         """
-
-        if MPIrank == 0 and not getattr(self, "_fem_warned", False):
-            print(
-                "[flexure] method='fem' (parallel FV biharmonic, flat model): "
-                "EXPERIMENTAL — default 0Slope0Shear (natural) boundary only; "
-                "validate against 'FD' (gFlex) before production use.",
-                flush=True,
-            )
-            self._fem_warned = True
 
         # ---- rigidity D(x); track the Te interval so the cached operator is
         #      rebuilt only when Te actually changes (never, for constant Te). --
@@ -782,41 +688,28 @@ class GridProcess(object):
                 )
             return
 
+        # Global (spherical-harmonic) flexure: gather the load to rank 0, solve
+        # on the Driscoll-Healy grid, scatter back. (The flat 'fem' method has
+        # already returned above; 'FD'/'FFT'/gFlex were removed.)
         dZ = self._gatherGlobalOnRoot(local_dZ)
         flexZ = None
-
-        if self.flex_method == 'global':
-            if self.tedata is not None:
-                self._updateTe()
-
-            if MPIrank == 0:
-                erodep_dh = self._unstr2dh(dZ)
-                te_dh = self.flexTe_dh if self.tedata is not None \
-                    else float(self.flex_eet)
-                wflex_dh = self._cmptFlexGlobal(
-                    erodep_dh, te_dh,
-                    max_iter=self.flex_max_iter,
-                    flex_tol=self.flex_tol,
-                    relax=self.flex_relax,
-                )
-                flexZ = self._dh2unstr(wflex_dh)
-
-        if MPIrank == 0 and self.flex_method != 'global':
-            flexZ = self._cptFlex2D(dZ)
+        if self.tedata is not None:
+            self._updateTe()
+        if MPIrank == 0:
+            erodep_dh = self._unstr2dh(dZ)
+            te_dh = self.flexTe_dh if self.tedata is not None \
+                else float(self.flex_eet)
+            wflex_dh = self._cmptFlexGlobal(
+                erodep_dh, te_dh,
+                max_iter=self.flex_max_iter,
+                flex_tol=self.flex_tol,
+                relax=self.flex_relax,
+            )
+            flexZ = self._dh2unstr(wflex_dh)
 
         # Send flexural response globally
         flexZ = MPI.COMM_WORLD.bcast(flexZ, root=0)
         tmpFlex = flexZ[self.locIDs]
-        if self.flex_method != 'global':
-            # Local flexural isostasy
-            if self.south == 1:
-                tmpFlex[self.southPts] = 0.
-            if self.east == 1:
-                tmpFlex[self.eastPts] = 0.
-            if self.north == 1:
-                tmpFlex[self.northPts] = 0.
-            if self.west == 1:
-                tmpFlex[self.westPts] = 0.
 
         self.localFlex += tmpFlex
 

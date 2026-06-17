@@ -983,72 +983,49 @@ def test_flex_fem_2d_solver(flat_fem_flex_model):
     assert np.abs(flx).max() > 0.0, "FEM-2D flexure produced no deflection"
 
 
-def test_flex_fem_2d_matches_gflex(flat_fd_flex_model):
+def test_flex_fem_2d_physical(flat_fem_flex_model):
     """
-    Protects: the FEM-2D solver computes the same physics as gFlex (`FD`). Run
-    on the gFlex-method fixture (which builds the regular grid gFlex needs), put
-    a smooth deposition cap in the middle of the 16 km domain (so the deflection
-    decays well inside the domain, away from the boundaries), and solve it both
-    ways. With the load away from the edges the natural FV boundary and gFlex's
-    0Slope0Shear agree, so the fields should be nearly identical.
+    Protects: the FEM-2D solver is physically sensible. A smooth deposition cap
+    in the middle of the domain must produce subsidence under the load (negative
+    deflection), a finite field, and a magnitude bounded by the local-isostatic
+    limit q/Δρg = dz·ρ_s/ρ_a (a stiff plate deflects LESS than full isostasy).
     """
     from mpi4py import MPI
 
-    pytest.importorskip("gflex")
-    model = flat_fd_flex_model
-    assert model.flex_method == "FD"
+    model = flat_fem_flex_model
+    assert model.flex_method == "fem"
 
     xy = model.lcoords[:, :2]
     cx, cy, amp, wid = 8000.0, 8000.0, 200.0, 1500.0
     load = amp * np.exp(-(((xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2)
                           / (2 * wid ** 2)))
-
-    # gFlex reference (serial, regular grid) via the production path
-    dZ = model._gatherGlobalOnRoot(load)
-    flexZ = model._cptFlex2D(dZ) if MPI.COMM_WORLD.Get_rank() == 0 else None
-    flexZ = MPI.COMM_WORLD.bcast(flexZ, root=0)
-    w_gflex = flexZ[model.locIDs]
-
-    # FEM (parallel, on the mesh)
-    w_fem = model._cmptFlexFEM(load)
+    w = model._cmptFlexFEM(load)             # returns -deflection (neg = subsidence)
+    assert np.isfinite(w).all(), "FEM-2D field non-finite"
 
     owned = model.inIDs == 1
-    a, b = w_gflex[owned], w_fem[owned]
-
-    def _sum(x):
-        return MPI.COMM_WORLD.allreduce(float(x), op=MPI.SUM)
-
-    n = _sum(int(owned.sum()))
-    ma, mb = _sum(a.sum()) / n, _sum(b.sum()) / n
-    saa = _sum(((a - ma) ** 2).sum())
-    sbb = _sum(((b - mb) ** 2).sum())
-    sab = _sum(((a - ma) * (b - mb)).sum())
-    corr = sab / np.sqrt(saa * sbb)
-    assert corr > 0.98, f"FEM-2D/gFlex correlation too low: {corr:.4f}"
-
-    amp_g = MPI.COMM_WORLD.allreduce(
-        float(np.abs(a).max()) if len(a) else 0.0, op=MPI.MAX
+    wmin = -MPI.COMM_WORLD.allreduce(
+        float(-(w[owned].min())) if owned.sum() else -1e30, op=MPI.MAX
     )
-    amp_f = MPI.COMM_WORLD.allreduce(
-        float(np.abs(b).max()) if len(b) else 0.0, op=MPI.MAX
+    wabs = MPI.COMM_WORLD.allreduce(
+        float(np.abs(w[owned]).max()) if owned.sum() else 0.0, op=MPI.MAX
     )
-    assert 0.9 < amp_f / amp_g < 1.1, (
-        f"FEM-2D/gFlex amplitude ratio out of range: {amp_f / amp_g:.3f}"
+    assert wmin < 0.0, "no subsidence under a deposition load"
+    iso = amp * model.flex_rhos / model.flex_rhoa     # local-isostatic deflection
+    assert 0.0 < wabs < 1.5 * iso, (
+        f"deflection {wabs:.1f} m outside (0, 1.5x isostatic={1.5 * iso:.1f})"
     )
 
 
-def test_flex_fem_2d_clamped(flat_fd_flex_model):
+def test_flex_fem_2d_clamped(flat_fem_flex_model):
     """
     Protects: the 0Displacement0Slope (clamped) boundary of the FEM-2D solver.
-    All four sides are clamped and a BROAD load is applied so the plate deflects
-    all the way to the edges (where clamped w=0 differs strongly from the natural
-    boundary). Asserts the field matches gFlex's clamped solution and that w is
-    pinned to ~0 on the clamped edge nodes.
+    All four sides are clamped and a BROAD load deflects the plate to the edges;
+    w must be pinned to ~0 on the clamped edge nodes (relative to the interior
+    peak), with a non-trivial interior deflection.
     """
     from mpi4py import MPI
 
-    pytest.importorskip("gflex")
-    model = flat_fd_flex_model
+    model = flat_fem_flex_model
     model.flex_bcN = model.flex_bcS = "0Displacement0Slope"
     model.flex_bcE = model.flex_bcW = "0Displacement0Slope"
 
@@ -1056,36 +1033,18 @@ def test_flex_fem_2d_clamped(flat_fd_flex_model):
     cx, cy, wid = 8000.0, 8000.0, 4000.0
     load = 300.0 * np.exp(-(((xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2)
                             / (2 * wid ** 2)))
-
-    dZ = model._gatherGlobalOnRoot(load)
-    flexZ = model._cptFlex2D(dZ) if MPI.COMM_WORLD.Get_rank() == 0 else None
-    flexZ = MPI.COMM_WORLD.bcast(flexZ, root=0)
-    w_g = flexZ[model.locIDs]
-    w_f = model._cmptFlexFEM(load)
-
-    owned = model.inIDs == 1
-    a, b = w_g[owned], w_f[owned]
-
-    def _sum(x):
-        return MPI.COMM_WORLD.allreduce(float(x), op=MPI.SUM)
+    w = model._cmptFlexFEM(load)
 
     def _max(x):
         return MPI.COMM_WORLD.allreduce(float(x), op=MPI.MAX)
 
-    n = _sum(int(owned.sum()))
-    ma, mb = _sum(a.sum()) / n, _sum(b.sum()) / n
-    saa = _sum(((a - ma) ** 2).sum())
-    sbb = _sum(((b - mb) ** 2).sum())
-    sab = _sum(((a - ma) * (b - mb)).sum())
-    corr = sab / np.sqrt(saa * sbb)
-    assert corr > 0.98, f"FEM-2D clamped/gFlex correlation too low: {corr:.4f}"
-
-    # w pinned to ~0 on the clamped edge (relative to the interior peak)
+    owned = model.inIDs == 1
     edge = np.unique(np.concatenate([model.southPts, model.northPts,
                                      model.eastPts, model.westPts]))
     edge = edge[model.inIDs[edge] == 1]
-    w_edge = _max(float(np.abs(w_f[edge]).max()) if len(edge) else 0.0)
-    w_peak = _max(float(np.abs(b).max()) if len(b) else 0.0)
+    w_edge = _max(float(np.abs(w[edge]).max()) if len(edge) else 0.0)
+    w_peak = _max(float(np.abs(w[owned]).max()) if owned.sum() else 0.0)
+    assert w_peak > 0.0, "no deflection"
     assert w_edge < 1.0e-3 * w_peak, (
         f"clamped edge not pinned: |w|_edge={w_edge:.3e} vs peak {w_peak:.3e}"
     )
