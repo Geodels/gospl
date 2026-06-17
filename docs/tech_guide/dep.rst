@@ -32,6 +32,19 @@ The approach proposed in goSPL is more general than the one in the initial paper
 
   The priority-flood algorithm returns the **flooded elevation** and for each depression its **volume**, its **spill over node**  and a **basin unique identifier** assigned to each of the nodes belonging to the depression.
 
+Parallel implementation
+---------------------------------
+
+On a distributed (MPI) mesh goSPL follows the three-phase structure of `Barnes et al. (2016) <https://arxiv.org/pdf/1606.06204.pdf>`_:
+
+1. **Per-tile flood (parallel).** Each processor priority-floods its own partition and emits a small *spillover graph* whose nodes are the local depression labels and whose edges record the minimum elevation at which one basin spills into another (including a special "ocean"/edge label).
+2. **Global graph solve (serial, on rank 0).** The per-tile graphs are gathered, the labels that describe the same basin across a partition boundary are unified, and a single priority-flood **on the graph** computes the final water level of every depression. Because the graph scales with the *boundary* length (:math:`\mathrm{O(\sqrt{N})}` per tile) rather than the domain area, this master solve is intentionally serial — it is cheap even for very large meshes.
+3. **Apply (parallel).** Each processor raises its cells to the per-label water levels.
+
+.. note::
+
+  The cross-partition label unification (step 2) uses a **union-find** (disjoint-set) pass: every connected component of the equivalence graph is collapsed to its minimum label in a single deterministic sweep. This makes the depression identifiers **independent of how the domain is partitioned** — the filled surface is identical regardless of the number of processors. The serial graph solve itself uses a binary-heap priority queue and a compact (densely re-indexed) label space so its cost tracks the number of distinct spillover basins, not the (rank-dependent, globally-offset) raw label range.
+
 Depression filling
 ---------------------------------
 

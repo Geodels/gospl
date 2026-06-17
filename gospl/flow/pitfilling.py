@@ -45,6 +45,33 @@ class PITFill(object):
 
     For inter-mesh connections and message passing, the approach relies on PETSc DMPlex functions.
 
+    **Parallel (MPI) structure — the three Barnes (2016) phases:**
+
+    1. *Per-tile flood (parallel).* Each rank priority-floods its own partition
+       (``fill_tile``) and emits a small spillover graph linking its local
+       depression labels by their minimum spill elevation (``graph_nodes`` /
+       ``combine_edges``).
+    2. *Global graph solve (serial, rank 0).* The per-rank graphs are gathered,
+       labels describing the same basin across a partition border are unified
+       (:meth:`_transferIDs` → :meth:`_unifyLabels`), and a single priority-flood
+       on the combined graph (:meth:`_fillFromEdges` → ``fill_edges``) computes
+       each depression's final water level. The graph scales with the partition
+       *perimeter* (``O(sqrt(N))`` per tile), so — as in Barnes (2016) — this
+       master solve is intentionally serial and cheap even on large meshes.
+    3. *Apply (parallel).* Each rank raises its cells to the per-label water
+       levels (``fill_depressions``).
+
+    .. note::
+
+        Cross-rank label unification (:meth:`_unifyLabels`) is a single
+        deterministic **union-find** pass that collapses each connected component
+        of the equivalence graph to its minimum label — so the depression
+        identifiers (and the filled surface) are **independent of the MPI
+        partition**. The serial graph solve uses a compact (densely re-indexed)
+        label space and a binary-heap priority queue, so its cost tracks the
+        number of distinct spillover basins rather than the rank-dependent raw
+        (globally-offset) label range.
+
     The main functions return the following parameters:
 
     - the elevation of the filled surface,
