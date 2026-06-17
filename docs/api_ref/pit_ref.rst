@@ -26,6 +26,7 @@ Class PITFill
 
       ~PITFill._buildPitDataframe
       ~PITFill._sortingPits
+      ~PITFill._unifyLabels
       ~PITFill._offsetGlobal
       ~PITFill._fillFromEdges
       ~PITFill._transferIDs
@@ -46,6 +47,7 @@ Private functions
 
 .. automethod:: flow.pitfilling.PITFill._buildPitDataframe
 .. automethod:: flow.pitfilling.PITFill._sortingPits
+.. automethod:: flow.pitfilling.PITFill._unifyLabels
 .. automethod:: flow.pitfilling.PITFill._offsetGlobal
 .. automethod:: flow.pitfilling.PITFill._fillFromEdges
 .. automethod:: flow.pitfilling.PITFill._transferIDs
