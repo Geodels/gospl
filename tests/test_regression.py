@@ -963,6 +963,40 @@ def test_ice_flexure_loading(minimal_ice_flex_model):
                 assert field in hf, f"ice output field {field} not in output"
 
 
+def test_pit_unifyLabels_unionfind():
+    """
+    Protects: PITFill._unifyLabels — the union-find that collapses cross-rank
+    depression-label equivalence pairs to one canonical id per connected
+    component (replacing the iterative sort_ids fixpoint). Guarantees:
+      - canonical id is the component MINIMUM (deterministic, partition-free),
+      - multi-hop chains and merges-via-shared-node fully collapse,
+      - labels not in any pair (and the -1 border sentinel) pass through.
+    Pure function (self unused), so call it unbound with no Model/mesh.
+    """
+    pitfilling = pytest.importorskip("gospl.flow.pitfilling")
+    PITFill = pitfilling.PITFill
+
+    def unify(pairs, label):
+        df = (pd.DataFrame(pairs, columns=["p1", "p2"]) if pairs
+              else pd.DataFrame({"p1": [], "p2": []}))
+        return PITFill._unifyLabels(None, df, np.asarray(label, dtype=int))
+
+    # multi-hop chain 1-4-7 collapses to min (1); separate comp {2,6}->2;
+    # merge via shared node 8: {3,5,8}->3; lone label 9 and -1 unchanged.
+    label = np.array([1, 4, 7, 2, 6, 3, 5, 8, 9, -1])
+    expected = np.array([1, 1, 1, 2, 2, 3, 3, 3, 9, -1])
+    out = unify([(1, 4), (4, 7), (2, 6), (3, 8), (5, 8)], label)
+    assert np.array_equal(out, expected), f"{out} != {expected}"
+
+    # order/direction independence: shuffled pairs (some p1>p2) give the same
+    # canonical mapping — union-find is symmetric and roots to the component min.
+    out2 = unify([(5, 8), (8, 3), (7, 4), (4, 1), (6, 2)], label)
+    assert np.array_equal(out2, expected), f"{out2} != {expected}"
+
+    # empty pair set is a no-op
+    assert np.array_equal(unify([], label), label)
+
+
 def _strata_parser(stratNb):
     """
     Bare parser primed for `_extraStrata`: it reads `self.input`,
