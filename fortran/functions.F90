@@ -2428,20 +2428,24 @@ subroutine fill_edges(nb, cgraph, maxnghbs, nelev, spillrank, spillnodes, spilli
   double precision :: spill(nb,maxnghbs)
   double precision :: spillz(nb)
 
-  ! Initialise graph as a mesh
+  ! Initialise graph as a mesh.
+  ! NB: the dense (nb x maxnghbs) arrays ngbhArr/spill/spillnode/rank are NOT
+  ! pre-filled. The build loop below populates entries (c, 1..ngbNb(c)) and the
+  ! priority-flood only ever reads those same entries (do k = 1, ngbNb(c)), so a
+  ! full init is dead work. At high rank counts these fills are O(nb*maxnghbs)
+  ! and grow with the number of partition boundaries, so skipping them matters.
+  ! Only the O(nb) vectors are initialised — ranknode/spillz/inFlag/nelev and the
+  ! spill* outputs are read at indices the build loop may not populate, so they
+  ! must stay. tmp is written before read, so it needs no init either.
   inFlag = .False.
   ngbNb = 0
-  ngbhArr = -1
   spillnodes = -1
   spillrank = -1
   nelev = 1.e8
   nelev(1) = -1.e8
-  spillnode = -1
   spillz = 1.e8
   ranknode = -1
   spillid = -1
-  rank = -1
-  tmp = -1
   do k = 1, m
     n1 = int(cgraph(k,1))+1
     n2 = int(cgraph(k,2))+1
