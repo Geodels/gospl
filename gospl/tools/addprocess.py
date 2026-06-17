@@ -712,10 +712,14 @@ class GridProcess(object):
         else:
             self._flexDirNodes = np.empty(0, dtype=int)
 
-        # Reusable KSP. Serial → direct LU (matches gFlex on small meshes; the
-        # factorisation is reused so each step is a back-substitution). Parallel →
-        # GMRES+GAMG with the preconditioner reused across steps. Options-prefixed
-        # so either can be overridden (`-flexfem_ksp_type ...`).
+        # Reusable KSP — a cached DIRECT factorisation, reused every step (only
+        # the RHS changes), so a step costs a back-substitution. Serial uses
+        # PETSc's built-in LU; parallel uses MUMPS (the GMRES+GAMG alternative
+        # does not converge on the stiff biharmonic at realistic Te, hitting the
+        # iteration cap — a direct solve is both faster and robust here, and the
+        # one-off factorisation amortises over the run). Options-prefixed
+        # (`flexfem_`) so an iterative solver can be requested for meshes too
+        # large to factorise.
         if self._flexKSP is not None:
             self._flexKSP.destroy()
         if self._flexA is not None:
@@ -724,16 +728,14 @@ class GridProcess(object):
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
         ksp.setOptionsPrefix("flexfem_")
         ksp.setOperators(A)
-        if MPIsize == 1:
-            ksp.setType("preonly")
-            ksp.getPC().setType("lu")
-        else:
-            ksp.setType("gmres")
-            ksp.setTolerances(rtol=self.flex_tol * 1.0e-2, max_it=2000)
-            ksp.getPC().setType("gamg")
+        ksp.setType("preonly")
+        pc = ksp.getPC()
+        pc.setType("lu")
+        if MPIsize > 1:
+            pc.setFactorSolverType("mumps")              # parallel direct solve
         ksp.setFromOptions()
         ksp.setUp()
-        ksp.getPC().setReusePreconditioner(True)         # keep factor/PC across steps
+        pc.setReusePreconditioner(True)                  # keep the factor across steps
         self._flexKSP = ksp
 
         return
