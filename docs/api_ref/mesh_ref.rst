@@ -24,14 +24,18 @@ Class UnstMesh
 
    .. autosummary::
 
-      ~UnstMesh._buildMesh
-      ~UnstMesh._generateVTKmesh
-      ~UnstMesh._get_boundary
       ~UnstMesh._meshfrom_cell_list
       ~UnstMesh._meshStructure
-      ~UnstMesh._readErosionDeposition
+      ~UnstMesh._generateVTKmesh
+      ~UnstMesh._buildMesh
+      ~UnstMesh._gatherGlobalOnRoot
       ~UnstMesh._set_DMPlex_boundary_points
+      ~UnstMesh._get_boundary
+      ~UnstMesh._readErosionDeposition
       ~UnstMesh._updateRain
+      ~UnstMesh._updateIce
+      ~UnstMesh._resolveIceField
+      ~UnstMesh._updateEvap
       ~UnstMesh._updateEroFactor
 
 Public functions
@@ -45,12 +49,16 @@ Public functions
 Private functions
 ---------------------
 
-.. automethod:: mesher.unstructuredmesh.UnstMesh._buildMesh
-.. automethod:: mesher.unstructuredmesh.UnstMesh._generateVTKmesh
-.. automethod:: mesher.unstructuredmesh.UnstMesh._get_boundary
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshfrom_cell_list
 .. automethod:: mesher.unstructuredmesh.UnstMesh._meshStructure
-.. automethod:: mesher.unstructuredmesh.UnstMesh._readErosionDeposition
+.. automethod:: mesher.unstructuredmesh.UnstMesh._generateVTKmesh
+.. automethod:: mesher.unstructuredmesh.UnstMesh._buildMesh
+.. automethod:: mesher.unstructuredmesh.UnstMesh._gatherGlobalOnRoot
 .. automethod:: mesher.unstructuredmesh.UnstMesh._set_DMPlex_boundary_points
+.. automethod:: mesher.unstructuredmesh.UnstMesh._get_boundary
+.. automethod:: mesher.unstructuredmesh.UnstMesh._readErosionDeposition
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateRain
+.. automethod:: mesher.unstructuredmesh.UnstMesh._updateIce
+.. automethod:: mesher.unstructuredmesh.UnstMesh._resolveIceField
+.. automethod:: mesher.unstructuredmesh.UnstMesh._updateEvap
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateEroFactor

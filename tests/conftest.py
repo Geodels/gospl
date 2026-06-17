@@ -103,6 +103,17 @@ def minimal_model():
 
 
 @pytest.fixture
+def minimal_picard_model():
+    """
+    Same as minimal_model but with the opt-in lagged-diffusivity (Picard)
+    marine/lake diffusion solver (`diffusion: marineSolver: picard`). Used to
+    test the opt-in parsing and that the Picard deposit matches the default TS
+    on the minimal fixture. See minimal_picard.yml.
+    """
+    return _instantiate("minimal_picard.yml")
+
+
+@pytest.fixture
 def minimal_strat_model():
     """
     Minimal model with stratigraphy recording ON (single-fraction). Baseline

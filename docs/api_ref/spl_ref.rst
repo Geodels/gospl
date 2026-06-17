@@ -23,9 +23,10 @@ Class SPL
 
    .. autosummary::
 
-      ~SPL._coupledEDSystem
       ~SPL._eroMats
+      ~SPL._coupledEDSystem
       ~SPL._getEroDepRate
+      ~SPL._glacialAbrasion
 
 Public functions
 ---------------------
@@ -36,6 +37,7 @@ Public functions
 Private functions
 ---------------------
 
-.. automethod:: eroder.SPL.SPL._coupledEDSystem
 .. automethod:: eroder.SPL.SPL._eroMats
+.. automethod:: eroder.SPL.SPL._coupledEDSystem
 .. automethod:: eroder.SPL.SPL._getEroDepRate
+.. automethod:: eroder.SPL.SPL._glacialAbrasion

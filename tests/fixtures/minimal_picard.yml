@@ -1,0 +1,34 @@
+name: minimal test (Picard marine solver)
+domain:
+  npdata:
+  - mesh
+  - v
+  - c
+  - z
+  flowdir: 2
+  bc: '1111'
+  seadepo: true
+  nodep: false
+time:
+  start: 0.0
+  end: 100
+  tout: 50
+  dt: 10.0
+spl:
+  K: 4.0e-06
+  d: 0.0
+  m: 0.5
+  G: 0.0
+diffusion:
+  hillslopeKa: 0.01
+  hillslopeKm: 0.2
+  marineSolver: picard
+  picardSub: 10
+  picardIts: 2
+sea:
+  position: -100.0
+climate:
+- start: 0.0
+  uniform: 1
+output:
+  dir: minimal_picard

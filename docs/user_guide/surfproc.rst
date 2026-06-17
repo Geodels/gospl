@@ -79,6 +79,18 @@ Hillslope and marine deposition parameters
         g. ``offshore`` is the distance offshore (m) beyond which the clinoform-distance cap is no longer applied (default: 1.0e7),
         h. ``oFill`` is the minimum elevation (m) below which the priority-flood algorithm is not applied — used to skip deep ocean cells (default: -6000.0).
 
+        *Optional: marine/lake diffusion solver*
+
+        .. code:: yaml
+
+            diffusion:
+                # ... above keys ...
+                marineSolver: picard   # 'ts' (default) | 'picard'
+                picardSub: 10
+                picardIts: 2
+
+        By default the marine and lake non-linear diffusion is integrated with an adaptive non-linear PETSc time-stepper (``marineSolver: ts``). On large, stiff marine inputs this can dominate the run (the adaptive controller takes many sub-steps and stalls at the diffusivity threshold). The opt-in ``marineSolver: picard`` uses a **lagged-diffusivity** backward-Euler scheme instead: it takes ``picardSub`` sub-steps over the goSPL step (default 10), freezing the diffusivity within each and solving the resulting *linear* system with ``picardIts`` Picard updates (default 2). Each solve is linear (no non-linear stalls or step rejections), which is markedly faster on production meshes. It is an **approximation** — on small problems it matches the default solver almost exactly, but on large runs the deposit geometry differs slightly; increase ``picardSub`` to converge toward the time-stepper solution. The default remains ``ts``.
+
         The following parameters control how partial-fill deposition in **inland depressions** is distributed (see :ref:`dep`):
 
         .. code:: yaml

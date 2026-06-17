@@ -51,6 +51,10 @@ class hillSLP(object):
         self._ts_marine = None
         self._ts_marine_x = None
 
+        # Lagged-diffusivity (Picard) alternative to the marine/lake diffusion
+        # TS (opt-in via self.marineSolver == 'picard'); cached linear KSP.
+        self._ksp_picard = None
+
         # Cached marine-morphology smoothing operator (_hillSlope smooth=2) and
         # its KSP. The smoothing diffusivity is mesh-size-based and timestep-
         # independent, so the operator depends only on the (fixed) mesh and the
@@ -241,13 +245,30 @@ class hillSLP(object):
             diffCoeffs[self.idBorders, 1:] = 0.0
             diffCoeffs[self.idBorders, 0] = 1.0
 
-        diffMat = self._matrix_build_diag(diffCoeffs[:, 0])
+        return self._assembleDiffMat(diffCoeffs)
+
+    def _assembleDiffMat(self, coeffs):
+        """
+        Assemble a PETSc finite-volume stencil matrix from a per-node
+        coefficient array ``coeffs`` of shape ``(lpoints, 1 + maxnb)``: column 0
+        is the diagonal, columns ``1..maxnb`` are the off-diagonal entries for
+        the ``maxnb`` neighbours in ``self.FVmesh_ngbID``. Used by
+        ``_buildDiffMat`` (``sethillslopecoeff`` output) and the lagged-
+        diffusivity marine solver (``jacobiancoeff`` output, scaled to
+        ``I + dt·L``).
+
+        :arg coeffs: ``(lpoints, 1+maxnb)`` diagonal + neighbour coefficients.
+
+        :return: the assembled PETSc matrix (caller owns / destroys it).
+        """
+
+        diffMat = self._matrix_build_diag(coeffs[:, 0])
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
 
         for k in range(0, self.maxnb):
             tmpMat = self._matrix_build()
             indices = self.FVmesh_ngbID[:, k].copy()
-            data = diffCoeffs[:, k + 1]
+            data = coeffs[:, k + 1]
             ids = np.nonzero(data == 0.0)
             indices[ids] = ids
             tmpMat.assemblyBegin()
@@ -261,6 +282,58 @@ class hillSLP(object):
             tmpMat.destroy()
 
         return diffMat
+
+    def _assembleDiffMatCSR(self, coeffs):
+        """
+        Single-pass CSR assembly of the FV stencil matrix from ``coeffs``
+        ``(lpoints, 1+maxnb)`` (col 0 = diagonal, cols ``1..maxnb`` = neighbour
+        entries for ``self.FVmesh_ngbID``). Equivalent to ``_assembleDiffMat``
+        (diag + per-neighbour axpy) but builds the matrix in ONE
+        ``setValuesLocalCSR`` pass — ``ADD_VALUES`` sums shared columns exactly,
+        mirroring ``seaplex._matOcean`` (#450). Much cheaper than the 12-axpy
+        loop, used in the Picard hot loop (`_diffuseImplicitPicard`), which
+        rebuilds the operator every iteration.
+
+        ``_buildDiffMat`` deliberately keeps the 12-axpy ``_assembleDiffMat`` so
+        the bit-faithful cached smoother / linear-hillslope operators (#457 /
+        #459) are not perturbed by a different floating-point summation order.
+
+        :arg coeffs: ``(lpoints, 1+maxnb)`` diagonal + neighbour coefficients.
+
+        :return: the assembled PETSc matrix (caller owns / destroys it).
+        """
+
+        nnz = 1 + self.maxnb
+        nodes = np.arange(self.lpoints, dtype=petsc4py.PETSc.IntType)
+        ngb = self.FVmesh_ngbID[:, : self.maxnb].astype(petsc4py.PETSc.IntType).copy()
+        offvals = coeffs[:, 1 : 1 + self.maxnb].copy()
+        # Redirect zero-valued neighbour entries to the diagonal so the column
+        # index is always valid (adds 0 under ADD_VALUES) — matches the
+        # `indices[ids] = ids` trick in _assembleDiffMat.
+        zero = offvals == 0.0
+        ngb[zero] = np.broadcast_to(nodes[:, None], ngb.shape)[zero]
+
+        cols = np.empty((self.lpoints, nnz), dtype=petsc4py.PETSc.IntType)
+        cols[:, 0] = nodes
+        cols[:, 1:] = ngb
+        vals = np.empty((self.lpoints, nnz), dtype=np.float64)
+        vals[:, 0] = coeffs[:, 0]
+        vals[:, 1:] = offvals
+        indptr = np.arange(
+            0, self.lpoints * nnz + 1, nnz, dtype=petsc4py.PETSc.IntType
+        )
+
+        M = self._matrix_build(nnz=(nnz, nnz))
+        M.assemblyBegin()
+        M.setValuesLocalCSR(
+            indptr,
+            cols.ravel(),
+            vals.ravel(),
+            addv=petsc4py.PETSc.InsertMode.ADD_VALUES,
+        )
+        M.assemblyEnd()
+
+        return M
 
     def _makeDiffusionKSP(self, prefix):
         """
@@ -628,6 +701,11 @@ class hillSLP(object):
         :return: ndepo - smoothed deposit thickness (m), zeroed where negative
         """
 
+        # Opt-in: lagged-diffusivity (Picard) linear solver instead of the
+        # adaptive non-linear TS (see _diffuseImplicitPicard). Default 'ts'.
+        if getattr(self, "marineSolver", "ts") == "picard":
+            return self._diffuseImplicitPicard(dh, mask, Cd_val, label=label)
+
         t0 = process_time()
 
         self.mat.zeroEntries()
@@ -719,5 +797,95 @@ class hillSLP(object):
         self.dm.globalToLocal(self.dh, self.tmpL)
         ndepo = self.tmpL.getArray().copy()
         ndepo[ndepo < 0.0] = 0.0
+
+        return ndepo
+
+    def _diffuseImplicitPicard(self, dh, mask, Cd_val, label="diffusion"):
+        r"""
+        Lagged-diffusivity (Picard) alternative to ``_diffuseImplicit`` for the
+        non-linear thickness diffusion :math:`\partial_t h = \nabla\cdot(C_d(h)
+        \nabla h)` over one model step.
+
+        Instead of the adaptive non-linear TS, this takes ``self.picardSub``
+        backward-Euler sub-steps of size ``dt/picardSub``; within each sub-step
+        it freezes the diffusivity :math:`C_d(h^k)` and solves the resulting
+        **linear** system :math:`(I + \Delta t_{sub} L(C_d^k)) h^{k+1} = h^{start}`
+        with ``self.picardIts`` Picard updates. The operator ``L`` is built from
+        ``jacobiancoeff`` with a zero derivative term (``Kp=0``), so it is the
+        exact linear :math:`\nabla\cdot(C_d\nabla)` operator consistent with the
+        TS residual ``fctcoeff`` — including the "no flux across a zero-
+        diffusivity face" marine-mask gating.
+
+        Each solve is linear (a cached richardson+bjacobi KSP, no SNES) and,
+        because :math:`C_d` is frozen, smooth — so it avoids the error-estimate
+        rejections the adaptive TS hits at the :math:`C_d` kink (``dh<0.1``).
+        ``picardSub`` is the accuracy/speed knob. Same signature / return as
+        ``_diffuseImplicit``.
+
+        :arg dh: per-node initial deposit thickness (m)
+        :arg mask: cells where diffusion is active
+        :arg Cd_val: scalar non-linear diffusion coefficient (m^2/yr)
+        :arg label: log label
+
+        :return: ndepo - smoothed deposit thickness (m), zeroed where negative
+        """
+
+        t0 = process_time()
+        nsub = int(getattr(self, "picardSub", 10))
+        npic = int(getattr(self, "picardIts", 2))
+        dt_sub = self.dt / nsub
+
+        Cd0 = np.zeros(self.lpoints)
+        Cd0[mask] = Cd_val
+        minDiff_vec = np.zeros(self.lpoints)
+        minDiff_vec[mask] = self.minDiff
+        zb = self.hLocal.getArray().copy()         # pre-deposition bed
+        zeroKp = np.zeros(self.lpoints)
+
+        # Deposited surface h = bed + dh (global self.h, local self.hl).
+        self.hl.setArray(dh)
+        self.hl.axpy(1.0, self.hLocal)
+        self.dm.localToGlobal(self.hl, self.h)
+
+        if self._ksp_picard is None:
+            self._ksp_picard = self._makeDiffusionKSP("marpicard_")
+        ksp = self._ksp_picard
+
+        nsolve = 0
+        for _ in range(nsub):
+            self.h.copy(result=self.tmp1)          # h^start (BE right-hand side)
+            for _ in range(npic):
+                self.dm.globalToLocal(self.h, self.hl)
+                hloc = self.hl.getArray()
+                dhdep = hloc - zb
+                dhdep[dhdep < 0.1] = 0.0
+                Cd = minDiff_vec + np.multiply(
+                    Cd0, 1.0 - np.exp(-self.dexp * dhdep)
+                )
+                # Linear operator L = div(Cd grad .) consistent with fctcoeff
+                # (Kp=0 -> no derivative term); 13-col (diag, 12 neighbours).
+                nlC = jacobiancoeff(hloc, Cd, zeroKp)
+                coeffs = dt_sub * nlC
+                coeffs[:, 0] += 1.0                # M = I + dt_sub * L
+                M = self._assembleDiffMatCSR(coeffs)
+                ksp.setOperators(M, M)
+                ksp.solve(self.tmp1, self.h)
+                M.destroy()
+                nsolve += 1
+
+        # Deposit thickness relative to the pre-deposition elevation.
+        self.dh.waxpy(-1.0, self.hGlobal, self.h)
+        self.dm.globalToLocal(self.dh, self.tmpL)
+        ndepo = self.tmpL.getArray().copy()
+        ndepo[ndepo < 0.0] = 0.0
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Nonlinear diffusion (Picard %s, %0.02f seconds): %d linear "
+                "solves (%d sub-steps x %d Picard)"
+                % (label, process_time() - t0, nsolve, nsub, npic),
+                flush=True,
+            )
+        petsc4py.PETSc.garbage_cleanup()
 
         return ndepo

@@ -1,8 +1,9 @@
 .. _model_ref:
 
-==============
+
+===========
 Class Model
-==============
+===========
 
 .. autoclass:: model.Model
 
@@ -18,6 +19,7 @@ Class Model
 
       ~Model.runProcesses
       ~Model.destroy
+
 
 Public functions
 ---------------------

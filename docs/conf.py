@@ -25,8 +25,6 @@ import sphinx_rtd_theme
 from intersphinx_registry import get_intersphinx_mapping
 from numpydoc.docscrape_sphinx import SphinxDocString
 
-from mock import Mock as MagicMock
-
 try:
     # Available from Sphinx 2.0
     from sphinx.builders.dirhtml import DirectoryHTMLBuilder
@@ -38,6 +36,13 @@ except ImportError:
         SingleFileHTMLBuilder,
         StandaloneHTMLBuilder,
     )
+# Repo root so `import gospl` (and `from gospl.tools.constants import ...`, used
+# throughout the package) resolves — gospl is NOT pip-installed on Read the Docs,
+# so without this every module that imports from the `gospl` package failed to
+# import under autodoc and rendered as an EMPTY API page.
+sys.path.insert(0, os.path.abspath(".."))
+# `../gospl/` keeps the legacy top-level module paths (e.g. ``sed.hillslope``)
+# used by the ``.. autoclass::`` directives in docs/api_ref/*.rst.
 sys.path.insert(0, os.path.abspath("../gospl/"))
 
 # Redefine supported_image_types for the HTML builder
@@ -287,36 +292,25 @@ epub_title = project
 epub_exclude_files = ["search.html"]
 
 
-# -- Mock utils
-# utils contains binary (FORTRAN and C) code for the performance-sensitive
-# parts of Badlands. readthedocs can't compile or load this, so we mock it
-# out.
-# See also http://docs.readthedocs.io/en/latest/faq.html#i-get-import-errors-on-libraries-that-depend-on-c-modules
-
-
-class Mock(MagicMock):
-    @classmethod
-    def __getattr__(cls, name):
-        return MagicMock()
-
-
-MOCK_MODULES = [
+# -- Mock the compiled / MPI-linked dependencies that Read the Docs cannot
+# install or load, so autodoc can import every gospl module to extract its
+# docstrings. autodoc_mock_imports also covers SUBMODULES (e.g. vtk.util,
+# gflex.f2d), which the previous manual ``sys.modules[m] = Mock()`` approach did
+# not — and that manual approach also shadowed packages docs/requirements.txt
+# DOES install (numpy, scipy, pandas, numpy-indexed, ruamel.yaml), breaking
+# e.g. ``from scipy.special import ...`` and rendering most API pages empty.
+# Those installed packages are now left REAL; only the genuinely-absent ones,
+# plus the in-tree compiled extension ``gospl._fortran``, are mocked.
+# See https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#confval-autodoc_mock_imports
+autodoc_mock_imports = [
     "h5py",
     "mpi4py",
-    "Cython",
-    "ruamel",
-    "ruamel.yaml",
-    "pandas",
-    "scipy",
     "petsc4py",
-    "scipy.interpolate",
     "vtk",
-    "vtk.util",
     "gflex",
+    "pyshtools",
+    "gospl._fortran",
 ]
-
-for m in MOCK_MODULES:
-    sys.modules[m] = Mock()
 
 
 def skip(app, what, name, obj, would_skip, options):
