@@ -24,10 +24,15 @@ Class GridProcess
 
    .. autosummary::
 
-      ~GridProcess._buildRegGrid
       ~GridProcess._regInterp
+      ~GridProcess._buildRegGrid
       ~GridProcess._updateTe
-      
+      ~GridProcess._cptFlex2D
+      ~GridProcess._buildDHGrid
+      ~GridProcess._unstr2dh
+      ~GridProcess._dh2unstr
+      ~GridProcess._cmptFlexGlobal
+
 
 Public functions
 ---------------------
@@ -39,6 +44,11 @@ Public functions
 Private functions
 ---------------------
 
-.. automethod:: tools.addprocess.GridProcess._buildRegGrid
 .. automethod:: tools.addprocess.GridProcess._regInterp
+.. automethod:: tools.addprocess.GridProcess._buildRegGrid
 .. automethod:: tools.addprocess.GridProcess._updateTe
+.. automethod:: tools.addprocess.GridProcess._cptFlex2D
+.. automethod:: tools.addprocess.GridProcess._buildDHGrid
+.. automethod:: tools.addprocess.GridProcess._unstr2dh
+.. automethod:: tools.addprocess.GridProcess._dh2unstr
+.. automethod:: tools.addprocess.GridProcess._cmptFlexGlobal

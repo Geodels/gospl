@@ -17,17 +17,16 @@ Class WriteMesh
 
    .. autosummary::
 
-      ~WriteMesh.readData
       ~WriteMesh.visModel
-
+      ~WriteMesh.readData
 
    .. rubric:: Private Methods
 
    .. autosummary::
 
       ~WriteMesh._createOutputDir
-      ~WriteMesh._outputMesh
       ~WriteMesh._outputStrat
+      ~WriteMesh._outputMesh
       ~WriteMesh._save_DMPlex_XMF
       ~WriteMesh._save_XDMF
 
@@ -35,15 +34,15 @@ Class WriteMesh
 Public functions
 ---------------------
 
-.. automethod:: tools.outmesh.WriteMesh.readData
 .. automethod:: tools.outmesh.WriteMesh.visModel
+.. automethod:: tools.outmesh.WriteMesh.readData
 
 
 Private functions
 ---------------------
 
 .. automethod:: tools.outmesh.WriteMesh._createOutputDir
-.. automethod:: tools.outmesh.WriteMesh._outputMesh
 .. automethod:: tools.outmesh.WriteMesh._outputStrat
+.. automethod:: tools.outmesh.WriteMesh._outputMesh
 .. automethod:: tools.outmesh.WriteMesh._save_DMPlex_XMF
 .. automethod:: tools.outmesh.WriteMesh._save_XDMF

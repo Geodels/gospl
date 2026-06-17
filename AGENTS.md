@@ -323,6 +323,12 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 - The issue triage automation is designed to be transparent and idempotent: before posting a new automated response, the bot checks for an identical existing triage comment and skips duplicates when a workflow retry would otherwise repeat the same reply.
 - Concurrency: `tests-pr.yml` cancels in-flight runs on the same ref (`cancel-in-progress: true`); `tests-slow.yml` does not (`cancel-in-progress: false`) — slow runs are expensive enough that killing them mid-flight is more wasteful than letting them finish.
 
+## Docs / Read the Docs (autodoc)
+The API reference (`docs/api_ref/*.rst`) is Sphinx **autodoc** — it imports each module to extract docstrings, so the modules MUST import under the docs build. Two invariants keep the API pages from rendering empty (both regressed once and produced blank pages for *most* classes):
+- **`gospl` must be importable.** It is NOT pip-installed on Read the Docs, so `docs/conf.py` puts BOTH the repo root (`..`, so `from gospl.tools.constants import …` and other `from gospl.X import` resolve) AND `../gospl/` (so the legacy top-level `.. autoclass:: sed.hillslope.hillSLP` paths resolve) on `sys.path`. Don't remove either.
+- **Mock only the genuinely-absent compiled/MPI deps via `autodoc_mock_imports`** (`h5py`, `mpi4py`, `petsc4py`, `vtk`, `gflex`, `pyshtools`, `gospl._fortran`). Do NOT mock packages `docs/requirements.txt` installs (`numpy`, `scipy`, `pandas`, `numpy-indexed`, `ruamel.yaml`) — the old manual `sys.modules[m] = Mock()` shadowed the real `scipy` and broke `from scipy.special import …` (and didn't cover submodules), blanking the pages. `autodoc_mock_imports` mocks submodules automatically; the `READTHEDOCS` env-guard around `from gospl._fortran import …` is the belt-and-braces for the compiled extension.
+- When you add a public/private method that should appear in the API, add it to BOTH the `.. autosummary::` and `.. automethod::` lists in the relevant `docs/api_ref/*_ref.rst` (they are hand-maintained, not auto-generated).
+
 ## Analytical benchmark suite
 Tests in `benchmarks/` validate goSPL physics against exact analytical solutions. They require `scipy` and `matplotlib` and are silently skipped via `pytest.importorskip` in environments without these packages. `matplotlib` is in `environment.yml` for CI; it is NOT a goSPL runtime dependency (intentional — `pyproject.toml` does not list it).
 
