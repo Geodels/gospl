@@ -135,6 +135,19 @@ This function computes the flexural isostasy equilibrium based on topographic ch
         h. ``nu`` Poisson ratio.
         i. ``bcN``, ``bcE``, ``bcS``, ``bcW`` North, East, South and West boundary conditions.
 
+        For the **global** ``method`` (spherical-harmonic solve), the following
+        additional keys are available:
+
+        j. ``res_deg``: resolution (degrees) of the Driscoll–Healy grid on which the spherical-harmonic flexure is solved (default ``0.25``). The flexural deflection is long-wavelength, so a coarser grid (e.g. ``0.5`` or ``1.0``) is markedly cheaper with little change to the result — the cheapest speed-up for the (serial) global solve.
+        k. ``interval``: apply flexure only every ``interval`` goSPL steps, accumulating the load in between (default ``1`` = every step). Useful when flexure dominates the wall time; the elastic response is instantaneous so this only coarsens the temporal resolution of the loading history.
+        l. ``maxIter``: maximum Anderson/Picard iterations for the **varying-Te** (``temap``) iterative solve (default ``50``).
+        m. ``tol``: relative convergence tolerance ``|dw|/|w|`` for that iteration (default ``5.e-4``).
+        n. ``relax``: under-relaxation factor (0–1) for the varying-Te update (default ``1.0``; lower damps strong Te contrasts).
+
+        .. note::
+
+          The varying-Te global solve warm-starts each step from the previous step's converged deflection, so after the first step it typically needs noticeably fewer iterations (the load evolves slowly). With a constant ``thick`` (no ``temap``) the global solve is a single spectral pass and ``maxIter``/``tol``/``relax`` are unused.
+
         .. note::
   
           For non-global simulation, the user needs to specify the boundary conditions for the flexural isostasy calculation. Similar conditions to `gFlex <https://gmd.copernicus.org/articles/9/997/2016/gmd-9-997-2016.pdf>`_ are possible:

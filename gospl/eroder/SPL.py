@@ -285,7 +285,9 @@ class SPL(object):
         t0 = process_time()
         # Build the SPL erosion arrays
         hOldArray = self.hLocal.getArray().copy()
-        if self.flexOn:
+        # Snapshot the flexure load reference only at the start of a flexure
+        # interval so the load accumulates across skipped steps (flex_interval).
+        if self.flexOn and self.flexCount % self.flex_interval == 0:
             self.hLocal.copy(result=self.hOldFlex)
         eMat, PA = self._eroMats(hOldArray)
 

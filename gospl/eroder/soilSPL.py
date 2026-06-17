@@ -366,8 +366,10 @@ class soilSPL(object):
 
         t0 = process_time()
 
-        # Build the SPL erosion arrays
-        if self.flexOn:
+        # Build the SPL erosion arrays. Snapshot the flexure load reference only
+        # at the start of a flexure interval so the load accumulates across
+        # skipped steps (flex_interval).
+        if self.flexOn and self.flexCount % self.flex_interval == 0:
             self.hLocal.copy(result=self.hOldFlex)
 
         self._solveSoil()
