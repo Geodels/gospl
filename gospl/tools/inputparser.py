@@ -512,6 +512,14 @@ class ReadYaml(object):
             # bottom-up baseline. 0.0 = pure bowl fill, 1.0 = original
             # inlet-only spike.
             self.nl_pit_inlet_bias = hillDict.get("pitInletBias", 0.10)
+            # Marine/lake non-linear-diffusion solver. 'ts' (default) = adaptive
+            # non-linear PETSc TS (rosw). 'picard' = lagged-diffusivity backward-
+            # Euler with linear solves (faster, robust at the C_d kink), an
+            # opt-in approximation; picardSub sub-steps over dt, picardIts Picard
+            # iterations per sub-step. See sed/hillslope._diffuseImplicitPicard.
+            self.marineSolver = str(hillDict.get("marineSolver", "ts")).lower()
+            self.picardSub = int(hillDict.get("picardSub", 10))
+            self.picardIts = int(hillDict.get("picardIts", 2))
         except KeyError:
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
@@ -522,9 +530,16 @@ class ReadYaml(object):
             self.nl_pit_depth = 100.0
             self.nl_pit_K = self.nlK
             self.nl_pit_inlet_bias = 0.50
+            self.marineSolver = "ts"
+            self.picardSub = 10
+            self.picardIts = 2
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
         self.nl_pit_inlet_bias = min(1.0, max(0.0, self.nl_pit_inlet_bias))
+        if self.marineSolver not in ("ts", "picard"):
+            self.marineSolver = "ts"
+        self.picardSub = max(1, self.picardSub)
+        self.picardIts = max(1, self.picardIts)
 
         return
 

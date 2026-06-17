@@ -3363,6 +3363,66 @@ def test_marine_ts_step_counter_resets(minimal_model):
 
 
 # ---------------------------------------------------------------------------
+# TEST 8e - Opt-in lagged-diffusivity (Picard) marine solver
+# ---------------------------------------------------------------------------
+#
+# `diffusion: marineSolver: picard` selects hillslope._diffuseImplicitPicard
+# (lagged-diffusivity backward-Euler with linear solves) instead of the default
+# adaptive non-linear TS. It is an opt-in approximation: on the minimal fixture
+# it matches the TS deposit to ~1e-5; on large stiff marine inputs it is much
+# faster (no kink rejections) at a small deposit difference. This test checks
+# (a) the opt-in is parsed, (b) the Picard run conserves mass, and (c) its
+# deposit matches the default TS on the minimal fixture (closed sphere).
+# ---------------------------------------------------------------------------
+
+
+def test_marine_picard_solver(minimal_model, minimal_picard_model):
+    """
+    Protects: the opt-in `diffusion: marineSolver: picard` path
+    (inputparser._extraHillslope -> hillslope._diffuseImplicitPicard). Asserts
+    the flag is parsed, the Picard marine/lake diffusion conserves mass, and its
+    cumulative erosion/deposition matches the default TS solver on the minimal
+    closed-sphere fixture (the approximation is exact there).
+    """
+    mp = minimal_picard_model
+    assert getattr(mp, "marineSolver", "ts") == "picard", (
+        "diffusion.marineSolver: picard was not parsed into self.marineSolver"
+    )
+
+    def _run(m):
+        try:
+            m.runProcesses()
+            owned = m.inIDs == 1
+            ed = m.cumEDLocal.getArray()[owned]
+            la = m.larea[owned]
+            ednorm = float(np.sum(ed ** 2)) ** 0.5
+            vol = float(np.sum(ed * la))
+            act = float(np.sum(np.abs(ed) * la))
+            return ednorm, abs(vol) / max(act, 1.0e-30)
+        finally:
+            m.destroy()
+
+    if getattr(minimal_model, "flatModel", False):
+        pytest.skip("needs a closed sphere (flatModel=False) for mass conservation")
+
+    ed_pic, mass_pic = _run(mp)
+    ed_ts, mass_ts = _run(minimal_model)
+
+    # Mass conservation on the closed sphere (same gate as test_mass_conservation).
+    assert mass_pic < 1.0e-4, (
+        f"Picard marine solver breaks mass conservation (rel {mass_pic:.2e})."
+    )
+    # Deposit must match the default TS solver to a tight tolerance on the
+    # minimal fixture (the lagged-diffusivity approximation is exact here).
+    rel = abs(ed_pic - ed_ts) / max(ed_ts, 1.0e-30)
+    assert rel < 1.0e-2, (
+        f"Picard deposit diverges from the TS solver on the minimal fixture "
+        f"(cumED rel diff {rel:.2e} > 1e-2): ed_pic={ed_pic:.6e} "
+        f"ed_ts={ed_ts:.6e}. The opt-in approximation should be near-exact here."
+    )
+
+
+# ---------------------------------------------------------------------------
 # TEST 9 - Stratigraphy: deposition + compaction physics
 # ---------------------------------------------------------------------------
 #

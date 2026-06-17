@@ -23,6 +23,7 @@ tests/fixtures/incising/
 tests/fixtures/minimal_strat/
 tests/fixtures/minimal_dual/
 tests/fixtures/minimal_dual_coarse/
+tests/fixtures/minimal_picard/
 tests/fixtures/minimal_ice/
 tests/fixtures/ice_soil_out/
 tests/fixtures/minimal_ice_till/

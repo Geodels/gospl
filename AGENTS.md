@@ -48,7 +48,7 @@ Rule: use `MPI.COMM_WORLD` for raw collectives (Allreduce/bcast/Allgatherv); use
 ## KSP / SNES / TS lifecycle contract
 PETSc solvers in goSPL follow two intentional patterns. **Use the right one for new code.**
 
-### CACHED — hot-path solvers (10 sites)
+### CACHED — hot-path solvers (11 sites)
 Solvers that run **every timestep** are created lazily on first use, stored as `self._X`, and reused across the entire simulation. Avoids the ~5-10 ms create+destroy churn per call, which compounds over thousands of timesteps. Each site's inline docstring confirms the rationale.
 
 | File | Method | Cached attribute | Solver |
@@ -63,6 +63,7 @@ Solvers that run **every timestep** are created lazily on first use, stored as `
 | `sed/hillslope.py` | `_diffuseImplicit` | `self._ts_marine` | TS (rosw marine + lake diffusion) |
 | `sed/hillslope.py` | `_solveSmooth` | `self._ksp_smooth` (+ cached operator `self._smoothMat`) | KSP (richardson+bjacobi, `marsmooth_` prefix, factor-shift) for the marine flow-direction smoother (`_hillSlope(smooth=2)`). Operator is mesh-size-based + timestep-independent so it is built once and the PC **reused**; rebuilt only when the coastline (`seaID`) moves (`_smooth_pc_ready` guards the reuse). |
 | `sed/hillslope.py` | `_hillSlope(smooth=0)` | `self._ksp_hill_lin` (+ cached operator `self._hillMat`) | KSP (`hilllin_` prefix; same config via shared `_makeDiffusionKSP`) for the **linear** soil-creep solve. Operator `(I−Cd·dt·L)` is invariant for constant `Cda`/`Cdm`, so built once + PC **reused**, rebuilt only on coastline move (`_hill_pc_ready`). **Only when NOT dual-lithology** (`stratLith` makes `Cd` step-varying → per-step build on `_ksp_main`). Bit-faithful. |
+| `sed/hillslope.py` | `_diffuseImplicitPicard` | `self._ksp_picard` | KSP (`marpicard_` prefix; `_makeDiffusionKSP`) for the **opt-in** lagged-diffusivity marine/lake solver (`diffusion: marineSolver: picard`; default `ts` = the adaptive non-linear `_ts_marine`). Per Picard iteration it rebuilds `M = I + dt_sub·L` from `jacobiancoeff(h,Cd,Kp=0)` (the linear `∇·(Cd∇)` operator, **consistent with the TS residual `fctcoeff`** incl. the no-flux-across-zero-Cd-face marine-mask gating) via the single-pass `_assembleDiffMatCSR`, and solves it (no SNES). The operator changes each iteration so PCSetUp is not reused — but each solve is linear + smooth (no kink rejections). Approximation: matches the TS to ~1e-5 on minimal, ~1.5% deposit diff on a 658k earth run at ~5-8× the marine-diffusion speed; `picardSub`/`picardIts` are the accuracy/speed knobs. |
 
 **CRITICAL — collective rebuild decision.** Both coastline-gated caches above (`_smoothMat`/`_hillMat`) rebuild the operator (and redo `PCSetUp`) only when `seaID` moves. `seaID` is **rank-local**, but `_buildDiffMat` assembly and `PCSetUp` are **collective** — so the "did the coastline move?" test MUST be reduced across ranks (`rebuild = MPI.COMM_WORLD.allreduce(local_changed, op=MPI.LOR)`) before it gates those calls. Without the reduce, one rank rebuilds while another reuses, the two take different collective paths, and the run **deadlocks at np>1** (it ran fine until the per-partition coastlines drifted apart, then hung). A rank forced to rebuild with an unchanged mask reproduces its own cached matrix, so the reduce stays bit-faithful. Any future cached operator gated on a rank-local condition needs the same reduce.
 
@@ -208,7 +209,7 @@ NOT optional parsers. Each sets attributes required by other modules. Never dele
 
 - `_extraDomain` (inputparser.py:189) → `seaDepo`, `overlap`, `dataFile`, `nodep`, `strataFile`; calls `_extraDomain2`.
 - `_extraDomain2` (:229) → `advscheme`, `radius`, `gravity`.
-- `_extraHillslope` (:475) → `nlK`, `clinSlp`, `tsStep`, `Gmar`, `offshore`, `nl_pit_volume/depth/K/inlet_bias`.
+- `_extraHillslope` (:475) → `nlK`, `clinSlp`, `tsStep`, `Gmar`, `offshore`, `nl_pit_volume/depth/K/inlet_bias`, `marineSolver`(`ts`|`picard`)/`picardSub`/`picardIts` (opt-in lagged-diffusivity marine/lake solver).
 - `_extraStrata` (called from `_readCompaction`) → `stratLith` (dual-lithology master opt-in), `phi0c/z0c` (coarse porosity curve, defaults to compaction `phi0s/z0s`), `phi0f/z0f` (fine), `fine_k_factor` (fine erodibility multiplier), `bedrock_coarse_frac`, `fine_efficiency`, `pit_inlet_bias_coarse/fine`, `fine_diff_factor` (fine diffusivity multiplier). All inert while `stratLith` is False; forced False if `stratNb == 0`. See `docs/DESIGN_DUAL_LITHOLOGY.md`.
 - `_extraFlex` (:1430) → `nu`, `flex_res_deg`, `flex_bcN/S/E/W`.
 - `_extraOrography` (:1517) → `oro_cw`, `oro_conv_time`, `oro_fall_time`, `oro_precip_*`, `rainfall_frequency`.

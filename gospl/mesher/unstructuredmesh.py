@@ -994,6 +994,7 @@ class UnstMesh(object):
             "_ts_marine", "_ts_marine_x",
             "_smoothMat", "_ksp_smooth",
             "_hillMat", "_ksp_hill_lin",
+            "_ksp_picard",
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
         ):
             obj = getattr(self, name, None)
