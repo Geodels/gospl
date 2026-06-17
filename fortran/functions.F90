@@ -144,7 +144,7 @@ module meshparams
       integer  :: id
       type(node)  :: x
       type(node), allocatable  :: tmp(:)
-      integer :: ii
+      integer :: ii, parent
       x%Z = Z
       x%id = id
       this%n = this%n +1
@@ -155,11 +155,21 @@ module meshparams
         call move_alloc(tmp, this%buf)
       end if
       this%buf(this%n) = x
+      ! Sift the new node UP toward the root while it is smaller than its
+      ! parent: O(log n). Replaces the former loop that called shiftdown() on
+      ! every ancestor (ii = n/2, n/4, ... 1), which was O(log^2 n) per push and
+      ! dominated the serial priority-flood (fill_edges) at high rank counts.
+      ! Same resulting min-heap; only the order of exactly-equal-key entries can
+      ! differ (heap tie order is implementation-defined regardless).
       ii = this%n
-      do
-        ii = ii / 2
-        if (ii==0) exit
-        call this%shiftdown(ii)
+      do while (ii > 1)
+        parent = ii / 2
+        if (this%buf(ii)%Z < this%buf(parent)%Z) then
+          this%buf([ii, parent]) = this%buf([parent, ii])
+          ii = parent
+        else
+          exit
+        end if
       end do
     end subroutine PQpush
 
