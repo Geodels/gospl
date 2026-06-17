@@ -3302,6 +3302,67 @@ def test_parallel_cached_diffusion_rebuild(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# TEST 8d - Cached marine TS: per-call step-counter reset
+# ---------------------------------------------------------------------------
+#
+# hillslope._diffuseImplicit (marine diffusion) and soilSPL.diffuseSoil reuse a
+# cached PETSc TS. `ts.setTime(0.0)` resets the clock each call but NOT the step
+# counter (`getStepNumber()`), so without an explicit `ts.setStepNumber(0)` the
+# counter accumulates across calls. `ts.setMaxSteps(self.tsStep)` then acts as a
+# CUMULATIVE cap: after ~tsStep total substeps (a few hundred model steps at the
+# default tsStep=2000) the cap is already exceeded on entry, TSSolve returns
+# immediately, and the marine deposit is left un-diffused — silently. (It also
+# made the verbose substep/iteration counts grow without bound.)
+#
+# This guard runs the marine fixture for several steps and asserts the per-call
+# TS step count stays bounded (independent per call) instead of accumulating.
+# ---------------------------------------------------------------------------
+
+
+def test_marine_ts_step_counter_resets(minimal_model):
+    """
+    Protects: hillslope._diffuseImplicit must `ts.setStepNumber(0)` each call so
+    the cached TS's `setMaxSteps(tsStep)` is a PER-CALL budget, not a cumulative
+    cap that eventually stops marine diffusion silently. Without the reset,
+    `getStepNumber()` grows monotonically across the reused TS (7, 14, 21, ...).
+    """
+    m = minimal_model
+    if getattr(m, "flatModel", False):
+        pytest.skip("needs a marine domain (global sphere) to run _diffuseImplicit")
+
+    orig = m._diffuseImplicit
+    counts = []
+
+    def wrap(*args, **kwargs):
+        out = orig(*args, **kwargs)
+        if getattr(m, "_ts_marine", None) is not None:
+            counts.append(m._ts_marine.getStepNumber())
+        return out
+
+    m._diffuseImplicit = wrap
+    try:
+        m.runProcesses()
+    finally:
+        m.destroy()
+
+    if len(counts) < 3:
+        pytest.skip(
+            f"marine diffusion ran only {len(counts)} time(s); too few to "
+            f"distinguish per-call from cumulative step counts."
+        )
+
+    # Per-call (fixed): counts stay ~flat -> max ~ min. Cumulative (bug): counts
+    # grow ~linearly with the call index -> max == N*min. The 2x bound clears the
+    # mild physical drift in substep count while failing hard on accumulation.
+    assert max(counts) <= 2 * min(counts), (
+        "Cached marine TS step counter accumulates across calls "
+        f"(getStepNumber per call = {counts}). hillslope._diffuseImplicit must "
+        "call ts.setStepNumber(0) each invocation; otherwise setMaxSteps(tsStep) "
+        "is a cumulative cap that silently stops marine diffusion on long runs."
+    )
+
+
+# ---------------------------------------------------------------------------
 # TEST 9 - Stratigraphy: deposition + compaction physics
 # ---------------------------------------------------------------------------
 #
