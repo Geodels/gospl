@@ -568,17 +568,21 @@ class GridProcess(object):
         decays inside the domain: correlation 0.998, amplitude within ~1.5 %.
 
         .. note::
-            Boundary conditions: the default gFlex ``0Slope0Shear`` maps to the
-            natural zero-flux FV boundary (``∂w/∂n = 0``), which the FV Laplacian
-            already imposes — so no extra boundary code is needed for the default
-            **provided the deflection decays before the domain edge** (true for
-            large flat models). On small/edge-dominated domains the discrete
-            natural boundary differs from gFlex and the amplitude near the rim is
-            off. Other BCs (clamped ``0Displacement0Slope`` etc.) would require
-            explicit constraints on ``w`` at the border and are not yet
-            implemented. ``Lm`` is geometry-only and cached in
-            ``self._flexLm``; the KSP is rebuilt each call (operator caching is a
-            later optimisation).
+            Boundary conditions (per side, from ``flex_bcN/S/E/W``):
+
+            * ``0Slope0Shear`` and ``Mirror`` — the natural zero-flux FV boundary
+              (``w'=0, w'''=0``; a thin plate's Mirror *is* 0Slope0Shear), imposed
+              for free by the FV Laplacian — no modification.
+            * ``0Displacement0Slope`` (clamped) — pin ``w=0`` (Dirichlet
+              ``zeroRows`` on that side's nodes); the natural ``w'=0`` from the
+              inner FV Laplacian completes the clamp.
+
+            Sides map geographically (no gFlex N/S swap). Validated vs gFlex with
+            the same BC: natural corr 0.998, clamped corr 0.9996. Other gFlex BCs
+            (``0Moment0Shear``, ``Periodic``) are not yet implemented.
+
+            ``Lm`` is geometry-only and cached in ``self._flexLm``; the KSP is
+            rebuilt each call (operator caching is a later optimisation).
 
         :arg dzLocal: local (lpoints) elevation change = surface load thickness (m).
 
@@ -631,8 +635,43 @@ class GridProcess(object):
         sysMat = LmD.matMult(Lm)                         # Lm·diag(D)·Lm  (∇⁴ term)
         sysMat.shift(kfound)                             # + Δρg·I  (foundation)
 
+        # ---- per-side boundary conditions ----
+        # 0Slope0Shear and Mirror are the natural zero-flux FV boundary (w'=0,
+        # w'''=0 — a thin plate's Mirror is exactly 0Slope0Shear), so they need
+        # NO modification. 0Displacement0Slope (clamped) pins w=0 (Dirichlet);
+        # combined with the natural w'=0 from the inner FV Laplacian this is the
+        # clamped edge. Sides map geographically (no gFlex N/S swap, which only
+        # compensated gFlex's own coordinate convention).
+        qloc = dzLocal * self.flex_rhos * self.gravity
+        sides = (
+            (self.southPts, self.flex_bcS),
+            (self.eastPts, self.flex_bcE),
+            (self.northPts, self.flex_bcN),
+            (self.westPts, self.flex_bcW),
+        )
+        # `flex_bc*` come from the YAML (identical on every rank), so this guard
+        # is collective-safe: every rank then calls zeroRows (a collective op)
+        # with its own owned clamped nodes — possibly an empty list.
+        if any(bc == "0Displacement0Slope" for _, bc in sides):
+            dbc = [
+                pts for pts, bc in sides
+                if bc == "0Displacement0Slope" and pts is not None and len(pts) > 0
+            ]
+            dnodes = (
+                np.unique(np.concatenate(dbc)) if dbc
+                else np.empty(0, dtype=int)
+            )
+            qloc[dnodes] = 0.0                            # Dirichlet rhs (w = 0)
+            owned = dnodes[self.inIDs[dnodes] == 1]
+            rmap = Lm.getLGMap()[0]
+            grows = (
+                rmap.apply(owned.astype(petsc4py.PETSc.IntType)) if len(owned)
+                else np.empty(0, dtype=petsc4py.PETSc.IntType)
+            )
+            sysMat.zeroRows(grows, diag=1.0)             # collective; clamps w=0
+
         # ---- RHS q = ρ_s g·(erodep) ----
-        self.tmpL.setArray(dzLocal * self.flex_rhos * self.gravity)
+        self.tmpL.setArray(qloc)
         self.dm.localToGlobal(self.tmpL, self.tmp)       # self.tmp = q (global)
         sol = self.hGlobal.duplicate()
 
