@@ -169,7 +169,6 @@ The current ``environment.yml`` for the goSPL runtime environment is:
         - hdf5 * mpi_openmpi*
         - vtk-base
         - ruamel.yaml
-        - gflex
         - pyshtools
         - cython
         - c-compiler

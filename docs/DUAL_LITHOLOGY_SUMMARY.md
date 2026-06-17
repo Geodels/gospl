@@ -144,18 +144,20 @@ solving the thin-elastic-plate biharmonic equation
 (`D` flexural rigidity, `w` deflection, `Δρ = ρ_m − ρ_fill`). The YAML
 `flexure.method` selects one of two families:
 
-### Planar / Cartesian — `method: FD` or `FFT` (flat models)
+### Planar / Cartesian — `method: fem` (flat models)
 
-- Uses the **gFlex** library (`gflex.f2d.F2D`, `_cptFlex2D`).
-- The unstructured mesh load is interpolated to a regular Cartesian grid of
-  spacing `regdx`, solved, and interpolated back.
-- `FD` → finite-difference solver (`vWC1994` plate solution, direct solver);
-  `FFT` → spectral.
-- Spatially-variable elastic thickness `Te` via a `teMap` time series
-  (`_updateTe`), or a uniform `thick`.
-- Per-edge boundary conditions `bcN/S/E/W` (default `0Slope0Shear`). The
-  `BC_S = bcN` / `BC_N = bcS` assignment is an intentional coordinate-convention
-  swap for gFlex (see AGENTS.md > Intentional surprises).
+- Parallel mixed finite-volume biharmonic solve **directly on the DMPlex**
+  (`_cmptFlexFEM`): the FV negative-Laplacian `Lm` applied twice gives the
+  single-field system `[Lm·diag(D)·Lm + Δρg·I] w = q`. No gather-to-root, no
+  regular grid, no external dependency. (This replaced the former gFlex `FD` and
+  FFT solvers.)
+- Spatially-variable elastic thickness `Te` via a `temap` time series
+  (`_updateTe`, per-node) or a uniform `thick` — a single linear solve either
+  way (the rigidity goes into `diag(D)`; no iteration over the contrast).
+- The operator + factorisation are cached and reused each step (serial PETSc LU
+  / parallel MUMPS); only the RHS changes.
+- Per-edge boundary conditions `bcN/S/E/W`: `0Slope0Shear` and `Mirror` (the
+  natural zero-flux FV boundary) and `0Displacement0Slope` (clamped, `w=0`).
 
 ### Global / spherical — `method: global`
 

@@ -119,7 +119,7 @@ Then install the remaining runtime dependencies::
           h5py netCDF4 \
           pandas ruamel.yaml \
           numpy-indexed \
-          pyshtools gflex \
+          pyshtools \
           vtk pyevtk \
           stripy meshplex \
           xarray matplotlib \
@@ -148,7 +148,6 @@ pandas                    2.0                Data analysis; forcing DataFrames u
 ruamel.yaml               0.18               YAML parser for goSPL input files.
 vtk                       9.3                VTK for unstructured mesh I/O (headless; ``vtk-base`` on conda).
 numpy-indexed             0.3.7              Indexed operations on NumPy arrays.
-gflex                     1.2                Flexural isostasy.
 pyshtools                 4.13               Spherical-harmonic backend for the flexure module.
 meson-python              0.16               Build backend (replaces ``setup.py``).
 ========================= ================== =============================================================
