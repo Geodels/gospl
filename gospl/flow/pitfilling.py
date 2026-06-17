@@ -300,12 +300,20 @@ class PITFill(object):
             )
         t0 = process_time()
 
-        # Send depression IDs globally
-        offset, _ = self._offsetGlobal(len(df))
-        combIds = -np.ones((np.amax(offset), 2), dtype=int)
-        if len(df) > 0:
-            combIds[offset[MPIrank] : offset[MPIrank + 1], :] = df.values
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, combIds, op=MPI.MAX)
+        # Gather every rank's equivalence pairs onto all ranks. Allgatherv of
+        # the real pairs (Barnes-style) replaces a padded Allreduce(MAX) over a
+        # (total, 2) array — same content, no -1 padding to move. All ranks then
+        # run the identical union-find.
+        offset, total = self._offsetGlobal(len(df))
+        sendbuf = (
+            df.values.astype(np.int64).ravel()
+            if len(df) > 0
+            else np.empty(0, dtype=np.int64)
+        )
+        counts = (np.diff(offset) * 2).astype(int)
+        recvbuf = np.empty(int(total) * 2, dtype=np.int64)
+        MPI.COMM_WORLD.Allgatherv(sendbuf, [recvbuf, counts])
+        combIds = recvbuf.reshape(-1, 2)
         df = self._buildPitDataframe(combIds[:, 0], combIds[:, 1])
         df = df[(df["p1"] >= 0) & (df["p2"] >= 0)]
         if MPIrank == 0 and self.verbose:
