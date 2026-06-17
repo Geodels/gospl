@@ -136,26 +136,60 @@ class PITFill(object):
         )
         cgraph = cgraph.sort_values("elev")
         cgraph = cgraph.drop_duplicates(["source", "target"], keep="first")
-        c12 = np.concatenate((cgraph["source"].values, cgraph["target"].values))
-        cmax = np.max(np.bincount(c12.astype(int))) + 1
+        cgraph = cgraph.values
+
+        # --- Pit-label compaction --------------------------------------------
+        # source/target are globally-offset pit labels (disjoint per rank), so
+        # the label space is SPARSE and its maximum grows ~linearly with the
+        # rank count even though the number of distinct spillover pits is far
+        # smaller. fill_edges sizes its O(nb) / O(nb*maxnghbs) work arrays from
+        # that maximum (nb = max(label)+2), so the serial solve grows with
+        # ranks. Relabel to a dense [0, nlab) space, solve there, then scatter
+        # the results back onto the global label index the downstream code
+        # expects. Label 0 (the global outlet, == node 1, the priority-flood
+        # seed) is the smallest label so it always maps to compact 0; union it
+        # in explicitly in case no edge references it directly. This is a pure
+        # relabeling: the fill result is identical to solving in global space.
+        nb_global = int(cgraph[:, 1].max()) + 2
+        src = cgraph[:, 0].astype(np.int64)
+        tgt = cgraph[:, 1].astype(np.int64)
+        uniq = np.unique(np.concatenate((src, tgt)))
+        if uniq[0] != 0:
+            uniq = np.concatenate((np.array([0], dtype=uniq.dtype), uniq))
+        nlab = len(uniq)
+        ccgraph = cgraph.copy()
+        ccgraph[:, 0] = np.searchsorted(uniq, src)
+        ccgraph[:, 1] = np.searchsorted(uniq, tgt)
+        c12 = ccgraph[:, :2].astype(int).ravel()
+        cmax = np.max(np.bincount(c12)) + 1
 
         # Filling the bidirectional graph (serial priority-flood; timed
         # separately so we can see whether the Fortran graph solve or the
         # surrounding MPI Reduce/bcast dominates the serial pitgraph cost).
-        cgraph = cgraph.values
+        # nlab+1 always covers every compact label 0..nlab-1 (the +1 keeps the
+        # one-node slack the global formula had).
         self.profiler.start("flow_pit_edges")
-        elev, rank, nodes, spillID = fill_edges(
-            int(max(cgraph[:, 1]) + 2), cgraph, cmax
-        )
+        elev, rank, nodes, spillID = fill_edges(nlab + 1, ccgraph, cmax)
         self.profiler.stop("flow_pit_edges")
-        ggraph = -np.ones((len(elev), 5))
-        ggraph[:, 0] = elev
-        ggraph[:, 1] = nodes
-        ggraph[:, 2] = rank
-        ggraph[:, 3] = spillID
+
+        # Scatter compact results back to the global label index. Labels with
+        # no spillover edge are absent from the compact graph; in global space
+        # fill_edges would have left them at its nelev sentinel (1e8), which the
+        # caller rewrites to MISSING_DATA_SENTINEL — reproduce that default so
+        # behaviour is identical. spillID is itself a (compact) label, so map it
+        # back to the global label too (nodes/rank are mesh ids, not labels).
+        ggraph = -np.ones((nb_global, 5))
+        ggraph[:, 0] = 1.0e8
+        ggraph[uniq, 0] = elev[:nlab]
+        ggraph[uniq, 1] = nodes[:nlab]
+        ggraph[uniq, 2] = rank[:nlab]
+        gspill = spillID[:nlab].astype(np.int64)
+        valid = (gspill >= 0) & (gspill < nlab)
+        gspill[valid] = uniq[gspill[valid]]
+        ggraph[uniq, 3] = gspill
         if self.memclear:
-            del elev, nodes, rank
-            del spillID, c12
+            del elev, nodes, rank, spillID
+            del src, tgt, uniq, c12, gspill, ccgraph
 
         return ggraph
 
