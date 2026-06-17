@@ -608,6 +608,12 @@ class soilSPL(object):
         # Soil thicknesses are meters; mm-level absolute tolerance is plenty.
         ts.setTolerances(atol=1e-3, rtol=1e-3)
         ts.setTime(0.0)
+        # Reset the step COUNTER (setTime only resets the clock). The cached TS
+        # is reused and getStepNumber() is not reset by setTime, so without this
+        # setMaxSteps below becomes a *cumulative* cap — after ~tsStep total
+        # substeps it is exceeded on entry and TSSolve returns immediately,
+        # leaving the soil column un-diffused (same bug as hillslope marine TS).
+        ts.setStepNumber(0)
         # Larger initial step (was self.dt / 1000.0).
         ts.setTimeStep(self.dt / 100.0)
         ts.setMaxTime(self.dt)

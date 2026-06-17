@@ -675,6 +675,15 @@ class hillSLP(object):
         # artefacts seen with 1e-3/1e-3.
         ts.setTolerances(atol=5.0e-3, rtol=1.0e-4)
         ts.setTime(0.0)
+        # Reset the step COUNTER too (setTime only resets the clock). The TS is
+        # cached and reused, and getStepNumber() is NOT reset by setTime, so
+        # without this it accumulates across calls — making setMaxSteps below a
+        # *cumulative* cap that, after ~tsStep total substeps (a few hundred
+        # model steps at the default tsStep=2000), is already exceeded on entry,
+        # so TSSolve returns immediately and the marine deposit is left
+        # un-diffused (silent). It also made the verbose substep/iteration
+        # counts grow without bound (they were cumulative, not per-call).
+        ts.setStepNumber(0)
         # Initial dt close to the controller's typical equilibrium for
         # marine diffusion; minor over-large warmup is corrected by the
         # adaptive controller within a step or two.
