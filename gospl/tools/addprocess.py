@@ -52,10 +52,15 @@ class GridProcess(object):
             # previous step's converged DH-grid deflection seeds the next solve
             # (loads evolve slowly ⇒ far fewer Anderson iterations). Rank-0 only.
             self._flex_w_prev = None
-            # Cached FV negative-Laplacian for the parallel mixed-FV biharmonic
-            # flexure solver (method == 'fem', flat models); geometry-only, so
-            # built once. See _cmptFlexFEM.
+            # Cached state for the parallel FV biharmonic flexure solver
+            # (method == 'fem', flat models). Lm is geometry-only; the operator A
+            # and its KSP are rebuilt only when the Te interval advances (never,
+            # for constant Te) — see _cmptFlexFEM / _buildFlexFEM.
             self._flexLm = None
+            self._flexA = None
+            self._flexKSP = None
+            self._flexTeNb = -2
+            self._flexDirNodes = np.empty(0, dtype=int)
             # Step counter driving the flexure interval (`flex_interval`): the
             # load reference (hOldFlex) is snapshotted at interval starts and
             # flexure applied at interval ends, so the load accumulates in
@@ -581,8 +586,14 @@ class GridProcess(object):
             the same BC: natural corr 0.998, clamped corr 0.9996. Other gFlex BCs
             (``0Moment0Shear``, ``Periodic``) are not yet implemented.
 
-            ``Lm`` is geometry-only and cached in ``self._flexLm``; the KSP is
-            rebuilt each call (operator caching is a later optimisation).
+            The operator ``A`` and its KSP are CACHED and reused across steps:
+            the geometry (``Lm``) is fixed and, for constant or piecewise-constant
+            ``Te``, ``A`` only changes when the ``Te`` interval advances. Each step
+            then re-uses the factorisation / preconditioner and only the RHS
+            changes — so after the one-off setup a step costs a back-substitution
+            (serial) or a few warm Krylov iterations (parallel). Serial runs use a
+            direct LU (matches gFlex on small meshes); parallel runs use
+            GMRES+GAMG. The KSP is options-prefixed (``flexfem_``) to override.
 
         :arg dzLocal: local (lpoints) elevation change = surface load thickness (m).
 
@@ -599,16 +610,57 @@ class GridProcess(object):
             )
             self._fem_warned = True
 
-        # ---- rigidity D(x) (varying Te -> per-node; else constant) ----
+        # ---- rigidity D(x); track the Te interval so the cached operator is
+        #      rebuilt only when Te actually changes (never, for constant Te). --
         if self.tedata is not None:
             self._updateTe()
             Te = self.flexTe_local
+            teNb = self.teNb
         else:
             Te = self.flex_eet * np.ones(self.lpoints)
+            teNb = -1
+        rebuild = (self._flexKSP is None) or (teNb != self._flexTeNb)
+
+        if rebuild:
+            self._buildFlexFEM(Te)
+            self._flexTeNb = teNb
+
+        # ---- RHS q = ρ_s g·(erodep); pin w=0 at any clamped boundary nodes ----
+        qloc = dzLocal * self.flex_rhos * self.gravity
+        if len(self._flexDirNodes) > 0:
+            qloc[self._flexDirNodes] = 0.0
+        self.tmpL.setArray(qloc)
+        self.dm.localToGlobal(self.tmpL, self.tmp)       # self.tmp = q (global)
+
+        sol = self.hGlobal.duplicate()
+        self._flexKSP.solve(self.tmp, sol)
+        r = self._flexKSP.getConvergedReason()
+        if r < 0 and MPIrank == 0:
+            print(
+                "[femflex] KSP failed to converge (reason %d) after %d its"
+                % (r, self._flexKSP.getIterationNumber()),
+                flush=True,
+            )
+
+        self.dm.globalToLocal(sol, self.tmpL)
+        w = self.tmpL.getArray().copy()
+        sol.destroy()
+
+        return -w
+
+    def _buildFlexFEM(self, Te):
+        r"""
+        Assemble (and cache) the flat-model FV biharmonic operator
+        ``A = Lm·diag(D)·Lm + Δρg·I`` with its boundary conditions, and set up the
+        reusable KSP. Called from :meth:`_cmptFlexFEM` on the first flexure step
+        and whenever the elastic-thickness interval advances; the result is reused
+        for every step in between (only the RHS changes).
+        """
+
         D = self.young * Te ** 3 / (12.0 * (1.0 - self.nu ** 2))
         kfound = self.flex_rhoa * self.gravity          # Δρ·g (rho_infill = 0)
 
-        # ---- FV negative-Laplacian Lm (= -∇²); geometry only ⇒ cache ----
+        # FV negative-Laplacian Lm (= -∇²); geometry only ⇒ cache.
         if self._flexLm is None:
             coeffs = jacobiancoeff(
                 self.hLocal.getArray(),
@@ -618,93 +670,73 @@ class GridProcess(object):
             self._flexLm = self._assembleDiffMatCSR(coeffs)
         Lm = self._flexLm
 
-        # ---- single-field operator A = Lm·diag(D)·Lm + Δρg·I ----
-        # Eliminating the auxiliary moment M = Lm·w from the mixed form leaves one
-        # equation in w: the FV Laplacian Lm (= -∇²) applied twice is the
-        # biharmonic ∇⁴, weighted per-node by the rigidity diag(D); the elastic
-        # foundation Δρg·I (positive) makes the operator well-posed (it pins the
-        # absolute deflection — no nullspace, no mean removal). Lm is
-        # row-area-normalised (slightly non-symmetric) so the default Krylov is
-        # GMRES; GAMG preconditions it. The solver is options-prefixed
-        # (`flexfem_`) so a direct LU can be requested for validation.
+        # A = Lm·diag(D)·Lm + Δρg·I (biharmonic + elastic foundation).
         Dvec = self.hGlobal.duplicate()
         self.tmpL.setArray(D)
         self.dm.localToGlobal(self.tmpL, Dvec)
         LmD = Lm.copy()
         LmD.diagonalScale(R=Dvec)                        # Lm·diag(D)
-        sysMat = LmD.matMult(Lm)                         # Lm·diag(D)·Lm  (∇⁴ term)
-        sysMat.shift(kfound)                             # + Δρg·I  (foundation)
+        A = LmD.matMult(Lm)                              # Lm·diag(D)·Lm
+        A.shift(kfound)                                  # + Δρg·I
+        LmD.destroy()
+        Dvec.destroy()
 
-        # ---- per-side boundary conditions ----
-        # 0Slope0Shear and Mirror are the natural zero-flux FV boundary (w'=0,
-        # w'''=0 — a thin plate's Mirror is exactly 0Slope0Shear), so they need
-        # NO modification. 0Displacement0Slope (clamped) pins w=0 (Dirichlet);
-        # combined with the natural w'=0 from the inner FV Laplacian this is the
-        # clamped edge. Sides map geographically (no gFlex N/S swap, which only
-        # compensated gFlex's own coordinate convention).
-        qloc = dzLocal * self.flex_rhos * self.gravity
+        # Per-side BCs. 0Slope0Shear and Mirror are the natural zero-flux FV
+        # boundary (w'=0, w'''=0; a thin plate's Mirror IS 0Slope0Shear) — no
+        # modification. 0Displacement0Slope (clamped) pins w=0 (Dirichlet
+        # zeroRows); the natural w'=0 from the inner FV Laplacian completes the
+        # clamp. Sides map geographically (no gFlex N/S swap). The clamped node
+        # set is cached for the per-step RHS. `flex_bc*` are identical on every
+        # rank, so the zeroRows guard is collective-safe.
         sides = (
             (self.southPts, self.flex_bcS),
             (self.eastPts, self.flex_bcE),
             (self.northPts, self.flex_bcN),
             (self.westPts, self.flex_bcW),
         )
-        # `flex_bc*` come from the YAML (identical on every rank), so this guard
-        # is collective-safe: every rank then calls zeroRows (a collective op)
-        # with its own owned clamped nodes — possibly an empty list.
         if any(bc == "0Displacement0Slope" for _, bc in sides):
             dbc = [
                 pts for pts, bc in sides
                 if bc == "0Displacement0Slope" and pts is not None and len(pts) > 0
             ]
             dnodes = (
-                np.unique(np.concatenate(dbc)) if dbc
-                else np.empty(0, dtype=int)
+                np.unique(np.concatenate(dbc)) if dbc else np.empty(0, dtype=int)
             )
-            qloc[dnodes] = 0.0                            # Dirichlet rhs (w = 0)
             owned = dnodes[self.inIDs[dnodes] == 1]
-            rmap = Lm.getLGMap()[0]
             grows = (
-                rmap.apply(owned.astype(petsc4py.PETSc.IntType)) if len(owned)
-                else np.empty(0, dtype=petsc4py.PETSc.IntType)
+                Lm.getLGMap()[0].apply(owned.astype(petsc4py.PETSc.IntType))
+                if len(owned) else np.empty(0, dtype=petsc4py.PETSc.IntType)
             )
-            sysMat.zeroRows(grows, diag=1.0)             # collective; clamps w=0
+            A.zeroRows(grows, diag=1.0)                  # collective; clamps w=0
+            self._flexDirNodes = dnodes
+        else:
+            self._flexDirNodes = np.empty(0, dtype=int)
 
-        # ---- RHS q = ρ_s g·(erodep) ----
-        self.tmpL.setArray(qloc)
-        self.dm.localToGlobal(self.tmpL, self.tmp)       # self.tmp = q (global)
-        sol = self.hGlobal.duplicate()
-
-        # ---- KSP (GMRES + GAMG by default; opts-prefixed) ----
+        # Reusable KSP. Serial → direct LU (matches gFlex on small meshes; the
+        # factorisation is reused so each step is a back-substitution). Parallel →
+        # GMRES+GAMG with the preconditioner reused across steps. Options-prefixed
+        # so either can be overridden (`-flexfem_ksp_type ...`).
+        if self._flexKSP is not None:
+            self._flexKSP.destroy()
+        if self._flexA is not None:
+            self._flexA.destroy()
+        self._flexA = A
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
         ksp.setOptionsPrefix("flexfem_")
-        ksp.setType(petsc4py.PETSc.KSP.Type.GMRES)
-        ksp.setOperators(sysMat)
-        ksp.setTolerances(rtol=self.flex_tol * 1.0e-2, max_it=2000)
-        ksp.getPC().setType("gamg")
+        ksp.setOperators(A)
+        if MPIsize == 1:
+            ksp.setType("preonly")
+            ksp.getPC().setType("lu")
+        else:
+            ksp.setType("gmres")
+            ksp.setTolerances(rtol=self.flex_tol * 1.0e-2, max_it=2000)
+            ksp.getPC().setType("gamg")
         ksp.setFromOptions()
+        ksp.setUp()
+        ksp.getPC().setReusePreconditioner(True)         # keep factor/PC across steps
+        self._flexKSP = ksp
 
-        ksp.solve(self.tmp, sol)
-        r = ksp.getConvergedReason()
-        if r < 0 and MPIrank == 0:
-            print(
-                "[femflex] KSP failed to converge (reason %d) after %d its"
-                % (r, ksp.getIterationNumber()),
-                flush=True,
-            )
-
-        self.dm.globalToLocal(sol, self.tmpL)
-        w = self.tmpL.getArray().copy()
-
-        # ---- clean up (AD-HOC lifecycle; Lm is cached) ----
-        LmD.destroy()
-        ksp.destroy()
-        sysMat.destroy()
-        sol.destroy()
-        Dvec.destroy()
-        petsc4py.PETSc.garbage_cleanup()
-
-        return -w
+        return
 
     def applyFlexure(self):
         r"""
