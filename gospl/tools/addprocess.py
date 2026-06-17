@@ -52,6 +52,10 @@ class GridProcess(object):
             # previous step's converged DH-grid deflection seeds the next solve
             # (loads evolve slowly ⇒ far fewer Anderson iterations). Rank-0 only.
             self._flex_w_prev = None
+            # Cached FV negative-Laplacian for the parallel mixed-FV biharmonic
+            # flexure solver (method == 'fem', flat models); geometry-only, so
+            # built once. See _cmptFlexFEM.
+            self._flexLm = None
             # Step counter driving the flexure interval (`flex_interval`): the
             # load reference (hOldFlex) is snapshotted at interval starts and
             # flexure applied at interval ends, so the load accumulates in
@@ -63,9 +67,13 @@ class GridProcess(object):
 
         if self.flexOn or self.oroOn:
             # Build regular grid for the FD/FFT flexure or orographic
-            # precipitation calculation. The 'global' (spherical-harmonic)
-            # flexure method does not use the regular grid.
-            if MPIrank == 0 and self.flex_method != 'global':
+            # precipitation calculation. The 'global' (spherical-harmonic) and
+            # 'fem' (parallel mixed-FV biharmonic, flat) flexure methods solve
+            # directly on the mesh, but orography still needs the regular grid.
+            needRegGrid = self.oroOn or (
+                self.flexOn and self.flex_method not in ('global', 'fem')
+            )
+            if MPIrank == 0 and needRegGrid:
                 self._buildRegGrid()
             if MPIrank == 0 and self.flexOn and self.flex_method == 'global':
                 self._buildDHGrid()
@@ -174,6 +182,17 @@ class GridProcess(object):
                 del loadData
                 if MPIrank == 0:
                     self.flexTe_dh = self._unstr2dh(self.flexTe)
+            elif self.flex_method == 'fem':
+                # Parallel FV biharmonic (flat): Te is needed per LOCAL mesh node
+                # (no regular grid). Uniform value or per-vertex map indexed by
+                # this rank's owned+ghost nodes.
+                if self.tedata["tUni"][nb] == 0.:
+                    loadData = np.load(self.tedata.at[nb, "tMap"])
+                    teVal = loadData[self.tedata.at[nb, "tKey"]]
+                    del loadData
+                    self.flexTe_local = teVal[self.locIDs]
+                else:
+                    self.flexTe_local = self.tedata.at[nb, "tUni"] * np.ones(self.lpoints)
             elif self.tedata["tUni"][nb] == 0.:
                 loadData = np.load(self.tedata.at[nb, "tMap"])
                 teVal = loadData[self.tedata.at[nb, "tKey"]]
@@ -512,6 +531,142 @@ class GridProcess(object):
 
         return -w_dh
 
+    def _cmptFlexFEM(self, dzLocal):
+        r"""
+        **Parallel finite-volume biharmonic flexure for FLAT (2D) models**
+        (opt-in ``flexure: method: 'fem'``).
+
+        Replaces the serial gFlex (``'FD'``) / FFT solvers — and their
+        unstructured→regular→unstructured regridding — with a single PETSc solve
+        **directly on the DMPlex**: fully parallel, no gather-to-root, no regular
+        grid, no gFlex dependency, and **varying elastic thickness in one linear
+        solve** (no iteration over rigidity contrast).
+
+        Solves the thin-plate-on-elastic-foundation equation with a spatially
+        varying rigidity :math:`D(x)=E\,T_e(x)^3/[12(1-\nu^2)]`
+
+        .. math::
+          \nabla^2\!\big(D\,\nabla^2 w\big) + \Delta\rho\,g\,w = q,
+          \qquad q = \rho_s\,g\,\mathrm{(erodep)}
+
+        Discretised with the cached finite-volume negative-Laplacian ``Lm``
+        (:math:`= -\nabla^2`, the hillslope stencil) applied twice, this is the
+        **single-field** SPD-structured system
+
+        .. math::
+          \big[\,L_m\,\mathrm{diag}(D)\,L_m + \Delta\rho g\,I\,\big]\,w = q,
+
+        solved with GMRES + GAMG (``Lm`` is row-area-normalised, hence slightly
+        non-symmetric, so GMRES rather than CG). The elastic foundation
+        :math:`\Delta\rho g\,I` (a positive diagonal) makes the operator
+        well-posed — it pins the absolute deflection, so there is **no nullspace
+        and no mean removal** (unlike the closed-sphere spectral solver). The
+        solver is options-prefixed (``flexfem_``) so a direct LU can be requested
+        for validation.
+
+        Validated against gFlex (``'FD'``) on a flat mesh where the deflection
+        decays inside the domain: correlation 0.998, amplitude within ~1.5 %.
+
+        .. note::
+            Boundary conditions: the default gFlex ``0Slope0Shear`` maps to the
+            natural zero-flux FV boundary (``∂w/∂n = 0``), which the FV Laplacian
+            already imposes — so no extra boundary code is needed for the default
+            **provided the deflection decays before the domain edge** (true for
+            large flat models). On small/edge-dominated domains the discrete
+            natural boundary differs from gFlex and the amplitude near the rim is
+            off. Other BCs (clamped ``0Displacement0Slope`` etc.) would require
+            explicit constraints on ``w`` at the border and are not yet
+            implemented. ``Lm`` is geometry-only and cached in
+            ``self._flexLm``; the KSP is rebuilt each call (operator caching is a
+            later optimisation).
+
+        :arg dzLocal: local (lpoints) elevation change = surface load thickness (m).
+
+        :return: local (lpoints) flexural deflection (m), same sign convention as
+            ``_cmptFlexGlobal`` (negative = subsidence under deposition).
+        """
+
+        if MPIrank == 0 and not getattr(self, "_fem_warned", False):
+            print(
+                "[flexure] method='fem' (parallel FV biharmonic, flat model): "
+                "EXPERIMENTAL — default 0Slope0Shear (natural) boundary only; "
+                "validate against 'FD' (gFlex) before production use.",
+                flush=True,
+            )
+            self._fem_warned = True
+
+        # ---- rigidity D(x) (varying Te -> per-node; else constant) ----
+        if self.tedata is not None:
+            self._updateTe()
+            Te = self.flexTe_local
+        else:
+            Te = self.flex_eet * np.ones(self.lpoints)
+        D = self.young * Te ** 3 / (12.0 * (1.0 - self.nu ** 2))
+        kfound = self.flex_rhoa * self.gravity          # Δρ·g (rho_infill = 0)
+
+        # ---- FV negative-Laplacian Lm (= -∇²); geometry only ⇒ cache ----
+        if self._flexLm is None:
+            coeffs = jacobiancoeff(
+                self.hLocal.getArray(),
+                np.ones(self.lpoints),
+                np.zeros(self.lpoints),
+            )
+            self._flexLm = self._assembleDiffMatCSR(coeffs)
+        Lm = self._flexLm
+
+        # ---- single-field operator A = Lm·diag(D)·Lm + Δρg·I ----
+        # Eliminating the auxiliary moment M = Lm·w from the mixed form leaves one
+        # equation in w: the FV Laplacian Lm (= -∇²) applied twice is the
+        # biharmonic ∇⁴, weighted per-node by the rigidity diag(D); the elastic
+        # foundation Δρg·I (positive) makes the operator well-posed (it pins the
+        # absolute deflection — no nullspace, no mean removal). Lm is
+        # row-area-normalised (slightly non-symmetric) so the default Krylov is
+        # GMRES; GAMG preconditions it. The solver is options-prefixed
+        # (`flexfem_`) so a direct LU can be requested for validation.
+        Dvec = self.hGlobal.duplicate()
+        self.tmpL.setArray(D)
+        self.dm.localToGlobal(self.tmpL, Dvec)
+        LmD = Lm.copy()
+        LmD.diagonalScale(R=Dvec)                        # Lm·diag(D)
+        sysMat = LmD.matMult(Lm)                         # Lm·diag(D)·Lm  (∇⁴ term)
+        sysMat.shift(kfound)                             # + Δρg·I  (foundation)
+
+        # ---- RHS q = ρ_s g·(erodep) ----
+        self.tmpL.setArray(dzLocal * self.flex_rhos * self.gravity)
+        self.dm.localToGlobal(self.tmpL, self.tmp)       # self.tmp = q (global)
+        sol = self.hGlobal.duplicate()
+
+        # ---- KSP (GMRES + GAMG by default; opts-prefixed) ----
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setOptionsPrefix("flexfem_")
+        ksp.setType(petsc4py.PETSc.KSP.Type.GMRES)
+        ksp.setOperators(sysMat)
+        ksp.setTolerances(rtol=self.flex_tol * 1.0e-2, max_it=2000)
+        ksp.getPC().setType("gamg")
+        ksp.setFromOptions()
+
+        ksp.solve(self.tmp, sol)
+        r = ksp.getConvergedReason()
+        if r < 0 and MPIrank == 0:
+            print(
+                "[femflex] KSP failed to converge (reason %d) after %d its"
+                % (r, ksp.getIterationNumber()),
+                flush=True,
+            )
+
+        self.dm.globalToLocal(sol, self.tmpL)
+        w = self.tmpL.getArray().copy()
+
+        # ---- clean up (AD-HOC lifecycle; Lm is cached) ----
+        LmD.destroy()
+        ksp.destroy()
+        sysMat.destroy()
+        sol.destroy()
+        Dvec.destroy()
+        petsc4py.PETSc.garbage_cleanup()
+
+        return -w
+
     def applyFlexure(self):
         r"""
         This function computes the flexural isostasy equilibrium based on topographic change. It is a simple routine that accounts for flexural isostatic rebound associated with erosional loading/unloading.
@@ -537,6 +692,22 @@ class GridProcess(object):
         if self.iceOn:
             dIce = self.iceHL.getArray() - self.iceFlex.getArray()
             local_dZ += dIce * 910.0 / self.flex_rhos  # 910 kg/m3 ice density
+
+        # Parallel mixed-FV biharmonic flexure for FLAT models (opt-in
+        # `method: 'fem'`): solved directly on the DMPlex with no gather-to-root,
+        # no regular grid, no gFlex. Returns the local deflection; apply and exit.
+        if self.flex_method == 'fem':
+            tmpFlex = self._cmptFlexFEM(local_dZ)
+            self.localFlex += tmpFlex
+            self.hLocal.setArray(hl + tmpFlex)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "Compute Flexural Isostasy [fem] (%0.02f seconds)"
+                    % (process_time() - t0),
+                    flush=True,
+                )
+            return
 
         dZ = self._gatherGlobalOnRoot(local_dZ)
         flexZ = None

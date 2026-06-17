@@ -173,6 +173,27 @@ def minimal_ice_flex_model():
 
 
 @pytest.fixture
+def flat_fem_flex_model():
+    """
+    Flat (2D) model with the opt-in parallel FV biharmonic flexure solver
+    (`flexure: method: fem`) — replaces gFlex, solved directly on the DMPlex.
+    16 km domain, thin Te so the flexural response is well resolved and decays
+    inside the domain. See flatbig_fem.yml.
+    """
+    return _instantiate("flatbig_fem.yml")
+
+
+@pytest.fixture
+def flat_fd_flex_model():
+    """
+    Same flat 16 km mesh but with the gFlex (`method: FD`) solver — the
+    reference for the FEM-vs-gFlex agreement test (the FD path builds the regular
+    grid the comparison needs). See flatbig_flex.yml.
+    """
+    return _instantiate("flatbig_flex.yml")
+
+
+@pytest.fixture
 def minimal_ice_dual_model():
     """
     Minimal glacial model with abrasion + till on AND dual-lithology

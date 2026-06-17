@@ -1629,13 +1629,13 @@ class ReadYaml(object):
             self.flexOn = True
             self.flex_method = flexDict.get("method", 'FD')
 
-            if self.flex_method != 'global' and self.flex_method != 'FD' and self.flex_method != 'FFT':
+            if self.flex_method not in ('global', 'FD', 'FFT', 'fem'):
                 print(
                     "Method {} is not in the list of possible methods".format(
                         self.flex_method), flush=True,
                 )
                 raise ValueError(
-                    "Method name for flexure is not recognised choices are FD, FFT or global."
+                    "Method name for flexure is not recognised choices are FD, FFT, global or fem."
                 )
             self.reg_dx = flexDict.get("regdx", 1000.0)
             # raise ValueError("Flexure definition: regular grid spacing is required.")
