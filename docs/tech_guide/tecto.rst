@@ -51,10 +51,6 @@ The IIOE is formally second order accurate in space and time for 1D advection pr
 
 .. note::
 
-    **Cyclic (periodic) boundaries.** Horizontal advection works with a cyclic boundary (a periodic 2D model runs on a cylinder mesh). The displacement field is still given in the flat ``(vx, vy)`` frame; goSPL maps it onto the cylinder tangent so the periodic-axis component advects *around* the seam. The finite-volume advection then transports material across the periodic boundary through the wrapping cells (the seam is not pinned), so it remains mass-conserving across the seam.
-
-.. note::
-
     Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)).
 
     Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
