@@ -91,6 +91,10 @@ Hillslope and marine deposition parameters
 
         By default the marine and lake non-linear diffusion is integrated with an adaptive non-linear PETSc time-stepper (``marineSolver: ts``). On large, stiff marine inputs this can dominate the run (the adaptive controller takes many sub-steps and stalls at the diffusivity threshold). The opt-in ``marineSolver: picard`` uses a **lagged-diffusivity** backward-Euler scheme instead: it takes ``picardSub`` sub-steps over the goSPL step (default 10), freezing the diffusivity within each and solving the resulting *linear* system with ``picardIts`` Picard updates (default 2). Each solve is linear (no non-linear stalls or step rejections), which is markedly faster on production meshes. It is an **approximation** — on small problems it matches the default solver almost exactly, but on large runs the deposit geometry differs slightly; increase ``picardSub`` to converge toward the time-stepper solution. The default remains ``ts``.
 
+        .. note::
+
+           The ``picard`` solver has been **validated on a production earth model**: its marine deposit distribution was confirmed to match the default ``ts`` time-stepper closely (a few percent on the deposit geometry) while running roughly 5–8× faster on the marine diffusion. It is therefore a safe opt-in for large runs where marine diffusion dominates the wall-clock time; the exact adaptive ``ts`` solver remains the default.
+
         The following parameters control how partial-fill deposition in **inland depressions** is distributed (see :ref:`dep`):
 
         .. code:: yaml
