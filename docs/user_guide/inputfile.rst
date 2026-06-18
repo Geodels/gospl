@@ -27,7 +27,7 @@ Initial mesh definition and simulation declaration
             domain:
                 npdata: ['input/mesh','v','c','z']
                 flowdir: 5
-                bc:'0101'
+                bc:'ofof'
                 fast: False
                 seadepo: True
                 nperodep: 'input/erodep20Ma'
