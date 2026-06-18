@@ -90,7 +90,16 @@ class Tectonics(object):
                 else:
                     # Get the velocity from the input file.
                     nodeVel = np.zeros((self.lpoints, 3))
-                    if self.flatModel:
+                    if self.cyclicBC:
+                        # Cyclic 2D model: the mesh is a cylinder. The user keeps
+                        # supplying the displacement in the flat (vx, vy) frame
+                        # (as for a planar model); map it onto the cylinder
+                        # tangent so the periodic-axis component advects AROUND
+                        # the seam instead of pushing radially through it.
+                        nodeVel = self._cylinderVelocity(self.hdisp)
+                    elif self.flatModel:
+                        # Planar 2D model: the displacement lives in the (x, y)
+                        # plane (the z component is zero).
                         nodeVel[:, :2] = self.hdisp[:, :2]
                     else:
                         nodeVel = self.hdisp.copy()
@@ -127,17 +136,55 @@ class Tectonics(object):
 
         return
 
+    def _cylinderVelocity(self, hdisp):
+        """
+        Map a flat ``(vx, vy)`` horizontal displacement onto the tangent of the
+        cylinder used for a cyclic (periodic) 2D model.
+
+        A cyclic mesh is a cylinder: the periodic flat axis is wrapped into a
+        circle lying in the plane that contains the synthetic ``z`` dimension,
+        while the other flat axis stays the (straight) cylinder axis. A flat
+        velocity in the periodic direction must therefore become a velocity
+        *around* the cylinder — tangent to that circle (the local ``θ̂``) — not a
+        Cartesian translation, which would push radially through the surface and
+        be discarded by the face-normal dot product. The non-periodic component
+        is unchanged (it is already tangent, along the cylinder axis).
+        """
+
+        coords = self.lcoords
+        vel = np.zeros((self.lpoints, 3))
+        if self.east == 2 or self.west == 2:
+            # Periodic in x -> circle in (x, z), cylinder axis = y.
+            rad = np.sqrt(coords[:, 0] ** 2 + coords[:, 2] ** 2)
+            rad[rad == 0.0] = 1.0
+            cos, sin = coords[:, 0] / rad, coords[:, 2] / rad
+            vel[:, 0] = -hdisp[:, 0] * sin   # around-seam component (θ̂)
+            vel[:, 2] = hdisp[:, 0] * cos
+            vel[:, 1] = hdisp[:, 1]          # axial component (unchanged)
+        else:
+            # Periodic in y -> circle in (y, z), cylinder axis = x.
+            rad = np.sqrt(coords[:, 1] ** 2 + coords[:, 2] ** 2)
+            rad[rad == 0.0] = 1.0
+            cos, sin = coords[:, 1] / rad, coords[:, 2] / rad
+            vel[:, 1] = -hdisp[:, 1] * sin   # around-seam component (θ̂)
+            vel[:, 2] = hdisp[:, 1] * cos
+            vel[:, 0] = hdisp[:, 0]          # axial component (unchanged)
+        return vel
+
     def _buildAdvecMat(self, iioe, lCoeffs, rCoeffs=None):
         """
         Create the advection matrix.
         """
 
         if self.flatModel:
-            lCoeffs[self.idBorders, 1:] = 0.0
-            lCoeffs[self.idBorders, 0] = 1.0
+            # Pin the (non-periodic) domain edges with a Dirichlet row. A cyclic
+            # seam stays free so material advects across it (advectBorders
+            # excludes the seam nodes).
+            lCoeffs[self.advectBorders, 1:] = 0.0
+            lCoeffs[self.advectBorders, 0] = 1.0
             if iioe:
-                rCoeffs[self.idBorders, 1:] = 0.0
-                rCoeffs[self.idBorders, 0] = 1.0
+                rCoeffs[self.advectBorders, 1:] = 0.0
+                rCoeffs[self.advectBorders, 0] = 1.0
 
         advMat_left = self._matrix_build_diag(lCoeffs[:, 0])
         if iioe:
@@ -267,7 +314,7 @@ class Tectonics(object):
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
         if self.flatModel:
             hL = self.hLocal.getArray().copy()
-            hL[self.idBorders] = MISSING_DATA_SENTINEL
+            hL[self.advectBorders] = MISSING_DATA_SENTINEL
             nhL = fitedges(hL)
             self.hLocal.setArray(nhL)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
@@ -296,7 +343,7 @@ class Tectonics(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         if self.flatModel:
             edL = self.cumEDLocal.getArray().copy()
-            edL[self.idBorders] = MISSING_DATA_SENTINEL
+            edL[self.advectBorders] = MISSING_DATA_SENTINEL
             nedL = fitedges(edL)
             self.cumEDLocal.setArray(nedL)
             self.dm.localToGlobal(self.cumEDLocal, self.cumED)

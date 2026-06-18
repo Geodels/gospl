@@ -1133,6 +1133,71 @@ def test_cyclic_boundary(cyclic_cyl_model):
     assert np.isfinite(fa).all() and fa.max() > 0.0, "flow accumulation invalid"
 
 
+def test_cyclic_advection(cyclic_advect_model):
+    """
+    Protects: horizontal advection across a cyclic (periodic) seam. A cyclic 2D
+    model runs on a cylinder, so a flat (vx, vy) displacement must be remapped
+    onto the cylinder tangent — the periodic component becoming motion AROUND
+    the seam (`_cylinderVelocity`), and the seam nodes kept out of the advection
+    Dirichlet (`advectBorders`). Checks that:
+      - the cyclic boundary is detected and the seam is excluded from the
+        advection border set (advectBorders ⊂ idBorders);
+      - the velocity transform is exactly tangent to the cylinder (zero radial
+        component) and preserves the around-seam speed and the axial component;
+      - an elevation bump started just inside the seam is advected ACROSS it
+        (its peak wraps from +θ past ±π to the far side) and the far side gains
+        mass — i.e. material genuinely crosses the periodic boundary;
+      - mass is essentially conserved (the seam does not leak) and stays finite.
+    """
+    model = cyclic_advect_model
+    assert model.flatModel and model.cyclicBC, "cyclic model not detected"
+    # E/W periodic (bc 'ococ'): the seam must be dropped from the advection
+    # Dirichlet, so advectBorders is a strict subset of idBorders.
+    assert model.cyclicPts is not None and len(model.cyclicPts) > 0
+    assert len(model.advectBorders) < len(model.idBorders)
+    assert not np.isin(model.advectBorders, model.cyclicPts).any()
+
+    # --- velocity transform: flat (vx, vy) -> cylinder tangent ---
+    vx = 0.25
+    hdisp = np.zeros((model.lpoints, 3))
+    hdisp[:, 0] = vx          # around-seam (periodic-x) component
+    vel = model._cylinderVelocity(hdisp)
+    co = model.lcoords
+    rad = np.sqrt(co[:, 0] ** 2 + co[:, 2] ** 2)
+    rad[rad == 0.0] = 1.0
+    normal = np.c_[co[:, 0] / rad, np.zeros(model.lpoints), co[:, 2] / rad]
+    assert np.abs(np.sum(vel * normal, axis=1)).max() < 1.0e-9, \
+        "transformed velocity is not tangent to the cylinder"
+    assert np.abs(vel[:, 1]).max() < 1.0e-12, "spurious axial velocity"
+    np.testing.assert_allclose(np.linalg.norm(vel, axis=1), vx, rtol=1e-9)
+
+    # --- advect the bump across the seam ---
+    theta = np.arctan2(model.lcoords[:, 2], model.lcoords[:, 0])
+    base = -500.0
+    z0 = model.hLocal.getArray().copy()
+    far = theta < -1.5                       # far side of the seam (θ ≈ -π)
+    peak0 = theta[np.argmax(z0)]
+    mass0 = float(np.sum((z0 - base) * model.larea))
+    farmass0 = float(np.sum((z0[far] - base) * model.larea[far]))
+    assert peak0 > 2.0, "bump should start just inside the +θ seam"
+
+    model.runProcesses()
+
+    z1 = model.hLocal.getArray().copy()
+    peak1 = theta[np.argmax(z1)]
+    mass1 = float(np.sum((z1 - base) * model.larea))
+    farmass1 = float(np.sum((z1[far] - base) * model.larea[far]))
+
+    assert np.isfinite(z1).all(), "advected elevation is not finite"
+    # The peak wrapped from the +θ side across the seam to the far (−θ) side.
+    assert peak1 < 0.0, "bump peak did not cross the periodic seam"
+    # Material accumulated on the far side of the seam.
+    assert farmass1 > 3.0 * farmass0, "no mass transported across the seam"
+    # The seam does not leak: total mass is conserved (small numerical
+    # diffusion of the sharp bump is expected).
+    assert abs(mass1 - mass0) / abs(mass0) < 0.1, "mass not conserved across seam"
+
+
 def test_pit_unifyLabels_unionfind():
     """
     Protects: PITFill._unifyLabels — the union-find that collapses cross-rank

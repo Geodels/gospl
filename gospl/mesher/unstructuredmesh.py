@@ -286,6 +286,11 @@ class UnstMesh(object):
         mCells = None
         self.vtkMesh = None
         self.flatModel = False
+        # Cyclic (periodic) boundary support: cyclicBC is True when at least one
+        # edge pair is periodic (the input mesh is then a cylinder); cyclicPts
+        # holds the seam node ids so horizontal advection can keep them interior.
+        self.cyclicBC = False
+        self.cyclicPts = None
         if MPIrank == 0 and self.verbose:
             print(
                 "Reading mesh information (%0.02f seconds)" % (process_time() - t0),
@@ -440,6 +445,10 @@ class UnstMesh(object):
         # routing/pit-filling code uses outletIDs (not idBorders) for the
         # boundary drain/discard treatment.
         self.outletIDs = self.idBorders
+        # Boundary nodes pinned/reset by horizontal advection: the real domain
+        # edges, but never a cyclic seam (it must advect across freely). Equals
+        # idBorders unless an edge pair is cyclic.
+        self.advectBorders = self.idBorders
         nib = np.zeros(1, dtype=np.int64)
         nib[0] = len(self.idBorders)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nib, op=MPI.MAX)
@@ -487,6 +496,21 @@ class UnstMesh(object):
             if wall_pts:
                 wall_nodes = np.unique(np.concatenate(wall_pts))
                 self.outletIDs = np.setdiff1d(self.idBorders, wall_nodes)
+
+            # Cyclic (periodic) edges (flag 2): the input mesh is a cylinder, so
+            # the seam nodes are NOT a real boundary — they must stay interior for
+            # horizontal advection (otherwise the advection Dirichlet would pin
+            # them and block transport across the seam).
+            cyc_pts = [
+                pts for flag, pts in (
+                    (self.south, self.southPts), (self.east, self.eastPts),
+                    (self.north, self.northPts), (self.west, self.westPts),
+                ) if flag == 2 and pts is not None and len(pts) > 0
+            ]
+            if cyc_pts:
+                self.cyclicBC = True
+                self.cyclicPts = np.unique(np.concatenate(cyc_pts))
+                self.advectBorders = np.setdiff1d(self.idBorders, self.cyclicPts)
 
         del idLocal
         vIS.destroy()

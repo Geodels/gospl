@@ -48,13 +48,17 @@ Initial mesh definition and simulation declaration
            - ``w`` — **wall**: a true no-flux wall; flow is contained and sediment deposits against the edge instead of draining out.
            - ``c`` — **cyclic** (periodic): flow and sediment wrap from one edge to the opposite one.
 
-           Legacy digits are accepted: ``0`` is read as ``o`` (open) and ``1`` as ``f`` (fixed). The default is ``'ffff'``. For example ``'ofof'`` opens north/south with fixed east/west; ``'wfwf'`` walls north/south with fixed east/west.
+           Legacy digits are accepted: ``0`` is read as ``o`` (open) and ``1`` as ``f`` (fixed). The default is ``'oooo'``. For example ``'ofof'`` opens north/south with fixed east/west; ``'wfwf'`` walls north/south with fixed east/west.
 
            Cyclic edges must be set as an **opposite pair** — both ``south`` and ``north``, *or* both ``east`` and ``west`` — and **at most one pair** may be cyclic (so up to two periodic edges, never all four). For example ``'ococ'`` makes east/west periodic with open north/south.
 
            .. important::
 
               A cyclic run **requires a periodic input mesh** in that direction: the mesh must be a **cylinder** (the periodic axis wrapped onto a circle whose circumference is the domain width), so that its cells genuinely connect the two seam edges. A cylinder is intrinsically flat, so its finite-volume geometry is identical to a periodic flat strip's; goSPL detects the cylinder's two open ends as the (non-periodic) boundary and routes flow/sediment across the seam through the wrapping cells. goSPL does **not** synthesise the wrap from an ordinary flat mesh (a planar wrap would have incorrect seam geometry). This works in parallel.
+
+           .. note::
+
+              **Horizontal advection on a cyclic mesh.** When ``tectonics`` horizontal displacements (``hdisp``) are applied together with a cyclic boundary, the displacement field is still supplied in the ordinary flat ``(vx, vy)`` frame (exactly as for a planar model). goSPL maps it onto the cylinder tangent automatically: the component along the periodic axis becomes motion *around* the cylinder (so material advects across the seam), while the non-periodic component stays along the cylinder axis. The advected fields wrap across the seam and the periodic edge is never pinned, so advection remains mass-conserving across the boundary.
 
            .. note::
 

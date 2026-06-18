@@ -207,6 +207,35 @@ def cyclic_cyl_model():
 
 
 @pytest.fixture
+def cyclic_advect_model():
+    """
+    Cyclic (periodic E/W) cylinder model with horizontal advection: a localised
+    elevation bump just inside the seam and a uniform around-seam displacement
+    (flat vx > 0) that carries it across the periodic boundary. Exercises the
+    flat→cylinder velocity transform and the cyclic-seam handling of the
+    advection solver. See cyclic_cyl_advect.yml / cyclic_cyl_advect.npz.
+
+    Keeps the fixtures dir as the working directory for the whole test: the
+    tectonics `hdisp` displacement npz is loaded lazily during runProcesses(),
+    so its relative path must still resolve after model construction.
+    """
+    yml = FIXTURES_DIR / "cyclic_cyl_advect.yml"
+    if not yml.exists():
+        pytest.skip(f"{yml.name} not present under tests/fixtures/")
+    try:
+        from gospl.model import Model
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Cannot import gospl.model: {exc!r}")
+    cwd = os.getcwd()
+    os.chdir(yml.parent)
+    try:
+        model = Model(str(yml.name), verbose=False, showlog=False)
+        yield model
+    finally:
+        os.chdir(cwd)
+
+
+@pytest.fixture
 def minimal_ice_dual_model():
     """
     Minimal glacial model with abrasion + till on AND dual-lithology

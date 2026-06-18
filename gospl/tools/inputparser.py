@@ -207,7 +207,7 @@ class ReadYaml(object):
         # and at most ONE pair may be cyclic — i.e. up to two periodic edges,
         # never all four (a full torus has no boundary and would be mis-detected
         # as a global model).
-        bc = str(domainDict.get("bc", 'ffff'))
+        bc = str(domainDict.get("bc", 'oooo'))
         bc = bc.replace('0', 'o').replace('1', 'f')   # legacy digits
         self.boundCond = bc
         if len(self.boundCond) != 4 or any(c not in 'ofwc' for c in self.boundCond):
