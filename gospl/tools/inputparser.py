@@ -232,6 +232,23 @@ class ReadYaml(object):
                 "At most one pair of edges may be cyclic (North/South OR "
                 "East/West, not both); got bc='%s'." % self.boundCond
             )
+        # Cyclic boundaries are SERIAL-ONLY for now. The periodic cylinder seam,
+        # once split by the DMPlex partitioner, makes the finite-volume operators
+        # ill-conditioned: the pit-deposition diffusion does not converge (the run
+        # hangs) and the horizontal-advection solve diverges (elevation collapses
+        # to ~0). Flow and pit-filling themselves are fine, but the sediment and
+        # advection solves are not — so a parallel cyclic run produces a hang or
+        # garbage rather than a wrong-but-finite answer. Fail fast with a clear
+        # message instead. (A parallel-safe cylinder-seam discretisation is a
+        # tracked follow-up.)
+        if 'c' in self.boundCond and petsc4py.PETSc.COMM_WORLD.Get_size() > 1:
+            raise ValueError(
+                "Cyclic (periodic) boundary conditions (bc='%s') are currently "
+                "supported only in SERIAL (one MPI rank). The periodic mesh seam "
+                "does not yet partition correctly, so a parallel run would hang or "
+                "produce invalid results. Run this model on a single rank, or use "
+                "open/fixed/wall boundaries for parallel runs." % self.boundCond
+            )
 
         # TODO-REFACTOR: complex except, needs manual review
         try:

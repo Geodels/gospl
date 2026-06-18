@@ -3488,6 +3488,131 @@ def test_soil_temp_parallel_shape(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# TEST 8b2 - Horizontal advection: parallel correctness (np=1 vs np=2)
+# ---------------------------------------------------------------------------
+# tectonics._varAdvector advects fields (elevation, cumED, flexure, soil) by an
+# implicit FV upwind/IIOE solve on the DMPlex with a cached operator + KSP and a
+# per-field warm start. This guards that the advected field is the SAME
+# regardless of decomposition. Uses a PLANAR flat mesh (a ridge advected
+# downwind by a uniform wind). NOTE: the cyclic cylinder mesh has a separate,
+# known parallel-correctness bug (the wrap-seam partitions badly at some rank
+# counts) — that is out of scope here; this test guards the common flat case.
+# ---------------------------------------------------------------------------
+
+_ADVECT_DUMP_SCRIPT = '''\
+"""Subprocess entry for test_advection_parallel: advect on a flat mesh and
+write owned-node stats of the advected elevation as JSON on rank 0."""
+import json
+import sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+comm = MPI.COMM_WORLD
+model = Model(sys.argv[1], verbose=False, showlog=False)
+try:
+    model.runProcesses()
+    owned = model.inIDs == 1
+    h = model.hLocal.getArray()[owned]
+    area = model.larea[owned]
+    wmean = comm.allreduce(float((h * area).sum()), op=MPI.SUM) / \\
+            comm.allreduce(float(area.sum()), op=MPI.SUM)
+    hmax = comm.allreduce(float(h.max()) if len(h) else -1e30, op=MPI.MAX)
+    owned_count = comm.allreduce(int(owned.sum()), op=MPI.SUM)
+    if comm.Get_rank() == 0:
+        json.dump({"size": comm.Get_size(), "wmean": wmean, "hmax": hmax,
+                   "owned_count": owned_count}, open(sys.argv[2], "w"))
+finally:
+    model.destroy()
+'''
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    _petsc4py_abi_mismatch(),
+    reason="petsc4py built against different Python ABI; segfaults on MPI "
+           "finalization — not a gospl bug (see test_parallel_correctness)",
+)
+def test_advection_parallel(tmp_path):
+    """
+    Protects: horizontal advection (`tectonics._varAdvector`) gives the same
+    advected field regardless of MPI decomposition, on a planar flat mesh. The
+    cached operator + single-pass CSR assembly + per-field warm start must be
+    partition-correct. (The cyclic cylinder mesh has a separate, documented
+    parallel bug and is intentionally NOT used here.)
+    """
+    import json
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    yml_src = fixtures_dir / "flat_advect.yml"
+    npz_src = fixtures_dir / "flat_advect.npz"
+    if not (yml_src.exists() and npz_src.exists()):
+        pytest.skip("flat_advect fixtures not present.")
+
+    dump_py = tmp_path / "_advect_dump.py"
+    dump_py.write_text(_ADVECT_DUMP_SCRIPT)
+
+    def run_at_rank(n):
+        out_dir = tmp_path / f"n{n}"
+        out_dir.mkdir()
+        shutil.copy(yml_src, out_dir / "flat_advect.yml")
+        shutil.copy(npz_src, out_dir / "flat_advect.npz")
+        stats_json = out_dir / "stats.json"
+        # Scrub inherited OpenMPI runtime env before the nested mpirun (see
+        # test_parallel_correctness for the rationale).
+        child_env = {k: v for k, v in os.environ.items()
+                     if not k.startswith(("OMPI_", "PMIX_", "PRTE_", "OPAL_"))}
+        if "OPAL_PREFIX" in os.environ:
+            child_env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
+        result = subprocess.run(
+            ["mpirun", "-n", str(n), sys.executable, str(dump_py),
+             "flat_advect.yml", str(stats_json)],
+            cwd=out_dir, timeout=600, capture_output=True, text=True, env=child_env,
+        )
+        if result.returncode != 0 or not stats_json.exists():
+            pytest.fail(
+                f"`mpirun -n {n}` advection subprocess failed "
+                f"(rc={result.returncode}).\n--- stdout ---\n{result.stdout}"
+                f"\n--- stderr ---\n{result.stderr}"
+            )
+        return json.loads(stats_json.read_text())
+
+    s1 = run_at_rank(1)
+    s2 = run_at_rank(2)
+
+    assert s1["size"] == 1 and s2["size"] == 2
+    assert s1["owned_count"] == s2["owned_count"], "partition ownership gap"
+
+    # The advected ridge must survive (a partition-boundary bug would collapse
+    # or blow up the field — observed measure ~644 m).
+    assert s2["hmax"] > 100.0, (
+        f"advected ridge lost at np=2 (hmax={s2['hmax']:.3f})"
+    )
+
+    # n=1 and n=2 must agree: the only expected difference is KSP partition
+    # noise (flat advection agrees to ~0.1% across decompositions).
+    def rel(a, b, d):
+        return abs(a - b) / max(abs(d), 1e-30)
+
+    assert rel(s1["hmax"], s2["hmax"], s1["hmax"]) < 1e-2, (
+        f"advected peak differs beyond noise: n1={s1['hmax']:.4f} "
+        f"n2={s2['hmax']:.4f}"
+    )
+    assert rel(s1["wmean"], s2["wmean"], s1["wmean"]) < 1e-2, (
+        f"advected mean differs beyond noise: n1={s1['wmean']:.4f} "
+        f"n2={s2['wmean']:.4f}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # TEST 8c - Cached diffusion operators: collective rebuild decision (np>1)
 # ---------------------------------------------------------------------------
 #
