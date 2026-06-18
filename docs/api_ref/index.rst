@@ -247,7 +247,7 @@ API reference
         **Class Grid Processes**
         ^^^
 
-        Functions related to additional processes performed on a regular grid.
+        Functions related to additional processes (flexural isostasy and orographic precipitation) solved on the unstructured mesh.
 
         +++
 

@@ -1196,6 +1196,64 @@ def test_cyclic_advection(cyclic_advect_model):
     assert abs(mass1 - mass0) / abs(mass0) < 0.1, "mass not conserved across seam"
 
 
+def test_orography_rain_shadow(oro_hill_model):
+    """
+    Protects: the mesh-native orographic precipitation solver (parallel, no
+    regular grid / FFT). Smith-Barstad is recast as two steady advection-
+    relaxation equations on the DMPlex (cloud water → hydrometeors → precip)
+    with the terrain-forced uplift source Cw·(v·∇h). The fixture is an ocean →
+    coastal mountain → ocean profile with wind from the west. Checks that:
+      - the orographic rain is computed, finite and positive everywhere;
+      - the uplift is driven by topography ABOVE sea level only: the windward
+        ocean (submarine bathymetry) gets the background rate, no orographic
+        enhancement (the elevation is clamped to sea level in the source);
+      - the windward/lee RAIN SHADOW is reproduced: the coastal mountain is far
+        wetter than the dried lee, and the upwind ocean is wetter than the
+        (shadowed) downwind ocean;
+      - the precipitation peak sits at/just downwind of the crest (advective
+        shift), not on the far windward side.
+    """
+    model = oro_hill_model
+    assert model.oroOn and model.flatModel
+
+    model.cptOrography()
+
+    own = model.inIDs == 1                 # owned nodes (exclude halo)
+    x = model.lcoords[:, 0]
+    rain = model.rainVal
+    assert np.isfinite(rain[own]).all(), "orographic rain is not finite"
+    assert (rain[own] > 0.0).all(), "orographic rain must stay positive"
+
+    def region_mean(lo, hi):
+        m = (x >= lo) & (x < hi) & own
+        return rain[m].mean()
+
+    # Background (non-orographic) rate the solver adds everywhere.
+    background = model.oro_precip_base * 0.366 * model.rainfall_frequency
+
+    windward_ocean = region_mean(1000.0, 4000.0)    # submarine, upwind
+    mountain = region_mean(6500.0, 9000.0)          # coastal windward flank (land)
+    lee_ocean = region_mean(12500.0, 15000.0)       # shadowed, downwind ocean
+
+    # Sea-level clamp: no orographic forcing over the windward submarine
+    # bathymetry — that region carries only the background rate.
+    assert abs(windward_ocean - background) < 0.2 * background, (
+        f"windward ocean got orographic rain ({windward_ocean:.3f}) instead of "
+        f"background ({background:.3f}) — sea-level clamp not applied"
+    )
+    # ... and it is far drier than the coastal mountain it sits next to.
+    assert mountain > 10.0 * windward_ocean, "no orographic uplift over the coast"
+
+    # Rain shadow: the dried downwind ocean is much drier than the windward
+    # mountain, and drier than the upwind ocean.
+    assert mountain > 5.0 * lee_ocean, "no rain shadow over the lee"
+    assert lee_ocean < windward_ocean, "lee ocean not shadowed vs upwind ocean"
+
+    # Precip maximum is at/just downwind of the crest (advective shift).
+    xpeak = x[own][np.argmax(rain[own])]
+    assert 9000.0 <= xpeak <= 11500.0, f"precip peak misplaced at x={xpeak:.0f}"
+
+
 def test_pit_unifyLabels_unionfind():
     """
     Protects: PITFill._unifyLabels — the union-find that collapses cross-rank

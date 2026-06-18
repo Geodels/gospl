@@ -1,0 +1,33 @@
+name: orographic precipitation test — ridge, wind from the west (rain shadow)
+
+domain:
+    npdata: ['oro_hill','v','c','z']
+    flowdir: 5
+    bc: 'oooo'
+
+time:
+    start: 0.
+    end: 5.e3
+    tout: 5.e3
+    dt: 5.e3
+
+spl:
+    K: 0.
+    d: 0.
+    m: 0.5
+
+sea:
+    position: 0.
+
+orography:
+    wind_speed: 15.
+    wind_dir: 270.
+    conv_time: 200.
+    fall_time: 200.
+    precip_base: 0.5
+    precip_min: 0.01
+    rainfall_frequency: 1.
+
+output:
+    dir: 'oro_hill'
+    makedir: True

@@ -24,8 +24,8 @@ Class GridProcess
 
    .. autosummary::
 
-      ~GridProcess._regInterp
-      ~GridProcess._buildRegGrid
+      ~GridProcess._buildOroMat
+      ~GridProcess._oroSolve
       ~GridProcess._updateTe
       ~GridProcess._buildDHGrid
       ~GridProcess._unstr2dh
@@ -45,8 +45,8 @@ Public functions
 Private functions
 ---------------------
 
-.. automethod:: tools.addprocess.GridProcess._regInterp
-.. automethod:: tools.addprocess.GridProcess._buildRegGrid
+.. automethod:: tools.addprocess.GridProcess._buildOroMat
+.. automethod:: tools.addprocess.GridProcess._oroSolve
 .. automethod:: tools.addprocess.GridProcess._updateTe
 .. automethod:: tools.addprocess.GridProcess._buildDHGrid
 .. automethod:: tools.addprocess.GridProcess._unstr2dh

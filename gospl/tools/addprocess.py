@@ -12,6 +12,8 @@ from time import process_time
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import jacobiancoeff
+    from gospl._fortran import getfacevelocity
+    from gospl._fortran import advecupwind
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
@@ -20,10 +22,10 @@ MPIcomm = petsc4py.PETSc.COMM_WORLD
 
 class GridProcess(object):
     """
-    When running goSPL on a 2D grid (*i.e.* not a global simulation), this class defines two processes operating on a regular grid:
+    When running goSPL on a 2D grid (*i.e.* not a global simulation), this class defines two processes solved directly on the unstructured mesh:
 
     1. **Flexural isostasy**: it allows to compute isostatic deflections of Earth's lithosphere with uniform or non-uniform flexural rigidity. Evolving surface loads are defined from erosion/deposition values associated to modelled surface processes.
-    2. **Orographic rain**: it accounts for change in rainfall patterns associated to change in topography. The orographic precipitation function is based on `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_ linear model.
+    2. **Orographic rain**: it accounts for change in rainfall patterns associated to change in topography. The orographic precipitation function is based on the `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_ linear model, solved **directly on the unstructured mesh in parallel** as two steady advection–relaxation equations (cloud water → hydrometeors → precipitation). The stratified airflow (mountain-wave) term of the original spectral solution is dropped, so the windward/lee rain-shadow is retained while no regular grid or FFT is required.
 
     For global simulation, the library `pyshtools <https://shtools.github.io/SHTOOLS/>`_ provides a framework to estimate global-scale flexural isostasy. 
 
@@ -36,7 +38,6 @@ class GridProcess(object):
 
         self.flexIDs = None
         self.flex = None
-        self.xIndices = None
 
         if self.flexOn:
             self.rho_water = 1030.0
@@ -62,98 +63,24 @@ class GridProcess(object):
             # start; interval=1 reproduces every-step behaviour exactly.
             self.flexCount = -1
         if self.oroOn:
-            self.oroEPS = np.finfo(float).eps
+            # Orographic precipitation is solved on the mesh (no regular grid).
+            # The advection-relaxation operators depend only on the uniform,
+            # constant wind and the fixed mesh, so they are assembled once and
+            # cached; each step only the surface load (source) and the solves
+            # change. Cloud-water / hydrometeor solutions are warm-started.
+            self._oroKSP = None
+            self._oroAc = None        # cloud-water operator  (v·∇ + 1/τc)
+            self._oroAf = None        # hydrometeor operator  (v·∇ + 1/τf)
+            self._oroAdvDiag = None   # diagonal of the upwind advection operator
+            self._oroLcoeff = None    # off-diagonal advection coefficients
+            self._oroQc = None        # cached cloud-water solution (warm start)
+            self._oroQs = None        # cached hydrometeor solution (warm start)
 
-        if self.flexOn or self.oroOn:
-            # The regular grid is now only used by orographic precipitation; both
-            # flexure methods solve directly on the mesh ('fem' = parallel FV
-            # biharmonic on the flat DMPlex, 'global' = spherical-harmonic).
-            if MPIrank == 0 and self.oroOn:
-                self._buildRegGrid()
-            if MPIrank == 0 and self.flexOn and self.flex_method == 'global':
+        if self.flexOn:
+            # Both flexure methods solve directly on the mesh ('fem' = parallel
+            # FV biharmonic on the flat DMPlex, 'global' = spherical-harmonic).
+            if MPIrank == 0 and self.flex_method == 'global':
                 self._buildDHGrid()
-
-        return
-
-    def _regInterp(self, field):
-        """
-        Perform bilinear interpolation of ``field`` on the regular grid to unstructured 2D mesh.
-
-        :arg field: data to interpolate of size m x n
-
-        :return: ufield ``field`` interpolated to unstructured nodes
-        """
-
-        ufield = \
-            (1. - self.xFrac) * (1. - self.yFrac) * field[self.yIndices, self.xIndices] + \
-            self.xFrac * (1. - self.yFrac) * field[self.yIndices, self.xIndices + 1] + \
-            (1. - self.xFrac) * self.yFrac * field[self.yIndices + 1, self.xIndices] + \
-            self.xFrac * self.yFrac * field[self.yIndices + 1, self.xIndices + 1]
-
-        return ufield
-
-    def _buildRegGrid(self):
-        """
-        Builds the regular grid based on nodes coordinates and instantiates two interpolation objects.
-
-        1. The first one uses  `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_ to interpolate values from the unstructured mesh onto the regular grid based on an inverse weighting distance approach.
-
-        2. The second performs a bilinear interpolation from the regular grid to unstructured 2D mesh.
-
-        .. note::
-            Here the KDTree is not kept in memory, instead we store the interpolation information, namely the indices of the neighbouring nodes, and the weights of each node in the neighborhood (based on the distance). This implies that the initial distribution of the mesh coordinates remains fixed over the simulation time window.
-        """
-
-        # Build regular grid for flexure and orographic precipitation calculation
-        xmin = self.mCoords[:, 0].min()
-        xmax = self.mCoords[:, 0].max()
-        ymin = self.mCoords[:, 1].min()
-        ymax = self.mCoords[:, 1].max()
-
-        newx = np.arange(xmin, xmax + self.reg_dx, self.reg_dx)
-        newy = np.arange(ymin, ymax + self.reg_dx, self.reg_dx)
-        rx, ry = np.meshgrid(newx, newy)
-        rPts = np.stack((rx.ravel(), ry.ravel())).T
-        xmin, xmax = newx[0], newx[-1]
-        ymin, ymax = newy[0], newy[-1]
-        self.reg_xl = xmax - xmin
-        self.reg_yl = ymax - ymin
-
-        self.reg_nx = int(self.reg_xl / self.reg_dx + 1)
-        self.reg_ny = int(self.reg_yl / self.reg_dx + 1)
-
-        assert np.all(self.mCoords[:, 0] >= newx[0])
-        assert np.all(self.mCoords[:, 0] <= newx[-1])
-        assert np.all(self.mCoords[:, 1] >= newy[0])
-        assert np.all(self.mCoords[:, 1] <= newy[-1])
-
-        self.xFrac = np.interp(self.mCoords[:, 0], newx, np.arange(self.reg_nx))
-        self.yFrac = np.interp(self.mCoords[:, 1], newy, np.arange(self.reg_ny))
-
-        self.xIndices = np.array(self.xFrac, dtype=int)
-        self.xFrac -= self.xIndices
-        self.yIndices = np.array(self.yFrac, dtype=int)
-        self.yFrac -= self.yIndices
-
-        mask = self.xIndices == self.reg_nx - 1
-        self.xIndices[mask] -= 1
-        self.xFrac[mask] += 1.
-        mask = self.yIndices == self.reg_ny - 1
-        self.yIndices[mask] -= 1
-        self.yFrac[mask] += 1.
-
-        treeT = spatial.cKDTree(self.mCoords[:, :2], leafsize=10)
-        distances, self.regIDs = treeT.query(rPts, k=self.rgrd_interp)
-        # Inverse weighting distance...
-        self.regWeights = np.divide(
-            1.0, distances ** 2, out=np.zeros_like(distances), where=distances != 0
-        )
-        self.regSumWeights = np.sum(self.regWeights, axis=1)
-        self.regOnIDs = np.where(self.regSumWeights == 0)[0]
-        self.regSumWeights[self.regSumWeights == 0] = 1.0e-4
-
-        del treeT, distances, mask, rPts, newx, newy
-        gc.collect()
 
         return
 
@@ -724,11 +651,103 @@ class GridProcess(object):
 
         return
 
+    def _buildOroMat(self, diag, offcoeff, dirichlet=False):
+        """
+        Assemble a PETSc operator on the DMPlex from a per-row diagonal and the
+        upwind off-diagonal coefficients returned by ``advecupwind`` (one column
+        per neighbour, ``FVmesh_ngbID`` giving the neighbour indices). This is the
+        same incremental local-CSR assembly used for the tectonic advection
+        matrix.
+
+        :arg diag: diagonal entries (length ``lpoints``)
+        :arg offcoeff: off-diagonal coefficients, shape ``(lpoints, maxnb)``
+        :arg dirichlet: when True, the (non-cyclic) domain edge rows are replaced
+            by an identity row so the precipitation tracers are pinned to zero
+            there (clean inflow / zero-padding equivalent).
+
+        :return: assembled PETSc matrix
+        """
+
+        d = diag.copy()
+        off = offcoeff.copy()
+        if dirichlet:
+            d[self.advectBorders] = 1.0
+            off[self.advectBorders, :] = 0.0
+
+        mat = self._matrix_build_diag(d)
+        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
+        for k in range(0, self.maxnb):
+            tmpMat = self._matrix_build()
+            indices = self.FVmesh_ngbID[:, k].copy()
+            data = off[:, k]
+            ids = np.nonzero(data == 0.0)
+            indices[ids] = ids
+            tmpMat.assemblyBegin()
+            tmpMat.setValuesLocalCSR(
+                indptr,
+                indices.astype(petsc4py.PETSc.IntType),
+                data,
+            )
+            tmpMat.assemblyEnd()
+            mat.axpy(1.0, tmpMat)
+            tmpMat.destroy()
+
+        return mat
+
+    def _oroSolve(self, matrix, rhs, sol):
+        """
+        Solve one orographic advection-relaxation system with a dedicated
+        (cached) GMRES + block-Jacobi KSP. The operators are non-symmetric but
+        diagonally-dominant M-matrices, so this converges quickly; the solution
+        is warm-started from the previous step.
+        """
+
+        if self._oroKSP is None:
+            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+            ksp.setType("gmres")
+            ksp.getPC().setType("bjacobi")
+            ksp.setTolerances(rtol=1.0e-8)
+            ksp.setInitialGuessNonzero(True)
+            ksp.setOptionsPrefix("oro_")
+            petsc4py.PETSc.Options()["oro_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setFromOptions()
+            self._oroKSP = ksp
+
+        ksp = self._oroKSP
+        ksp.setOperators(matrix, matrix)
+        ksp.solve(rhs, sol)
+        petsc4py.PETSc.garbage_cleanup()
+
+        return sol
+
     def cptOrography(self):
         """
-        Linear Theory of Orographic Precipitation following ` <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_.
+        Linear Theory of Orographic Precipitation following `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_, solved **directly on the unstructured mesh in parallel**.
 
-        The model includes airflow dynamics, condensed water advection, and downslope evaporation. It consists of two vertically-integrated steady-state advection equations describing: (i) the cloud water density and (ii) the hydrometeor density. Solving these equations using Fourier transform techniques, derives a single formula relating terrain and precipitation.
+        The model is cast as two steady, vertically-integrated advection-relaxation
+        equations for the cloud-water density :math:`q_c` and the hydrometeor
+        density :math:`q_s`, advected by a uniform wind :math:`\\mathbf{v}`:
+
+        .. math::
+
+            (\\mathbf{v}\\cdot\\nabla + 1/\\tau_c)\\,q_c = C_w\\,\\mathbf{v}\\cdot\\nabla h, \\qquad
+            (\\mathbf{v}\\cdot\\nabla + 1/\\tau_f)\\,q_s = q_c/\\tau_c,
+
+        with the precipitation rate :math:`P = q_s/\\tau_f`. The source is the
+        terrain-forced uplift :math:`C_w\\,\\mathbf{v}\\cdot\\nabla h`: positive
+        (condensation) on windward slopes, negative (evaporation) on lee slopes,
+        which together with the downwind advection of :math:`q_c, q_s` produces
+        the windward-wet / lee-dry rain shadow. The elevation in the source is
+        clamped to sea level, so submarine bathymetry produces no orographic
+        forcing (the airflow follows the flat sea surface, not the seafloor).
+
+        In Fourier space these equations recover the Smith-Barstad transfer
+        function with the stratified mountain-wave term :math:`(1-i\\,h_w m)` set
+        to one. That airflow term is therefore dropped (and the parameters
+        ``nm``, ``hw`` and ``latitude`` are inert); everything else is identical.
+        The advection operator is the first-order upwind finite-volume scheme on
+        the Voronoi mesh, so the operators depend only on the (uniform, constant)
+        wind and are assembled once and cached.
 
         .. note::
 
@@ -736,102 +755,90 @@ class GridProcess(object):
 
         Common bounds:
 
-         - latitude : 0-90 [degrees]
          - precip_base : 0-10 [mm/h]
          - precip_min : 0.001 - 1  [mm/h]
          - conv_time :  200-2000 [s]
          - fall_time :  200-2000 [s]
-         - nm :  0-0.1 [1/s]
-         - hw  : 1000-5000 [m]
          - cw :  0.001-0.02 [kg/m^3]
          - rainfall_frequency : 0.1 - 24 [number of storms of 1 hour duration per day]
         """
 
         t0 = process_time()
 
-        # Get elevations from the unstructured mesh structure. The orographic
-        # precipitation solve is serial on rank 0, so assemble the global
-        # elevation there from the owned nodes only (no mpoints array /
-        # Allreduce on the other ranks).
-        hl = self.hLocal.getArray().copy()
-        newZ = self._gatherGlobalOnRoot(hl)
+        # Ensure the local elevation (with halo) is current for the FV operator.
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        if MPIrank == 0:
-            # Build regular grid for flexure calculation
-            if self.xIndices is None:
-                self._buildRegGrid()
-
-            # Interpolate values on the regular grid
-            regNewZ = np.sum(self.regWeights * newZ[self.regIDs][:, :], axis=1) / self.regSumWeights
-            if len(self.regOnIDs) > 0:
-                regNewZ[self.regOnIDs] = newZ[self.regIDs[self.regOnIDs, 0]]
-            regNewZ = regNewZ.reshape(self.reg_ny, self.reg_nx)
-
-            # Wind components
+        # Assemble and cache the advection-relaxation operators. They depend only
+        # on the uniform wind and the fixed mesh, so this is done once.
+        if self._oroAc is None:
+            # Uniform wind in the flat (x, y) plane.
             u0 = -np.sin(self.wind_dir * 2 * np.pi / 360) * self.wind_speed
             v0 = np.cos(self.wind_dir * 2 * np.pi / 360) * self.wind_speed
-            # Coriolis factors
-            f_coriolis = 2 * 7.2921e-5 * np.sin(self.wind_latitude * np.pi / 180)
+            nodeVel = np.zeros((self.lpoints, 3))
+            nodeVel[:, 0] = u0
+            nodeVel[:, 1] = v0
+            getfacevelocity(self.lpoints, nodeVel)
 
-            # Pad raster boundaries prior to FFT
-            calc_pad = int(np.ceil(((sum(regNewZ.shape))) / 2) / 100 * 100)
-            pad = min([calc_pad, 200])
-            h = np.pad(regNewZ, pad, 'constant')
-            nx, ny = h.shape
+            # advecupwind(dt=1) returns (I + L) where L is the upwind FV operator
+            # for v·∇. So L has diagonal lcoeff[:,0]-1 and off-diagonals lcoeff[:,1:].
+            lcoeff = advecupwind(self.lpoints, 1.0)
+            self._oroAdvDiag = lcoeff[:, 0] - 1.0
+            self._oroLcoeff = lcoeff[:, 1:].copy()
+            # Cloud-water (v·∇ + 1/τc) and hydrometeor (v·∇ + 1/τf) operators with
+            # zero-Dirichlet domain edges.
+            self._oroAc = self._buildOroMat(
+                self._oroAdvDiag + 1.0 / self.oro_conv_time,
+                self._oroLcoeff, dirichlet=True,
+            )
+            self._oroAf = self._buildOroMat(
+                self._oroAdvDiag + 1.0 / self.oro_fall_time,
+                self._oroLcoeff, dirichlet=True,
+            )
+            self._oroQc = self.hGlobal.duplicate()
+            self._oroQc.set(0.0)
+            self._oroQs = self.hGlobal.duplicate()
+            self._oroQs.set(0.0)
 
-            # FFT
-            hhat = np.fft.fft2(h)
-            x_n_value = np.fft.fftfreq(ny, (1. / ny))
-            y_n_value = np.fft.fftfreq(nx, (1. / nx))
-            x_len = nx * self.reg_dx
-            y_len = ny * self.reg_dx
-            kx_line = 2 * np.pi * x_n_value / x_len
-            ky_line = 2 * np.pi * y_n_value / y_len
-            kx = np.tile(kx_line, (nx, 1))
-            ky = np.tile(ky_line[:, None], (1, ny))
+        # Source S = Cw (v·∇h) via the same upwind operator (local matvec using
+        # the haloed elevation), zeroed on the Dirichlet edges. The uplift is
+        # forced by the surface the airflow follows, which over the ocean is the
+        # (flat) sea surface, not the seafloor — so the elevation is clamped to
+        # sea level: there is no orographic forcing over submarine bathymetry,
+        # only where land rises above the sea.
+        hL = np.maximum(self.hLocal.getArray(), self.sealevel)
+        src = self._oroAdvDiag * hL
+        for k in range(0, self.maxnb):
+            src = src + self._oroLcoeff[:, k] * hL[self.FVmesh_ngbID[:, k]]
+        src *= self.oro_cw
+        src[self.advectBorders] = 0.0
+        self.tmpL.setArray(src)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
 
-            # Vertical wave number (m)
-            sigma = kx * u0 + ky * v0
-            mf_num = self.oro_nm ** 2 - sigma ** 2
-            mf_den = sigma ** 2 - f_coriolis ** 2
+        # Cloud water: Ac q_c = S
+        self._oroSolve(self._oroAc, self.tmp, self._oroQc)
 
-            # Numerical stability
-            mf_num[mf_num < 0] = 0.
-            mf_den[(mf_den < self.oroEPS) & (mf_den >= 0)] = self.oroEPS
-            mf_den[(mf_den > -self.oroEPS) & (mf_den < 0)] = -self.oroEPS
-            sign = np.where(sigma >= 0, 1, -1)
-            m = sign * np.sqrt(np.abs(mf_num / mf_den * (kx ** 2 + ky ** 2)))
+        # Hydrometeors: Af q_s = q_c / τc
+        self._oroQc.copy(result=self.tmp1)
+        self.tmp1.scale(1.0 / self.oro_conv_time)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        arr = self.tmpL.getArray()
+        arr[self.advectBorders] = 0.0
+        self.tmpL.setArray(arr)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self._oroSolve(self._oroAf, self.tmp1, self._oroQs)
 
-            # Transfer function
-            P_karot = ((self.oro_cw * 1j * sigma * hhat) / 
-                       ((1 - (self.oro_hw * m * 1j)) * 
-                        (1 + (sigma * self.oro_conv_time * 1j)) * 
-                        (1 + (sigma * self.oro_fall_time * 1j))))
+        # Precipitation P = q_s/τf; convert to the goSPL rainfall units (mirrors
+        # the previous spectral implementation's post-processing exactly).
+        self.dm.globalToLocal(self._oroQs, self.tmpL)
+        P = self.tmpL.getArray().copy() / self.oro_fall_time
+        P *= 3600.  # mm hr-1
+        P += self.oro_precip_base
+        # Precipitation rate must exceed the minimum to avoid zero/negative runoff.
+        P[P <= self.oro_precip_min] = self.oro_precip_min
+        # Conversion from mm/hr to m/yr.
+        P *= 0.366 * self.rainfall_frequency
 
-            # Inverse FFT, de-pad, convert units, add uniform rate
-            oroRain = np.fft.ifft2(P_karot)
-            if pad > 0:
-                oroRain = np.real(oroRain[pad:-pad, pad:-pad])
-            else:
-                oroRain = np.real(oroRain)
-            oroRain *= 3600.  # mm hr-1
-            oroRain += self.oro_precip_base
-            # Precipitation rate must be a value greater than minimum precipitation/runoff to avoid errors when precip_rate <= 0
-            oroRain[oroRain <= self.oro_precip_min] = self.oro_precip_min
-            # Conversion from mm/hr to m/yr
-            oroRain *= 0.366 * self.rainfall_frequency
-
-            # Interpolate back to goSPL mesh
-            oRain = self._regInterp(oroRain)
-        else:
-            oRain = None
-
-        # Send orographic rain globally
-        oroR = MPI.COMM_WORLD.bcast(oRain, root=0)
-
-        # Local orographic rain values
-        self.rainVal = oroR[self.locIDs]
-
+        self.rainVal = P
         self.bL.setArray(self.rainVal * self.larea)
         self.dm.localToGlobal(self.bL, self.bG)
 
