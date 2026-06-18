@@ -433,20 +433,34 @@ class UnstMesh(object):
         localBound = self._get_boundary()
         idLocal = np.where(vIS.indices >= 0)[0]
         self.idBorders = np.where(np.isin(idLocal, localBound))[0]
+        # outletIDs: the boundary nodes that drain the domain (open / fixed
+        # edges). Wall ('w') edges are excluded below so their nodes behave as
+        # interior (no-flux, sediment-containing). Defaults to all borders;
+        # narrowed inside the flat-model block when any edge is a wall. The
+        # routing/pit-filling code uses outletIDs (not idBorders) for the
+        # boundary drain/discard treatment.
+        self.outletIDs = self.idBorders
         nib = np.zeros(1, dtype=np.int64)
         nib[0] = len(self.idBorders)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nib, op=MPI.MAX)
         if nib[0] > 0:
             self.flatModel = True
-            # 0 = open (outflow), 1 = closed (wall), 2 = cyclic (periodic).
-            # Open is the only case given special treatment below; closed and
-            # cyclic both leave the edge untouched — for cyclic the wrap is
-            # provided by the (required) periodic input mesh, whose cells already
-            # connect the two seam edges in the FV neighbour graph.
-            _bc = {'0': 0, '1': 1, 'c': 2}
-            self.south = _bc[self.boundCond[0]]
+            # boundCond chars (normalised in the parser) -> edge flag:
+            #   'o' open  -> 0 : deep base-level outlet (elevation forced low
+            #                    below + it acts as an outlet / drain);
+            #   'f' fixed -> 1 : fixed base-level outlet at natural elevation
+            #                    (drains — the historic behaviour);
+            #   'c' cyclic-> 2 : periodic (wrap provided by the cylinder mesh);
+            #   'w' wall  -> 3 : true no-flux wall — its edge nodes are EXCLUDED
+            #                    from `outletIDs` below so they behave as interior
+            #                    nodes (sediment is contained, not drained).
+            # Only 'o' is given the deep-sentinel treatment in `applyForces`.
+            # Edge order is [North, East, South, West] (N=ymax, E=xmax, S=ymin,
+            # W=xmin).
+            _bc = {'o': 0, 'f': 1, 'c': 2, 'w': 3}
+            self.north = _bc[self.boundCond[0]]
             self.east = _bc[self.boundCond[1]]
-            self.north = _bc[self.boundCond[2]]
+            self.south = _bc[self.boundCond[2]]
             self.west = _bc[self.boundCond[3]]
             xmin = self.mCoords[:, 0].min()
             xmax = self.mCoords[:, 0].max()
@@ -459,6 +473,20 @@ class UnstMesh(object):
             self.northPts = np.where(np.isclose(self.lcoords[:, 1], ymax, atol=tol))[0]
             self.eastPts = np.where(np.isclose(self.lcoords[:, 0], xmax, atol=tol))[0]
             self.westPts = np.where(np.isclose(self.lcoords[:, 0], xmin, atol=tol))[0]
+
+            # True no-flux walls (flag 3): drop their edge nodes from outletIDs
+            # so they are treated as interior — flow accumulates and sediment
+            # deposits against the wall instead of draining out. idBorders is
+            # left intact (it still drives flatModel detection).
+            wall_pts = [
+                pts for flag, pts in (
+                    (self.south, self.southPts), (self.east, self.eastPts),
+                    (self.north, self.northPts), (self.west, self.westPts),
+                ) if flag == 3 and pts is not None and len(pts) > 0
+            ]
+            if wall_pts:
+                wall_nodes = np.unique(np.concatenate(wall_pts))
+                self.outletIDs = np.setdiff1d(self.idBorders, wall_nodes)
 
         del idLocal
         vIS.destroy()

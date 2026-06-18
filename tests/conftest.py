@@ -184,6 +184,17 @@ def flat_fem_flex_model():
 
 
 @pytest.fixture
+def flat_wall_model():
+    """
+    Flat (2D) model with ALL edges set to wall/closed (`bc: 'wwww'`) and the sea
+    far below the domain — a fully closed continental box. Used to verify that
+    wall boundaries do not leak flow/sediment (mass must be conserved, as on a
+    closed sphere). See flat_wall.yml.
+    """
+    return _instantiate("flat_wall.yml")
+
+
+@pytest.fixture
 def cyclic_cyl_model():
     """
     Flat model with a CYCLIC (periodic) boundary pair (`bc: '0c0c'` → E/W

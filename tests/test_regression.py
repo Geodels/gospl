@@ -1050,6 +1050,47 @@ def test_flex_fem_2d_clamped(flat_fem_flex_model):
     )
 
 
+def test_wall_boundary_conservation(flat_wall_model):
+    """
+    Protects: WALL (closed) boundaries contain flow AND sediment for a SINGLE
+    step. With every edge a wall and the sea far below the domain, the flat model
+    is a closed box, so the sediment budget must balance over a step: eroded
+    material that reaches the closed terminal sinks is deposited in place (the
+    `_closedDepo` closure) rather than draining out — total deposited == total
+    eroded, surface volume conserved.
+
+    Scope: the fixture runs ONE step. Full conservation over MANY steps in a
+    *fully* closed domain is NOT guaranteed — once the basins saturate, goSPL's
+    spill-based cascade cannot aggrade a closed basin (it assumes excess always
+    spills toward an outlet). That is a documented architectural limitation; the
+    common case (walls plus at least one open/fixed edge, or marine) conserves.
+    """
+    from mpi4py import MPI
+
+    model = flat_wall_model
+    assert model.flatModel
+    assert (model.south, model.east, model.north, model.west) == (3, 3, 3, 3), \
+        "all edges should be wall (flag 3)"
+    assert len(model.outletIDs) == 0, "all-wall domain should have no draining outlets"
+
+    model.runProcesses()
+
+    owned = model.inIDs == 1
+    cumED = model.cumEDLocal.getArray()[owned]
+    la = model.larea[owned]
+
+    def _sum(x):
+        return MPI.COMM_WORLD.allreduce(float(x), op=MPI.SUM)
+
+    dV = _sum((cumED * la).sum())                 # net volume change (should ~0)
+    activity = _sum((np.abs(cumED) * la).sum())   # volume actually redistributed
+    assert activity > 0.0, "no erosion/deposition occurred — test is vacuous"
+    rel = abs(dV) / activity
+    assert rel < 1.0e-4, (
+        f"wall boundary leaks: |dV|/activity = {rel:.2e} (sediment not conserved)"
+    )
+
+
 def test_cyclic_boundary(cyclic_cyl_model):
     """
     Protects: the cyclic (periodic) flow/sediment boundary option (`bc: '0c0c'`

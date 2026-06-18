@@ -208,6 +208,26 @@ class SEDMesh(object):
         if prov:
             vSedP = vSedP * self.inIDs[:, None]
 
+        # CLOSED terminal sinks: flow-terminal nodes that are not a labelled
+        # depression (and, via `lsink`, not an outlet or below sea level). On a
+        # closed (wall) domain the sediment arriving here can neither drain nor
+        # fill a pit, so the per-pit accounting below (which excludes pit-id -1)
+        # would silently drop it. Deposit it in place instead — accumulate it
+        # and remove it from the routed flux. Empty set on open/marine domains.
+        closed = getattr(self, "_closedDepo", None)
+        if closed is not None:
+            csink = self.lsink & (self.pitIDs < 0)
+            if csink.any():
+                self._closedDepo[csink] += vSed[csink]
+                vSed = vSed.copy()
+                vSed[csink] = 0.0
+                if dual:
+                    vSedF = vSedF.copy()
+                    vSedF[csink] = 0.0
+                if prov:
+                    vSedP = vSedP.copy()
+                    vSedP[csink, :] = 0.0
+
         # Get volume incoming in each depression
         grp = npi.group_by(self.pitIDs[self.lsink])
         uID = grp.unique
@@ -371,6 +391,11 @@ class SEDMesh(object):
         self.fMat.destroy()
         self.fMat = None
 
+        # Accumulator for sediment that reaches CLOSED terminal sinks (no pit, no
+        # outlet, above sea) during the cascade — deposited after the loop so a
+        # closed (wall) domain conserves mass. Empty on open/marine domains.
+        self._closedDepo = np.zeros(self.lpoints, dtype=np.float64)
+
         step = 0
         excess = True
         max_iters = 5000
@@ -390,7 +415,7 @@ class SEDMesh(object):
                 nvSed = vSed.copy()
                 nvSed[hl < self.sedFilled] = 0.0
                 self.tmpL.setArray(nvSed / self.dt)
-                vSed[self.idBorders] = 0.0
+                vSed[self.outletIDs] = 0.0
                 self.vSedLocal.axpy(1.0, self.tmpL)
                 if self.stratLith:
                     # Mirror the residual-flux accumulation for the fine pile.
@@ -398,13 +423,13 @@ class SEDMesh(object):
                     nvSedF = vSedF.copy()
                     nvSedF[hl < self.sedFilled] = 0.0
                     self.tmpL.setArray(nvSedF / self.dt)
-                    vSedF[self.idBorders] = 0.0
+                    vSedF[self.outletIDs] = 0.0
                     self.vSedFLocal.axpy(1.0, self.tmpL)
                 if self.provOn:
                     # Carry the routed provenance overspill to the next pit
                     # (downstream-lake chains), matching the total's treatment.
                     vSedP = self._routedProv.copy()
-                    vSedP[self.idBorders, :] = 0.0
+                    vSedP[self.outletIDs, :] = 0.0
             if MPIrank == 0 and self.verbose:
                 print(
                     "Downstream sediment flux computation step %d (%0.02f seconds)"
@@ -417,6 +442,24 @@ class SEDMesh(object):
         if self.fMat is not None:
             self.fMat.destroy()
             self.fMat = None
+
+        # Conservation closure for CLOSED (wall) sinks: deposit the sediment the
+        # cascade routed to closed terminal sinks that are not a labelled pit
+        # (collected in `_closedDepo` inside _moveDownstream — flow-terminal
+        # nodes that are not a pit, an outlet, or below sea level, e.g. the low
+        # corner of an all-wall box). No-op on open / marine domains. NOTE: this
+        # does NOT make a fully-closed multi-step domain conserve once its basins
+        # saturate — see the "wall" boundary note in the docs / AGENTS.
+        if self._closedDepo is not None and self._closedDepo.any():
+            delta = np.zeros(self.lpoints)
+            nz = self._closedDepo > 0.0
+            delta[nz] = self._closedDepo[nz] / self.larea[nz]   # volume -> thickness
+            self.tmpL.setArray(delta)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.cumED.axpy(1.0, self.tmp)
+            self.hGlobal.axpy(1.0, self.tmp)
+            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
         if self.stratLith:

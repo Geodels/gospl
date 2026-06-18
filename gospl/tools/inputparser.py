@@ -193,34 +193,43 @@ class ReadYaml(object):
         # except KeyError:
         self.flowExp = 1.1
 
-        # Boundary conditions, one char per edge in order [South, East, North,
-        # West]: '0' = open (outflow), '1' = closed (wall), 'c' = cyclic
-        # (periodic). Cyclic edges must come as an OPPOSITE PAIR (South+North or
-        # East+West) and at most ONE pair may be cyclic — i.e. up to two periodic
-        # edges, never all four (a full torus has no boundary and would be
-        # mis-detected as a global model). A cyclic run REQUIRES an input mesh
-        # that is genuinely periodic in that direction (cells connecting the two
-        # seam edges); goSPL does not synthesise the wrap.
-        self.boundCond = domainDict.get("bc", '1111')
-        if len(self.boundCond) != 4 or any(c not in '01c' for c in self.boundCond):
+        # Boundary conditions, one char per edge in order [North, East, South,
+        # West] — N at y=ymax, E at x=xmax, S at y=ymin, W at x=xmin:
+        #   'o' = open    — deep base-level outlet (edge forced below sea level);
+        #   'f' = fixed   — fixed base-level outlet at the natural edge elevation
+        #                   (water/sediment leave the domain — NOT a no-flux wall);
+        #   'w' = wall    — true no-flux wall: flow and sediment are contained
+        #                   (the edge nodes behave as interior, sediment deposits
+        #                   against them, mass is conserved);
+        #   'c' = cyclic  — periodic (requires a periodic/cylinder input mesh).
+        # Legacy digits map '0' -> 'o' and '1' -> 'f' (preserving old behaviour).
+        # Cyclic edges must come as an OPPOSITE PAIR (North+South or East+West)
+        # and at most ONE pair may be cyclic — i.e. up to two periodic edges,
+        # never all four (a full torus has no boundary and would be mis-detected
+        # as a global model).
+        bc = str(domainDict.get("bc", 'ffff'))
+        bc = bc.replace('0', 'o').replace('1', 'f')   # legacy digits
+        self.boundCond = bc
+        if len(self.boundCond) != 4 or any(c not in 'ofwc' for c in self.boundCond):
             raise ValueError(
-                "domain.bc must be 4 characters from {'0','1','c'} "
-                "[South, East, North, West]; got '%s'." % self.boundCond
+                "domain.bc must be 4 characters from {'o' open, 'f' fixed, "
+                "'w' wall, 'c' cyclic} (legacy '0'/'1' accepted) in [North, "
+                "East, South, West] order; got '%s'." % str(domainDict.get("bc"))
             )
-        bcS, bcE, bcN, bcW = self.boundCond
-        if (bcS == 'c') != (bcN == 'c'):
+        bcN, bcE, bcS, bcW = self.boundCond
+        if (bcN == 'c') != (bcS == 'c'):
             raise ValueError(
-                "Cyclic (periodic) boundaries must be paired: set BOTH South and "
-                "North to 'c' (got bc='%s')." % self.boundCond
+                "Cyclic (periodic) boundaries must be paired: set BOTH North and "
+                "South to 'c' (got bc='%s')." % self.boundCond
             )
         if (bcE == 'c') != (bcW == 'c'):
             raise ValueError(
                 "Cyclic (periodic) boundaries must be paired: set BOTH East and "
                 "West to 'c' (got bc='%s')." % self.boundCond
             )
-        if bcS == 'c' and bcE == 'c':
+        if bcN == 'c' and bcE == 'c':
             raise ValueError(
-                "At most one pair of edges may be cyclic (South/North OR "
+                "At most one pair of edges may be cyclic (North/South OR "
                 "East/West, not both); got bc='%s'." % self.boundCond
             )
 

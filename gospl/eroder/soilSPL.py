@@ -291,7 +291,7 @@ class soilSPL(object):
         self.fDep[self.seaID] = 0.
         self.fDep[self.fDep > 0.99] = 0.99
         if self.flatModel:
-            self.fDep[self.idBorders] = 0.
+            self.fDep[self.outletIDs] = 0.
 
         if self._snes_soil is None:
             self._snes_soil, self._snes_soil_f = self._build_soil_snes(primary=True)
@@ -383,7 +383,7 @@ class soilSPL(object):
         self.dm.globalToLocal(self.Eb, self.EbLocal)
         E = self.EbLocal.getArray().copy()
         if self.flatModel:
-            E[self.idBorders] = 0.0
+            E[self.outletIDs] = 0.0
         E[self.lsink] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)

@@ -41,17 +41,24 @@ Initial mesh definition and simulation declaration
         
         In addition the following optional parameters could be set:
 
-        c. boundary conditions (``bc``) when not running a global model: a 4-character string, one per edge in the order **south, east, north, west**. Each character is:
+        c. boundary conditions (``bc``) when not running a global model: a 4-character string, one per edge in the order **north, east, south, west** (N at ``y = ymax``, E at ``x = xmax``, S at ``y = ymin``, W at ``x = xmin``). Each character is:
 
-           - ``0`` — **open** (outflow): water and the sediment it carries drain out across that edge.
-           - ``1`` — **closed** (fixed wall): no flux; flow and sediment accumulate against the edge.
+           - ``o`` — **open**: a deep base-level outlet (the edge is held below sea level); water and the sediment it carries drain out across it.
+           - ``f`` — **fixed**: a base-level outlet at the natural edge elevation; flow and sediment still leave the domain there (this is *not* a no-flux wall).
+           - ``w`` — **wall**: a true no-flux wall; flow is contained and sediment deposits against the edge instead of draining out.
            - ``c`` — **cyclic** (periodic): flow and sediment wrap from one edge to the opposite one.
 
-           Cyclic edges must be set as an **opposite pair** — both ``south`` and ``north``, *or* both ``east`` and ``west`` — and **at most one pair** may be cyclic (so up to two periodic edges, never all four). For example ``'0c0c'`` makes east/west periodic with open north/south, and ``'c1c1'`` makes south/north periodic with closed east/west.
+           Legacy digits are accepted: ``0`` is read as ``o`` (open) and ``1`` as ``f`` (fixed). The default is ``'ffff'``. For example ``'ofof'`` opens north/south with fixed east/west; ``'wfwf'`` walls north/south with fixed east/west.
+
+           Cyclic edges must be set as an **opposite pair** — both ``south`` and ``north``, *or* both ``east`` and ``west`` — and **at most one pair** may be cyclic (so up to two periodic edges, never all four). For example ``'ococ'`` makes east/west periodic with open north/south.
 
            .. important::
 
               A cyclic run **requires a periodic input mesh** in that direction: the mesh must be a **cylinder** (the periodic axis wrapped onto a circle whose circumference is the domain width), so that its cells genuinely connect the two seam edges. A cylinder is intrinsically flat, so its finite-volume geometry is identical to a periodic flat strip's; goSPL detects the cylinder's two open ends as the (non-periodic) boundary and routes flow/sediment across the seam through the wrapping cells. goSPL does **not** synthesise the wrap from an ordinary flat mesh (a planar wrap would have incorrect seam geometry). This works in parallel.
+
+           .. note::
+
+              The ``w`` (wall) boundary contains flow, and deposits the sediment that reaches the closed edge. A domain that is *fully* enclosed by walls (no ``o``/``f``/marine exit anywhere) conserves sediment over a single step, but **not** indefinitely once its basins fill: goSPL's spill-based sediment cascade cannot aggrade a fully-closed basin (it assumes excess always spills toward an outlet). Combine walls with at least one ``o``/``f`` edge (or a marine area) for a fully mass-conserving long run.
         d. the ``fast`` key allows you to run a model without applying any surface processes on top. This is used to check your input files prior to run your simulation with all options. By default it is set to *False*.
         e. ``seadepo`` performing marine deposition or not. By default it is set to *True*.
         f. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file (**.npz** format with the erosion deposition defined with the key ``ed``) containing for each vertex of the mesh the cumulative erosion deposition values in metres. 

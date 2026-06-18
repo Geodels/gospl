@@ -289,18 +289,21 @@ class FAMesh(object):
             self.wghtVal[ids, :] = 0.0
             self.wghtVal[ids, 0] = 1.0
 
-        # Set borders nodes
+        # Set draining-border nodes (open / fixed outlets only — `outletIDs`
+        # excludes true-wall edges so those behave as interior, retaining flow
+        # and letting sediment deposit against them).
         if self.flatModel:
-            self.rcvID[self.idBorders, :] = np.tile(self.idBorders, (self.flowDir, 1)).T
-            self.distRcv[self.idBorders, :] = 0.0
-            self.wghtVal[self.idBorders, :] = 0.0
+            self.rcvID[self.outletIDs, :] = np.tile(self.outletIDs, (self.flowDir, 1)).T
+            self.distRcv[self.outletIDs, :] = 0.0
+            self.wghtVal[self.outletIDs, :] = 0.0
 
         # Get local nodes with no receivers as boolean array
         sum_weight = np.sum(self.wghtVal, axis=1)
         lsink = sum_weight == 0.0
 
-        # We don't consider open sea nodes and borders as sinks
-        lsink[self.idBorders] = False
+        # We don't consider open sea nodes and draining borders as sinks (wall
+        # edges ARE allowed to be sinks so deposition contains the sediment).
+        lsink[self.outletIDs] = False
         lsink[self.seaID] = False
         lsink = lsink.astype(int) * self.inIDs
 

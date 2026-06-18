@@ -312,7 +312,7 @@ class SPL(object):
             # well-conditioned; values approaching 1 lead to a singular system.
             self.fDep[self.fDep > 0.99] = 0.99
             if self.flatModel:
-                self.fDep[self.idBorders] = 0.
+                self.fDep[self.outletIDs] = 0.
             self._coupledEDSystem(eMat)
             eMat.destroy()
             if MPIrank == 0 and self.verbose:
@@ -335,7 +335,7 @@ class SPL(object):
         self.dm.globalToLocal(self.Eb, self.EbLocal)
         E = self.EbLocal.getArray().copy()
         if self.flatModel:
-            E[self.idBorders] = 0.0
+            E[self.outletIDs] = 0.0
         E[self.lsink] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)
