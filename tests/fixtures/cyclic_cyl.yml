@@ -3,7 +3,7 @@ name: cyclic (periodic) boundary test — cylinder mesh, periodic E/W
 domain:
     npdata: ['cyclic_cyl','v','c','z']
     flowdir: 5
-    bc: '0c0c'
+    bc: 'ococ'
 
 time:
     start: 0.
