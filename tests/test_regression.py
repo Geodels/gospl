@@ -966,10 +966,9 @@ def test_ice_flexure_loading(minimal_ice_flex_model):
 def test_flex_fem_2d_solver(flat_fem_flex_model):
     """
     Protects: the opt-in parallel FV biharmonic flexure solver for FLAT models
-    (`flexure: method: fem`) runs end-to-end on the DMPlex (no gFlex, no regular
+    (`flexure: method: fem`) runs end-to-end on the DMPlex (no regular
     grid) and produces a finite, non-trivial flexural field with subsidence
-    under deposition. Numerical agreement with gFlex is checked separately in
-    test_flex_fem_2d_matches_gflex.
+    under deposition.
     """
     model = flat_fem_flex_model
     assert model.flexOn and model.flex_method == "fem"
@@ -979,7 +978,6 @@ def test_flex_fem_2d_solver(flat_fem_flex_model):
     assert np.isfinite(flx).all(), "FEM-2D flexural field non-finite"
     # The incising fixture is net-erosional (unloading → isostatic rebound), so
     # the deflection is positive; only require a finite, non-trivial response.
-    # The sign/physics vs gFlex is checked in test_flex_fem_2d_matches_gflex.
     assert np.abs(flx).max() > 0.0, "FEM-2D flexure produced no deflection"
 
 

@@ -176,7 +176,7 @@ def minimal_ice_flex_model():
 def flat_fem_flex_model():
     """
     Flat (2D) model with the parallel FV biharmonic flexure solver
-    (`flexure: method: fem`) — solved directly on the DMPlex (no gFlex/regular
+    (`flexure: method: fem`) — solved directly on the DMPlex (no regular
     grid). 16 km domain, thin Te so the flexural response is well resolved and
     decays inside the domain. See flatbig_fem.yml.
     """

@@ -52,7 +52,6 @@ requirements:
     - mpi4py >=4.0
     - petsc >=3.21,<3.22
     - petsc4py >=3.21,<3.22
-    - gflex >=1.1.0,<2.0
     - pyshtools
 
 test:

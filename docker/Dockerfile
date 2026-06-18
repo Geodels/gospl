@@ -181,7 +181,7 @@ RUN CC=/opt/mpich/bin/mpicc HDF5_MPI=ON HDF5_DIR=/opt/hdf5 \
 # --- remaining pure/wheel deps (no direct MPI linkage) ---
 RUN pip install --no-cache-dir \
         scipy pandas numpy-indexed "ruamel.yaml" \
-        "gflex>=1.1.0,<2.0" pyshtools vtk
+        pyshtools vtk
 
 # --- install goSPL from the build context (repo root) ---
 WORKDIR /opt/gospl-src
