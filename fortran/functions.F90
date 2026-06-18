@@ -24,7 +24,15 @@ module meshparams
   double precision, dimension(:, :, :), allocatable :: midFace  ! Voronoi edge mid face coordinates
   double precision, dimension(:, :), allocatable :: faceVel  ! Voronoi edge mid face velocity
 
-  integer, dimension(:), allocatable :: stencilNb        
+  ! Flat-vs-curved geometry/velocity branch selector, set from Python via
+  ! `setcurvedmesh` to a GLOBALLY consistent value (1 = curved/spherical,
+  ! 0 = flat/euclidean — used for both a planar mesh AND an intrinsically-flat
+  ! cylinder). -1 (default) falls back to the legacy per-rank inference from
+  ! lcoords(1,3), which is partition-DEPENDENT and must not be relied on in
+  ! parallel (it breaks cyclic/cylinder runs at MPIsize>1).
+  integer :: curvedmesh = -1
+
+  integer, dimension(:), allocatable :: stencilNb
   integer, dimension(:,:), allocatable :: stencilNgb      
 
   ! Queue node definition: index and elevation
@@ -990,6 +998,25 @@ subroutine hillslp_nl(nb, elev, kd, exp, n, val)
 
 end subroutine hillslp_nl
 
+subroutine setcurvedmesh(flag)
+!*****************************************************************************
+! Set the globally-consistent flat-vs-curved branch selector (see the
+! `curvedmesh` declaration in meshparams). Called once from Python with a value
+! reduced across all ranks (0 = flat/euclidean, incl. the intrinsically-flat
+! cylinder; 1 = curved/spherical) so the geometry/velocity discretisation is
+! identical on every partition.
+
+  use meshparams
+  implicit none
+
+  integer, intent(in) :: flag
+
+  curvedmesh = flag
+
+  return
+
+end subroutine setcurvedmesh
+
 subroutine getfacevelocity(nb, vel)
 !*****************************************************************************
 ! Update the face velocity of each vertex-based voronoi and compute the dot product
@@ -1005,8 +1032,14 @@ subroutine getfacevelocity(nb, vel)
 
   if(.not. allocated(faceVel)) allocate(faceVel(nb,12))
   faceVel(:,:) = 0.0
+  ! Branch selector: use the globally-consistent `curvedmesh` flag when set
+  ! (parallel-safe); otherwise fall back to the legacy per-rank inference.
   radius = 0.
-  if(lcoords(1,3) .ne. 0) radius = norm2(lcoords(1,1:3))
+  if(curvedmesh == 1)then
+    radius = norm2(lcoords(1,1:3))
+  else if(curvedmesh == -1)then
+    if(lcoords(1,3) .ne. 0) radius = norm2(lcoords(1,1:3))
+  endif
 
   if(radius == 0.0)then
     do k = 1, nb
@@ -3038,8 +3071,16 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   FVnIDfNb = -1
 
   lcoords = coords
+  ! Branch selector: use the globally-consistent `curvedmesh` flag when set
+  ! (parallel-safe); otherwise fall back to the legacy per-rank inference. A
+  ! cylinder is intrinsically flat, so it MUST take the euclidean branch
+  ! (curvedmesh == 0) consistently on every partition.
   radius = 0.
-  if(lcoords(1,3) .ne. 0.0) radius = norm2(lcoords(1,1:3))
+  if(curvedmesh == 1)then
+    radius = norm2(lcoords(1,1:3))
+  else if(curvedmesh == -1)then
+    if(lcoords(1,3) .ne. 0.0) radius = norm2(lcoords(1,1:3))
+  endif
   if(radius > 0.)then
     allocate(midFace(nb,12,3))
     midFace = -1.0

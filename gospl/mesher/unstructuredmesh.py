@@ -21,6 +21,7 @@ from gospl.tools.constants import MISSING_DATA_SENTINEL
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import globalngbhs
     from gospl._fortran import definetin
+    from gospl._fortran import setcurvedmesh
     from gospl._fortran import fitedges
     from gospl._fortran import updatearea
 
@@ -145,6 +146,14 @@ class UnstMesh(object):
         edges_nodes = self.edges["nodes"]
         cells_nodes = self.cells["nodes"]
         cells_edges = self.cells["edges"]
+
+        # Select the FV geometry / advection-velocity branch from a GLOBALLY
+        # consistent flag (sphere -> curved/spherical; flat plane OR cylinder ->
+        # euclidean — a cylinder is intrinsically flat). This replaces the
+        # Fortran's legacy per-rank inference from a single node's z-coordinate,
+        # which is partition-dependent and broke cyclic runs at MPIsize>1.
+        # `flatModel` is already set (see `_buildMesh`) and is partition-invariant.
+        setcurvedmesh(0 if self.flatModel else 1)
 
         # Finite volume discretisation
         self.FVmesh_ngbID, self.larea = definetin(
