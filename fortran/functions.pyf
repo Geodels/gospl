@@ -41,6 +41,10 @@ python module _fortran
             double precision dimension(nb),intent(out),depend(nb) :: val
         end subroutine hillslp_nl
         
+        subroutine setcurvedmesh(flag)
+            integer intent(in) :: flag
+        end subroutine setcurvedmesh
+
         subroutine getfacevelocity(nb,vel)
             integer :: nb
             double precision dimension(nb,3),intent(in),depend(nb) :: vel
