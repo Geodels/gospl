@@ -966,10 +966,9 @@ def test_ice_flexure_loading(minimal_ice_flex_model):
 def test_flex_fem_2d_solver(flat_fem_flex_model):
     """
     Protects: the opt-in parallel FV biharmonic flexure solver for FLAT models
-    (`flexure: method: fem`) runs end-to-end on the DMPlex (no gFlex, no regular
+    (`flexure: method: fem`) runs end-to-end on the DMPlex (no regular
     grid) and produces a finite, non-trivial flexural field with subsidence
-    under deposition. Numerical agreement with gFlex is checked separately in
-    test_flex_fem_2d_matches_gflex.
+    under deposition.
     """
     model = flat_fem_flex_model
     assert model.flexOn and model.flex_method == "fem"
@@ -979,7 +978,6 @@ def test_flex_fem_2d_solver(flat_fem_flex_model):
     assert np.isfinite(flx).all(), "FEM-2D flexural field non-finite"
     # The incising fixture is net-erosional (unloading → isostatic rebound), so
     # the deflection is positive; only require a finite, non-trivial response.
-    # The sign/physics vs gFlex is checked in test_flex_fem_2d_matches_gflex.
     assert np.abs(flx).max() > 0.0, "FEM-2D flexure produced no deflection"
 
 
@@ -1048,6 +1046,154 @@ def test_flex_fem_2d_clamped(flat_fem_flex_model):
     assert w_edge < 1.0e-3 * w_peak, (
         f"clamped edge not pinned: |w|_edge={w_edge:.3e} vs peak {w_peak:.3e}"
     )
+
+
+def test_wall_boundary_conservation(flat_wall_model):
+    """
+    Protects: WALL (closed) boundaries contain flow AND sediment for a SINGLE
+    step. With every edge a wall and the sea far below the domain, the flat model
+    is a closed box, so the sediment budget must balance over a step: eroded
+    material that reaches the closed terminal sinks is deposited in place (the
+    `_closedDepo` closure) rather than draining out — total deposited == total
+    eroded, surface volume conserved.
+
+    Scope: the fixture runs ONE step. Full conservation over MANY steps in a
+    *fully* closed domain is NOT guaranteed — once the basins saturate, goSPL's
+    spill-based cascade cannot aggrade a closed basin (it assumes excess always
+    spills toward an outlet). That is a documented architectural limitation; the
+    common case (walls plus at least one open/fixed edge, or marine) conserves.
+    """
+    from mpi4py import MPI
+
+    model = flat_wall_model
+    assert model.flatModel
+    assert (model.south, model.east, model.north, model.west) == (3, 3, 3, 3), \
+        "all edges should be wall (flag 3)"
+    assert len(model.outletIDs) == 0, "all-wall domain should have no draining outlets"
+
+    model.runProcesses()
+
+    owned = model.inIDs == 1
+    cumED = model.cumEDLocal.getArray()[owned]
+    la = model.larea[owned]
+
+    def _sum(x):
+        return MPI.COMM_WORLD.allreduce(float(x), op=MPI.SUM)
+
+    dV = _sum((cumED * la).sum())                 # net volume change (should ~0)
+    activity = _sum((np.abs(cumED) * la).sum())   # volume actually redistributed
+    assert activity > 0.0, "no erosion/deposition occurred — test is vacuous"
+    rel = abs(dV) / activity
+    assert rel < 1.0e-4, (
+        f"wall boundary leaks: |dV|/activity = {rel:.2e} (sediment not conserved)"
+    )
+
+
+def test_cyclic_boundary(cyclic_cyl_model):
+    """
+    Protects: the cyclic (periodic) flow/sediment boundary option (`bc: '0c0c'`
+    → E/W cyclic, N/S open) on a cylinder mesh. Checks that:
+      - the cyclic edges parse to the cyclic flag (2), open edges to 0;
+      - the FV neighbour graph wraps across the seam (the cylinder's seam cells
+        link the two periodic edges) — this is what makes flow/sediment route
+        across the boundary;
+      - the cyclic seam is NOT given the open-outflow sentinel (it is not a
+        drain — only the genuinely open N/S edges are);
+      - the model runs end-to-end with finite flow accumulation.
+    """
+    model = cyclic_cyl_model
+    assert model.flatModel
+    # bc '0c0c' = [S=0 open, E=c cyclic→2, N=0 open, W=c cyclic→2]
+    assert (model.east, model.west) == (2, 2), "E/W should be cyclic (2)"
+    assert (model.south, model.north) == (0, 0), "N/S should be open (0)"
+
+    # Cross-seam wrap: nodes on the θ≈0 seam (x≈xmax) have FV neighbours on the
+    # θ≈2π side (x≈xmax, opposite embedding-z sign) — i.e. the graph is periodic.
+    xmax = model.lcoords[:, 0].max()
+    seam = np.where(np.isclose(model.lcoords[:, 0], xmax, atol=1.0))[0]
+    ng = model.FVmesh_ngbID
+    cross = 0
+    for s in seam:
+        nbrs = ng[s][ng[s] >= 0]
+        for n in nbrs:
+            if (abs(model.lcoords[n, 0] - xmax) < 200.0
+                    and abs(model.lcoords[n, 2] + model.lcoords[s, 2]) < 200.0):
+                cross += 1
+    assert cross > 0, "no cross-seam FV links — mesh is not periodic / not wrapping"
+
+    model.runProcesses()
+
+    # The cyclic seam must not be drained like an open edge (no deep sentinel).
+    h = model.hLocal.getArray()
+    assert (h[seam] > -1.0e6).all(), "cyclic seam was forced to the open sentinel"
+
+    fa = model.FAL.getArray()
+    assert np.isfinite(fa).all() and fa.max() > 0.0, "flow accumulation invalid"
+
+
+def test_cyclic_advection(cyclic_advect_model):
+    """
+    Protects: horizontal advection across a cyclic (periodic) seam. A cyclic 2D
+    model runs on a cylinder, so a flat (vx, vy) displacement must be remapped
+    onto the cylinder tangent — the periodic component becoming motion AROUND
+    the seam (`_cylinderVelocity`), and the seam nodes kept out of the advection
+    Dirichlet (`advectBorders`). Checks that:
+      - the cyclic boundary is detected and the seam is excluded from the
+        advection border set (advectBorders ⊂ idBorders);
+      - the velocity transform is exactly tangent to the cylinder (zero radial
+        component) and preserves the around-seam speed and the axial component;
+      - an elevation bump started just inside the seam is advected ACROSS it
+        (its peak wraps from +θ past ±π to the far side) and the far side gains
+        mass — i.e. material genuinely crosses the periodic boundary;
+      - mass is essentially conserved (the seam does not leak) and stays finite.
+    """
+    model = cyclic_advect_model
+    assert model.flatModel and model.cyclicBC, "cyclic model not detected"
+    # E/W periodic (bc 'ococ'): the seam must be dropped from the advection
+    # Dirichlet, so advectBorders is a strict subset of idBorders.
+    assert model.cyclicPts is not None and len(model.cyclicPts) > 0
+    assert len(model.advectBorders) < len(model.idBorders)
+    assert not np.isin(model.advectBorders, model.cyclicPts).any()
+
+    # --- velocity transform: flat (vx, vy) -> cylinder tangent ---
+    vx = 0.25
+    hdisp = np.zeros((model.lpoints, 3))
+    hdisp[:, 0] = vx          # around-seam (periodic-x) component
+    vel = model._cylinderVelocity(hdisp)
+    co = model.lcoords
+    rad = np.sqrt(co[:, 0] ** 2 + co[:, 2] ** 2)
+    rad[rad == 0.0] = 1.0
+    normal = np.c_[co[:, 0] / rad, np.zeros(model.lpoints), co[:, 2] / rad]
+    assert np.abs(np.sum(vel * normal, axis=1)).max() < 1.0e-9, \
+        "transformed velocity is not tangent to the cylinder"
+    assert np.abs(vel[:, 1]).max() < 1.0e-12, "spurious axial velocity"
+    np.testing.assert_allclose(np.linalg.norm(vel, axis=1), vx, rtol=1e-9)
+
+    # --- advect the bump across the seam ---
+    theta = np.arctan2(model.lcoords[:, 2], model.lcoords[:, 0])
+    base = -500.0
+    z0 = model.hLocal.getArray().copy()
+    far = theta < -1.5                       # far side of the seam (θ ≈ -π)
+    peak0 = theta[np.argmax(z0)]
+    mass0 = float(np.sum((z0 - base) * model.larea))
+    farmass0 = float(np.sum((z0[far] - base) * model.larea[far]))
+    assert peak0 > 2.0, "bump should start just inside the +θ seam"
+
+    model.runProcesses()
+
+    z1 = model.hLocal.getArray().copy()
+    peak1 = theta[np.argmax(z1)]
+    mass1 = float(np.sum((z1 - base) * model.larea))
+    farmass1 = float(np.sum((z1[far] - base) * model.larea[far]))
+
+    assert np.isfinite(z1).all(), "advected elevation is not finite"
+    # The peak wrapped from the +θ side across the seam to the far (−θ) side.
+    assert peak1 < 0.0, "bump peak did not cross the periodic seam"
+    # Material accumulated on the far side of the seam.
+    assert farmass1 > 3.0 * farmass0, "no mass transported across the seam"
+    # The seam does not leak: total mass is conserved (small numerical
+    # diffusion of the sharp bump is expected).
+    assert abs(mass1 - mass0) / abs(mass0) < 0.1, "mass not conserved across seam"
 
 
 def test_pit_unifyLabels_unionfind():

@@ -155,7 +155,7 @@ class SEAMesh(object):
         else:
             minh = max(minh, self.oFill)
             hsmth = hl.copy()
-            hsmth[self.idBorders] = BOUNDARY_FLOW_SENTINEL
+            hsmth[self.outletIDs] = BOUNDARY_FLOW_SENTINEL
 
         # The filled + eps is done on the global grid, serially on rank 0, so
         # assemble it there from the owned nodes only (hsmth is ghost-synced
@@ -176,8 +176,8 @@ class SEAMesh(object):
 
         # Set borders nodes
         if self.flatModel:
-            rcv[self.idBorders, :] = np.tile(self.idBorders, (12, 1)).T
-            wght[self.idBorders, :] = 0.0
+            rcv[self.outletIDs, :] = np.tile(self.outletIDs, (12, 1)).T
+            wght[self.outletIDs, :] = 0.0
 
         # Detect terminal sinks: cells whose every flow direction points
         # back to themselves. After the dMat1 transpose below the column
@@ -192,7 +192,7 @@ class SEAMesh(object):
             rcv.astype(int) == nodes_idx[:, None], axis=1
         )
         if self.flatModel:
-            self.is_sink_local[self.idBorders] = False
+            self.is_sink_local[self.outletIDs] = False
 
         # Define downstream matrix based on filled + dir elevations
         self.dMat1 = self.zMat.copy()
@@ -465,9 +465,9 @@ class SEAMesh(object):
             noexcess = np.invert(excess)
             marVol[noexcess] -= sinkVol[noexcess]
             vdep[noexcess] += sinkVol[noexcess]
-            vdep[self.idBorders] = 0.0
+            vdep[self.outletIDs] = 0.0
             sinkVol[noexcess] = 0.0
-            sinkVol[self.idBorders] = 0.0
+            sinkVol[self.outletIDs] = 0.0
 
             # Force-deposit at terminal sinks. Their dMat1 column is zero
             # (rcv==self for all directions, see _matOcean), so the next
@@ -510,7 +510,7 @@ class SEAMesh(object):
         residual = self.tmpL.getArray().copy()
         if residual.any():
             vdep += residual
-            vdep[self.idBorders] = 0.0
+            vdep[self.outletIDs] = 0.0
 
         if self.memclear:
             del marVol, sinkVol

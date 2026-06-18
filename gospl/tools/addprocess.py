@@ -455,9 +455,9 @@ class GridProcess(object):
         Solves the plate equation with a single PETSc solve **directly on the
         DMPlex**: fully parallel, no gather-to-root, no regular grid, and
         **varying elastic thickness in one linear solve** (no iteration over the
-        rigidity contrast). It replaced the former serial gFlex (``'FD'``) and
-        FFT solvers, which gathered the load to one rank, solved on a regular
-        grid, and interpolated back.
+        rigidity contrast). It replaced the former serial ``'FD'`` and ``'FFT'``
+        solvers, which gathered the load to one rank, solved on a regular grid,
+        and interpolated back.
 
         Solves the thin-plate-on-elastic-foundation equation with a spatially
         varying rigidity :math:`D(x)=E\,T_e(x)^3/[12(1-\nu^2)]`
@@ -483,10 +483,10 @@ class GridProcess(object):
         options-prefixed (``flexfem_``) so an iterative Krylov method can be
         requested for meshes too large to factorise.
 
-        When this solver replaced gFlex it agreed with it on a flat mesh where the
-        deflection decays inside the domain: correlation 0.998 (natural BC), 0.9996
-        (clamped). Where the flexural wavelength approaches the domain size the two
-        boundary discretisations differ by ~10 %.
+        When this solver replaced the former regular-grid solver it agreed with it
+        on a flat mesh where the deflection decays inside the domain: correlation
+        0.998 (natural BC), 0.9996 (clamped). Where the flexural wavelength
+        approaches the domain size the two boundary discretisations differ by ~10 %.
 
         .. note::
             Boundary conditions (per side, from ``flex_bcN/S/E/W``):
@@ -507,7 +507,7 @@ class GridProcess(object):
             then re-uses the factorisation / preconditioner and only the RHS
             changes — so after the one-off setup a step costs a back-substitution
             (serial) or a few warm Krylov iterations (parallel). Serial runs use a
-            direct LU (matches gFlex on small meshes); parallel runs use
+            direct LU (fast on small meshes); parallel runs use
             GMRES+GAMG. The KSP is options-prefixed (``flexfem_``) to override.
 
         :arg dzLocal: local (lpoints) elevation change = surface load thickness (m).
@@ -591,7 +591,7 @@ class GridProcess(object):
         # boundary (w'=0, w'''=0; a thin plate's Mirror IS 0Slope0Shear) — no
         # modification. 0Displacement0Slope (clamped) pins w=0 (Dirichlet
         # zeroRows); the natural w'=0 from the inner FV Laplacian completes the
-        # clamp. Sides map geographically (no gFlex N/S swap). The clamped node
+        # clamp. Sides map geographically (N=ymax, E=xmax, S=ymin, W=xmin). The clamped node
         # set is cached for the per-step RHS. `flex_bc*` are identical on every
         # rank, so the zeroRows guard is collective-safe.
         sides = (
@@ -674,7 +674,7 @@ class GridProcess(object):
 
         # Parallel mixed-FV biharmonic flexure for FLAT models (opt-in
         # `method: 'fem'`): solved directly on the DMPlex with no gather-to-root,
-        # no regular grid, no gFlex. Returns the local deflection; apply and exit.
+        # no regular grid. Returns the local deflection; apply and exit.
         if self.flex_method == 'fem':
             tmpFlex = self._cmptFlexFEM(local_dZ)
             self.localFlex += tmpFlex
@@ -690,7 +690,7 @@ class GridProcess(object):
 
         # Global (spherical-harmonic) flexure: gather the load to rank 0, solve
         # on the Driscoll-Healy grid, scatter back. (The flat 'fem' method has
-        # already returned above; 'FD'/'FFT'/gFlex were removed.)
+        # already returned above; the former 'FD'/'FFT' solvers were removed.)
         dZ = self._gatherGlobalOnRoot(local_dZ)
         flexZ = None
         if self.tedata is not None:

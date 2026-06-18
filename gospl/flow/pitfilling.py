@@ -84,12 +84,17 @@ class PITFill(object):
         The initialisation of `PITFill` class consists in the declaration of PETSc vectors, matrices and each partition internals edge vertices.
         """
 
-        # Petsc vectors
+        # Petsc vectors. Domain spill-over outlets are the DRAINING borders
+        # (`outletIDs` = open/fixed edges); true-wall edges are excluded so a
+        # depression touching a wall fills and is contained rather than spilling
+        # out of the domain. (`idLBounds` are the parallel partition-local
+        # boundaries — unrelated to the physical domain boundary — and always
+        # participate in the spill graph.)
         edges = -np.ones((self.lpoints, 2), dtype=int)
         edges[self.idLBounds, 0] = self.idLBounds
-        edges[self.idBorders, 0] = self.idBorders
+        edges[self.outletIDs, 0] = self.outletIDs
         edges[self.idLBounds, 1] = 0
-        edges[self.idBorders, 1] = 1
+        edges[self.outletIDs, 1] = 1
         self.borders = edges
 
         self.outEdges = np.zeros(self.lpoints, dtype=int)
@@ -538,35 +543,47 @@ class PITFill(object):
 
         # Add processor number to the graph
         offset, total = self._offsetGlobal(lgrph)
-        graph = -np.ones((total, 5), dtype=float)
-        if lgrph > 0:
-            graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
-            graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
 
-        # Build global spillover graph on master. SERIAL on rank 0 (the
-        # depression-merge graph) + a Reduce-to-root and a bcast — the suspected
-        # non-scaling part of `flow`. Timed as "flow_pitgraph" (no-op when
-        # profiling off) to confirm whether it (vs the parallel solves) drives
-        # the high-rank flow plateau.
-        self.profiler.start("flow_pitgraph")
-        if MPIrank == 0:
-            mgraph = -np.ones((total, 5), dtype=float)
+        if total == 0:
+            # Fully closed domain (e.g. every edge a wall): there is no
+            # spill-over graph at all, so every depression is endorheic and the
+            # local fill from fill_tile is already final. A ggraph left at the
+            # MISSING_DATA_SENTINEL default makes fill_depressions keep that
+            # local fill (no global merge, no outflow) — and skips the serial
+            # rank-0 solve / Reduce / bcast entirely.
+            nlab = int(label.max()) + 2 if label.size else 2
+            graph = -np.ones((nlab, 5), dtype=float)
         else:
-            mgraph = None
-        self.profiler.start("flow_pit_reduce")
-        MPI.COMM_WORLD.Reduce(graph, mgraph, op=MPI.MAX, root=0)
-        self.profiler.stop("flow_pit_reduce")
-        # _fillFromEdges (serial rank-0 graph solve) self-times "flow_pit_edges".
-        if MPIrank == 0:
-            ggraph = self._fillFromEdges(mgraph)
-        else:
-            ggraph = None
+            graph = -np.ones((total, 5), dtype=float)
+            if lgrph > 0:
+                graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
+                graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
 
-        # Send filled graph dataset to each processors
-        self.profiler.start("flow_pit_bcast")
-        graph = MPI.COMM_WORLD.bcast(ggraph, root=0)
-        self.profiler.stop("flow_pit_bcast")
-        self.profiler.stop("flow_pitgraph")
+            # Build global spillover graph on master. SERIAL on rank 0 (the
+            # depression-merge graph) + a Reduce-to-root and a bcast — the
+            # suspected non-scaling part of `flow`. Timed as "flow_pitgraph"
+            # (no-op when profiling off) to confirm whether it (vs the parallel
+            # solves) drives the high-rank flow plateau.
+            self.profiler.start("flow_pitgraph")
+            if MPIrank == 0:
+                mgraph = -np.ones((total, 5), dtype=float)
+            else:
+                mgraph = None
+            self.profiler.start("flow_pit_reduce")
+            MPI.COMM_WORLD.Reduce(graph, mgraph, op=MPI.MAX, root=0)
+            self.profiler.stop("flow_pit_reduce")
+            # _fillFromEdges (serial rank-0 graph solve) self-times
+            # "flow_pit_edges".
+            if MPIrank == 0:
+                ggraph = self._fillFromEdges(mgraph)
+            else:
+                ggraph = None
+
+            # Send filled graph dataset to each processors
+            self.profiler.start("flow_pit_bcast")
+            graph = MPI.COMM_WORLD.bcast(ggraph, root=0)
+            self.profiler.stop("flow_pit_bcast")
+            self.profiler.stop("flow_pitgraph")
 
         # Drain pit on local boundaries and towards mesh edges
         keep = graph[:, 2].astype(int) == MPIrank
@@ -626,7 +643,7 @@ class PITFill(object):
             )
 
         t0 = process_time()
-        pitIDs[self.idBorders] = -1
+        pitIDs[self.outletIDs] = -1   # draining borders aren't pits; walls can be
         pitNb = self._transferIDs(pitIDs)
         if MPIrank == 0 and self.verbose:
             print(
@@ -662,7 +679,7 @@ class PITFill(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.dm.globalToLocal(self.tmp, self.tmpL)
         self.pitIDs = self.tmpL.getArray().copy().astype(int)
-        self.pitIDs[self.idBorders] = -1
+        self.pitIDs[self.outletIDs] = -1   # draining borders aren't pits; walls can be
 
         # Get directions on flats
         self._dirFlats()

@@ -263,7 +263,7 @@ class nlSPL(object):
         self.fDep[self.seaID] = 0.
         self.fDep[self.fDep > 0.99] = 0.99
         if self.flatModel:
-            self.fDep[self.idBorders] = 0.
+            self.fDep[self.outletIDs] = 0.
 
         if self._snes_ed is None:
             self._snes_ed, self._snes_ed_f = self._build_ed_snes(primary=True)
@@ -432,7 +432,7 @@ class nlSPL(object):
         self.dm.globalToLocal(self.Eb, self.EbLocal)
         E = self.EbLocal.getArray().copy()
         if self.flatModel:
-            E[self.idBorders] = 0.0
+            E[self.outletIDs] = 0.0
         E[self.lsink] = 0.0
         self.EbLocal.setArray(E)
         self.dm.localToGlobal(self.EbLocal, self.Eb)

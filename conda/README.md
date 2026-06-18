@@ -34,7 +34,7 @@ From the repository root:
 conda build conda/ -c conda-forge --override-channels --python 3.11
 ```
 
-The `-c conda-forge --override-channels` is required because `petsc4py`, `mpi4py`, `gflex` and `pyshtools` are only available on conda-forge. The `--python 3.11` is required because some host dependencies (notably the `numpy 1.26` builds that match `petsc4py`'s ABI) are not yet built for newer Python versions on osx-arm64 at the time of writing.
+The `-c conda-forge --override-channels` is required because `petsc4py`, `mpi4py` and `pyshtools` are only available on conda-forge. The `--python 3.11` is required because some host dependencies (notably the `numpy 1.26` builds that match `petsc4py`'s ABI) are not yet built for newer Python versions on osx-arm64 at the time of writing.
 
 This will:
 
@@ -78,6 +78,5 @@ mpirun -n 2 python -c "from mpi4py import MPI; print(MPI.COMM_WORLD.Get_rank())"
 ## Notes
 
 - The version string in `meta.yaml` (currently `2026.06.08`) is **hard-coded** to match `meson.build` at the time of writing. If you bump the version in `meson.build`, update `meta.yaml` AND `docs/conf.py` to match — there is no automatic syncing across these files.
-- `gflex` is pinned to `>=1.1.0` to match what conda-forge currently ships; goSPL only uses the stable `gflex.f2d.F2D` API.
-- `pyshtools` is required because the flexure backend was migrated off `isoFlex` to a spherical-harmonic implementation. `meshio` and `pyproj` are no longer dependencies.
+- `pyshtools` is required by the global (spherical) flexure backend (spherical-harmonic implementation). The flat-model flexure is solved directly on the unstructured mesh and needs no external library. `meshio`, `pyproj` and the former `gflex` dependency are no longer required.
 - The recipe builds against the `petsc4py` package on conda-forge; if you have a custom PETSc build you want to link against instead, build goSPL from source via `pip install --no-build-isolation -e .` rather than through this recipe.

@@ -149,8 +149,8 @@ solving the thin-elastic-plate biharmonic equation
 - Parallel mixed finite-volume biharmonic solve **directly on the DMPlex**
   (`_cmptFlexFEM`): the FV negative-Laplacian `Lm` applied twice gives the
   single-field system `[Lm·diag(D)·Lm + Δρg·I] w = q`. No gather-to-root, no
-  regular grid, no external dependency. (This replaced the former gFlex `FD` and
-  FFT solvers.)
+  regular grid, no external dependency. (This replaced the former `FD` and
+  `FFT` flat-model solvers.)
 - Spatially-variable elastic thickness `Te` via a `temap` time series
   (`_updateTe`, per-node) or a uniform `thick` — a single linear solve either
   way (the rigidity goes into `diag(D)`; no iteration over the contrast).

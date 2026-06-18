@@ -176,11 +176,63 @@ def minimal_ice_flex_model():
 def flat_fem_flex_model():
     """
     Flat (2D) model with the parallel FV biharmonic flexure solver
-    (`flexure: method: fem`) — solved directly on the DMPlex (no gFlex/regular
+    (`flexure: method: fem`) — solved directly on the DMPlex (no regular
     grid). 16 km domain, thin Te so the flexural response is well resolved and
     decays inside the domain. See flatbig_fem.yml.
     """
     return _instantiate("flatbig_fem.yml")
+
+
+@pytest.fixture
+def flat_wall_model():
+    """
+    Flat (2D) model with ALL edges set to wall/closed (`bc: 'wwww'`) and the sea
+    far below the domain — a fully closed continental box. Used to verify that
+    wall boundaries do not leak flow/sediment (mass must be conserved, as on a
+    closed sphere). See flat_wall.yml.
+    """
+    return _instantiate("flat_wall.yml")
+
+
+@pytest.fixture
+def cyclic_cyl_model():
+    """
+    Flat model with a CYCLIC (periodic) boundary pair (`bc: '0c0c'` → E/W
+    cyclic, N/S open). The mesh is a cylinder (the periodic axis mapped to a
+    circle), which is intrinsically flat, so its FV geometry equals a periodic
+    strip's and the seam cells link the two edges in the neighbour graph. See
+    cyclic_cyl.yml / cyclic_cyl.npz.
+    """
+    return _instantiate("cyclic_cyl.yml")
+
+
+@pytest.fixture
+def cyclic_advect_model():
+    """
+    Cyclic (periodic E/W) cylinder model with horizontal advection: a localised
+    elevation bump just inside the seam and a uniform around-seam displacement
+    (flat vx > 0) that carries it across the periodic boundary. Exercises the
+    flat→cylinder velocity transform and the cyclic-seam handling of the
+    advection solver. See cyclic_cyl_advect.yml / cyclic_cyl_advect.npz.
+
+    Keeps the fixtures dir as the working directory for the whole test: the
+    tectonics `hdisp` displacement npz is loaded lazily during runProcesses(),
+    so its relative path must still resolve after model construction.
+    """
+    yml = FIXTURES_DIR / "cyclic_cyl_advect.yml"
+    if not yml.exists():
+        pytest.skip(f"{yml.name} not present under tests/fixtures/")
+    try:
+        from gospl.model import Model
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Cannot import gospl.model: {exc!r}")
+    cwd = os.getcwd()
+    os.chdir(yml.parent)
+    try:
+        model = Model(str(yml.name), verbose=False, showlog=False)
+        yield model
+    finally:
+        os.chdir(cwd)
 
 
 @pytest.fixture

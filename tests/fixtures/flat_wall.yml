@@ -1,0 +1,33 @@
+name: wall boundary conservation test — flat domain, all edges wall (closed)
+
+domain:
+    npdata: ['flatbig','v','c','z']
+    flowdir: 5
+    bc: 'wwww'
+
+time:
+    start: 0.
+    end: 5.e3
+    tout: 5.e3
+    dt: 5.e3
+
+spl:
+    K: 2.e-6
+    d: 0.
+    m: 0.5
+    G: 1.0
+
+diffusion:
+    hillslopeKa: 0.1
+    hillslopeKm: 0.1
+
+sea:
+    position: -1000.
+
+climate:
+  - start: 0.
+    uniform: 1.
+
+output:
+    dir: 'flat_wall'
+    makedir: True

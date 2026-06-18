@@ -242,8 +242,8 @@ class hillSLP(object):
 
         diffCoeffs = sethillslopecoeff(self.lpoints, Kd)
         if self.flatModel:
-            diffCoeffs[self.idBorders, 1:] = 0.0
-            diffCoeffs[self.idBorders, 0] = 1.0
+            diffCoeffs[self.outletIDs, 1:] = 0.0
+            diffCoeffs[self.outletIDs, 0] = 1.0
 
         return self._assembleDiffMat(diffCoeffs)
 
@@ -422,7 +422,7 @@ class hillSLP(object):
             val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_sc, self.K_nb)
 
         if self.flatModel:
-            val[self.idBorders] = 0.
+            val[self.outletIDs] = 0.
 
         # Residuals
         res = h_array - self.hOldArray - self.dt * val

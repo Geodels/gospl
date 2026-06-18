@@ -190,14 +190,9 @@ Recurring magic numbers with no shared constant:
 
 The bedrock sentinel `1e6` in particular is documented in `stratplex.py:96-101` but used as a literal `1.0e6` four times in `erodeStrat` (`stratplex.py:194, 225`) with no constant. Renaming it requires grepping for `1.0e6` everywhere.
 
-### 2.7 N/S boundary swap in gFlex setup is intentional
+### 2.7 N/S boundary swap in gFlex setup — RESOLVED (gFlex removed)
 
-`gospl/tools/addprocess.py:221-222` deliberately swaps north/south:
-```python
-simflex.BC_S = self.flex_bcN
-simflex.BC_N = self.flex_bcS
-```
-(per the existing memory note). Not documented in code; a careful refactor would "fix" the apparent bug and break flexure for any user with non-default BCs.
+This item is obsolete. gFlex and its regular-grid flat-model flexure were removed; the flat model now uses the parallel FV biharmonic solver (`method='fem'`), which maps the boundary sides geographically (N=ymax, E=xmax, S=ymin, W=xmin) with no swap. There is no longer a `simflex.BC_S/BC_N` assignment in `addprocess.py`.
 
 ### 2.8 KSP/SNES failure is logged but execution continues with a zero or stale solution
 

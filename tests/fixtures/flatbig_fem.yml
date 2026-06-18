@@ -1,4 +1,4 @@
-name: flat-model flexure (FD/gflex reference for the FEM 2D A/B)
+name: flat-model FV biharmonic flexure (method='fem') test
 
 domain:
     npdata: ['flatbig','v','c','z']

@@ -286,6 +286,11 @@ class UnstMesh(object):
         mCells = None
         self.vtkMesh = None
         self.flatModel = False
+        # Cyclic (periodic) boundary support: cyclicBC is True when at least one
+        # edge pair is periodic (the input mesh is then a cylinder); cyclicPts
+        # holds the seam node ids so horizontal advection can keep them interior.
+        self.cyclicBC = False
+        self.cyclicPts = None
         if MPIrank == 0 and self.verbose:
             print(
                 "Reading mesh information (%0.02f seconds)" % (process_time() - t0),
@@ -433,15 +438,39 @@ class UnstMesh(object):
         localBound = self._get_boundary()
         idLocal = np.where(vIS.indices >= 0)[0]
         self.idBorders = np.where(np.isin(idLocal, localBound))[0]
+        # outletIDs: the boundary nodes that drain the domain (open / fixed
+        # edges). Wall ('w') edges are excluded below so their nodes behave as
+        # interior (no-flux, sediment-containing). Defaults to all borders;
+        # narrowed inside the flat-model block when any edge is a wall. The
+        # routing/pit-filling code uses outletIDs (not idBorders) for the
+        # boundary drain/discard treatment.
+        self.outletIDs = self.idBorders
+        # Boundary nodes pinned/reset by horizontal advection: the real domain
+        # edges, but never a cyclic seam (it must advect across freely). Equals
+        # idBorders unless an edge pair is cyclic.
+        self.advectBorders = self.idBorders
         nib = np.zeros(1, dtype=np.int64)
         nib[0] = len(self.idBorders)
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nib, op=MPI.MAX)
         if nib[0] > 0:
             self.flatModel = True
-            self.south = int(self.boundCond[0])
-            self.east = int(self.boundCond[1])
-            self.north = int(self.boundCond[2])
-            self.west = int(self.boundCond[3])
+            # boundCond chars (normalised in the parser) -> edge flag:
+            #   'o' open  -> 0 : deep base-level outlet (elevation forced low
+            #                    below + it acts as an outlet / drain);
+            #   'f' fixed -> 1 : fixed base-level outlet at natural elevation
+            #                    (drains — the historic behaviour);
+            #   'c' cyclic-> 2 : periodic (wrap provided by the cylinder mesh);
+            #   'w' wall  -> 3 : true no-flux wall — its edge nodes are EXCLUDED
+            #                    from `outletIDs` below so they behave as interior
+            #                    nodes (sediment is contained, not drained).
+            # Only 'o' is given the deep-sentinel treatment in `applyForces`.
+            # Edge order is [North, East, South, West] (N=ymax, E=xmax, S=ymin,
+            # W=xmin).
+            _bc = {'o': 0, 'f': 1, 'c': 2, 'w': 3}
+            self.north = _bc[self.boundCond[0]]
+            self.east = _bc[self.boundCond[1]]
+            self.south = _bc[self.boundCond[2]]
+            self.west = _bc[self.boundCond[3]]
             xmin = self.mCoords[:, 0].min()
             xmax = self.mCoords[:, 0].max()
             ymin = self.mCoords[:, 1].min()
@@ -453,6 +482,35 @@ class UnstMesh(object):
             self.northPts = np.where(np.isclose(self.lcoords[:, 1], ymax, atol=tol))[0]
             self.eastPts = np.where(np.isclose(self.lcoords[:, 0], xmax, atol=tol))[0]
             self.westPts = np.where(np.isclose(self.lcoords[:, 0], xmin, atol=tol))[0]
+
+            # True no-flux walls (flag 3): drop their edge nodes from outletIDs
+            # so they are treated as interior — flow accumulates and sediment
+            # deposits against the wall instead of draining out. idBorders is
+            # left intact (it still drives flatModel detection).
+            wall_pts = [
+                pts for flag, pts in (
+                    (self.south, self.southPts), (self.east, self.eastPts),
+                    (self.north, self.northPts), (self.west, self.westPts),
+                ) if flag == 3 and pts is not None and len(pts) > 0
+            ]
+            if wall_pts:
+                wall_nodes = np.unique(np.concatenate(wall_pts))
+                self.outletIDs = np.setdiff1d(self.idBorders, wall_nodes)
+
+            # Cyclic (periodic) edges (flag 2): the input mesh is a cylinder, so
+            # the seam nodes are NOT a real boundary — they must stay interior for
+            # horizontal advection (otherwise the advection Dirichlet would pin
+            # them and block transport across the seam).
+            cyc_pts = [
+                pts for flag, pts in (
+                    (self.south, self.southPts), (self.east, self.eastPts),
+                    (self.north, self.northPts), (self.west, self.westPts),
+                ) if flag == 2 and pts is not None and len(pts) > 0
+            ]
+            if cyc_pts:
+                self.cyclicBC = True
+                self.cyclicPts = np.unique(np.concatenate(cyc_pts))
+                self.advectBorders = np.setdiff1d(self.idBorders, self.cyclicPts)
 
         del idLocal
         vIS.destroy()
