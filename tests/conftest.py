@@ -184,6 +184,18 @@ def flat_fem_flex_model():
 
 
 @pytest.fixture
+def oro_hill_model():
+    """
+    Flat model with orographic precipitation over an ocean → coastal mountain →
+    ocean profile, wind from the west. Exercises the mesh-native (parallel, no
+    regular grid / FFT) Smith-Barstad advection-relaxation solver, its sea-level
+    clamp (no orographic forcing over submarine bathymetry) and the windward/lee
+    rain shadow. See oro_hill.yml / oro_hill.npz.
+    """
+    return _instantiate("oro_hill.yml")
+
+
+@pytest.fixture
 def flat_wall_model():
     """
     Flat (2D) model with ALL edges set to wall/closed (`bc: 'wwww'`) and the sea

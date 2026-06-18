@@ -1737,33 +1737,16 @@ class ReadYaml(object):
         Parse orographic precipitation variables.
         """
 
-        # TODO-REFACTOR: complex except, needs manual review (outer-section: sets oroOn=False on missing "orography")
         try:
             oroDict = self.input["orography"]
             self.oroOn = True
 
-            # TODO-REFACTOR: complex except, needs manual review (regdx is required when "orography" is present)
-            try:
-                self.reg_dx = oroDict["regdx"]
-            except KeyError:
-                raise ValueError("Orographic definition: regular grid spacing is required.")
-            # TODO-REFACTOR: complex except, needs manual review (try body has bounds-check + raise ValueError)
-            try:
-                self.wind_latitude = oroDict["latitude"]
-                if self.wind_latitude > 90 or self.wind_latitude < -90:
-                    print(
-                        "Latitude for orographic rain needs to be between -90 and 90.",
-                        flush=True,
-                    )
-                    raise ValueError("Latitude value not appropriately set.")
-            except KeyError:
-                self.wind_latitude = 0.0
+            # Orographic precipitation is solved directly on the unstructured
+            # mesh (advection-relaxation, no regular grid / FFT). Only the
+            # uniform wind and the moisture parameters are needed.
             self.wind_speed = oroDict.get("wind_speed", 10.)
             self.wind_dir = oroDict.get("wind_dir", 0.0)
-            self.oro_nm = oroDict.get("nm", 0.01)
-            self.oro_hw = oroDict.get("hw", 3400.0)
 
-            self.rgrd_interp = 4
             self._extraOrography(oroDict)
 
         except KeyError:

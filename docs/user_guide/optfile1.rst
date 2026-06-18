@@ -130,13 +130,13 @@ Orographic precipitation definition
 goSPL implements the Linear Theory of Orographic Precipitation following `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_.
 
 .. note::
-    
-    The model includes airflow dynamics, condensed water advection, and downslope evaporation. It consists of two vertically-integrated steady-state advection equations describing: 
 
-    1. the cloud water density and 
-    2. the hydrometeor density. 
+    The model consists of two vertically-integrated steady-state advection equations describing:
 
-    Solving these equations using Fourier transform techniques, derives a single formula relating terrain and precipitation.
+    1. the cloud water density and
+    2. the hydrometeor density,
+
+    forced by the terrain-driven uplift ``Cw·(v·∇h)`` (condensation on windward slopes, evaporation on lee slopes). goSPL solves these **directly on the unstructured mesh in parallel** (a first-order upwind finite-volume discretisation), so no regular grid or FFT is required. The windward/lee rain shadow is reproduced. The stratified mountain-wave (airflow) term of the original spectral solution is dropped, so the ``latitude``, ``nm`` and ``hw`` parameters are inert; this term mainly refines the precipitation pattern for narrow or strongly stratified ranges.
 
 .. grid:: 1
     :padding: 3
@@ -148,43 +148,43 @@ goSPL implements the Linear Theory of Orographic Precipitation following `Smith 
         .. code:: yaml
 
             orography:
-                regdx: 200.
-                latitude: 40.0  
-                wind_speed: 10.0 
-                wind_dir: 0 
-                nm: 0.005 
+                wind_speed: 10.0
+                wind_dir: 270
                 env_lapse_rate: -4
-                moist_lapse_rate: -7 
-                ref_density: 7.4e-3 
-                hw:  5000 
-                conv_time: 1000. 
-                fall_time: 1000. 
-                oro_precip_base: 7.0 
-                oro_precip_min: 0.01
-                rainfall_frequency: 1 
-            
-        This part of the input file define the parameters for the orographic rain:
+                moist_lapse_rate: -7
+                ref_density: 7.4e-3
+                conv_time: 1000.
+                fall_time: 1000.
+                precip_base: 7.0
+                precip_min: 0.01
+                rainfall_frequency: 1
 
-        a. ``regdx``: the resolution of the regular grid used to perform the orographic rain calculation.
+        This part of the input file defines the parameters for the orographic rain. All keys are optional and fall back to the defaults given below.
 
-        .. important::
+        **Wind** (sets the advection of moisture over the terrain):
 
-            If both orographic rain and flexure are turned-on then the ``regdx`` values will have to be the same. 
+        a. ``wind_speed``: uniform wind speed [m/s]; default 10. Together with the timescales below it sets the *advection length* ``wind_speed × conv/fall_time`` — how far moisture drifts downwind before it rains out. Faster wind pushes the precipitation maximum further onto the lee.
+        b. ``wind_dir``: wind direction the flow comes **from** [degrees, ``0`` = north, ``90`` = east, ``180`` = south, ``270`` = west]; default 0. It fixes which slopes are windward (uplift, rain) and which are lee (subsidence, rain shadow).
 
-        b. ``latitude``: average latitude used to compute the Coriolis factors [degrees btw -90 and 90]; default 0
-        c. ``wind_speed``: wind speed in m/s; default 10
-        d. ``wind_dir``: wind direction [0: north, 270: west]; default 0
-        e. ``nm``: moist stability frequency [1/s]; default 0.01
-        f. ``env_lapse_rate``: environmental lapse rate [degrees Celsius/km]; default -4.0
-        g. ``moist_lapse_rate``: moist adiabatic lapse rate [degrees Celsius/km]; default -7.0
-        h. ``ref_density``: reference saturation water vapor density [kg/m^3]; default 7.4e-3
-        i. ``hw``:  water vapor scale height [m]; default 3400
-        j. ``conv_time``: cloud water to hydrometeor conversion time [s]; default 1000
-        k. ``fall_time``: hydrometeor fallout time [s]; default 1000
-        l. ``oro_precip_base``: non-orographic, uniform precipitation rate [mm/h]; default 7.
-        m. ``oro_precip_min``: minimum precipitation [mm/h] when precipitation rate <= 0; default 0.01
-        n. ``rainfall_frequency``: number of storm of 1 hour duration per day; default 1
+        **Moisture sensitivity** (combine into the uplift coefficient ``Cw = ref_density × moist_lapse_rate / env_lapse_rate``, which scales the condensation source ``Cw·(v·∇h)`` and hence the overall orographic rain intensity):
 
-.. warning::
+        c. ``env_lapse_rate``: environmental lapse rate [°C/km]; default -4.0 (must be non-zero).
+        d. ``moist_lapse_rate``: moist adiabatic lapse rate [°C/km]; default -7.0.
+        e. ``ref_density``: reference saturation water-vapour density [kg/m³]; default 7.4e-3.
 
-    In case you missed it above: when **flexure** and **orographic rain** capabilities are defined in the same simulation, you will need to have the same grid resolution (``regdx``) for each definition.
+        **Microphysical timescales** (control where the rain falls relative to the crest and how sharp the rain shadow is):
+
+        f. ``conv_time``: cloud-water → hydrometeor conversion time :math:`\\tau_c` [s]; default 1000.
+        g. ``fall_time``: hydrometeor fallout time :math:`\\tau_f` [s]; default 1000. Short timescales make the rain fall on/near the windward crest with a crisp dry lee; long timescales smear it downwind.
+
+        **Rate conversion**:
+
+        h. ``precip_base``: uniform background (non-orographic) precipitation rate added everywhere [mm/h]; default 7.0.
+        i. ``precip_min``: minimum precipitation floor [mm/h] (the dried lee shadow is clamped to this); default 0.01.
+        j. ``rainfall_frequency``: number of 1-hour storms per day, used to convert the rate to m/yr; default 1.
+
+.. note::
+
+    The orographic precipitation is solved **directly on the unstructured mesh and in parallel** — there is no regular grid, no FFT and no ``regdx`` parameter. The stratified mountain-wave (airflow) term of the original spectral Smith-Barstad solution is dropped; the windward/lee rain shadow is retained, so the parameters ``latitude``, ``nm`` and ``hw`` of earlier versions are no longer used (and are silently ignored if present).
+
+    The orographic uplift is forced by the surface the airflow follows, so the elevation is **clamped to sea level**: submarine bathymetry produces no orographic rain (the air flows over the flat sea surface), and the forcing only switches on where land rises above the sea.

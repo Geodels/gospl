@@ -174,7 +174,7 @@ solving the thin-elastic-plate biharmonic equation
 
 `method`, `rhoa` (mantle density, default 3300), `rhoc` (load/fill density →
 `flex_rhos`, default 2300), `young` (Young's modulus, 65 GPa), `nu` (Poisson,
-0.25), `thick` (uniform `Te`, m), `regdx` (Cartesian grid spacing),
+0.25), `thick` (uniform `Te`, m),
 `res_deg` (DH grid resolution), `bcN/S/E/W`. Ice load is converted to an
 equivalent sediment thickness before loading. The deflection is accumulated into
 `localFlex` (an output field).
