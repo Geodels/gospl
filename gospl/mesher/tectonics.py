@@ -1,5 +1,4 @@
 import os
-import gc
 import sys
 import petsc4py
 import numpy as np
@@ -43,6 +42,18 @@ class Tectonics(object):
         self.plateStep = False
 
         self.fiso = self.hGlobal.duplicate()
+
+        # Cached horizontal-advection operator (FV upwind / IIOE). The matrix
+        # coefficients depend only on the face velocities (refreshed when the
+        # tectonic interval advances) and on `self.dt`, so within an interval at
+        # fixed dt the operator is constant: build it once and reuse it, along
+        # with its KSP (so the block-Jacobi PCSetUp is factorised once too).
+        self._advMatLeft = None
+        self._advMatRight = None
+        self._advKSP = None
+        self._advNbOut = None
+        self._advDt = None
+        self._advRebuild = True
 
         return
 
@@ -104,8 +115,10 @@ class Tectonics(object):
                     else:
                         nodeVel = self.hdisp.copy()
                     # Store velocity on voronoi edges and dot product based on
-                    # vecocity vector and face normals.
+                    # vecocity vector and face normals. The face velocities just
+                    # changed, so the cached advection operator must be rebuilt.
                     getfacevelocity(self.lpoints, nodeVel)
+                    self._advRebuild = True
             else:
                 self.hdisp = None
 
@@ -173,7 +186,18 @@ class Tectonics(object):
 
     def _buildAdvecMat(self, iioe, lCoeffs, rCoeffs=None):
         """
-        Create the advection matrix.
+        Build the advection operator(s) from the per-cell FV coefficients
+        ``(lpoints, 1+maxnb)`` (col 0 = diagonal, cols ``1..maxnb`` = neighbour
+        entries for ``self.FVmesh_ngbID``) in a single-pass CSR assembly
+        (``_assembleDiffMatCSR``) rather than the old ``maxnb``-matrix ``axpy``
+        loop.
+
+        :arg iioe: True for the IIOE scheme (build both left/right operators);
+            False for the implicit upwind scheme (left operator only).
+        :arg lCoeffs: left (implicit) coefficients.
+        :arg rCoeffs: right (explicit) coefficients (IIOE only).
+
+        :return: ``(advMat_left, advMat_right)`` if ``iioe`` else ``advMat_left``.
         """
 
         if self.flatModel:
@@ -186,52 +210,43 @@ class Tectonics(object):
                 rCoeffs[self.advectBorders, 1:] = 0.0
                 rCoeffs[self.advectBorders, 0] = 1.0
 
-        advMat_left = self._matrix_build_diag(lCoeffs[:, 0])
+        advMat_left = self._assembleDiffMatCSR(lCoeffs)
         if iioe:
-            advMat_right = self._matrix_build_diag(rCoeffs[:, 0])
-        else:
-            advMat_right = None
-
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-
-        for k in range(0, self.maxnb):
-            tmpMat = self._matrix_build()
-            indices = self.FVmesh_ngbID[:, k].copy()
-            data = lCoeffs[:, k + 1]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-            advMat_left.axpy(1.0, tmpMat)
-            tmpMat.destroy()
-            if iioe:
-                tmpMat = self._matrix_build()
-                indices = self.FVmesh_ngbID[:, k].copy()
-                data = rCoeffs[:, k + 1]
-                ids = np.nonzero(data == 0.0)
-                indices[ids] = ids
-                tmpMat.assemblyBegin()
-                tmpMat.setValuesLocalCSR(
-                    indptr,
-                    indices.astype(petsc4py.PETSc.IntType),
-                    data,
-                )
-                tmpMat.assemblyEnd()
-                advMat_right.axpy(1.0, tmpMat)
-                tmpMat.destroy()
-        if iioe:
+            advMat_right = self._assembleDiffMatCSR(rCoeffs)
             return advMat_left, advMat_right
-        else:
-            return advMat_left
+        return advMat_left
 
-    def _advectorIIOE2(self, vL, newv, vmin, vmax, nbOut):
+    def _advSolve(self, rhs, sol):
         """
-        Perform the advection for the Inflow-Implicit/Outflow-Explicit Scheme 2.
+        Solve one advection system with the cached operator + KSP. ``sol`` must
+        carry the warm-start guess on entry (the field's pre-advection value),
+        which is close to the solution since advection moves it only slightly.
+        Falls back to the fgmres/asm solver if the cached KSP diverges.
+        """
+
+        ksp = self._advKSP
+        ksp.solve(rhs, sol)
+        if ksp.getConvergedReason() < 0:
+            sol = self._solve_KSP2(self._advMatLeft, rhs, sol)
+
+        return sol
+
+    def _advectorIIOE2(self, gvec, vL, newv, vmin, vmax, nbOut):
+        """
+        Perform the advection for the Inflow-Implicit/Outflow-Explicit Scheme 2:
+        an anti-diffusion correction applied where the Scheme-1 result
+        (``newv``) over/undershoots the local neighbourhood range
+        ``[vmin, vmax]``. The correction operator depends on the per-field range,
+        so it is built fresh each call (not cached) and writes the corrected
+        result back into ``self.tmp``.
+
+        :arg gvec: the field's pre-advection global Vec (the explicit operator
+            multiplies THIS field — previously hard-wired to ``self.hGlobal``,
+            which corrupted the correction for cumED/flexure/soil).
+        :arg vL: the field's pre-advection local array.
+        :arg newv: the Scheme-1 advected local array.
+        :arg vmin, vmax: local neighbourhood min/max of the pre-advection field.
+        :arg nbOut: outflow-neighbour count from ``adveciioe``.
         """
 
         diffmax = newv - vmax
@@ -246,7 +261,7 @@ class Tectonics(object):
         if excess > 0.:
             lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, vL, vmin, vmax)
             advMat_left2, advMat_right2 = self._buildAdvecMat(True, lCoeffs, rCoeffs)
-            advMat_right2.mult(self.hGlobal, self.tmp1)
+            advMat_right2.mult(gvec, self.tmp1)
             self._solve_KSP(True, advMat_left2, self.tmp1, self.tmp)
             advMat_left2.destroy()
             advMat_right2.destroy()
@@ -279,130 +294,62 @@ class Tectonics(object):
         """
 
         t0 = process_time()
-        iioe = True
-        if self.advscheme == 1:
-            iioe = False
+        iioe = self.advscheme != 1
 
-        # Advection matrix construction
-        if iioe:
-            if self.advscheme == 3:
-                # Minimum and maximum in a local neighborhood
-                hL = self.hLocal.getArray().copy()
-                hmin, hmax = getrange(self.lpoints, hL)
-            nbOut, lCoeffs, rCoeffs = adveciioe(self.lpoints, self.dt)
-            advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
-        else:
-            lCoeffs = advecupwind(self.lpoints, self.dt)
-            advMat_left = self._buildAdvecMat(iioe, lCoeffs)
-
-        # Advect elevations
-        if iioe:
-            # Inflow-Implicit/Outflow-Explicit Scheme 1
-            advMat_right.mult(self.hGlobal, self.tmp1)
-            self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
-            # Inflow-Implicit/Outflow-Explicit Scheme 2
-            if self.advscheme == 3:
-                self.dm.globalToLocal(self.tmp, self.tmpL)
-                newh = self.tmpL.getArray()
-                self._advectorIIOE2(hL, newh, hmin, hmax, nbOut)
-        else:
-            # Upwind scheme with potentially excessive diffusion solved implicitly
-            self._solve_KSP(True, advMat_left, self.hGlobal, self.tmp)
-
-        # Update elevations
-        self.tmp.copy(result=self.hGlobal)
-        self.dm.globalToLocal(self.hGlobal, self.hLocal)
-        if self.flatModel:
-            hL = self.hLocal.getArray().copy()
-            hL[self.advectBorders] = MISSING_DATA_SENTINEL
-            nhL = fitedges(hL)
-            self.hLocal.setArray(nhL)
-            self.dm.localToGlobal(self.hLocal, self.hGlobal)
-
-        # Advect erosion deposition
-        if iioe:
-            if self.advscheme == 3:
-                self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-                # Minimum and maximum in a local neighborhood
-                edL = self.cumEDLocal.getArray().copy()
-                edmin, edmax = getrange(self.lpoints, edL)
-            # Inflow-Implicit/Outflow-Explicit Scheme 1
-            advMat_right.mult(self.cumED, self.tmp1)
-            self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
-            # Inflow-Implicit/Outflow-Explicit Scheme 2
-            if self.advscheme == 3:
-                self.dm.globalToLocal(self.tmp, self.tmpL)
-                newed = self.tmpL.getArray()
-                self._advectorIIOE2(edL, newed, edmin, edmax, nbOut)
-        else:
-            # Upwind scheme with potentially excessive diffusion solved implicitly
-            self._solve_KSP(True, advMat_left, self.cumED, self.tmp)
-
-        # Update erosion deposition
-        self.tmp.copy(result=self.cumED)
-        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-        if self.flatModel:
-            edL = self.cumEDLocal.getArray().copy()
-            edL[self.advectBorders] = MISSING_DATA_SENTINEL
-            nedL = fitedges(edL)
-            self.cumEDLocal.setArray(nedL)
-            self.dm.localToGlobal(self.cumEDLocal, self.cumED)
-
-        # Advect flexural isostasy
-        if self.flexOn:
+        # Build (or reuse) the cached advection operator + KSP. The coefficients
+        # depend only on the face velocities (refreshed on tectonic-interval
+        # change, which sets `_advRebuild`) and on `self.dt`, so within an
+        # interval at fixed dt the operator is constant: assemble it once and
+        # reuse it (and its block-Jacobi PCSetUp) across every step.
+        if self._advRebuild or self._advDt != self.dt:
+            if self._advMatLeft is not None:
+                self._advMatLeft.destroy()
+            if self._advMatRight is not None:
+                self._advMatRight.destroy()
+                self._advMatRight = None
             if iioe:
-                if self.advscheme == 3:
-                    self.tmpL.setArray(self.localFlex)
-                    self.dm.localToGlobal(self.tmpL, self.fiso)
-                    # Minimum and maximum in a local neighborhood
-                    fimin, fimax = getrange(self.lpoints, self.localFlex)
-                # Inflow-Implicit/Outflow-Explicit Scheme 1
-                advMat_right.mult(self.fiso, self.tmp1)
-                self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
-                # Inflow-Implicit/Outflow-Explicit Scheme 2
-                if self.advscheme == 3:
-                    self.dm.globalToLocal(self.tmp, self.tmpL)
-                    newfi = self.tmpL.getArray()
-                    self._advectorIIOE2(self.localFlex, newfi, fimin, fimax, nbOut)
+                self._advNbOut, lCoeffs, rCoeffs = adveciioe(self.lpoints, self.dt)
+                self._advMatLeft, self._advMatRight = self._buildAdvecMat(
+                    True, lCoeffs, rCoeffs
+                )
             else:
-                self.tmpL.setArray(self.localFlex)
-                self.dm.localToGlobal(self.tmpL, self.fiso)
-                # Upwind scheme with potentially excessive diffusion solved implicitly
-                self._solve_KSP(True, advMat_left, self.fiso, self.tmp)
+                lCoeffs = advecupwind(self.lpoints, self.dt)
+                self._advMatLeft = self._buildAdvecMat(False, lCoeffs)
+            if self._advKSP is None:
+                self._advKSP = self._makeDiffusionKSP("advect_")
+            self._advKSP.setOperators(self._advMatLeft, self._advMatLeft)
+            self._advDt = self.dt
+            self._advRebuild = False
 
-            # Update flexural isostasy
-            self.tmp.copy(result=self.fiso)
+        nbOut = self._advNbOut if iioe else None
+
+        # Each field is advected the same way; only the boundary-edge treatment
+        # differs (elevation/cumED are re-extrapolated, flexure/soil are not).
+        self._advectField(self.hGlobal, iioe, nbOut)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        self._resetEdges(self.hLocal, self.hGlobal, MISSING_DATA_SENTINEL)
+
+        # cumED uses the large-magnitude sentinel (consistent with
+        # `_advectPlates`): cumulative erosion/deposition can exceed the
+        # MISSING_DATA_SENTINEL magnitude, so a smaller marker could collide.
+        self._advectField(self.cumED, iioe, nbOut)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self._resetEdges(self.cumEDLocal, self.cumED, MISSING_LARGE_SENTINEL)
+
+        # Flexural isostasy (carried in the numpy `localFlex`; no edge reset).
+        if self.flexOn:
+            self.tmpL.setArray(self.localFlex)
+            self.dm.localToGlobal(self.tmpL, self.fiso)
+            self._advectField(self.fiso, iioe, nbOut)
             self.dm.globalToLocal(self.fiso, self.tmpL)
             self.localFlex = self.tmpL.getArray().copy()
 
-        # Advect soil thickness
+        # Soil thickness (no edge reset; clamped to a physical range after).
         if self.cptSoil:
-            if iioe:
-                if self.advscheme == 3:
-                    self.Lsoil.copy(result=self.tmpL)
-                    # Minimum and maximum in a local neighborhood
-                    lsoil = self.Lsoil.getArray().copy()
-                    somin, somax = getrange(self.lpoints, lsoil)
-                # Inflow-Implicit/Outflow-Explicit Scheme 1
-                advMat_right.mult(self.Gsoil, self.tmp1)
-                self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
-                # Inflow-Implicit/Outflow-Explicit Scheme 2
-                if self.advscheme == 3:
-                    self.dm.globalToLocal(self.tmp, self.tmpL)
-                    newsoil = self.tmpL.getArray()
-                    self._advectorIIOE2(lsoil, newsoil, somin, somax, nbOut)
-            else:
-                # Upwind scheme with potentially excessive diffusion solved implicitly
-                self._solve_KSP(True, advMat_left, self.Gsoil, self.tmp)
-
-            # Update soil thickness after advection
-            self.tmp.copy(result=self.Gsoil)
+            self._advectField(self.Gsoil, iioe, nbOut)
             self.dm.globalToLocal(self.Gsoil, self.Lsoil)
-
-            # Limit soil thickness
             lsoil = self.Lsoil.getArray().copy()
-            lsoil[lsoil < 0.] = 0.
-            lsoil[lsoil > self.soil_transition] = self.soil_transition
+            np.clip(lsoil, 0.0, self.soil_transition, out=lsoil)
             self.Lsoil.setArray(lsoil)
             self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
@@ -412,15 +359,64 @@ class Tectonics(object):
                 flush=True,
             )
 
-        # Clean
-        if iioe:
-            advMat_right.destroy()
-            del rCoeffs
+        return
 
-        advMat_left.destroy()
-        if self.flatModel:
-            del nedL, nhL
-        gc.collect()
+    def _advectField(self, gvec, iioe, nbOut):
+        """
+        Advect one global field Vec **in place** with the cached advection
+        operator (and, for IIOE Scheme 2, the anti-diffusion correction).
+
+        The field's current value is used as the warm-start guess (advection
+        moves it only slightly, so this converges in very few iterations).
+
+        Scratch used: ``self.tmp`` (solution), ``self.tmp1`` (RHS), ``self.tmpL``
+        (local views for the Scheme-2 range/correction).
+
+        :arg gvec: global field Vec (overwritten with the advected field).
+        :arg iioe: True for the IIOE schemes, False for implicit upwind.
+        :arg nbOut: outflow-neighbour count (IIOE Scheme 2 only; else None).
+        """
+
+        if iioe and self.advscheme == 3:
+            # Neighbourhood min/max of the pre-advection field for Scheme 2.
+            self.dm.globalToLocal(gvec, self.tmpL)
+            fL = self.tmpL.getArray().copy()
+            fmin, fmax = getrange(self.lpoints, fL)
+
+        gvec.copy(result=self.tmp)            # warm-start guess
+        if iioe:
+            self._advMatRight.mult(gvec, self.tmp1)
+            self._advSolve(self.tmp1, self.tmp)
+            if self.advscheme == 3:
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self._advectorIIOE2(gvec, fL, self.tmpL.getArray(), fmin, fmax, nbOut)
+        else:
+            self._advSolve(gvec, self.tmp)
+
+        self.tmp.copy(result=gvec)
+
+        return
+
+    def _resetEdges(self, lvec, gvec, sentinel):
+        """
+        Flat-model only: mark the (non-periodic) domain-edge nodes with
+        ``sentinel`` and re-extrapolate them from their interior neighbours with
+        ``fitedges``, then sync the global Vec. No-op on a global/sphere mesh.
+
+        :arg lvec: local Vec of the field (read + rewritten).
+        :arg gvec: matching global Vec (rewritten from ``lvec``).
+        :arg sentinel: edge marker (``fitedges`` treats any value ``<= -1e7`` as
+            missing, so both data/large sentinels are recognised).
+        """
+
+        if not self.flatModel:
+            return
+
+        arr = lvec.getArray().copy()
+        arr[self.advectBorders] = sentinel
+        arr = fitedges(arr)
+        lvec.setArray(arr)
+        self.dm.localToGlobal(lvec, gvec)
 
         return
 

@@ -27,7 +27,7 @@ Initial mesh definition and simulation declaration
             domain:
                 npdata: ['input/mesh','v','c','z']
                 flowdir: 5
-                bc:'0101'
+                bc:'ofof'
                 fast: False
                 seadepo: True
                 nperodep: 'input/erodep20Ma'
@@ -54,7 +54,11 @@ Initial mesh definition and simulation declaration
 
            .. important::
 
-              A cyclic run **requires a periodic input mesh** in that direction: the mesh must be a **cylinder** (the periodic axis wrapped onto a circle whose circumference is the domain width), so that its cells genuinely connect the two seam edges. A cylinder is intrinsically flat, so its finite-volume geometry is identical to a periodic flat strip's; goSPL detects the cylinder's two open ends as the (non-periodic) boundary and routes flow/sediment across the seam through the wrapping cells. goSPL does **not** synthesise the wrap from an ordinary flat mesh (a planar wrap would have incorrect seam geometry). This works in parallel.
+              A cyclic run **requires a periodic input mesh** in that direction: the mesh must be a **cylinder** (the periodic axis wrapped onto a circle whose circumference is the domain width), so that its cells genuinely connect the two seam edges. A cylinder is intrinsically flat, so its finite-volume geometry is identical to a periodic flat strip's; goSPL detects the cylinder's two open ends as the (non-periodic) boundary and routes flow/sediment across the seam through the wrapping cells. goSPL does **not** synthesise the wrap from an ordinary flat mesh (a planar wrap would have incorrect seam geometry).
+
+              .. warning::
+
+                 Cyclic boundaries are currently **serial-only** (a single MPI rank). When the periodic cylinder seam is split by the parallel partitioner the finite-volume operators become ill-conditioned, so a parallel cyclic run hangs (sediment-deposition diffusion) or collapses the elevation field (horizontal advection). goSPL therefore **raises an error** if a cyclic ``bc`` is combined with more than one MPI rank. Run cyclic models on a single rank, or use open/fixed/wall boundaries for parallel runs. (A parallel-safe cylinder-seam discretisation is planned.)
 
            .. note::
 

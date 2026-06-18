@@ -1055,6 +1055,8 @@ class UnstMesh(object):
             "_ksp_picard",
             "_flexLm", "_flexA", "_flexKSP",
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
+            "_advMatLeft", "_advMatRight", "_advKSP",
+            "_oroAc", "_oroAf", "_oroKSP", "_oroQc", "_oroQs",
         ):
             obj = getattr(self, name, None)
             if obj is not None:
