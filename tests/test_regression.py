@@ -3540,6 +3540,13 @@ def test_advection_parallel(tmp_path):
     cached operator + single-pass CSR assembly + per-field warm start must be
     partition-correct. (The cyclic cylinder mesh has a separate, documented
     parallel bug and is intentionally NOT used here.)
+
+    Also guards against the continental-sediment closed-sink deadlock: the
+    full `runProcesses` pipeline drives `sedplex._distributeSediment`, whose
+    closed-sink conservation closure must reduce its `_closedDepo.any()` guard
+    across ranks before running collective DM scatters. Before that fix this
+    test hung at np=2 (one rank in the scatter block, the other already in
+    `_spillCoords`'s Allreduce) and timed out at 600s.
     """
     import json
     import os

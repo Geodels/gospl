@@ -464,7 +464,17 @@ class SEDMesh(object):
         # corner of an all-wall box). No-op on open / marine domains. NOTE: this
         # does NOT make a fully-closed multi-step domain conserve once its basins
         # saturate — see the "wall" boundary note in the docs / AGENTS.
-        if self._closedDepo is not None and self._closedDepo.any():
+        # Whether ANY rank has closed-sink sediment to deposit must be decided
+        # collectively: the block below runs DM scatters (localToGlobal /
+        # globalToLocal), which are collective over the comm. On an open domain
+        # a closed flow-terminal node (interior pit-less low point) can land on
+        # one rank but not another, so a rank-local `_closedDepo.any()` guard
+        # would let one rank enter the scatters while another skips ahead to
+        # `_updateSinks` -> deadlock. Reduce the flag with LOR so every rank
+        # takes the same branch; ranks with no closed sink contribute zeros.
+        has_closed = self._closedDepo is not None and bool(self._closedDepo.any())
+        has_closed = MPI.COMM_WORLD.allreduce(has_closed, op=MPI.LOR)
+        if has_closed:
             delta = np.zeros(self.lpoints)
             nz = self._closedDepo > 0.0
             delta[nz] = self._closedDepo[nz] / self.larea[nz]   # volume -> thickness
