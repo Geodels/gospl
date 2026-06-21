@@ -17,7 +17,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fill_edges
     from gospl._fortran import fill_dir
     from gospl._fortran import nghb_dir
-    from gospl._fortran import fill_rcvs
     from gospl._fortran import getpitvol
     from gospl._fortran import pits_cons
     from gospl._fortran import fill_depressions
@@ -528,8 +527,50 @@ class PITFill(object):
         self.dm.globalToLocal(self.tmp, self.tmpL, 3)
         pdir = self.tmpL.getArray().copy().astype(int)
 
-        # Define receiver nodes on each depression
-        self.flatDirs = fill_rcvs(self.pitIDs, self.lFill, pdir)
+        # Define receiver nodes on each depression — PARTITION-INVARIANT.
+        #
+        # Each flat node routes to a neighbour strictly closer to the spill
+        # (smaller `pdir`, not higher: lFill[c] <= lFill[i]). `pdir` is itself
+        # partition-invariant, but in a flat region MANY neighbours tie at the
+        # minimum distance, and the fortran `fill_rcvs` broke that tie by
+        # "first in FVnID neighbour order" — which is partition-DEPENDENT (local
+        # numbering/halo), so the same node picked a different (equally-valid)
+        # receiver at different rank counts (~0.5% of nodes on a 370k earth
+        # mesh). That made the assembled (I - W^T) operator partition-dependent
+        # → the near-singular pinches / KSP failures that varied with the cut.
+        #
+        # We resolve the tie on `locIDs` (the input-mesh id), which IS
+        # partition-invariant (unlike `self.gid`, PETSc's per-partition
+        # numbering). Among the strictly-closer, not-higher neighbours we pick
+        # the smallest `pdir`, ties broken by smallest `locIDs` — identical
+        # across any decomposition. Replaces the fortran `fill_rcvs` tie-break;
+        # non-tied cases are unchanged.
+        ngb = self.FVmesh_ngbID                       # (n, K) local ids, -1 pad
+        n = self.lpoints
+        valid = ngb >= 0
+        cidx = np.where(valid, ngb, 0)
+        cpd = pdir[cidx]
+        ch = self.lFill[cidx]
+        clid = self.locIDs[cidx].astype(np.int64)
+        cand = (
+            valid
+            & (cpd > -1)
+            & (cpd < pdir[:, None])
+            & (ch <= self.lFill[:, None])
+            & (self.pitIDs[:, None] > -1)
+        )
+        BIG = np.iinfo(np.int64).max
+        nid = np.int64(self.locIDs.max()) + 1         # lexicographic (pdir, locID)
+        comp = np.where(cand, cpd.astype(np.int64) * nid + clid, BIG)
+        kbest = comp.argmin(axis=1)
+        rows = np.arange(n)
+        has = comp[rows, kbest] < BIG
+        self.flatDirs = np.full(n, -1, dtype=np.int32)
+        ispit = self.pitIDs > -1
+        # pit node with a candidate -> chosen receiver; pit node w/o -> self (sink)
+        self.flatDirs[ispit] = np.where(
+            has[ispit], ngb[rows, kbest][ispit], rows[ispit]
+        ).astype(np.int32)
         self.flatDirs[self.lspillIDs] = -1
 
         return
