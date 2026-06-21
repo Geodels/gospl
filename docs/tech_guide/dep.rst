@@ -45,6 +45,8 @@ On a distributed (MPI) mesh goSPL follows the three-phase structure of `Barnes e
 
   The cross-partition label unification (step 2) uses a **union-find** (disjoint-set) pass: every connected component of the equivalence graph is collapsed to its minimum label in a single deterministic sweep. This makes the depression identifiers **independent of how the domain is partitioned** — the filled surface is identical regardless of the number of processors. The serial graph solve itself uses a binary-heap priority queue and a compact (densely re-indexed) label space so its cost tracks the number of distinct spillover basins, not the (rank-dependent, globally-offset) raw label range.
 
+  The rest of the depression *graph* built on the filled surface is partition-invariant for the same reason — every tie is broken by the node's input-mesh index rather than the (partition-dependent) local ordering. Pit **membership** (the connected set of equal-fill cells reaching a depression bottom), each pit's **spill point** (the lowest-index qualifying rim cell), and the **flat-region routing** toward that spill (a relaxed shortest-path distance) are therefore identical across any number of processors. As a result the assembled flow operator — and in particular the set of genuinely un-drainable isolated pockets that fall back to local sinks — is bit-for-bit reproducible regardless of the decomposition.
+
 Depression filling
 ---------------------------------
 

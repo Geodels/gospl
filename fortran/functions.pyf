@@ -110,42 +110,6 @@ python module _fortran
             integer, optional,check(len(h)>=nb),depend(h) :: nb=len(h)
         end subroutine fitedges
 
-        subroutine scale_volume(ids,vscale,scale,nb,n)
-            integer dimension(nb),intent(in) :: ids
-            double precision dimension(n),intent(in) :: vscale
-            double precision dimension(nb),intent(out),depend(nb) :: scale
-            integer, optional,check(len(ids)>=nb),depend(ids) :: nb=len(ids)
-            integer, optional,check(len(vscale)>=n),depend(vscale) :: n=len(vscale)
-        end subroutine scale_volume
-
-        subroutine distocean(nrcv,sid,flux,rcv,wght,area,depth,dep,nb,nbi)
-            integer :: nrcv
-            integer dimension(nbi),intent(in) :: sid
-            double precision dimension(nb),intent(in) :: flux
-            integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcv
-            double precision dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: wght
-            double precision dimension(nb),intent(in),depend(nb) :: area
-            double precision dimension(nb),intent(in),depend(nb) :: depth
-            double precision dimension(nb),intent(out),depend(nb) :: dep
-            integer, optional,check(len(sid)>=nbi),depend(sid) :: nbi=len(sid)
-            integer, optional,check(len(flux)>=nb),depend(flux) :: nb=len(flux)
-        end subroutine distocean
-
-        subroutine donorslist(nrcv,inids,rcvs,donors,nb)
-            integer intent(in) :: nrcv
-            integer dimension(nb),intent(in) :: inids
-            integer dimension(nb,nrcv),intent(in),depend(nb,nrcv) :: rcvs
-            integer dimension(nb,12),intent(out),depend(nb) :: donors
-            integer, optional,check(len(inids)>=nb),depend(inids) :: nb=len(inids)
-        end subroutine donorslist
-
-        subroutine donorsmax(dat,donors,valmax,nb)
-            double precision dimension(nb),intent(in) :: dat
-            integer dimension(nb,12),intent(in),depend(nb) :: donors
-            double precision dimension(nb),intent(out),depend(nb) :: valmax
-            integer, optional,check(len(dat)>=nb),depend(dat) :: nb=len(dat)
-        end subroutine donorsmax
-
         subroutine mfdrcvrs(nrcv,exp,elev,sl,gid,rcv,dist,wgt,nb)
             integer intent(in) :: nrcv
             double precision intent(in) :: exp
@@ -205,28 +169,6 @@ python module _fortran
             integer, optional,check(shape(ids,0)==nb),depend(ids) :: nb=shape(ids,0)
         end subroutine strataonesed
 
-        subroutine stratathreesed(n,stratnb,ids,weights,strath,stratz,stratf,stratw,phis,phif,phiw,nstrath,nstratz,nstratf,nstratw,nphis,nphif,nphiw,nb)
-            integer intent(in) :: n
-            integer intent(in) :: stratnb
-            integer dimension(nb,3),intent(in) :: ids
-            double precision dimension(nb,3),intent(in),depend(nb) :: weights
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: strath
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: stratz
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: stratf
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: stratw
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: phis
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: phif
-            double precision dimension(n,stratnb),intent(in),depend(n,stratnb) :: phiw
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstrath
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratz
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratf
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nstratw
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphis
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphif
-            double precision dimension(nb,stratnb),intent(out),depend(nb,stratnb) :: nphiw
-            integer, optional,check(shape(ids,0)==nb),depend(ids) :: nb=shape(ids,0)
-        end subroutine stratathreesed
-
         subroutine label_pits(lvl,fill,label,nb)
             double precision,intent(in) :: lvl
             double precision dimension(nb),intent(in) :: fill
@@ -257,18 +199,6 @@ python module _fortran
             integer intent(in) :: graphnb
             double precision dimension(graphnb,4),intent(out),depend(graphnb) :: newwgraph
         end subroutine graph_nodes
-
-        subroutine spill_pts(mpirk,pitsnb,elev,pitids,border,spill,lspill,rank,m)
-            integer intent(in) :: mpirk
-            integer intent(in) :: pitsnb
-            double precision dimension(m),intent(in) :: elev
-            integer dimension(m),intent(in),depend(m) :: pitids
-            integer dimension(m),intent(in),depend(m) :: border
-            integer dimension(pitsnb),intent(out),depend(pitsnb) :: spill
-            integer dimension(m),intent(out),depend(m) :: lspill
-            integer dimension(pitsnb),intent(out),depend(pitsnb) :: rank
-            integer, optional,check(len(elev)>=m),depend(elev) :: m=len(elev)
-        end subroutine spill_pts
 
         subroutine sort_ids(df1,df2,id2,m)
             integer dimension(m),intent(in) :: df1
@@ -318,14 +248,6 @@ python module _fortran
             integer, optional,check(len(spill)>=m),depend(spill) :: m=len(spill)
             integer, optional,check(len(pitids)>=n),depend(pitids) :: n=len(pitids)
         end subroutine fill_dir
-
-        subroutine fill_rcvs(pitids,h,ptdir,rcvs,n)
-            integer dimension(n),intent(in) :: pitids
-            double precision dimension(n),intent(in) :: h
-            integer dimension(n),intent(in),depend(n) :: ptdir
-            integer dimension(n),intent(out),depend(n) :: rcvs
-            integer, optional,check(len(pitids)>=n),depend(pitids) :: n=len(pitids)
-        end subroutine fill_rcvs
 
         subroutine nghb_dir(pitids,h,ptdir,nptdir,n)
             integer dimension(n),intent(in) :: pitids
@@ -384,32 +306,6 @@ python module _fortran
             integer, optional,check(shape(coords,0)==nb),depend(coords) :: nb=shape(coords,0)
             integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
         end subroutine definetin
-
-        subroutine stencil(nb,ngbid,maxnb)
-            integer intent(in) :: nb
-            integer dimension(nb,41),intent(out),depend(nb) :: ngbid
-            integer,intent(out) :: maxnb
-        end subroutine stencil
-
-        subroutine definegtin(nb,cells_nodes,edges_nodes,ngbnb,ngbid,n,m)
-            integer intent(in) :: nb
-            integer dimension(n,3),intent(in) :: cells_nodes
-            integer dimension(m,2),intent(in) :: edges_nodes
-            integer dimension(nb),intent(out),depend(nb) :: ngbnb
-            integer dimension(nb,12),intent(out),depend(nb) :: ngbid
-            integer, optional,check(shape(cells_nodes,0)==n),depend(cells_nodes) :: n=shape(cells_nodes,0)
-            integer, optional,check(shape(edges_nodes,0)==m),depend(edges_nodes) :: m=shape(edges_nodes,0)
-        end subroutine definegtin
-
-        subroutine gfill(sl,elev,ngbid,hmax,fillz,nb)
-            use meshparams
-            double precision intent(in) :: sl
-            double precision dimension(nb),intent(in) :: elev
-            integer dimension(nb,12),intent(in),depend(nb) :: ngbid
-            double precision intent(in) :: hmax
-            double precision dimension(nb),intent(out) :: fillz
-            integer, optional,check(len(elev)>=nb),depend(elev) :: nb=len(elev)
-        end subroutine gfill
 
         subroutine filllabel(sl,elev,ngbid,fillz,labels,nb)
             use meshparams

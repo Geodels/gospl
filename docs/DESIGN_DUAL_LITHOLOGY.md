@@ -23,13 +23,12 @@ in `docs/tech_guide/strat.rst` once shipped.
 | Composition source | **Per stratigraphic layer** — each layer carries its own coarse/fine split; eroded material inherits the composition of the layer(s) it came from |
 | Transport | **Separate** — fines travel farther (distal basin / depocenter); coarse stays proximal |
 | Lake/depression behaviour | Coarse builds **inlet deltas**, fines settle in the **depocenter**; fine-enriched overspill may bypass downstream while coarse is trapped |
-| Fortran kernel | **Call `strataonesed` twice** (once for the total/coarse pile, once for the fine pile) — no Fortran change. NOT `stratathreesed`: it treats its extra fields as 0–1 fractions and renormalises (`functions.F90:1968`), which conflicts with the bulk-thickness representation used here. |
+| Fortran kernel | **Call `strataonesed` twice** (once for the total/coarse pile, once for the fine pile) — no Fortran change. A 3-fraction kernel would be wrong: it would treat its extra fields as 0–1 fractions and renormalise them, conflicting with the bulk-thickness representation used here. |
 
-The dormant `stratathreesed` 3-fraction kernel exists but is never called and
-its fraction semantics don't match this design's bulk-thickness `stratHf`;
-Phase 5 reuses `strataonesed` (already bound, `stratplex.py:13`) a second time
-for the fine pile instead. This design wires up the
-2-fraction subset of it.
+A dormant `stratathreesed` 3-fraction kernel used to exist but was never called
+and its fraction semantics didn't match this design's bulk-thickness `stratHf`,
+so it was removed 2026-06 (dead-Fortran cleanup). Phase 5 reuses `strataonesed`
+(already bound, `stratplex.py:13`) a second time for the fine pile instead.
 
 ---
 
