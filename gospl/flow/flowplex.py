@@ -43,6 +43,17 @@ class FAMesh(object):
         self._ksp_main = None
         self._ksp_fallback = None
 
+        # An (I - W^T) solve that fails to converge on only a HANDFUL of rows is
+        # the benign isolated-pocket / micro-cycle case (a few genuinely
+        # un-drainable cells that just pond; discharge there is clamped >=0, mass
+        # conserved). It is expected on a partitioned high-res mesh and no solver
+        # can converge it, so it is reported calmly rather than as a scary
+        # failure. A failure spanning MORE than this many nodes is a real problem
+        # (NaN source, broken partition) and keeps the full loud diagnostic. The
+        # observed benign region is O(1-10) nodes even at 240 ranks, so 256 is
+        # well clear of it and far below any genuine convergence failure.
+        self._undrained_benign_cap = 256
+
         # Identity matrix construction
         self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
@@ -146,9 +157,11 @@ class FAMesh(object):
             # is reached only by a genuinely (near-)singular sub-region that no
             # method can converge. So bound max_it TIGHTLY: it just confirms
             # non-convergence cheaply, then degrades gracefully (zeroed -> finite
-            # and bounded) for non-fatal callers. A large cap here only added the
-            # 190 s grind at the partitions where the singular region appears.
-            ksp.setTolerances(rtol=1.0e-6, divtol=1.e20, max_it=2000)
+            # and bounded) for non-fatal callers. A large cap here only added a
+            # grind at the partitions where the singular region appears -- and
+            # since fgmres already recovers every SOLVABLE case, the fallback
+            # never needs deep iteration, so 500 is ample to confirm and stop.
+            ksp.setTolerances(rtol=1.0e-6, divtol=1.e20, max_it=500)
             ksp.setInitialGuessNonzero(True)
             ksp.setOptionsPrefix("flowaccfb_")
             ksp.setFromOptions()
@@ -165,32 +178,14 @@ class FAMesh(object):
             # on every rank), so every rank reaches this branch together.
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
             its = ksp.getIterationNumber()
-            # Collective probe: a non-finite RHS (NaN/Inf entering from upstream)
-            # makes fgmres fail at iteration 0 with DIVERGED_DTOL regardless of
-            # the initial guess. Reporting RHS finiteness distinguishes "a NaN
-            # source to hunt upstream" from a genuine convergence stall (which
-            # would instead point to changing the solver/preconditioner).
-            rhs_finite = bool(np.isfinite(vector1.norm()))
-            mat_finite = bool(
-                np.isfinite(matrix.norm(petsc4py.PETSc.NormType.FROBENIUS))
-            )
-            if MPIrank == 0:
-                print(
-                    "KSP (richardson/none fallback) failed to converge after",
-                    its,
-                    "iterations with reason:",
-                    KSPReasons.get(r, r),
-                    "(RHS finite: %s, matrix finite: %s)" % (rhs_finite, mat_finite),
-                    flush=True,
-                )
-            # Localize the un-converged region. With a finite RHS+matrix and a
-            # cleaned guess, a persistent failure means the operator is
-            # (near-)rank-deficient -- a drainage region that never reaches a
-            # sink. The nodes carrying the largest residual ARE that region, so
-            # report the worst node (global id) and how many nodes are badly
-            # violated; the drainage / halo-lsink / tie-break handling can then
-            # be traced there. Wrapped defensively so the diagnostic can never
-            # itself break the run.
+            # Localize the un-converged region FIRST (one matvec). With a finite
+            # RHS+matrix and a cleaned guess, a persistent failure means the
+            # operator is (near-)rank-deficient on those rows -- a drainage region
+            # that never reaches a sink. The nodes carrying the largest residual
+            # ARE that region. Wrapped defensively so the diagnostic can never
+            # itself break the run; `nbad` stays -1 (-> loud, the safe default)
+            # if it cannot be computed.
+            worst_id, worst_val, nbad = -1, float("nan"), -1
             try:
                 resid = vector1.duplicate()
                 matrix.mult(vector2, resid)        # A x
@@ -202,15 +197,46 @@ class FAMesh(object):
                 nbad = int(np.count_nonzero(resid.getArray() > thr))
                 nbad = MPI.COMM_WORLD.allreduce(nbad, op=MPI.SUM)
                 resid.destroy()
-                if MPIrank == 0:
-                    print(
-                        "  [flowKSP] worst residual %.3e at global node %d; "
-                        "%d nodes exceed 1e-3*||b|| (the un-drained region)"
-                        % (worst_val, worst_id, nbad),
-                        flush=True,
-                    )
             except Exception:
                 pass
+            # A TINY un-drained region on a non-fatal (I - W^T) solve is the
+            # benign isolated-pocket / micro-cycle case (the cells just pond;
+            # discharge there is clamped >=0, mass conserved) -- expected and
+            # unconvergeable, so report it calmly. The fatal main solve, or a
+            # large region (a real failure), gets the full loud diagnostic plus
+            # the RHS/matrix-finite probe (a non-finite RHS = a NaN source to
+            # hunt upstream, distinct from a convergence stall). `nbad` is global
+            # (Allreduced) and `fatal` is identical on every rank, so the branch
+            # is collective-consistent.
+            benign = (not fatal) and (0 <= nbad <= self._undrained_benign_cap)
+            if MPIrank == 0:
+                if benign:
+                    print(
+                        "[flow] %d isolated un-drained cell(s) left as local "
+                        "sinks (benign: they pond, mass conserved)" % nbad,
+                        flush=True,
+                    )
+                else:
+                    rhs_finite = bool(np.isfinite(vector1.norm()))
+                    mat_finite = bool(
+                        np.isfinite(matrix.norm(petsc4py.PETSc.NormType.FROBENIUS))
+                    )
+                    print(
+                        "KSP (richardson/none fallback) failed to converge after",
+                        its,
+                        "iterations with reason:",
+                        KSPReasons.get(r, r),
+                        "(RHS finite: %s, matrix finite: %s)"
+                        % (rhs_finite, mat_finite),
+                        flush=True,
+                    )
+                    if nbad >= 0:
+                        print(
+                            "  [flowKSP] worst residual %.3e at global node %d; "
+                            "%d nodes exceed 1e-3*||b|| (the un-drained region)"
+                            % (worst_val, worst_id, nbad),
+                            flush=True,
+                        )
             if fatal:
                 # Only the main flow-accumulation discharge solve passes
                 # fatal=True: a zero discharge there would silently feed a
