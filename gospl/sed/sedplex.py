@@ -322,13 +322,19 @@ class SEDMesh(object):
             self.dm.localToGlobal(self.tmpL, self.tmp)
             if self.tmp.sum() > 0.5 * self.maxarea[0]:
                 excess = True
-                self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+                # seed=True: the sediment cascade solves the SAME substochastic
+                # (I - W^T) system as flow accumulation, so on a cold start
+                # (first step, no warm tmp1) the runoff/sediment RHS is a valid
+                # lower-bound guess. Without it the step-1 solve propagates one
+                # hop/iteration over the full network and grinds to max_it on a
+                # high-resolution global mesh (~10x slower first sediment step).
+                self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
                 if dual:
                     # Route the fine overspill through the SAME matrix (linear).
                     self.nQs.setArray(nvSedF)
                     self.dm.localToGlobal(self.nQs, self.tmp)
-                    self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+                    self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
                     self.dm.globalToLocal(self.tmp1, self.nQs)
                     self._routedFine = self.nQs.getArray().copy()
                 if prov:
@@ -336,7 +342,7 @@ class SEDMesh(object):
                     for c in range(self.provNb):
                         self.nQs.setArray(nvSedP[:, c])
                         self.dm.localToGlobal(self.nQs, self.tmp)
-                        self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+                        self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
                         self.dm.globalToLocal(self.tmp1, self.nQs)
                         self._routedProv[:, c] = self.nQs.getArray().copy()
             # Note: matrix lifecycle moved to _distributeSediment so we don't
@@ -437,6 +443,14 @@ class SEDMesh(object):
                     flush=True,
                 )
             step += 1
+
+        # Diagnostic (verbose): continental-routing cascade iteration count
+        # (number of spillover rounds), surfaced only when notably high.
+        if MPIrank == 0 and self.verbose and step > 20:
+            print(
+                "[sed] continental routing cascade ran %d iterations" % step,
+                flush=True,
+            )
 
         # Final cleanup of the cached flow matrix
         if self.fMat is not None:

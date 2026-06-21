@@ -311,7 +311,14 @@ class SEAMesh(object):
         ksp.setOptionsPrefix("marine_dep_")
         ksp.setType(petsc4py.PETSc.KSP.Type.TFQMR)
         ksp.setOperators(sysMat)
-        ksp.setTolerances(rtol=self.rtol)
+        # Bound the iteration count. The Schur fieldsplit converges in a handful
+        # of outer iterations on a well-conditioned step, but with no cap a
+        # badly-conditioned step let TFQMR grind to PETSc's default 10000 -- one
+        # such solve was the P=48 `sea`-phase blow-up (760 s) in the rank sweep.
+        # Capping low makes a stalling step fail FAST; divergence is already
+        # logged-and-continued below, so deposition that step is at worst
+        # approximate rather than catastrophically slow.
+        ksp.setTolerances(rtol=self.rtol, max_it=500)
 
         pc = ksp.getPC()
         pc.setType("fieldsplit")
@@ -499,6 +506,15 @@ class SEAMesh(object):
                     )
 
             step += 1
+
+        # Diagnostic (verbose): marine-routing cascade iteration count. Each
+        # pass is a cheap dMat1.mult (not a KSP solve); a high count is the
+        # marine routing taking many spillover rounds, not a solver issue.
+        if MPIrank == 0 and self.verbose and step > 20:
+            print(
+                "[sea] marine routing cascade ran %d iterations" % step,
+                flush=True,
+            )
 
         # Drain any residual sediment still in self.tmp at loop exit
         # (because the convergence threshold is non-zero, or because the

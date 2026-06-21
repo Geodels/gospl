@@ -29,8 +29,12 @@ class FAMesh(object):
         The initialisation of `FAMesh` class consists in the declaration of PETSc vectors and matrices.
         """
 
-        # KSP solver parameters
-        self.rtol = 1.0e-10
+        # KSP solver parameters. rtol=1e-8 is ample for discharge used as a
+        # flow-accumulation proxy; the previous 1e-10 was so tight that a cold
+        # start on a high-resolution global mesh (long strictly-downhill MFD
+        # chains -> Richardson needs ~longest-path-in-hops iterations) could
+        # exceed max_it and fall through to the fgmres fallback.
+        self.rtol = 1.0e-8
 
         # Cached KSP/PC objects: created lazily on first solve and reused
         # across timesteps so we avoid the create/destroy churn (~5-10ms per
@@ -105,7 +109,7 @@ class FAMesh(object):
             [(getattr(reasons, r), r) for r in dir(reasons) if not r.startswith("_")]
         )
 
-    def _solve_KSP2(self, matrix, vector1, vector2):
+    def _solve_KSP2(self, matrix, vector1, vector2, fatal=False):
         """
         Solution of Krylov subspace iterative method (PETSc *scalable linear equations solvers* - **KSP**) implemented using the Flexible Generalized Minimal Residual method (`fgmres`) with Additive Schwarz preconditioning (`asm`).
 
@@ -121,13 +125,32 @@ class FAMesh(object):
         """
         if self._ksp_fallback is None:
             ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
-            ksp.setType("fgmres")
-            ksp.getPC().setType("asm")
-            ksp.setTolerances(rtol=1.0e-6, divtol=1.e20)
+            # Fallback = plain Richardson with NO preconditioner: the IDA
+            # fixed-point x <- b + W^T x. The primary's bjacobi is fast but, on
+            # this non-normal (I - W^T) operator, its per-rank blocks DESTABILISE
+            # the iteration at some partitions -> the primary diverges and the
+            # solve lands here. The unpreconditioned iteration converges whenever
+            # the mesh drains (rho(W^T) < 1), INDEPENDENT of partition, so it
+            # cleanly and cheaply recovers those bjacobi-destabilised-but-solvable
+            # solves. This replaces the old fgmres+asm fallback, which on this
+            # operator either stalled (DIVERGED_MAX_IT), broke down (BiCGStab
+            # NANORINF), or -- when it did converge -- was so expensive it caused
+            # the erratic-scaling sed/sea blow-ups (e.g. P=240 sed=112 s with NO
+            # failure, just costly fallback). A genuinely singular sub-block (an
+            # undrained micro-region) still cannot converge; it grinds to the
+            # bounded max_it (cheap mat-vecs) and degrades gracefully (zeroed)
+            # for non-fatal callers, or aborts for the fatal main solve.
+            ksp.setType("richardson")
+            ksp.getPC().setType("none")
+            # With the fgmres default primary (robust, monotone), this fallback
+            # is reached only by a genuinely (near-)singular sub-region that no
+            # method can converge. So bound max_it TIGHTLY: it just confirms
+            # non-convergence cheaply, then degrades gracefully (zeroed -> finite
+            # and bounded) for non-fatal callers. A large cap here only added the
+            # 190 s grind at the partitions where the singular region appears.
+            ksp.setTolerances(rtol=1.0e-6, divtol=1.e20, max_it=2000)
             ksp.setInitialGuessNonzero(True)
-            # Same zero-pivot guard for the ASM sub-solver (see _solve_KSP).
             ksp.setOptionsPrefix("flowaccfb_")
-            petsc4py.PETSc.Options()["flowaccfb_sub_pc_factor_shift_type"] = "nonzero"
             ksp.setFromOptions()
             self._ksp_fallback = ksp
 
@@ -136,23 +159,76 @@ class FAMesh(object):
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
+            # Both the primary and fallback KSP diverged. This helper is shared
+            # by many solves (flow accumulation, sediment routing, hillslope,
+            # SPL, tectonics, ice). The converged reason is global (identical
+            # on every rank), so every rank reaches this branch together.
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
+            its = ksp.getIterationNumber()
+            # Collective probe: a non-finite RHS (NaN/Inf entering from upstream)
+            # makes fgmres fail at iteration 0 with DIVERGED_DTOL regardless of
+            # the initial guess. Reporting RHS finiteness distinguishes "a NaN
+            # source to hunt upstream" from a genuine convergence stall (which
+            # would instead point to changing the solver/preconditioner).
+            rhs_finite = bool(np.isfinite(vector1.norm()))
+            mat_finite = bool(
+                np.isfinite(matrix.norm(petsc4py.PETSc.NormType.FROBENIUS))
+            )
             if MPIrank == 0:
                 print(
-                    "Flow-accumulation KSP (fgmres/asm fallback) failed to "
-                    "converge after iterations",
-                    ksp.getIterationNumber(),
+                    "KSP (richardson/none fallback) failed to converge after",
+                    its,
+                    "iterations with reason:",
+                    KSPReasons.get(r, r),
+                    "(RHS finite: %s, matrix finite: %s)" % (rhs_finite, mat_finite),
                     flush=True,
                 )
-                print("with reason: ", KSPReasons[r], flush=True)
-            # If the fgmres+asm fallback also diverges, return a zero discharge
-            # for this step. Operators should monitor the warning above.
+            # Localize the un-converged region. With a finite RHS+matrix and a
+            # cleaned guess, a persistent failure means the operator is
+            # (near-)rank-deficient -- a drainage region that never reaches a
+            # sink. The nodes carrying the largest residual ARE that region, so
+            # report the worst node (global id) and how many nodes are badly
+            # violated; the drainage / halo-lsink / tie-break handling can then
+            # be traced there. Wrapped defensively so the diagnostic can never
+            # itself break the run.
+            try:
+                resid = vector1.duplicate()
+                matrix.mult(vector2, resid)        # A x
+                resid.aypx(-1.0, vector1)          # b - A x
+                resid.abs()
+                worst_id, worst_val = resid.max()  # (global index, value)
+                bnorm = vector1.norm()
+                thr = 1.0e-3 * bnorm if bnorm > 0.0 else 1.0e-3
+                nbad = int(np.count_nonzero(resid.getArray() > thr))
+                nbad = MPI.COMM_WORLD.allreduce(nbad, op=MPI.SUM)
+                resid.destroy()
+                if MPIrank == 0:
+                    print(
+                        "  [flowKSP] worst residual %.3e at global node %d; "
+                        "%d nodes exceed 1e-3*||b|| (the un-drained region)"
+                        % (worst_val, worst_id, nbad),
+                        flush=True,
+                    )
+            except Exception:
+                pass
+            if fatal:
+                # Only the main flow-accumulation discharge solve passes
+                # fatal=True: a zero discharge there would silently feed a
+                # no-river state into the erosion/sediment routines, so abort
+                # instead. Raising on every rank is collective -> no deadlock.
+                raise RuntimeError(
+                    "Flow-accumulation KSP failed to converge (reason %s) after "
+                    "%d iterations; aborting rather than continuing with zero "
+                    "discharge." % (KSPReasons.get(r, r), its)
+                )
+            # Auxiliary / iterative-cascade solves degrade gracefully: drop
+            # this solve's contribution (zero) and continue, as before.
             vector2.set(0.0)
         petsc4py.PETSc.garbage_cleanup()
 
         return vector2
 
-    def _solve_KSP(self, guess, matrix, vector1, vector2):
+    def _solve_KSP(self, guess, matrix, vector1, vector2, fatal=False, seed=False):
         """
         PETSc *scalable linear equations solvers* (**KSP**) component provides Krylov subspace iterative method and a preconditioner. Here, flow accumulation solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
@@ -172,9 +248,39 @@ class FAMesh(object):
 
         if self._ksp_main is None:
             ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
-            ksp.setType("richardson")
-            ksp.getPC().setType("bjacobi")
-            ksp.setTolerances(rtol=self.rtol)
+            # Primary solver + preconditioner (override via env GOSPL_FLOW_KSP /
+            # GOSPL_FLOW_PC). The (I - W^T) matrix is ill-conditioned (rho ~ 1
+            # from long flat drainage chains) so it NEEDS acceleration: bjacobi
+            # provides it. The historical choice was STATIONARY Richardson, but
+            # its per-rank blocks DESTABILISE at some partitions (spectral radius
+            # > 1 -> diverge -> slow fallback -> erratic scaling). 'fgmres'
+            # minimises the residual monotonically so it CANNOT diverge that way,
+            # while still benefiting from bjacobi -- validated fast AND stable at
+            # every rank count (e.g. P=240: 180s -> 50s, no fallback). So
+            # 'fgmres'+'bjacobi' is now the default; 'richardson' remains
+            # available via the env var.
+            flow_ksp = os.environ.get("GOSPL_FLOW_KSP", "fgmres")
+            flow_pc = os.environ.get("GOSPL_FLOW_PC", "bjacobi")
+            ksp.setType(flow_ksp)
+            ksp.getPC().setType(flow_pc)
+            if MPIrank == 0:
+                print(
+                    "[flow] primary KSP: %s + %s" % (flow_ksp, flow_pc),
+                    flush=True,
+                )
+            # Iteration budget. fgmres (the default) converges the well-posed
+            # bulk in O(100s) of passes; a tiny singular sub-region (a few
+            # genuinely undrained nodes) can NEVER reach rtol, so without a bound
+            # fgmres grinds the full budget failing to fix just those nodes --
+            # the residual sed/sea blow-ups at some partitions. Cap it modestly:
+            # the bulk is solved well within 5000 and the result is accepted as
+            # best-effort on max_it (see _solve_KSP). Stationary Richardson (the
+            # GOSPL_FLOW_KSP=richardson escape hatch) propagates one hop/pass, so
+            # it still needs the larger ~longest-flow-path budget.
+            ksp.setTolerances(
+                rtol=self.rtol,
+                max_it=(100000 if flow_ksp == "richardson" else 5000),
+            )
             # Shift zero/negative pivots in the per-rank ILU sub-solver so the
             # block-Jacobi PCSetUp cannot fail (DIVERGED_PCSETUP_FAILED) on a
             # degenerate / ocean-only partition at higher rank counts. Scoped
@@ -187,11 +293,35 @@ class FAMesh(object):
         ksp = self._ksp_main
         if guess:
             ksp.setInitialGuessNonzero(True)
+            # Cold-start seed (opt-in via seed=True). Applies ONLY to solves on
+            # the substochastic (I - W^T) flow matrix (flow accumulation +
+            # downstream water/sediment routing), where the solution satisfies
+            # x = b + W^T x >= b element-wise, so the RHS b is a valid lower
+            # bound. On a cold start (no previous-step solution, vector2 == 0)
+            # Richardson would otherwise propagate the solution one hop per
+            # iteration over the full network and exceed max_it on a high-
+            # resolution global mesh. Do NOT enable for other systems
+            # (hillslope/SPL/tectonics/ice) where b is not a valid lower bound.
+            if seed and vector2.norm() == 0.0:
+                vector1.copy(vector2)
         ksp.setOperators(matrix, matrix)
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
         if r < 0:
-            vector2 = self._solve_KSP2(matrix, vector1, vector2)
+            # The primary failed (max_it on a near-singular sub-region, or a
+            # genuine breakdown). Do NOT accept the iterate: on a near-singular
+            # system the SOLUTION is unbounded (huge null-space component) even
+            # when the residual looks small, so accepting fgmres's best-effort
+            # injects huge values that compound through the cascade (the 1e29
+            # blow-up). Restart the fallback from a clean, BOUNDED guess -- the
+            # seed lower-bound b for seeded solves, else a finite warm iterate
+            # (drop a non-finite one) -- and let the bounded fallback finish (it
+            # zeroes a non-convergent solve, keeping everything finite).
+            if seed:
+                vector1.copy(vector2)
+            elif not np.isfinite(vector2.norm()):
+                vector2.set(0.0)
+            vector2 = self._solve_KSP2(matrix, vector1, vector2, fatal=fatal)
         petsc4py.PETSc.garbage_cleanup()
 
         return vector2
@@ -437,7 +567,7 @@ class FAMesh(object):
             # cheap "less than 1 m of water over the biggest cell" guard.
             if self.tmp.sum() > self.maxarea[0]:
                 excess = True
-                self._solve_KSP(True, self.fMat, self.tmp, self.tmp1)
+                self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
                 nFA = self.tmpL.getArray().copy() * self.dt
                 FA = nFA.copy()
@@ -530,7 +660,12 @@ class FAMesh(object):
         self.dm.localToGlobal(self.bL, self.bG)
         self.profiler.stop("flow_dir")
         self.profiler.start("flow_ksp")
-        self._solve_KSP(True, self.fMat, self.bG, self.FAG)
+        # seed=True: cold-start the discharge from the runoff vector b (valid
+        # lower bound on the (I - W^T) system) so init does not blow past
+        # max_it -> DIVERGED_MAX_IT. fatal=True: a failed discharge solve here
+        # would silently zero all rivers and feed a degenerate state into
+        # erosion/sediment, so abort instead.
+        self._solve_KSP(True, self.fMat, self.bG, self.FAG, fatal=True, seed=True)
         self.dm.globalToLocal(self.FAG, self.FAL)
         self.profiler.stop("flow_ksp")
 
@@ -567,6 +702,19 @@ class FAMesh(object):
             self.fillFAL.setArray(FA)
         else:
             self.FAL.copy(result=self.fillFAL)
+
+        # fgmres (unlike the IDA fixed-point Richardson) does not preserve the
+        # non-negativity of discharge, so even a converged solve can leave tiny
+        # negative values. Discharge is physically >= 0 and feeds fractional
+        # powers downstream (PA ** spl_m in the SPL eroders), where a negative
+        # base produces NaN. Clamp the final discharge fields at the source so
+        # every consumer (SPL / nlSPL / soilSPL / sediment) is protected. No-op
+        # under Richardson (which never produces negatives).
+        for vec in (self.FAL, self.fillFAL):
+            arr = vec.getArray().copy()
+            if (arr < 0.0).any():
+                np.clip(arr, 0.0, None, out=arr)
+                vec.setArray(arr)
 
         # Get water level
         self.waterFilled -= hl

@@ -411,24 +411,122 @@ class PITFill(object):
         else:
             pdir = -np.ones(self.lpoints, dtype=np.int32)
 
-        # Transfer filled values along the local borders
-        keep = -np.ones(1)
+        # Iteratively propagate flat-region directions from the spill points
+        # across partition boundaries. Each pass advances the spill->interior
+        # BFS front one cell (plus one halo layer across partitions). The OLD
+        # fixed 100-pass cap stopped early on a large flat region (big endorheic
+        # basin / flat shelf on a high-res global mesh) or one cut unfavourably
+        # across ranks, leaving its interior with inconsistent cross-partition
+        # `ptdir` that fill_rcvs (run independently per rank) wired into
+        # mutually-pointing receivers -> a cycle -> a singular (I - W^T)
+        # sub-block that diverged the flow/sediment KSP (P=48/96/192, not 144 --
+        # partition-dependent). Instead of guessing a cap, run until either
+        # every pit node is directed (remaining == 0) or a pass directs no new
+        # node anywhere (remaining stops shrinking -> the rest is unreachable
+        # from any spill seed; spinning further cannot help). Same one collective
+        # per pass as before (a SUM count instead of a MIN), with a high
+        # absolute backstop. Any leftover undirected node becomes a self-sink in
+        # fill_rcvs, which is safe (non-singular).
+        remaining = np.array([-1.0])
+        prev_remaining = -1.0
+        stall = 0
         stp = 0
-        while keep[0] < 0:
+        while True:
             self.tmp.setArray(pdir[self.glIDs])
             self.dm.globalToLocal(self.tmp, self.tmpL, 3)
             pdir = self.tmpL.getArray().copy().astype(int)
             pdir = nghb_dir(self.pitIDs, self.lFill, pdir)
 
-            # Check if there are pit nodes without directions
+            # Global count of pit nodes still without a direction.
             if ids.any():
-                keep[0] = pdir[ids].min()
+                remaining[0] = float(np.count_nonzero(pdir[ids] < 0))
             else:
-                keep[0] = 1.0
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, keep, op=MPI.MIN)
+                remaining[0] = 0.0
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, remaining, op=MPI.SUM)
             stp += 1
-            if stp > 100:
+
+            if remaining[0] == 0.0:
+                break  # fully directed
+
+            # Stagnation: two consecutive passes with no net progress means the
+            # remainder is unreachable from any spill seed (one stall pass can be
+            # a transient waiting on a halo hop, so require two).
+            if prev_remaining >= 0.0 and remaining[0] >= prev_remaining:
+                stall += 1
+            else:
+                stall = 0
+            prev_remaining = remaining[0]
+
+            if stall >= 2 or stp > 10000:
+                # A handful of flat nodes can't be directed to a spill and fall
+                # back to sinks. The pinpoint diagnostic (P=240 sweep) showed
+                # these are ISOLATED filled pockets: single cells / tiny clusters
+                # whose neighbours are non-pit (higher) terrain or a different,
+                # higher pit -- they share a watershed's pitID+spill but have no
+                # pit-connected path to it and no downhill exit at the fill level.
+                # A sink is therefore the physically-correct local outcome (they
+                # pond; mass stays in the pit). This is a depression-merge
+                # labelling artefact, NOT a routing failure -- count it (owned
+                # only) so the magnitude stays visible, but don't call it a bug.
+                owned = self.inIDs == 1
+                unreached = owned & (self.pitIDs > -1) & (pdir < 0)
+                ncnt = np.array([float(np.count_nonzero(unreached))])
+                MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, ncnt, op=MPI.SUM)
+                if MPIrank == 0 and self.verbose:
+                    print(
+                        "[pitfill] %d isolated flat node(s) had no pit-path to a "
+                        "spill -> left as sinks (pond locally; mass conserved)"
+                        % int(ncnt[0]),
+                        flush=True,
+                    )
+                # Verbose-only pinpoint diagnostic: dump the first unreachable
+                # owned node's local neighbourhood (same-pit? directed? owned vs
+                # ghost?) -- used to characterise the isolated-pocket pattern.
+                if self.verbose and not getattr(self, "_pitDiagDone", False):
+                    uidx = np.where(unreached)[0]
+                    if uidx.size > 0:
+                        try:
+                            n0 = int(uidx[0])
+                            bits = []
+                            for c in self.FVmesh_ngbID[n0]:
+                                c = int(c)
+                                if c < 0:
+                                    continue
+                                bits.append(
+                                    "g%d/pit%d/pdir%d/%s"
+                                    % (
+                                        self.gid[c],
+                                        self.pitIDs[c],
+                                        pdir[c],
+                                        "own" if self.inIDs[c] == 1 else "ghost",
+                                    )
+                                )
+                            print(
+                                "[pitfill-diag] rank%d node g%d pit%d pdir%d "
+                                "spill_g%d | nbrs: %s"
+                                % (
+                                    MPIrank,
+                                    self.gid[n0],
+                                    self.pitIDs[n0],
+                                    pdir[n0],
+                                    self.pitInfo[self.pitIDs[n0], 0],
+                                    " ".join(bits),
+                                ),
+                                flush=True,
+                            )
+                            self._pitDiagDone = True
+                        except Exception:
+                            pass
                 break
+
+        # Final halo refresh so fill_rcvs sees `ptdir` consistent across
+        # partition boundaries. The last nghb_dir advanced owned nodes only,
+        # leaving ghost directions one pass stale; without this refresh two ranks
+        # can pick mutually-pointing receivers on a shared boundary -> a 2-cycle
+        # in the assembled matrix.
+        self.tmp.setArray(pdir[self.glIDs])
+        self.dm.globalToLocal(self.tmp, self.tmpL, 3)
+        pdir = self.tmpL.getArray().copy().astype(int)
 
         # Define receiver nodes on each depression
         self.flatDirs = fill_rcvs(self.pitIDs, self.lFill, pdir)
