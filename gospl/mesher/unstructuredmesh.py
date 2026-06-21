@@ -424,15 +424,17 @@ class UnstMesh(object):
         self.lgmap_col = petsc4py.PETSc.LGMap().create(
             l2g, comm=petsc4py.PETSc.COMM_WORLD
         )
-        # Per-local-node global vertex ID, consistent across MPI
-        # decompositions (PETSc DMPlex guarantees a node's global ID is
-        # the same on every rank that has it as either owned or ghost).
-        # Used by `mfdreceivers` / `mfdrcvrs` to break exact slope ties
-        # deterministically — without this, quicksort can pick a different
-        # receiver on different ranks for the same global node and
-        # cascade into divergent drainage statistics under partitioning.
+        # Per-local-node PARTITION-INVARIANT id used by `mfdreceivers` /
+        # `mfdrcvrs` (and the flat-router) to break exact ties deterministically
+        # — without it, quicksort picks a different receiver on different
+        # partitions for the same node and cascades into rank-count-dependent
+        # drainage. It MUST be the same physical-node id under ANY decomposition.
+        # The PETSc DMPlex global id (`l2g`) is consistent across ranks WITHIN a
+        # run, but PETSc RENUMBERS it per partition, so it is NOT invariant
+        # across rank counts (this caused partition-dependent flow at np>1). The
+        # input-mesh index (`locIDs`, KDTree on coords) IS invariant — use it.
         # int32 because f2py declares the Fortran arg as default integer.
-        self.gid = l2g.astype(np.int32)
+        self.gid = self.locIDs.astype(np.int32)
 
         # Vertex part of an unique partition
         vIS = self.dm.getVertexNumbering()
