@@ -2172,7 +2172,25 @@ end subroutine fill_rcvs
 
 subroutine nghb_dir(pitids, h, ptdir, nptdir, n)
 !*****************************************************************************
-! Perform pit filling on depression crossing different processors.
+! Propagate flat-region distance-to-spill across a depression as a RELAXING
+! (label-correcting) shortest-path solve. Edges run only toward not-lower flat
+! cells (h(c) >= h(i)); every directed node seeds the queue at its current
+! distance and a neighbour's distance is LOWERED whenever a shorter path is
+! found.
+!
+! The previous version assigned each node's distance exactly once (a `flag`
+! gate) and never revised it. Because the outer driver re-invokes this kernel
+! once per pass, re-seeding from the prior `ptdir` plus a one-cell halo, a node
+! near a partition boundary could be assigned a distance via a longer
+! within-partition path BEFORE the shorter cross-partition distance arrived
+! through the halo -- and then keep that stale value forever. So `ptdir` (and
+! the flat receivers derived from it in _dirFlats) depended on the MPI cut:
+! ~0.17% of nodes on a 5.9M global mesh, which made the assembled (I - W^T)
+! flow operator partition-dependent and the flow KSP's "un-drained region"
+! vary with rank count. Relaxation removes the set-once freeze: cross-partition
+! shortcuts arriving in later passes lower the affected distances, so the
+! kernel converges to the true graph distance -- a partition-invariant fixed
+! point.
 
   use meshparams
   implicit none
@@ -2184,34 +2202,34 @@ subroutine nghb_dir(pitids, h, ptdir, nptdir, n)
 
   integer, intent(out) :: nptdir(n)
 
-  integer :: i, k, c
+  integer :: i, k, c, di
   type (node)  :: ptID
-  logical :: flag(n)
 
-  nptdir = -1
-
-  ! Push existing directions to priority queue
-  flag = .False.
+  ! Start from the current distances (the relaxation base) and seed the queue
+  ! with every already-directed node.
+  nptdir = ptdir
   do c = 1, n
-    if(ptdir(c)>-1)then
-      flag(c) = .True.
-      nptdir(c) = ptdir(c)
-      call priorityqueue%PQpush(dble(ptdir(c)), c)
+    if(nptdir(c) > -1)then
+      call priorityqueue%PQpush(dble(nptdir(c)), c)
     endif
   enddo
 
-  ! Find closest neighbours to available priority queue node id
+  ! Label-correcting Dijkstra with lazy deletion: skip a popped entry whose
+  ! stored priority is staler (larger) than the node's current distance.
   do while(priorityqueue%n>0)
     ptID = priorityqueue%PQpop()
     i = ptID%id
+    di = nptdir(i)
+    if(int(ptID%Z) > di) cycle
     do k = 1, FVnNb(i)
       c = FVnID(i,k)+1
       if(c>0)then
-        if(.not.flag(c) .and. pitids(c) > -1)then
+        if(pitids(c) > -1)then
           if(h(c)>=h(i))then
-            flag(c) = .True.
-            nptdir(c) = nptdir(i)+1
-            call priorityqueue%PQpush(dble(nptdir(c)), c)
+            if(nptdir(c) < 0 .or. di+1 < nptdir(c))then
+              nptdir(c) = di+1
+              call priorityqueue%PQpush(dble(di+1), c)
+            endif
           endif
         endif
       endif
@@ -2689,10 +2707,25 @@ subroutine label_pits(lvl, fill, label, nb)
   flag = .False.
   lbl = 0
 
-  ! Resolve flats
+  ! Label each depression (lake) as a connected component of equal-fill cells
+  ! that contains a depression bottom (a cell with no strictly-lower neighbour).
+  ! This labelling is PARTITION-INVARIANT by construction: a cell is labelled iff
+  ! it is reachable from a bottom seed through equal-fill connectivity, which
+  ! depends only on the (invariant) filled surface, not on the local node order.
+  !
+  ! Two flag operations were removed from the old version because both made
+  ! membership depend on the visit order (= the MPI partition), flipping ~150
+  ! rim cells between rank counts on a 5.9M global mesh:
+  !  (1) flagging EVERY node on first visit — a flat rim cell visited before its
+  !      depression's seed was frozen unlabelled and the later flood skipped it.
+  !      Now only seeds and flooded cells are flagged, so a flood always reaches
+  !      a rim cell whatever order it is visited in.
+  !  (2) flagging a strictly-HIGHER neighbour during the flood — such a cell can
+  !      never be a seed (it has the lower flooded cell as a neighbour) and is
+  !      never flooded (the flood is equal-fill only), so the flag did nothing
+  !      but block that cell from its OWN (higher) lake's flood order-dependently.
   do i = 1, nb
     if(fill(i)>lvl .and. .not. flag(i))then
-      flag(i) = .True.
       noflow = .True.
       lp: do k = 1, FVnNb(i)
         c = FVnID(i,k)+1
@@ -2704,6 +2737,7 @@ subroutine label_pits(lvl, fill, label, nb)
         endif
       enddo lp
       if(noflow)then
+        flag(i) = .True.
         lbl = lbl+1
         label(i) = lbl
         call simplequeue%spush(i)
@@ -2717,8 +2751,6 @@ subroutine label_pits(lvl, fill, label, nb)
               if(fill(c)==fill(p) .and. .not. flag(c))then
                 call simplequeue%spush(c)
                 label(c) = lbl
-                flag(c) = .True.
-              elseif(fill(c)>fill(p))then
                 flag(c) = .True.
               endif
             endif
