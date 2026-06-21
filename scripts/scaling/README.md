@@ -86,6 +86,32 @@ mpirun -n 1 python scripts/scaling/run_scaling.py \
    → console table, `results/scaling/scaling_summary.{csv,md}`, and
    `scaling_speedup.png` / `scaling_phases.png`.
 
+### Worked example (10 km global model)
+
+A real end-to-end run on Gadi (project `gf22`). The `module load` + `PYTHONPATH`
++ venv lines are only needed on the **login node** so `analyze_scaling.py` /
+`plot_scaling.py` (numpy/matplotlib) work afterwards — `submit_sweep.sh` itself
+just needs `qsub`. Adjust the project, paths and venv to your account:
+
+```bash
+# login-node environment (matches gadi.pbs's native module stack)
+module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 \
+            netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
+export PYTHONPATH="${PYTHONPATH:-}:/apps/petsc/3.21.3/lib/mpich/Intel"
+source $HOME/gospl-smoke/bin/activate
+
+# submit the sweep (3 steps, 30 min walltime, ranks 16..240)
+WALLTIME=00:30:00 STEPS=3 PROJECT=gf22 GOSPL_VENV=$HOME/gospl-smoke/bin/activate \
+RES=10km ./submit_sweep.sh input_10km.yml 16 24 48 96 144 192 240
+
+# after the jobs finish: analyse + plot
+python analyze_scaling.py /scratch/gf22/$USER/scaling/scaling_10km -o results/scaling_10km
+python plot_scaling.py results/scaling_10km/scaling_summary.csv results/scaling_10km/scaling.png
+```
+
+(The 5.9M-node 10 km mesh OOMs below ~16–24 ranks, so the sweep starts at 16;
+the analysis baselines to that smallest rank count — see the note below.)
+
 ## Plotting the results
 
 `analyze_scaling.py` writes the plots directly. If you only kept the summary CSV
