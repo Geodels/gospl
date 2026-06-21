@@ -8,9 +8,10 @@ enabled with `Model(..., profile=True)` or YAML `output: profile: true`).
 |---|---|
 | `run_scaling.py` | mpirun/srun entry point: runs a capped number of steps with profiling, writes `scaling_p<N>.json` (timings + speedup inputs + peak RSS). `--steps` caps downward only (never past the input's forcing range); `--verbose` enables per-phase + solver monitors; `--set ATTR=VALUE` overrides model attributes (e.g. `--set soil_solver=qn`) without editing the YAML. |
 | `local_sweep.sh` | **Workstation** driver: runs ranks 1–6 (default) sequentially under `mpirun`, writes `scaling_p<N>.json`, then auto-runs `analyze_scaling.py`. The local counterpart of `submit_sweep.sh`. |
-| `gadi_scaling.pbs` | PBS job for **one** rank count on NCI Gadi (native module build *or* Singularity container). |
-| `submit_sweep.sh` | qsub's `gadi_scaling.pbs` once per rank count (1,2,4,…,48). |
+| `gadi.pbs` | PBS job for **one** rank count on NCI Gadi (native intel-mpi module build *or* Singularity container). Launches `RANKS` MPI ranks — deliberately **not** `NCPUS` (a reserved Gadi variable auto-set to the node core count, which silently shadowed any override above 48) — and sets `I_MPI_HYDRA_BRANCH_COUNT` so Intel-MPI spans multiple nodes (without it, >48-rank jobs all ran on one node and overwrote `scaling_p0048.json`). |
+| `submit_sweep.sh` | qsub's `gadi.pbs` once per rank count, sizing each job's `ncpus`/`mem`, optionally chaining them (`DEPEND=1`) for clean timing. |
 | `analyze_scaling.py` | Reads all `scaling_p*.json`, computes speedup/efficiency, writes CSV + Markdown + plots to `results/scaling/`. |
+| `plot_scaling.py` | Plots speedup + efficiency from a `scaling_summary.csv` **alone** (when the per-run `scaling_p*.json` are no longer around). Baselines to the smallest rank count; overlays the Amdahl-absolute curve if present. |
 
 ## What it measures
 
@@ -52,8 +53,10 @@ mpirun -n 1 python scripts/scaling/run_scaling.py \
 
 ## On NCI Gadi
 
-1. Edit `gadi_scaling.pbs`: set `#PBS -P <project>`, `-l storage`, and (native
-   mode) the `GOSPL_VENV` path or (container mode) `CONTAINER` `.sif` path.
+1. Edit `gadi.pbs`: set `#PBS -P <project>`, `-l storage`, and (native mode) the
+   `GOSPL_VENV` path or (container mode) the `CONTAINER` `.sif` path. The native
+   path loads the intel-mpi/petsc/hdf5/netcdf module stack (mirrors
+   `hpc_setup/nciRun.pbs`).
 2. Submit a sweep (absolute input path; pick a representative production input):
 
    ```bash
@@ -67,8 +70,9 @@ mpirun -n 1 python scripts/scaling/run_scaling.py \
    ```
 
    Each rank count is a separate job sized `mem = ranks × MEM_PER_CPU_GB`
-   (default 4 GB/rank). Counts >48 span multiple nodes — Gadi's `normal` queue
-   allocates in whole 48-core nodes, so use 48, 96, 192, … there.
+   (default 4 GB/rank, raise it for large meshes). Counts >48 span multiple
+   nodes — Gadi's `normal` queue allocates in whole 48-core nodes, so use 48,
+   96, 144, 192, … there.
 
    Add `DEPEND=1` to chain the jobs (one at a time) for the cleanest timing on a
    shared system.
@@ -82,34 +86,26 @@ mpirun -n 1 python scripts/scaling/run_scaling.py \
    → console table, `results/scaling/scaling_summary.{csv,md}`, and
    `scaling_speedup.png` / `scaling_phases.png`.
 
-### Preconfigured instances (do20, untracked)
+## Plotting the results
 
-`gadi_scaling.pbs` / `submit_sweep.sh` are the generic, project-agnostic
-harness. Alongside them live a couple of **do20-preconfigured instances** of the
-same harness for specific campaigns — they hardcode `#PBS -P do20`, the
-`scratch/do20+gdata/do20` storage, and a default input path, so a do20 user just
-edits the input and submits. They are **left untracked** in git (machine-/
-project-specific run config, not part of the published harness):
-
-| File | Campaign |
-|---|---|
-| `gadi_earth.pbs` + `submit_earth_ab.sh` | A/B-compare two goSPL builds (baseline vs `#447` gather-to-root) on the "Global soil 10 km" earth input — validates the per-rank-RSS / flexure+sea win at high rank counts. |
-| `gadi_ice.pbs` + `submit_ice_sweep.sh` | Single-build **strong-scaling sweep of the diagnostic-ice run**. The local workstation sweep is memory-bandwidth bound past ~4 cores (dominant phases sea/sed/flow/erosion; ice itself ~9%), so the multi-node Gadi points are where the real verdict lives. |
+`analyze_scaling.py` writes the plots directly. If you only kept the summary CSV
+(the per-run `scaling_p*.json` are gone), regenerate the speedup/efficiency
+figure from the CSV alone:
 
 ```bash
-# ice strong-scaling sweep (do20): intra-node ramp + 1/2/4 nodes, jobs chained
-INPUT=/scratch/do20/$USER/scaling/ice.yml \
-GOSPL_VENV=$HOME/envi_gospl/bin/activate \
-  ./submit_ice_sweep.sh                       # ranks 1 2 4 8 16 24 48 96 192
-
-python analyze_scaling.py $PWD/ice_scaling -o results/ice_scaling
+python plot_scaling.py scaling_summary.csv scaling.png
 ```
 
-`submit_ice_sweep.sh` defaults `DEPEND=1` (chains jobs one-at-a-time for clean
-timing), sizes mem `n×4 GB` sub-node / `nodes×190 GB` multi-node with a 16 GB
-floor for the small-rank init, and tags every record `ice`. The input must carry
-an `ice:` block (the diagnostic glacial model — there is no `flow_model`/`sia`
-selector). Container mode: add `MODE=container CONTAINER=<.sif>`.
+> **No 1-CPU baseline needed.** A production global model is memory-infeasible at
+> low rank counts (it OOMs well before 1 rank — e.g. the 5.9M-node mesh needs
+> ~6.5 GB/rank and cannot start under ~24 ranks). Both `analyze_scaling.py` and
+> `plot_scaling.py` therefore **baseline to the smallest rank count in the
+> sweep** (`p0`): speedup `S(p)=T(p0)/T(p)`, efficiency `E(p)=S·p0/p`, ideal line
+> `p/p0`. State "baseline = `p0` ranks" in any caption. Efficiency can read
+> **>100 %** at the first few steps up from `p0` when the `p0` run is itself
+> memory-bandwidth bound — that is real (superlinear) and expected; the
+> Amdahl-absolute columns (`*_abs_amdahl`) give the extrapolated vs-1-rank view
+> that avoids the artifact.
 
 ## Reading the results
 

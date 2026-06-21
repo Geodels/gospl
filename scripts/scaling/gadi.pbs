@@ -1,0 +1,93 @@
+#!/bin/bash
+###############################################################################
+# NCI Gadi (PBS) job for ONE point of a goSPL strong-scaling sweep.
+#
+# Submitted (with per-job overrides) by submit_sweep.sh, but also runnable on
+# its own:
+#
+#   qsub -l ncpus=8 -l mem=32GB \
+#        -v RANKS=8,INPUT=/path/to/input.yml,STEPS=20,IO=off,MODE=native,OUTDIR=$PWD/scaling_results \
+#        gadi.pbs
+#
+# Variables (all overridable via `qsub -v`):
+#   RANKS   MPI ranks to launch (default: $PBS_NCPUS)
+#           NOTE: NOT named NCPUS — NCI/Gadi auto-exports a reserved
+#           NCPUS variable into every job set to the PHYSICAL core count
+#           of the node (e.g. 48), regardless of how many total CPUs your
+#           job requested. A -v NCPUS=<n> override is silently shadowed by
+#           that auto-export, so mpirun -np "$NCPUS" always launched only
+#           48 ranks no matter what was requested above 48. See:
+#           https://opus.nci.org.au/display/Help/Useful+PBS+Environment+Variables
+#   INPUT   goSPL input YAML (absolute path recommended)
+#   STEPS   timesteps to run (default 20)
+#   IO      on|off  — 'off' isolates compute from HDF5 output (default off)
+#   MODE    native|container (default native)
+#   OUTDIR  where scaling_p<N>.json is written (default $PWD/scaling_results)
+#   CONTAINER  .sif path when MODE=container
+#   DRIVER  path to run_scaling.py (default: alongside this script)
+#
+# Edit the #PBS -P project code and -l storage before submitting.
+###############################################################################
+#PBS -P do20
+#PBS -q normal
+#PBS -l ncpus=48
+#PBS -l mem=190GB
+#PBS -l walltime=02:00:00
+#PBS -l wd
+#PBS -l storage=scratch/d20+gdata/d20
+#PBS -N gospl_scaling
+#
+# NOTE: the ncpus=/mem= values above are just a default for standalone
+# testing. submit_sweep.sh always overrides resources via its own
+# qsub -l ncpus=... -l mem=... (Gadi's qsub does not support PBS Pro's
+# "-l select=..." syntax — it errors immediately on parsing if used,
+# including in a script's own #PBS header), so the value here doesn't
+# matter when submitted through the sweep script.
+
+set -euo pipefail
+
+echo "[gadi_scaling][debug] raw RANKS='${RANKS:-<unset>}' NCPUS='${NCPUS:-<unset>}' PBS_NCPUS='${PBS_NCPUS:-<unset>}' PBS_NCI_NCPUS_PER_NODE='${PBS_NCI_NCPUS_PER_NODE:-<unset>}'"
+
+# RANKS is the number of MPI ranks to launch. Deliberately NOT using the
+# NCPUS variable name here — see note above.
+RANKS="${RANKS:-${PBS_NCPUS:-1}}"
+INPUT="${INPUT:?set INPUT to the goSPL input YAML}"
+STEPS="${STEPS:-20}"
+IO="${IO:-off}"
+MODE="${MODE:-native}"
+OUTDIR="${OUTDIR:-$PWD/scaling_results}"
+DRIVER="${DRIVER:-$(dirname "$0")/run_scaling.py}"
+
+# One thread per MPI rank (AGENTS.md container invariant 2; also correct native).
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+cd "$(dirname "$INPUT")"
+INPUT_BASE="$(basename "$INPUT")"
+
+echo "[gadi_scaling] MODE=$MODE RANKS=$RANKS STEPS=$STEPS IO=$IO INPUT=$INPUT"
+
+# Native build — mirror hpc_setup/nciRun.pbs module + venv setup.
+module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 \
+    netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
+
+export PYTHONPATH="${PYTHONPATH:-}:/apps/petsc/3.21.3/lib/mpich/Intel"
+
+source "${GOSPL_VENV:-$HOME/gospl-smoke/bin/activate}"
+
+# Intel MPI's Hydra launcher does not reliably auto-detect the number of
+# nodes in the PBS allocation on Gadi. Without this, `mpirun -np N` for N
+# above one node's core count (48 on normal) silently launches only on the
+# first node — e.g. requesting 192 ranks but actually running with 48,
+# which is why higher-rank sweep points were all quietly producing
+# scaling_p0048.json instead of their own file. See:
+# https://opus.nci.org.au/display/Help/Hybrid+MPI+and+OpenMP
+NCPUS_PER_NODE="${PBS_NCI_NCPUS_PER_NODE:-${CORES_PER_NODE:-48}}"
+export I_MPI_HYDRA_BRANCH_COUNT=$(( (RANKS + NCPUS_PER_NODE - 1) / NCPUS_PER_NODE ))
+
+mpirun -np "$RANKS" \
+    python3 run_scaling.py -i "$INPUT_BASE" --steps "$STEPS" --io "$IO" \
+        --outdir "$OUTDIR" --tag native
+
+echo "[gadi_scaling] done -> $OUTDIR/scaling_p$(printf '%04d' "$RANKS").json"
