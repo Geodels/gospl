@@ -3346,9 +3346,18 @@ def test_parallel_correctness(tmp_path):
     )
 
     # ---- Tier 1B: global mean elevation -------------------------------
-    assert rel_mean_h < 1e-10, (
+    # Like rel_sum_fa, this drifts with the platform's parallel-reduction
+    # order (non-associative floating-point): for n=1 vs n=2 the observed
+    # drift is ~3.6e-11 on macOS-14 (arm64, OpenMPI) but ~7.6e-10 on
+    # Ubuntu-latest (x86_64, MPICH) — the SAME near-tie receiver
+    # non-determinism that loosens rel_sum_fa above, propagated into
+    # elevation. 5e-9 is ~6x the worst observed and still ~7 orders of
+    # magnitude below any real ghost-node reduction bug (which would drive
+    # mean_h to the %-level, not the nm-level). Tightening this back needs
+    # KSP-precision halo determinism (hard PETSc work), as for rel_sum_fa.
+    assert rel_mean_h < 5e-9, (
         "Area-weighted mean elevation differs between n=1 and n=2 "
-        "beyond 1e-10 relative. Likely causes:\n"
+        "beyond 5e-9 relative. Likely causes:\n"
         "  (a) Ghost nodes included in a rank-local reduction before "
         "allreduce — every sum must use `inIDs == 1` as the owned-node "
         "mask.\n"
