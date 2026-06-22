@@ -25,28 +25,32 @@ the edge lengths below are in km):
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 16 16 16 22
+   :widths: 14 18 18 14 14 14
 
    * - Cell width (km)
+     - Nodes
+     - Faces
      - Edge min (km)
      - Edge max (km)
      - Edge mean (km)
-     - Nodes
    * - 5
-     - 1.1
-     - 4.5
-     - 2.8
-     - 23,632,811
+     - 23,655,606
+     - 47,311,208
+     - 3.73
+     - 6.78
+     - 4.99
    * - 8
-     - 1.8
-     - 7.2
-     - 4.6
-     - 9,236,387
+     - 9,246,354
+     - 18,492,704
+     - 6.11
+     - 10.96
+     - 7.98
    * - 10
-     - 2.2
-     - 8.9
-     - 5.7
-     - 5,912,778
+     - 5,916,934
+     - 11,833,864
+     - 7.59
+     - 13.61
+     - 9.98
 
 
 How the benchmark is run
@@ -83,10 +87,10 @@ Results
    :alt: goSPL strong-scaling speedup and parallel efficiency vs MPI ranks.
 
    Strong-scaling **speedup** (a) and **parallel efficiency** (b) versus MPI
-   rank count, for the global meshes above. Markers are measured points; dashed
-   lines are the ideal (each sweep baselined to its own smallest rank count, so
-   the 10 km and 8 km curves have different ideal references). *(The 5 km curve
-   is being collected and will be added here.)*
+   rank count, for the three global meshes above. Markers are measured points;
+   dashed lines are the ideal (each sweep is baselined to its own smallest
+   feasible rank count — 16, 24 and 96 for the 10, 8 and 5 km meshes — so the
+   three curves have different ideal references).
 
 **10 km mesh (5.9 M nodes), baseline = 16 ranks:**
 
@@ -187,6 +191,43 @@ Results
      - 0.93
      - 9.8
 
+**5 km mesh (23.7 M nodes), baseline = 96 ranks:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 16 14 16 20
+
+   * - Ranks
+     - Wall (s)
+     - Speedup
+     - Efficiency
+     - RSS / rank (GB)
+   * - 96
+     - 766.6
+     - 1.00
+     - 1.00
+     - 24.2
+   * - 144
+     - 432.5
+     - 1.77
+     - 1.18
+     - 24.3
+   * - 192
+     - 336.0
+     - 2.28
+     - 1.14
+     - 24.4
+   * - 240
+     - 292.2
+     - 2.62
+     - 1.05
+     - 24.4
+   * - 288
+     - 241.9
+     - 3.17
+     - 1.06
+     - 24.3
+
 
 Reading the results
 -------------------
@@ -200,49 +241,100 @@ Reading the results
   growing weight of the small *serial* sections as the parallel work shrinks:
 
   - **flexure** (global spherical-harmonic solve, ``pyshtools``) is a flat
-    ~4 s floor at every rank count;
-  - the **pit-filling spillover graph** (Barnes-2016 master solve, serial on
-    rank 0 by design — its cost scales with the partition *perimeter*) is a flat
-    ~8 s floor and grows slightly with rank count.
+    ~4 s floor at every rank count — genuinely serial;
+  - **pit filling** parallelises *partway* (the local priority-flood fill scales
+    — 10 km: ~16 → ~8 s) then flattens toward the floor set by its serial,
+    rank-0 spillover-graph master solve (whose cost tracks the partition
+    *perimeter* and so creeps up slightly with rank count).
 
-  Together these set the practical ceiling.
+  Together these set the practical ceiling (see *Where the time goes* below).
 * **Practical sweet spot ≈ 240 ranks** for the 10 km mesh: 11.1× speedup at 74 %
   efficiency. Going to 288 buys almost nothing (11.1× → 11.7×, efficiency
   0.74 → 0.65) — past here you are mostly paying the serial floors.
 * **Memory is the lower bound, not a per-rank growth.** Peak RSS on the heaviest
-  rank stays flat with rank count — ~6.6 GB (10 km) / ~9.9 GB (8 km) — because
-  the dominant arrays are replicated, mesh-sized (``mpoints``) globals that do
-  not decompose. That flat floor is what sets the *smallest* feasible rank count
-  (the 8 km mesh cannot start below ~24 ranks); the aggregate footprint grows
-  roughly linearly with rank count.
-* **The 8 km mesh scales superlinearly to ~96 ranks** (efficiency 1.09 at 48,
-  1.03 at 96 — *above* the ideal line). This is genuine, not a measurement
-  artefact: at the 24-rank baseline the per-rank working set is large and spills
-  cache / saturates memory bandwidth, so the baseline is *slow*; adding ranks
-  shrinks each rank's slice until it fits, and per-core throughput rises. The
-  effect fades once the slices are cache-resident (≥144 ranks), after which the
-  same Amdahl decline takes over (0.89 → 0.83 to 240, with 288 a favourable
-  outlier at 0.93). We report efficiency **uncapped** — superlinear points are
-  shown as measured, not clipped to 1.0.
+  rank stays flat with rank count — ~6.6 GB (10 km) / ~9.9 GB (8 km) /
+  ~24 GB (5 km) — because the dominant arrays are replicated, mesh-sized
+  (``mpoints``) globals that do not decompose. That flat floor is what sets the
+  *smallest* feasible rank count, which rises with mesh size: 16 ranks at 10 km,
+  24 at 8 km, **96 at 5 km**. At 5 km the peak is concentrated on **rank 0**
+  (which holds the serial pit-spillover graph): the *max*-rank RSS is ~24 GB
+  while the per-rank *average* (``rss_sum`` / ranks) is only ~3 GB, so the run
+  still fits on standard nodes even though the headline number looks large.
+  (A 48-rank 5 km run — everything on a single 192 GB node — is **OOM-killed**
+  on rank 0 (``SIGKILL``); PBS recorded ~180 GB, which undercounts the transient
+  peak that tripped the node limit — the sampled figure lags the actual peak, and
+  a "192 GB" node leaves only ~185 GB to the job after OS overhead. Spread over
+  two nodes, 96 ranks fits — which is why 96 is the smallest feasible 5 km count.)
+* **The 8 km and 5 km meshes scale superlinearly** at intermediate rank counts
+  (8 km: efficiency 1.09 at 48, 1.03 at 96; 5 km: 1.18 at 144, 1.14 at 192 —
+  *above* the ideal line). This is genuine, not a measurement artefact: at the
+  baseline the per-rank working set is large and spills cache / saturates memory
+  bandwidth, so the baseline is *slow*; adding ranks shrinks each rank's slice
+  until it fits, and per-core throughput rises. The effect fades once the slices
+  are cache-resident, after which the usual Amdahl decline takes over (8 km:
+  0.89 → 0.83 to 240; 10 km, with its small per-rank slice already cache-resident
+  at the 16-rank baseline, shows no super-linearity and declines from the start).
+  We report efficiency **uncapped** — super-linear points are shown as measured,
+  not clipped to 1.0.
 
 .. note::
 
    Efficiency is reported relative to each mesh's smallest feasible run
-   (:math:`p_0` = 16 ranks at 10 km, 24 at 8 km), **not** a single core. We
+   (:math:`p_0` = 16 ranks at 10 km, 24 at 8 km, 96 at 5 km), **not** a single
+   core. We
    deliberately do not extrapolate a virtual 1-core time to inflate the speedup.
    One consequence: because the baseline itself is memory-bandwidth bound,
    efficiency can legitimately exceed 1.0 at intermediate rank counts (see the
    8 km mesh) — a real super-linear effect we leave un-clipped rather than hide.
 
 
+Where the time goes
+-------------------
+
+Splitting the wall-clock by phase shows *why* the curves bend, and it's the
+honest way to see what scales and what doesn't.
+
+.. figure:: ../images/scaling_phases.png
+   :width: 100%
+   :align: center
+   :alt: Per-phase wall-clock vs MPI ranks for each global mesh.
+
+   Mean per-call wall-clock of the main model phases versus rank count, one
+   panel per mesh (log–log; the dashed line is the ideal :math:`\propto 1/p`).
+   Only top-level phases are shown — the ``flow_*`` sub-phases nest inside
+   *flow accumulation* — with *flexure* (the serial floor) and *pit filling*
+   (partly serial) broken out.
+
+* **The compute phases scale well.** Sediment routing, marine deposition, flow
+  accumulation, river incision (SPL) and hillslope diffusion all track the
+  :math:`1/p` ideal across the whole range — they dominate the budget and are
+  what makes the overall speedup hold up.
+* **Flexure is the one genuinely serial floor.** The global spherical-harmonic
+  load solve is essentially **flat** with rank count (it does not decompose), so
+  as the parallel phases shrink it becomes a larger fraction — the main Amdahl
+  term behind the efficiency decline.
+* **Pit filling is only *partly* serial.** It *does* scale down at first (10 km:
+  ~16 → ~8 s) — the local priority-flood fill is parallel — but it **flattens**
+  toward a floor set by its rank-0 spillover-graph master solve (whose own cost
+  even creeps up slightly with rank count, tracking the partition perimeter). So
+  it scales partway and then plateaus, rather than being a fixed cost like
+  flexure.
+* **The floors grow with mesh size.** Flexure rises ~4 → ~5 → ~11 s and pit
+  filling's baseline ~16 → ~32 → ~45 s from the 10 → 8 → 5 km meshes, so on
+  finer meshes the serial fraction sets in at a (proportionally) lower rank
+  count — the motivation for keeping these two phases on the optimisation radar.
+
+
 Reproducing
 -----------
 
-The summary CSVs and the figure script live in
-``docs/user_guide/scaling/``. To regenerate the figure (e.g. after adding the
-8 km / 5 km sweeps as ``scaling_8km.csv`` / ``scaling_5km.csv``)::
+The summary CSVs and the figure script live in ``docs/user_guide/scaling/``.
+To regenerate both figures (``scaling_hpc.png`` and ``scaling_phases.png``)
+after adding or updating a sweep CSV (``scaling_<N>km.csv``)::
 
     python docs/user_guide/scaling/make_scaling_figure.py
 
-To run a sweep and produce a CSV, see ``scripts/scaling/README.md`` (the
-``submit_sweep.sh`` → ``analyze_scaling.py`` → ``plot_scaling.py`` workflow).
+The script auto-discovers every ``scaling_<N>km.csv`` in that folder, so a new
+resolution is picked up by dropping its CSV in and re-running. To run a sweep
+and produce a CSV, see ``scripts/scaling/README.md`` (the ``submit_sweep.sh`` →
+``analyze_scaling.py`` → ``plot_scaling.py`` workflow).
