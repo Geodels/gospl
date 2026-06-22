@@ -190,6 +190,11 @@ Results
      - 11.22
      - 0.93
      - 9.8
+   * - 336
+     - 69.4
+     - 11.54
+     - 0.82
+     - 10.0
 
 **5 km mesh (23.7 M nodes), baseline = 96 ranks:**
 
@@ -227,6 +232,11 @@ Results
      - 3.17
      - 1.06
      - 24.3
+   * - 336
+     - 213.6
+     - 3.59
+     - 1.03
+     - 24.3
 
 
 Reading the results
@@ -248,9 +258,13 @@ Reading the results
     *perimeter* and so creeps up slightly with rank count).
 
   Together these set the practical ceiling (see *Where the time goes* below).
-* **Practical sweet spot ≈ 240 ranks** for the 10 km mesh: 11.1× speedup at 74 %
-  efficiency. Going to 288 buys almost nothing (11.1× → 11.7×, efficiency
-  0.74 → 0.65) — past here you are mostly paying the serial floors.
+* **Each mesh has a useful core ceiling that rises with size.** For 10 km the
+  practical sweet spot is ≈ 240 ranks (11.1× at 74 %); 288 buys almost nothing
+  (→ 11.7×, efficiency 0.74 → 0.65). The 8 km mesh runs out of road around
+  288–336: 288 → 336 improves wall-clock by only ~3 % (71.4 → 69.4 s) while
+  efficiency drops 0.93 → 0.82, so 336 cores is past its useful point. The 5 km
+  mesh, with far more parallel work, is **still gaining** at 336 (3.17× → 3.59×,
+  efficiency ~1.03). Past each ceiling you are mostly paying the serial floors.
 * **Memory is the lower bound, not a per-rank growth.** Peak RSS on the heaviest
   rank stays flat with rank count — ~6.6 GB (10 km) / ~9.9 GB (8 km) /
   ~24 GB (5 km) — because the dominant arrays are replicated, mesh-sized
