@@ -54,6 +54,20 @@ class FAMesh(object):
         # well clear of it and far below any genuine convergence failure.
         self._undrained_benign_cap = 256
 
+        # Iteration cap for the NON-fatal IDA cascade solves (sediment/water
+        # downstream routing). The well-posed bulk converges in O(100s) of
+        # fgmres iterations; a partition-dependent near-singular cell (an
+        # isolated pocket / residual cross-partition cycle) can NEVER reach rtol,
+        # so without a tight bound fgmres grinds the full primary budget (5000)
+        # on that one cell before the bounded fallback -- which is the dominant
+        # cause of the erratic `sed` wall-time at some rank counts (measured: a
+        # single capped solve = ~5500 iters at np=16 vs ~205/solve at np=8 on a
+        # 9.2M mesh). The fatal flow-accumulation solve keeps the full budget
+        # (it MUST converge); only the degrade-gracefully cascade solves are
+        # capped here. The pinning of undrained cells (which removes the singular
+        # rows entirely) is the deeper fix; this cap is the cheap backstop.
+        self._cascade_max_it = 1000
+
         # Identity matrix construction
         self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
@@ -303,10 +317,8 @@ class FAMesh(object):
             # best-effort on max_it (see _solve_KSP). Stationary Richardson (the
             # GOSPL_FLOW_KSP=richardson escape hatch) propagates one hop/pass, so
             # it still needs the larger ~longest-flow-path budget.
-            ksp.setTolerances(
-                rtol=self.rtol,
-                max_it=(100000 if flow_ksp == "richardson" else 5000),
-            )
+            self._primary_max_it = 100000 if flow_ksp == "richardson" else 5000
+            ksp.setTolerances(rtol=self.rtol, max_it=self._primary_max_it)
             # Shift zero/negative pivots in the per-rank ILU sub-solver so the
             # block-Jacobi PCSetUp cannot fail (DIVERGED_PCSETUP_FAILED) on a
             # degenerate / ocean-only partition at higher rank counts. Scoped
@@ -330,6 +342,16 @@ class FAMesh(object):
             # (hillslope/SPL/tectonics/ice) where b is not a valid lower bound.
             if seed and vector2.norm() == 0.0:
                 vector1.copy(vector2)
+        # Cap the iteration budget per call: the fatal flow-accumulation solve
+        # keeps the full primary budget (it must converge); the non-fatal IDA
+        # cascade solves (seed=True) are capped so a near-singular cell can't
+        # grind the full budget before the bounded fallback. seed=False solves
+        # (hillslope/SPL/tectonics/ice) keep the full budget.
+        ksp.setTolerances(
+            rtol=self.rtol,
+            max_it=(self._cascade_max_it if (seed and not fatal)
+                    else self._primary_max_it),
+        )
         ksp.setOperators(matrix, matrix)
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
