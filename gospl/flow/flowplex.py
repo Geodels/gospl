@@ -68,6 +68,39 @@ class FAMesh(object):
         # rows entirely) is the deeper fix; this cap is the cheap backstop.
         self._cascade_max_it = 1000
 
+        # Hard cap on the OUTER downstream-routing loop (`while excess`) in
+        # flowAccumulation. Each iteration rebuilds fMat and solves the cascade;
+        # a partition that cuts a closed, un-drainable pocket leaves residual
+        # flux above threshold forever, so the loop never exits. Unbounded, it
+        # both burns wall-time AND piles up deferred-destroy PETSc objects until
+        # the collective garbage collector (GarbageKeyAllReduceIntersect) over-
+        # flows its key count and aborts the whole run (observed at 5 km / 144
+        # ranks: a 1473-node pocket on that partition only). The loop is meant to
+        # converge well within ~100 steps -- step 100 already force-fills with
+        # lFill as a last resort -- so anything beyond this is non-convergence:
+        # cap it, leave the residual ponded (those cells ARE un-drainable), and
+        # warn loudly. Partition-INVARIANT outcome (other rank counts that never
+        # form the pocket exit in a few steps; this one ponds it). Env override
+        # GOSPL_CASCADE_MAX_STEPS for diagnostics.
+        self._cascade_max_steps = int(os.environ.get("GOSPL_CASCADE_MAX_STEPS", 100))
+
+        # Early stagnation break for that same loop. The hard step cap above is
+        # only a backstop: the crash it guards against fires LONG before 100
+        # passes (observed at 5 km / 144 ranks ~10-15 passes in, where the
+        # collective PETSc garbage collector overflows mid-cascade). So instead
+        # of waiting for the cap, watch the residual downstream flux: a drainable
+        # basin's residual shrinks every pass, an un-drainable pocket plateaus.
+        # After `_cascade_patience` consecutive passes that fail to shrink the
+        # residual by at least `_cascade_rel_improve` (relative), declare the
+        # pocket un-drainable, leave it ponded, and stop -- typically within ~3-5
+        # passes, well short of the overflow window. A genuinely (slowly)
+        # converging basin never plateaus, so this never truncates real progress.
+        # `_cascade_resid` is a global Vec.sum (identical on every rank), so the
+        # break is collective-consistent. Env GOSPL_CASCADE_PATIENCE.
+        self._cascade_patience = int(os.environ.get("GOSPL_CASCADE_PATIENCE", 3))
+        self._cascade_rel_improve = 1.0e-3
+        self._cascade_resid = 0.0
+
         # Identity matrix construction
         self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
@@ -613,7 +646,11 @@ class FAMesh(object):
             # Skip the KSP solve for negligible residual fluxes: comparing
             # total residual flux (m^3/yr) against the largest cell area is a
             # cheap "less than 1 m of water over the biggest cell" guard.
-            if self.tmp.sum() > self.maxarea[0]:
+            # Capture the residual flux (global Vec.sum) driving this pass so the
+            # outer loop can detect stagnation (un-drainable pocket) and break.
+            resid = self.tmp.sum()
+            self._cascade_resid = float(resid)
+            if resid > self.maxarea[0]:
                 excess = True
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
@@ -724,7 +761,15 @@ class FAMesh(object):
             FA = self.FAL.getArray().copy() * self.dt
             excess = True
             step = 0
-            while excess:
+            # Stagnation tracking (see __init__): break as soon as the residual
+            # downstream flux stops shrinking, rather than grinding to the hard
+            # step cap (the backstop on the `while`). An un-drainable pocket
+            # plateaus within a few passes; continuing past that wastes wall-time
+            # and, at scale, overflows the collective PETSc garbage collector.
+            best_resid = None
+            stall = 0
+            stalled = False
+            while excess and step <= self._cascade_max_steps:
                 t1 = process_time()
                 excess, pitVol, FA = self._distributeDownstream(pitVol, FA, hl, step)
                 if MPIrank == 0 and self.verbose:
@@ -734,6 +779,39 @@ class FAMesh(object):
                         flush=True,
                     )
                 step += 1
+                # Progress check only while flux remains to route. `_cascade_resid`
+                # is a global Vec.sum, so `stall` is identical on every rank and
+                # the break stays collective-consistent.
+                if excess:
+                    resid = self._cascade_resid
+                    if best_resid is None or resid < best_resid * (
+                        1.0 - self._cascade_rel_improve
+                    ):
+                        best_resid = resid
+                        stall = 0
+                    else:
+                        stall += 1
+                        if stall >= self._cascade_patience:
+                            stalled = True
+                            break
+
+            # Non-convergence: either the residual plateaued (stagnation break,
+            # the common case) or the hard step cap was hit. Either way the
+            # residual flux stays ponded in those cells -- physically correct,
+            # they are closed/un-drainable basins on this partition -- instead of
+            # spinning the loop and overflowing the PETSc garbage collector.
+            # Report loudly; the converged-reason path is unaffected (OUTER loop).
+            if (excess or stalled) and MPIrank == 0:
+                if stalled:
+                    why = "stalled after %d passes (residual flux no longer " \
+                          "shrinking)" % step
+                else:
+                    why = "did not converge after %d passes" % self._cascade_max_steps
+                print(
+                    "[flow] downstream cascade %s; residual flux left ponded as "
+                    "closed basins (un-drainable on this partition)." % why,
+                    flush=True,
+                )
 
             # Get overall water flowing donwstream accounting for filled depressions
             FA = self.FAL.getArray().copy()
