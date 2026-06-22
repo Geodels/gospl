@@ -130,6 +130,29 @@ Optional parameters related to tectonics
 
             Learn more.
 
+
+Performance on HPC
+^^^^^^^^^^^^^^^^^^^
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Strong-scaling benchmarks**
+        ^^^
+
+        Speedup and parallel efficiency on global meshes (10, 8, 5 km).
+
+        +++
+
+        .. button-ref:: hpc_scaling
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
 .. toctree::
     :maxdepth: 3
     :hidden:
@@ -138,3 +161,4 @@ Optional parameters related to tectonics
     surfproc
     optfile1
     optfile2
+    hpc_scaling
