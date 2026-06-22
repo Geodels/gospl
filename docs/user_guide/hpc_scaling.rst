@@ -16,6 +16,15 @@ continental and marine sediment routing, hillslope diffusion, flexural isostasy,
 tectonic forcing) so the numbers reflect a realistic workload, not a single
 kernel.
 
+.. figure:: ../_static/run_view10km.jpg
+   :width: 100%
+   :align: center
+   :alt: goSPL model output on the 10 km global mesh used for the scaling tests.
+
+   Example goSPL output on the 10 km global mesh (5.9 M nodes) used for the
+   scaling benchmarks below — the full landscape-evolution workload (drainage,
+   erosion/deposition, sediment routing) that each timed step solves.
+
 
 Global mesh resolutions
 -----------------------
