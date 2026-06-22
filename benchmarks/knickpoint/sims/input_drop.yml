@@ -3,7 +3,7 @@ name: Test stream power law
 domain:
     npdata: ['boundary_condition/drop_baselevel','v','c','z']
     flowdir: 1
-    bc: '0001'
+    bc: 'ooof'
     seadepo: False
     nodep: True
 

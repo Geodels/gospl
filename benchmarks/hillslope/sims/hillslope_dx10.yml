@@ -5,7 +5,7 @@ domain:
     flowdir: 1
     seadepo: False
     nodep: True
-    bc: '0101'
+    bc: 'ofof'
 
 time:
     start: 0.

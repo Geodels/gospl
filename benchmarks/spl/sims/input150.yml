@@ -3,13 +3,13 @@ name: Test stream power law
 domain:
     npdata: ['boundary_conditions/mesh150','v','c','z']
     flowdir: 1
-    bc: '0010'
+    bc: 'fooo'
     seadepo: False
     nodep: True
 
 time:
     start: 0.
-    end: 10.e6
+    end: 5.e6
     tout: 1e5
     dt: 5000
 

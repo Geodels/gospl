@@ -912,14 +912,20 @@ def _run_spl_benchmarks():
         # 2. Load mesh topology (static — same for all timesteps).
         # ------------------------------------------------------------------
         coords, cells = loadTopology(model_path)
-        print(f"\nPost-processing 101 timesteps for case {label}...")
+        # Output count = end/tout + 1. The inputs run to 5 Myr at tout=1e5 yr
+        # (51 outputs). Steady state is reached by ~1.9 Myr (E/U within 5% and
+        # flat thereafter), so 5 Myr leaves >2x margin while running ~half the
+        # original 10 Myr; the slope-area / ks tests read the final, balanced
+        # state. Derive the count from the files written so the post-processor
+        # tracks the input's `end`/`tout` without a hard-coded constant.
+        n_out = len(glob.glob(os.path.join(model_path, "h5", "gospl.*.p0.h5")))
+        print(f"\nPost-processing {n_out} timesteps for case {label}...")
         t_pp = time.time()
-        
+
         # ------------------------------------------------------------------
-        # 3. Post-process all output timesteps.
-        #    101 outputs × 1e5 yr = 10 Myr total — matches the input file run.
+        # 3. Post-process all output timesteps (0 .. n_out-1).
         # ------------------------------------------------------------------
-        steps = [getStepData(model_path, coords, cells, k) for k in range(101)]
+        steps = [getStepData(model_path, coords, cells, k) for k in range(n_out)]
         print(f"Post-processing complete  ({time.time()-t_pp:.1f} s)")
 
         # ------------------------------------------------------------------
