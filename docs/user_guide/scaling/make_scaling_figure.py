@@ -80,6 +80,23 @@ def _load(path):
     return p, sp, eff
 
 
+def _label_ticks(ticks, ratio=1.4):
+    """Thin a dense rank list to a well-spaced label subset (≥`ratio` apart on
+    the log axis), always keeping the first and last. Markers are still plotted
+    at every rank — this only controls which ticks get a printed label."""
+    ticks = sorted(set(ticks))
+    out = [ticks[0]]
+    for t in ticks[1:]:
+        if t >= out[-1] * ratio:
+            out.append(t)
+    if out[-1] != ticks[-1]:
+        if ticks[-1] < out[-1] * ratio and len(out) > 1:
+            out[-1] = ticks[-1]   # too close to the max -> replace, don't crowd
+        else:
+            out.append(ticks[-1])
+    return out
+
+
 def _load_phases(path):
     rows = list(csv.DictReader(open(path)))
     rows.sort(key=lambda r: int(r["nranks"]))
@@ -115,8 +132,9 @@ def phase_figure(files):
                         lw=1.6, ms=5, mec="white", mew=0.5)
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
-        ax.set_xticks(ticks)
-        ax.set_xticklabels([str(t) for t in ticks], rotation=45, ha="right")
+        lticks = _label_ticks(ticks)
+        ax.set_xticks(lticks)
+        ax.set_xticklabels([str(t) for t in lticks], rotation=45, ha="right")
         ax.set_xlabel("MPI ranks (cores)")
         ax.set_title(MESH.get(km, "%d km" % km))
     axes[0].set_ylabel("phase wall-clock per call (s)")
@@ -160,9 +178,10 @@ def main():
     ax1.set_xscale("log", base=2)
     ax1.set_yscale("log", base=2)
     ticks = sorted(all_p)
-    ax1.set_xticks(ticks)
-    ax1.set_xticklabels([str(t) for t in ticks], rotation=45, ha="right")
-    yt = [t / min(baselines) for t in ticks]
+    lticks = _label_ticks(ticks)
+    ax1.set_xticks(lticks)
+    ax1.set_xticklabels([str(t) for t in lticks], rotation=45, ha="right")
+    yt = [t / min(baselines) for t in lticks]
     ax1.set_yticks(yt)
     ax1.set_yticklabels(["%g" % v for v in yt])
     ax1.set_xlabel("MPI ranks (cores)")
@@ -173,8 +192,8 @@ def main():
     # --- parallel efficiency (semilog-x) ---
     ax2.axhline(1.0, ls="--", color="0.55", lw=1.0, zorder=0, label="ideal (100 %)")
     ax2.set_xscale("log", base=2)
-    ax2.set_xticks(ticks)
-    ax2.set_xticklabels([str(t) for t in ticks], rotation=45, ha="right")
+    ax2.set_xticks(lticks)
+    ax2.set_xticklabels([str(t) for t in lticks], rotation=45, ha="right")
     ax2.set_ylim(0.0, max(1.15, max_eff * 1.08))
     ax2.set_xlabel("MPI ranks (cores)")
     ax2.set_ylabel("parallel efficiency")
