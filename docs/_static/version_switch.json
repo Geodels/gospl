@@ -6,9 +6,9 @@
         "url": "https://gospl.readthedocs.io/en/stable/"
     },
     {
-        "name": "v2026.6.23rc1 (pre-release)",
-        "version": "v2026.6.23rc1",
-        "url": "https://gospl.readthedocs.io/en/v2026.6.23rc1/"
+        "name": "release candidate",
+        "version": "release-candidate",
+        "url": "https://gospl.readthedocs.io/en/release-candidate/"
     },
     {
         "name": "v2026.6.13",
