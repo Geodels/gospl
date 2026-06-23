@@ -74,6 +74,11 @@ To pin to a specific release::
 
     pip install --no-deps --no-build-isolation gospl==2026.6.13
 
+Pre-release / **release candidate** builds (e.g. ``2026.6.23rc1``) are not
+installed by default; request them explicitly with ``--pre``::
+
+    pip install --pre --no-deps --no-build-isolation gospl==2026.6.23rc1
+
 .. note::
 
     **Latest released package on PyPI:**
