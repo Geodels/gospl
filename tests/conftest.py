@@ -30,12 +30,42 @@ Both should be small enough to run in < 10 s on a single rank.
 
 from __future__ import annotations
 
+import gc
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def _release_petsc_after_test():
+    """Free each test's goSPL Model + its PETSc objects before the next one.
+
+    The model fixtures below are function-scoped and return (not yield) their
+    Model, so PETSc objects (Mat/Vec/KSP/DMPlex) and the large mesh arrays from
+    one test linger until Python gets around to collecting them. Across the full
+    ~20-model slow tier in a single process this accumulates and, on the ubuntu
+    CI runner, eventually aborts a later `Mat().create()` (SIGABRT) from resource
+    buildup — flaky, deep in the suite, ubuntu-only.
+
+    As an autouse fixture this is set up first and so torn down LAST (after each
+    model fixture has already released its reference), then forces a `gc.collect`
+    (runs the PETSc objects' finalizers → deferred destroy) followed by PETSc's
+    `garbage_cleanup` (actually frees them). At np=1 per test the cleanup is
+    trivial; it only touches PETSc if a model test actually imported it (checked
+    via `sys.modules`, so parser-only tests don't pull PETSc/MPI in needlessly).
+    """
+    yield
+    gc.collect()
+    petsc = sys.modules.get("petsc4py.PETSc")
+    if petsc is not None:
+        try:
+            petsc.garbage_cleanup()
+        except Exception:
+            pass
 
 
 def pytest_configure(config):
