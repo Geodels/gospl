@@ -2311,10 +2311,15 @@ subroutine fill_depressions(lvl, dem, fillp, wsh, ggraph, elev, m, nb)
   do k = 1, m
     if(dem(k)>lvl)then
       n = wsh(k)+1
-      if(dem(k) < fillp(k) .and. fillp(k) > ggraph(n))then
-        elev(k) = fillp(k)
-      elseif(dem(k) <= ggraph(n))then
-        elev(k) = ggraph(n)
+      ! wsh(k) == -1 (n == 0) means the cell has no assigned watershed/spill,
+      ! so it gets no depression fill (elev stays dem, set above). Guard the
+      ! 1-indexed ggraph access against that below-bounds read.
+      if(n >= 1)then
+        if(dem(k) < fillp(k) .and. fillp(k) > ggraph(n))then
+          elev(k) = fillp(k)
+        elseif(dem(k) <= ggraph(n))then
+          elev(k) = ggraph(n)
+        endif
       endif
     endif
   enddo
@@ -2747,6 +2752,12 @@ subroutine definetin( coords, cells_nodes, cells_edges, edges_nodes, &
   if(allocated(faceVec)) deallocate(faceVec)
   if(allocated(FVnIDfNb)) deallocate(FVnIDfNb)
   if(allocated(midFace)) deallocate(midFace)
+  ! faceVel is allocated lazily in getfacevelocity (guarded by .not.allocated)
+  ! and was the ONE FV array never freed here, so it kept the first model's nb
+  ! across model instantiations. A later, larger mesh (e.g. orography's 8100
+  ! nodes) then overflowed it in getfacevelocity -> heap corruption (ubuntu CI
+  ! SIGABRT, silent on macOS). Free it here so it is reallocated at the new nb.
+  if(allocated(faceVel)) deallocate(faceVel)
 
   allocate(FVarea(nb))
   allocate(FVnNb(nb))
