@@ -674,25 +674,21 @@ class GridProcess(object):
             d[self.advectBorders] = 1.0
             off[self.advectBorders, :] = 0.0
 
-        mat = self._matrix_build_diag(d)
-        indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
-        for k in range(0, self.maxnb):
-            tmpMat = self._matrix_build()
-            indices = self.FVmesh_ngbID[:, k].copy()
-            data = off[:, k]
-            ids = np.nonzero(data == 0.0)
-            indices[ids] = ids
-            tmpMat.assemblyBegin()
-            tmpMat.setValuesLocalCSR(
-                indptr,
-                indices.astype(petsc4py.PETSc.IntType),
-                data,
-            )
-            tmpMat.assemblyEnd()
-            mat.axpy(1.0, tmpMat)
-            tmpMat.destroy()
-
-        return mat
+        # Single-pass CSR assembly (col 0 = diagonal, cols 1..maxnb = the
+        # FVmesh_ngbID neighbour entries) via the shared `_assembleDiffMatCSR`
+        # helper — the same ubuntu-safe path the advection (`_buildAdvecMat`),
+        # diffusion and flexure operators already use. This REPLACES the old
+        # per-neighbour `axpy` loop, which added off-diagonal entries into a
+        # diagonal-only-preallocated matrix: on the ubuntu PETSc build that
+        # aborted (SIGABRT) inside `MatAXPY` while growing the under-preallocated
+        # matrix (it passed on macOS, which tolerates the reallocation), crashing
+        # the orography model setup deep in the slow tier. Math is unchanged
+        # (the helper redirects zero-coeff neighbours to the diagonal and sums
+        # shared columns with ADD_VALUES, mirroring the old `indices[ids] = ids`).
+        coeffs = np.empty((self.lpoints, 1 + self.maxnb), dtype=np.float64)
+        coeffs[:, 0] = d
+        coeffs[:, 1:] = off[:, : self.maxnb]
+        return self._assembleDiffMatCSR(coeffs)
 
     def _oroSolve(self, matrix, rhs, sol):
         """
