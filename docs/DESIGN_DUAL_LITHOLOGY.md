@@ -60,6 +60,7 @@ strata:
   coarse: {phi0: 0.49, z0: 3700.}     # coarse porosity-depth (today's phi0s/z0s = coarse)
   fine:   {phi0: 0.63, z0: 1960., k_factor: 1.0}   # fines: porosity-depth + erodibility ratio
   bedrock_coarse_frac: 0.5            # composition of the layer-0 bedrock sentinel
+  bedrock_sentinel: False            # True -> dedicated infinite bedrock beneath npstrata layers
   # transport / deposition contrast (the "fines travel farther" knobs):
   fine_efficiency: <factor>           # marine: per-fraction Gmar (fine deposits less readily)
   pitInletBias: {coarse: 0.5, fine: 0.0}   # lacustrine: coarse delta vs fine depocenter

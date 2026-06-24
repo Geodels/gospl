@@ -557,8 +557,23 @@ Dual-lithology (coarse/fine) variables definition
            them). ``> 1`` makes fines diffuse (and so travel) farther.
         d. ``bedrock_coarse_frac`` — coarse fraction of the underlying bedrock
            (default 0.5), i.e. the composition of material eroded from bedrock.
-        e. ``pitInletBias`` — per-fraction lake-deposition bias (coarse builds
-           inlet deltas, fine settles in the depocenter).
+        e. ``bedrock_sentinel`` — ``True`` inserts a dedicated infinite-bedrock
+           reservoir *beneath* the initial layers supplied by an ``npstrata``
+           file, with the ``bedrock_coarse_frac`` composition (default
+           ``False``). Without it the deepest file layer is itself the
+           un-erodable floor; with it those layers are finite and erosion that
+           cuts through them exposes the bedrock reservoir below. Only relevant
+           when an ``npstrata`` file is given — the no-file path always builds a
+           sentinel.
+        f. ``pitInletBias`` — per-fraction lake/depression deposition bias
+           (coarse builds inlet deltas, fine settles in the depocenter). It is
+           the **contrast** ``coarse − fine`` that sets how strongly the
+           pit-deposit composition segregates with bathymetric depth: equal
+           values give a uniform composition (no segregation), ``coarse > fine``
+           (e.g. ``{coarse: 0.5, fine: 0.0}``) concentrates fine in the deep
+           depocenter, and ``coarse − fine == 1`` is the maximum (fully
+           depth-proportional) split. Conserves each pit's fine volume at any
+           strength.
 
         Fines preferentially reach the **distal** parts of the system: the
         depocenter of lakes/depressions and the deeper/distal marine shelf,

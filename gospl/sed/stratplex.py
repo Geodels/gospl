@@ -84,30 +84,36 @@ class STRAMesh(object):
         if self.strataFile is not None:
             fileData = np.load(self.strataFile)
             stratVal = fileData["strataH"]
-            self.initLay = stratVal.shape[1]
+            nlay = stratVal.shape[1]
+            # Optionally reserve layer 0 as a dedicated infinite-bedrock
+            # sentinel BELOW the file-provided layers (strata.bedrock_sentinel).
+            # The file's `nlay` layers then occupy indices [off : off+nlay] and
+            # layer 0 is the frozen 1e6 m reservoir. off=0 is the legacy
+            # behaviour: the deepest file layer is itself the erosion floor.
+            off = 1 if getattr(self, "bedrock_sentinel", False) else 0
+            self.initLay = nlay + off
             self.stratNb += self.initLay
+            lo, hi = off, off + nlay
 
             # Create stratigraphic arrays
             self.stratH = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.stratH[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
+            self.stratH[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
 
             stratVal = fileData["strataZ"]
             self.stratZ = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.stratZ[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
+            self.stratZ[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
 
             stratVal = fileData["phiS"]
             self.phiS = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-            self.phiS[:, 0 : self.initLay] = stratVal[self.locIDs, 0 : self.initLay]
+            self.phiS[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
 
             # Per-layer K multiplier. Loaded from the optional `stratK`
-            # key in the npstrata file (same (mpoints, initLay) shape as
+            # key in the npstrata file (same (mpoints, nlay) shape as
             # the other layer fields); defaults to 1.0 (use self.K as-is).
             self.stratK = np.ones((self.lpoints, self.stratNb), dtype=np.float64)
             if "stratK" in fileData.files:
                 stratVal = fileData["stratK"]
-                self.stratK[:, 0 : self.initLay] = stratVal[
-                    self.locIDs, 0 : self.initLay
-                ]
+                self.stratK[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
 
             # Dual-lithology fine-fraction layer fields. Optional in the
             # npstrata file: `strataHf` (per-layer fine bulk thickness, so each
@@ -118,27 +124,23 @@ class STRAMesh(object):
                 self.stratHf = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 if "strataHf" in fileData.files:
                     stratVal = fileData["strataHf"]
-                    self.stratHf[:, 0 : self.initLay] = stratVal[
-                        self.locIDs, 0 : self.initLay
-                    ]
+                    self.stratHf[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
                     # Keep the partition physical: 0 <= fine <= total thickness.
                     np.clip(
-                        self.stratHf[:, 0 : self.initLay],
+                        self.stratHf[:, lo:hi],
                         0.0,
-                        self.stratH[:, 0 : self.initLay],
-                        out=self.stratHf[:, 0 : self.initLay],
+                        self.stratH[:, lo:hi],
+                        out=self.stratHf[:, lo:hi],
                     )
                 self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
                 if "phiF" in fileData.files:
                     stratVal = fileData["phiF"]
-                    self.phiF[:, 0 : self.initLay] = stratVal[
-                        self.locIDs, 0 : self.initLay
-                    ]
+                    self.phiF[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
                 else:
                     # No fine porosity supplied: default to the fine surface
                     # porosity so fine-bearing initial layers compact sensibly
                     # (irrelevant where strataHf == 0).
-                    self.phiF[:, 0 : self.initLay] = self.phi0f
+                    self.phiF[:, lo:hi] = self.phi0f
             elif "strataHf" in fileData.files and MPIrank == 0:
                 print(
                     "Warning: the npstrata file provides 'strataHf' (per-layer "
@@ -147,8 +149,27 @@ class STRAMesh(object):
                     flush=True,
                 )
 
-            # All layers in the file are real sediment; no bedrock sentinel.
-            self.bedrockLay = 0
+            if off:
+                # Dedicated infinite-bedrock sentinel beneath the file layers
+                # (mirrors the no-file path): a 1e6 m reservoir at layer 0,
+                # split into coarse/fine by bedrock_coarse_frac under dual
+                # lithology. bedrockLay > 0 freezes it in compaction
+                # (_depthPorosity), and erodeStrat's transient inflate/deflate
+                # of layer 0 makes it an un-erodable floor with this defined
+                # composition. stratZ/stratK keep their 0.0/1.0 init (frozen,
+                # so the values are inert). Provenance is seeded for every
+                # layer (incl. this one) by _initProvenance below.
+                self.stratH[:, 0] = BEDROCK_SENTINEL
+                self.phiS[:, 0] = self.phi0s
+                if self.stratLith:
+                    self.stratHf[:, 0] = BEDROCK_SENTINEL * (
+                        1.0 - self.bedrock_coarse_frac
+                    )
+                    self.phiF[:, 0] = self.phi0f
+                self.bedrockLay = 1
+            else:
+                # All layers in the file are real sediment; no bedrock sentinel.
+                self.bedrockLay = 0
 
             if self.memclear:
                 del fileData, stratVal

@@ -1568,6 +1568,12 @@ class ReadYaml(object):
         self.fine_k_factor = 1.0
         self.bedrock_coarse_frac = 0.5
         self.fine_efficiency = 0.5
+        # Insert a dedicated infinite-bedrock sentinel layer BENEATH the
+        # file-provided initial layers (only consulted when an `npstrata` file
+        # is given; the no-file path always builds a sentinel). Default False
+        # keeps existing file runs unchanged, where the deepest file layer is
+        # itself the erosion floor.
+        self.bedrock_sentinel = False
         self.pit_inlet_bias_coarse = 0.50
         self.pit_inlet_bias_fine = 0.0
         # Fine diffusivity relative to coarse: a multiplier on the existing
@@ -1593,6 +1599,9 @@ class ReadYaml(object):
                 "bedrock_coarse_frac", self.bedrock_coarse_frac
             )
             self.fine_efficiency = strataDict.get("fine_efficiency", self.fine_efficiency)
+            self.bedrock_sentinel = bool(
+                strataDict.get("bedrock_sentinel", self.bedrock_sentinel)
+            )
 
             biasDict = strataDict.get("pitInletBias", {})
             if isinstance(biasDict, dict):

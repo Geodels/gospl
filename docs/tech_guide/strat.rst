@@ -77,7 +77,9 @@ Bedrock sentinel
 
 When no initial stratigraphy file (``npstrata``) is provided, goSPL treats stratigraphic layer 0 as an effectively infinite bedrock reservoir by initialising its thickness to a sentinel value of :math:`\mathrm{10^6}` m. The erosion logic adds and subtracts this offset internally so it cancels out of all eroded-volume calculations.
 
-The compaction step explicitly **freezes** the sentinel layer: when ``bedrockLay > 0`` (set to ``1`` for the no-file case and ``0`` when an initial stratigraphy file is loaded), the corresponding rows of :math:`\mathrm{\Delta z}` and :math:`\mathrm{\phi}` are restored to their pre-compaction values at the end of ``_depthPorosity``. Without this, the sentinel would compute a near-zero equilibrium porosity at the resulting half-million-metre burial depth and shrink to roughly half its thickness in a single step, producing a catastrophic surface drop.
+The compaction step explicitly **freezes** the sentinel layer: when ``bedrockLay > 0`` the corresponding rows of :math:`\mathrm{\Delta z}` and :math:`\mathrm{\phi}` are restored to their pre-compaction values at the end of ``_depthPorosity``. Without this, the sentinel would compute a near-zero equilibrium porosity at the resulting half-million-metre burial depth and shrink to roughly half its thickness in a single step, producing a catastrophic surface drop.
+
+When an ``npstrata`` file **is** provided, by default no sentinel is added (``bedrockLay = 0``) and the deepest file layer is itself the un-erodable floor — the erosion offset is applied to layer 0 regardless, so erosion can never cut below it, but that layer then defines the infinite-reservoir composition. Set ``strata: bedrock_sentinel: True`` to instead insert a **dedicated** infinite-bedrock layer beneath the file layers: the file's layers shift up by one and become finite (erosion can exhume through them), layer 0 becomes the frozen :math:`\mathrm{10^6}` m reservoir with the ``bedrock_coarse_frac`` composition, and ``bedrockLay`` is set to ``1`` so the same compaction freeze applies.
 
 Porosity inheritance for empty layers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -134,6 +136,7 @@ Enable it with a ``strata`` block in the input file:
        coarse: {phi0: 0.49, z0: 3700.}              # coarse porosity-depth curve
        fine:   {phi0: 0.63, z0: 1960., k_factor: 1.5}  # fine curve + erodibility ratio
        bedrock_coarse_frac: 0.6                      # coarse fraction of bedrock
+       bedrock_sentinel: True                        # infinite bedrock below the npstrata layers
        fine_diff_factor: 2.0                         # fine diffuses 2x faster
        pitInletBias: {coarse: 0.5, fine: 0.0}        # lake delta vs depocenter
 

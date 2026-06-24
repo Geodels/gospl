@@ -1454,6 +1454,7 @@ def test_dual_lithology_opt_in():
             "fine_efficiency": 0.3,
             "pitInletBias": {"coarse": 0.8, "fine": 0.1},
             "fine_diff_factor": 2.0,
+            "bedrock_sentinel": True,
         }
     }
     parser._extraStrata()
@@ -1466,6 +1467,7 @@ def test_dual_lithology_opt_in():
     assert parser.pit_inlet_bias_coarse == 0.8
     assert parser.pit_inlet_bias_fine == 0.1
     assert parser.fine_diff_factor == 2.0
+    assert parser.bedrock_sentinel is True
 
     # ---- Case 3: dual requested but stratigraphy off → forced False
     parser = _strata_parser(stratNb=0)
@@ -1770,6 +1772,62 @@ def test_dual_lithology_initial_strata_composition(tmp_path):
     assert (m.stratHf[:, :il] >= 0.0).all()
     # phiF absent -> defaulted to phi0f on the initial layers.
     assert np.allclose(m.phiF[:, :il], 0.63)
+
+
+def test_strata_bedrock_sentinel(tmp_path):
+    """
+    Protects: strata.bedrock_sentinel — a dedicated infinite-bedrock sentinel
+    layer is inserted BENEATH the file-provided initial layers. The file's
+    layers shift up by one, layer 0 becomes the frozen 1e6 m reservoir with the
+    bedrock_coarse_frac composition, and bedrockLay flips to 1 (so compaction
+    freezes it). Off by default -> the legacy file path (no sentinel) is
+    unchanged.
+    """
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+    from gospl.tools.constants import BEDROCK_SENTINEL
+
+    n, nl = 3, 2
+    f = tmp_path / "init.npz"
+    np.savez(
+        str(f),
+        strataH=np.full((n, nl), 10.0),
+        strataZ=np.zeros((n, nl)),
+        phiS=np.full((n, nl), 0.49),
+        strataHf=np.full((n, nl), 4.0),     # each file layer 40% fine
+    )
+
+    def _mesh(sentinel):
+        m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+        m.strataFile = str(f)
+        m.lpoints = n
+        m.stratNb = 2
+        m.locIDs = np.arange(n)
+        m.phi0s, m.phi0f = 0.49, 0.63
+        m.bedrock_coarse_frac = 0.7         # -> 0.3 fine in the sentinel
+        m.memclear = False
+        m.stratLith = True
+        m.stratHf = None
+        m.phiF = None
+        m.bedrock_sentinel = sentinel
+        m.readStratLayers()
+        return m
+
+    # ---- sentinel ON: extra frozen bedrock layer at index 0 ----
+    m = _mesh(True)
+    assert m.initLay == nl + 1 and m.bedrockLay == 1
+    # Layer 0 is the 1e6 m reservoir with the bedrock_coarse_frac split.
+    assert np.allclose(m.stratH[:, 0], BEDROCK_SENTINEL)
+    assert np.allclose(m.stratHf[:, 0], BEDROCK_SENTINEL * (1.0 - 0.7))
+    assert np.allclose(m.phiS[:, 0], 0.49) and np.allclose(m.phiF[:, 0], 0.63)
+    # File layers shifted to indices 1..nl, composition preserved.
+    assert np.allclose(m.stratH[:, 1 : nl + 1], 10.0)
+    assert np.allclose(m.stratHf[:, 1 : nl + 1], 4.0)
+
+    # ---- sentinel OFF (default path): unchanged, no sentinel ----
+    m0 = _mesh(False)
+    assert m0.initLay == nl and m0.bedrockLay == 0
+    assert np.allclose(m0.stratH[:, 0], 10.0)        # deepest file layer is layer 0
+    assert np.allclose(m0.stratHf[:, 0], 4.0)
 
 
 def test_dual_lithology_erosion_split():
