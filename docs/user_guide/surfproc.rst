@@ -339,7 +339,7 @@ Ice sheets and glacial erosion
 
         From a **Jupyter notebook**, either shell out with the ``!`` magic:
 
-        .. code:: python
+        .. code:: bash
 
             !python scripts/ela_from_temperature.py \
                 --temperature climate/t2m_21ka.npz --t-key t2m \

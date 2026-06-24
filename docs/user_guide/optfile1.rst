@@ -19,7 +19,7 @@ Sea-level (eustatic) forcing
                 
         **Declaration example**:
 
-        .. code:: yamk
+        .. code:: yaml
 
             sea:
                 position: 0.
