@@ -6,11 +6,6 @@
         "url": "https://gospl.readthedocs.io/en/stable/"
     },
     {
-        "name": "release candidate",
-        "version": "release-candidate",
-        "url": "https://gospl.readthedocs.io/en/release-candidate/"
-    },
-    {
         "name": "v2026.6.13",
         "version": "v2026.6.13",
         "url": "https://gospl.readthedocs.io/en/v2026.6.13/"

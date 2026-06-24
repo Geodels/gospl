@@ -179,12 +179,11 @@ html_theme_options = {
     # },
 }
 
-if 'dev' in version:
+if 'dev' in version or 'rc' in version:
+    # Development and release-candidate builds both live on the `dev`
+    # branch (RCs are tagged on dev), so highlight the "Development"
+    # entry in docs/_static/version_switch.json.
     html_theme_options["switcher"]["version_match"] = "development"
-elif 'rc' in version:
-    # Release-candidate: match the "release-candidate" entry in
-    # docs/_static/version_switch.json so the switcher highlights it.
-    html_theme_options["switcher"]["version_match"] = "release-candidate"
 
 if 'versionwarning' in tags:  # noqa: F821
     # Specific to docs.scipy.org deployment.
