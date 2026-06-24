@@ -417,6 +417,18 @@ Soil production, erosion, transport and deposition
 
             The soil solve is usually the dominant cost of a soil-enabled run. The default ``solver: 'qn'`` was chosen because on a global model it cut the soil-solve wall time roughly in half (or more) versus ``'ngmres'`` at the **same** tolerance and solution — L-BFGS reaches a comparable iteration count but each iteration is far cheaper than an ``ngmres``/multigrid sweep. If ``'qn'`` struggles on a particular configuration, set ``solver: 'ngmres'``. Prefer switching ``solver`` over relaxing ``rtol``: a loose ``rtol`` can leave the elevation field under-resolved and **destabilise the downstream sediment-routing solver**, which is both slower and less accurate.
 
+        .. tip::
+
+            **Validated fast preset for a stiff regional soil run.** Where the default ``'qn'`` stalls, ::
+
+                soil:
+                    solver: 'ngmres'
+                    pcType: 'hypre'
+                    rtol: 1.e-5
+                    atol: 1.e-5
+
+            converged cleanly in ~30 non-linear iterations and cut the soil solve by roughly 3–5× versus the un-tuned ``ngmres`` at ``rtol = 1.e-6``, with no artefacts in the elevation or deposition fields. Two findings worth keeping in mind when tuning from here: do **not** loosen ``rtol``/``atol`` to ``1.e-4`` — at that tolerance the global residual norm stops while a single node remains under-resolved, producing an isolated elevation **spike** ("needle"); and at ``1.e-5`` the stronger ``pcType: 'hypre'`` BoomerAMG preconditioner *beat* the cheaper ``'bjacobi'`` on wall-clock (fewer Krylov iterations per ``ngmres`` step more than offset its higher per-application cost). The cheaper ``'bjacobi'`` only wins at the over-loose ``1.e-4`` that should not be used. So: tighten the tolerance to ``1.e-5`` and keep the stronger preconditioner.
+
         .. note::
 
             If the chosen primary solver stalls on a stiff soil-production residual, goSPL automatically retries that timestep with the *complementary* solver (quasi-Newton ⇄ ``ngmres`` multigrid accelerator) at a relaxed tolerance before continuing.
