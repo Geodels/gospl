@@ -134,32 +134,47 @@ class IceMesh(object):
             mdot = np.where(mdot > 0.0, acc, mdot)
         return zbed, mdot
 
-    def _matrixIceFlow(self, dir_ice=1):
+    def _matrixIceFlow(self, dir_ice=1, terminus=None):
         """
         Build the multiple-flow-direction (MFD) routing matrix for ice on the
         (epsilon-filled) bed surface — used by the diagnostic ``mfd`` flow model
         to accumulate the ELA mass balance into an ice discharge. Mirrors the
         water flow-direction matrix; deterministic slope tie-break via ``gid``.
+
+        The eps-fill is seeded from the glacier **terminus** (``terminus``, the
+        physical ice outlet — ice melts out at/below it), and every cell at or
+        below the terminus is made an absorbing sink in the routing matrix. This
+        is essential for a well-posed solve: seeding/draining the whole bed down
+        to sea level instead leaves the ice-free sub-terminus region as interior
+        drainage targets that are NOT absorbed, so ``(I − Wᵀ)`` is singular, the
+        discharge KSP diverges, and the bounded fallback zeroes it — producing
+        no ice anywhere. Anchoring the outlet at the terminus drains the
+        above-terminus ice region to a well-posed boundary.
         """
         hl = self.hLocal.getArray().copy()
-        minh = self.hGlobal.min()[1] + 0.1
-        minh = max(minh, self.sealevel)
+        if terminus is None:
+            terminus = max(self.hGlobal.min()[1] + 0.1, self.sealevel)
+        # Absorbing outlet = the ice-free melt-out region (bed at/below the
+        # terminus) plus the domain borders. Captured on the BED elevation
+        # (matches the `fa[zbed < terminus] = 0` discharge mask downstream).
+        sinks = hl <= terminus
         if self.flatModel:
             hl[self.idBorders] = BOUNDARY_FLOW_SENTINEL
+            sinks[self.idBorders] = True
         fillz = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
         fillz[self.locIDs] = hl
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
         if MPIrank == 0:
-            fillz = epsfill(minh, fillz)
+            fillz = epsfill(terminus, fillz)
         fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
         fillz = fillEPS[self.locIDs]
 
         rcv, _, wght = mfdreceivers(
             dir_ice, 1.0, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
         )
-        if self.flatModel:
-            rcv[self.idBorders, :] = np.tile(self.idBorders, (dir_ice, 1)).T
-            wght[self.idBorders, :] = 0.0
+        sink_ids = np.where(sinks)[0]
+        rcv[sink_ids, :] = sink_ids[:, None]
+        wght[sink_ids, :] = 0.0
 
         self.iceMat = self.iMat.copy()
         indptr = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
@@ -205,11 +220,18 @@ class IceMesh(object):
         # (2) Route the positive mass balance (accumulation) into a discharge.
         # Source is a VOLUME rate (m^3/yr) = accumulation rate x cell area, so
         # the routed `iceFA` is an ice discharge (m^3/yr).
-        self._matrixIceFlow(self.iceDir)
+        self._matrixIceFlow(self.iceDir, terminus)
         iceA = np.maximum(mdot, 0.0) * self.larea
         self.tmpL.setArray(iceA)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(True, self.iceMat, self.tmp, self.iceFAG)
+        # seed=True: cold-start the ice discharge from the accumulation source
+        # (a valid lower bound for the substochastic (I - W^T) routing system,
+        # exactly as the water flow-accumulation solve does). Without it the
+        # first-step solve starts from iceFAG == 0, cannot propagate across the
+        # network within the iteration budget, fails, and is zeroed by the
+        # bounded fallback -- leaving NO ice discharge (hence no thickness) for
+        # the whole run.
+        self._solve_KSP(True, self.iceMat, self.tmp, self.iceFAG, seed=True)
         self.dm.globalToLocal(self.iceFAG, self.iceFAL)
         fa = self.iceFAL.getArray()
         fa[fa < 0.0] = 0.0
@@ -301,6 +323,12 @@ class IceMesh(object):
                 self.iceFAG.set(0.)
                 if self.flexOn:
                     self.iceFlex.set(0.)
+                if MPIrank == 0 and self.verbose:
+                    why = ("max elevation %.0f m below ELA %.0f m" % (max_elev, elaH)
+                           if max_elev < elaH
+                           else "ice-cap altitude %.0f m not above ELA %.0f m" % (iceH, elaH))
+                    print("Glaciers Accumulation (%0.02f seconds) — no ice (%s)"
+                          % (process_time() - ti, why), flush=True)
                 return
 
         # Diagnostic glacial driver (routing proxy — glacial erosion morphology
@@ -312,11 +340,39 @@ class IceMesh(object):
         if self.flexOn and self.tNow == self.tStart:
             self.iceHL.copy(result=self.iceFlex)
 
-        if MPIrank == 0 and self.verbose:
-            print(
-                "Glaciers Accumulation (%0.02f seconds)" % (process_time() - ti),
-                flush=True,
-            )
+        # Instructive diagnostics (only with -v / verbose). The reductions are
+        # COLLECTIVE so they run on every rank (gated only by the uniform
+        # `self.verbose`, never by MPIrank); the formatted line prints on rank 0.
+        if self.verbose:
+            comm = MPI.COMM_WORLD
+            own = self.inIDs == 1
+            H = self.iceHL.getArray()
+            ub = self.iceUbL.getArray()
+            abr = self.iceAbrL.getArray()
+            vol = comm.allreduce(float(np.sum(H[own] * self.larea[own])), op=MPI.SUM)
+            hmax = comm.allreduce(float(H[own].max()) if own.any() else 0.0, op=MPI.MAX)
+            ncov = comm.allreduce(int((H[own] > 0.1).sum()), op=MPI.SUM)
+            ntot = comm.allreduce(int(own.sum()), op=MPI.SUM)
+            ubmax = comm.allreduce(float(ub[own].max()) if own.any() else 0.0, op=MPI.MAX)
+            abrmax = comm.allreduce(float(abr[own].max()) if own.any() else 0.0, op=MPI.MAX)
+            if MPIrank == 0:
+                cov = 100.0 * ncov / max(ntot, 1)
+                geom = (
+                    "ELA %.0f m, terminus %.0f m, ice-cap %.0f m"
+                    % (elaH, max(iceT, self.sealevel), iceH)
+                    if not spatial else "spatial ELA/terminus/ice-cap maps"
+                )
+                print(
+                    "Glaciers Accumulation (%0.02f seconds) — %s"
+                    % (process_time() - ti, geom),
+                    flush=True,
+                )
+                print(
+                    "   ice volume %.4g km3 | max thickness %.1f m | cover %.1f%% "
+                    "(%d cells) | max sliding %.3g m/yr | max abrasion %.3g m/yr"
+                    % (vol / 1.0e9, hmax, cov, ncov, ubmax, abrmax),
+                    flush=True,
+                )
 
         return
 
