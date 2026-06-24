@@ -207,6 +207,50 @@ converted to an equivalent load (scaled by :math:`\rho_i / \rho_c`) and applied
 through the existing flexure path, so a growing ice sheet drives isostatic
 subsidence and deglaciation drives rebound.
 
+Coupling to the river system (flow and sediment)
+------------------------------------------------
+
+The glacial model is **fully diagnostic** and feeds the fluvial machinery rather
+than running in isolation: it never modifies the river equations directly, but
+each step it edits the same fields the rivers act on. There are two coupling
+channels, water and sediment, both resolved **within a single timestep**.
+
+**Water — redistributed runoff.** The ice discharge and the river discharge are
+solved with the *same* MFD flow-accumulation operator. The glacier acts as a
+spatial redistributor of runoff in the river source vector:
+
+- precipitation that falls above the ELA becomes ice and is **removed** from the
+  river runoff (the high catchment is starved of that water);
+- the same water is routed down-glacier and **re-injected** as liquid meltwater
+  where the ice melts out (``iceMelt``), so by default (``melt_conserve: True``)
+  the water removed above the ELA returns to the river network at the terminus
+  rather than being lost.
+
+**Sediment — abrasion to fluvially-reworkable moraine.** Glacial abrasion lowers
+the bed under fast-sliding ice; with ``till.on`` that material is carried by the
+ice and laid down as moraine where the ice melts out (a conserved bed-to-bed
+transport). The coupling to rivers is *indirect but deliberate* — the abrasion
+and moraine reshape the topography, and the fresh moraine becomes erodible
+material that the rivers entrain and transport the **same** step. (With
+``till.on`` off, the abraded material instead enters the fluvial sediment flux
+directly through the SPL erosion path.)
+
+**Within-step ordering** (see the time loop in ``model.py``):
+
+#. diagnose the glacial state — discharge, thickness, sliding velocity,
+   abrasion, meltwater;
+#. river flow accumulation — now with the meltwater re-injected and the
+   above-ELA precipitation removed;
+#. fluvial incision/deposition (stream-power law);
+#. glacial till — abrade the bed and deposit moraine, run **before** fluvial
+   deposition so the moraine is reworked this step;
+#. flow accumulation + fluvial sediment transport — reworks the fresh moraine;
+#. marine deposition and hillslope diffusion.
+
+So in one step the ice first redistributes the *water* (stronger rivers at the
+snout, weaker above the ELA), then redistributes *sediment* into moraines, and
+the rivers immediately act on both the new discharge field and the new moraine.
+
 Output
 ------
 
