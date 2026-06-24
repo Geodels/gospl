@@ -23,10 +23,12 @@ class IceMesh(object):
     erosion, sediment transport and ice loading. For the equilibrium-line-altitude
     (ELA) surface mass balance :math:`\dot{m}`:
 
-    1. The accumulation :math:`\dot{m}^+` is routed downhill on the
-       (epsilon-filled) bed using a multiple-flow-direction algorithm — the same
-       machinery as the river flow accumulation — into an **ice discharge**
-       :math:`Q` (m\ :sup:`3`/yr); one linear solve, no time integration.
+    1. The net mass balance :math:`\dot{m}^+ - \mathrm{melt}\,\dot{m}^-` is routed
+       downhill on the (drainage-conditioned) bed using a multiple-flow-direction
+       algorithm — the same machinery as the river flow accumulation — into an
+       **ice discharge** :math:`Q` (m\ :sup:`3`/yr); one linear solve, no time
+       integration. ``melt`` (default 0 = accumulation-only) sets how much
+       ablation eats the discharge, hence the glacier extent.
     2. The **ice thickness** follows a Bahr width–area scaling of the discharge,
        :math:`H = e_h\, f_w\, Q^{0.3}`.
     3. The **basal sliding velocity** comes from Glen's sliding law on that
@@ -104,7 +106,11 @@ class IceMesh(object):
     def _iceMassBalance(self, elaH, iceH):
         """
         Bed elevation `zbed` and the ELA surface mass balance `mdot`
-        (m ice/yr, no `meltfac`): accumulation above the ELA, ablation below.
+        (m ice/yr): accumulation above the ELA, ablation below. The accumulation
+        side is scaled/capped by `accum_factor`/`accum_max`. The RAW ablation is
+        returned here (used as-is for the till melt-out weight and meltwater);
+        the `melt` amplifier is applied only to the ablation that feeds the ice
+        discharge (see `_iceFlowMFD`).
         """
         zbed = self.hLocal.getArray().copy()              # bed elevation (fixed this step)
         # ELA mass-balance ramp (1 above the ice cap, 0 at the ELA, negative
@@ -218,8 +224,10 @@ class IceMesh(object):
         1. ELA surface mass balance (``_iceMassBalance``: accumulation above the
            ELA, ablation below — including the ``accum_factor``/``accum_max``
            controls).
-        2. Route the accumulation downhill through the MFD matrix into an **ice
-           discharge** ``iceFA`` (one linear solve; no time integration).
+        2. Route the **net mass balance** (accumulation minus `melt`-scaled
+           ablation) downhill through the MFD matrix into an **ice discharge**
+           ``iceFA`` (one linear solve; no time integration). The tongue ends
+           where downstream ablation has consumed the upstream accumulation.
         3. **Thickness** ``iceHL`` from a Bahr width–area scaling of the discharge.
         4. **Basal sliding velocity** ``iceUbL`` from Glen's sliding law on that
            thickness + bed-surface slope (``ice_velocity``), the abrasion driver
@@ -232,20 +240,32 @@ class IceMesh(object):
         zbed, mdot = self._iceMassBalance(elaH, iceH)
         terminus = max(iceT, self.sealevel)
 
-        # (2) Route the positive mass balance (accumulation) into a discharge.
-        # Source is a VOLUME rate (m^3/yr) = accumulation rate x cell area, so
-        # the routed `iceFA` is an ice discharge (m^3/yr).
+        # (2) Route the NET mass balance into a discharge. The source is a volume
+        # rate (m^3/yr) = net balance x cell area: accumulation above the ELA
+        # ADDS, ablation below SUBTRACTS, so the routed `iceFA` is the cumulative
+        # net ice flux through each cell. Where downstream ablation has eaten all
+        # the upstream accumulation the flux goes <= 0 (clamped to 0 below) — that
+        # is the glacier snout, emerging from the mass balance rather than a hard
+        # cut-off. `melt` (in _iceMassBalance) scales the ablation, so it directly
+        # controls how far/thick the tongue reaches.
         self._matrixIceFlow(self.iceDir, terminus)
-        iceA = np.maximum(mdot, 0.0) * self.larea
+        # Net-balance source for the discharge: accumulation minus the
+        # `melt`-scaled ablation. `melt` (ice_meltfac) controls ONLY how much
+        # the below-ELA ablation eats the routed discharge -> glacier extent:
+        #   melt = 0  -> accumulation-only (ablation ignored; the legacy default)
+        #   melt = 1  -> true net balance
+        #   melt > 1  -> amplified ablation -> shorter, thinner tongues
+        # The raw ablation in `mdot` is untouched, so the till melt-out weight
+        # (iceMeltL) and the conserving meltwater below still use the true rate.
+        iceA = (
+            np.maximum(mdot, 0.0) - self.ice_meltfac * np.maximum(-mdot, 0.0)
+        ) * self.larea
         self.tmpL.setArray(iceA)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        # seed=True: cold-start the ice discharge from the accumulation source
-        # (a valid lower bound for the substochastic (I - W^T) routing system,
-        # exactly as the water flow-accumulation solve does). Without it the
-        # first-step solve starts from iceFAG == 0, cannot propagate across the
-        # network within the iteration budget, fails, and is zeroed by the
-        # bounded fallback -- leaving NO ice discharge (hence no thickness) for
-        # the whole run.
+        # seed=True warm-starts the discharge from the net-balance source (the
+        # accumulation zone, where it is positive, dominates the warm start);
+        # the parallel terminus-anchored fill makes (I - W^T) well-posed so the
+        # solve converges, and the bounded fallback is the safety net.
         self._solve_KSP(True, self.iceMat, self.tmp, self.iceFAG, seed=True)
         self.dm.globalToLocal(self.iceFAG, self.iceFAL)
         fa = self.iceFAL.getArray()

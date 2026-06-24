@@ -4,7 +4,7 @@ Status: **implemented / shipped** on `dev`.
 Last updated: 2026-06-16.
 
 Design of goSPL's glacial capability: a cheap, robust **diagnostic
-glacial-erosion model**. Each goSPL step routes the ELA accumulation downhill
+glacial-erosion model**. Each goSPL step routes the ELA net mass balance downhill
 into an ice discharge, derives an ice thickness and a basal sliding velocity from
 that discharge (one linear solve, no ice-thickness PDE time integration), and
 from those drives velocity-based glacial erosion (vertical abrasion + optional
@@ -41,13 +41,18 @@ it is the only glacial model goSPL ships.
 1. **ELA surface mass balance** `ṁ` (m ice/yr): accumulation above the ELA
    `hela`, full accumulation reached at the ice-cap altitude `hice`, ablation
    below — `ṁ = P·min(1, (η − hela)/(hice − hela))`. Accumulation is scaled by
-   `accum_factor` and optionally capped at `accum_max`; ablation amplified by
-   `melt`. Degenerate-config guard zeroes ice when `hice ≤ hela` or the max
-   surface lies below the ELA.
-2. **Route accumulation downhill** on the epsilon-filled bed via a
-   multiple-flow-direction (MFD) algorithm (`icedir` directions) — the same
-   flow-matrix / KSP machinery as the river flow accumulation — into an **ice
-   discharge** `Q` (m³/yr). One linear solve; no time integration.
+   `accum_factor` and optionally capped at `accum_max`. Degenerate-config guard
+   zeroes ice when `hice ≤ hela` or the max surface lies below the ELA.
+2. **Route the net mass balance downhill** — accumulation minus the `melt`-scaled
+   ablation `(ṁ⁺ − melt·ṁ⁻)` — on a **terminus-anchored, drainage-conditioned**
+   bed (filled in parallel so every above-terminus cell strictly drains; no
+   serial gather-to-rank-0 epsfill) via a multiple-flow-direction (MFD)
+   algorithm (`icedir` directions) — the same flow-matrix / KSP machinery as the
+   river flow accumulation — into an **ice discharge** `Q` (m³/yr). The tongue
+   ends where downstream ablation has consumed the upstream accumulation; `melt`
+   (default 0 = accumulation-only, 1 = true net balance, >1 = shorter tongues)
+   thus controls glacier extent. The raw ablation `ṁ⁻` is kept for the till
+   melt-out weight and meltwater. One linear solve; no time integration.
 3. **Ice thickness** from a Bahr discharge scaling:
    `H = eheight · fwidth · Q^0.3`.
 4. **Basal sliding velocity** from Glen's sliding law on that thickness and the
@@ -112,7 +117,7 @@ ice:
     icedir: 1            # MFD flow directions for the ice routing
     eheight: 0.25        # Bahr thickness factor
     fwidth: 1.5          # Bahr width factor
-    melt: 10.            # ablation amplifier
+    melt: 1.0            # ablation in net balance (0 = accumulation-only; 1 = true net; >1 shorter tongues)
     slide: 1.0e-3        # basal sliding coefficient (Glen sliding law)
     glen: 3.0            # Glen sliding exponent n
     accum_factor: 1.0    # precipitation -> ice accumulation fraction

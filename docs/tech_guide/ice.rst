@@ -58,12 +58,18 @@ A degenerate-configuration guard zeroes the ice and returns immediately when
 Ice routing and discharge
 -------------------------
 
-The accumulated ice is **routed downhill** on a *drainage-conditioned* bed using
+The **net mass balance** — accumulation above the ELA minus the ``melt``-scaled
+ablation below it — is **routed downhill** on a *drainage-conditioned* bed using
 a multiple-flow-direction (MFD) algorithm — the same flow-matrix / KSP machinery
 that builds the river flow accumulation, with the number of directions set by
-``icedir``. A single linear solve turns the per-cell accumulation into an **ice
+``icedir``. A single linear solve turns the per-cell net balance into an **ice
 discharge** :math:`Q` (m\ :sup:`3`/yr) at each cell: the volume of ice passing
-through it per year. There is no time integration of an ice-thickness PDE.
+through it per year. Where downstream ablation has consumed all the upstream
+accumulation the flux falls to zero — that is the glacier snout, emerging from
+the mass balance rather than a hard cut-off. The ``melt`` factor sets how much
+ablation is subtracted (``0`` = accumulation-only, ``1`` = true net balance,
+``> 1`` = shorter/thinner tongues). There is no time integration of an
+ice-thickness PDE.
 
 Because the discharge is a single :math:`(\mathbf{I}-\mathbf{W}^{\!\top})`
 solve, the routing surface must let **every cell above the glacier terminus

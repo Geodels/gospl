@@ -39,12 +39,16 @@ Each step, in `gospl/flow/iceplex.py`:
 
 1. The ELA surface mass balance `mdot` is computed (accumulation above the ELA
    `hela`, full accumulation at the ice-cap altitude `hice`, ablation below),
-   with the accumulation scaled by `accum_factor` / capped by `accum_max` and
-   ablation amplified by `melt`.
-2. The accumulation is **routed downhill** on the epsilon-filled bed by a
+   with the accumulation scaled by `accum_factor` / capped by `accum_max`.
+2. The **net mass balance** — accumulation minus the `melt`-scaled ablation
+   `(mdot⁺ − melt·mdot⁻)` — is **routed downhill** on a terminus-anchored,
+   drainage-conditioned bed (filled in parallel, no serial gather/epsfill) by a
    multiple-flow-direction (MFD) algorithm (`icedir` directions) — the same
    flow-matrix / KSP machinery as the river flow accumulation — into an **ice
-   discharge** `Q` (m³/yr). One linear solve, no time integration.
+   discharge** `Q` (m³/yr). The tongue ends where downstream ablation eats the
+   upstream accumulation, so `melt` (default 0 = accumulation-only, 1 = true net,
+   >1 = shorter tongues) controls glacier extent; the raw ablation still drives
+   the till melt-out and meltwater. One linear solve, no time integration.
 3. **Ice thickness** from a Bahr discharge scaling: `H = eheight·fwidth·Q^0.3`.
 4. **Basal sliding velocity** `u_b ∝ H^(n-1)|∇s|^(n-1)∇s` from Glen's sliding law
    on that thickness and the bed-surface slope (`slide`, `glen`; the
@@ -123,7 +127,7 @@ ice:
     icedir: 1             # MFD flow directions for the ice routing
     eheight: 0.25         # Bahr thickness factor
     fwidth: 1.5           # Bahr width factor
-    melt: 10.             # ablation amplifier
+    melt: 1.0             # ablation in net balance (0 = accumulation-only; 1 = true net; >1 shorter tongues)
     slide: 1.0e-3         # basal sliding coefficient (Glen sliding law)
     glen:  3.0            # Glen sliding exponent n
     accum_factor: 1.0     # precipitation -> ice accumulation fraction

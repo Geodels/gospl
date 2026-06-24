@@ -1836,7 +1836,7 @@ class ReadYaml(object):
             # the glacial abrasion / till / loading machinery with no ice-dynamics
             # solve (robust and physical at any resolution).
             self.iceDir = int(iceDict.get("icedir", 1))      # MFD flow directions
-            self.ice_meltfac = iceDict.get("melt", 10.0)     # ablation amplifier
+            self.ice_meltfac = iceDict.get("melt", 0.0)      # ablation in net balance (0 = accumulation-only; 1 = true net)
             self.icewf = iceDict.get("fwidth", 1.5)          # Bahr width factor
             self.icewe = iceDict.get("eheight", 0.25)        # Bahr thickness factor
             self.ice_slide = iceDict.get("slide", 1.0e-3)    # basal sliding coeff
@@ -1906,7 +1906,7 @@ class ReadYaml(object):
             iceH = None
             iceT = None
             self.iceDir = 1
-            self.ice_meltfac = 10.0
+            self.ice_meltfac = 0.0
             self.icewf = 1.5
             self.icewe = 0.25
             self.ice_slide = 1.0e-3

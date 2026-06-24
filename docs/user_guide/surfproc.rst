@@ -150,7 +150,7 @@ Ice sheets and glacial erosion
 
         Adding an ``ice`` section turns on goSPL's glacial model, driving glacial
         abrasion, till transport and ice loading. It is a cheap, robust
-        **diagnostic glacial-erosion model**: the ELA accumulation is routed
+        **diagnostic glacial-erosion model**: the ELA net mass balance is routed
         downhill into an ice discharge, from which a Bahr ice thickness and a
         bounded Glen-sliding velocity are derived (one linear solve, no
         ice-dynamics time integration), then abrasion, till/moraine deposition,
@@ -175,7 +175,7 @@ Ice sheets and glacial erosion
                 icedir: 1                 # MFD flow directions for ice routing
                 eheight: 0.25             # Bahr thickness factor
                 fwidth: 1.5               # Bahr width factor
-                melt: 10.                 # ablation amplifier
+                melt: 1.0                 # ablation in the net mass balance (0 = accumulation-only; 1 = true net)
                 slide: 1.0e-3             # basal sliding coefficient (Glen sliding law)
                 glen: 3.0                 # Glen sliding exponent n
                 # accum_factor: 1.0       # precip->ice accumulation fraction (optional)
@@ -189,7 +189,8 @@ Ice sheets and glacial erosion
                     on: True          # default True (set False -> abrasion goes straight to rivers)
                     route: True       # default True (catchment-routed; False = global melt-spread)
 
-        Each goSPL step the model routes the ELA accumulation downhill on a
+        Each goSPL step the model routes the ELA **net mass balance**
+        (accumulation minus the ``melt``-scaled ablation) downhill on a
         **terminus-anchored, drainage-conditioned bed** — filled in parallel so
         that every cell above the glacier terminus strictly drains (no closed
         depression, no flat), which is required for the single ice-discharge
@@ -221,8 +222,8 @@ Ice sheets and glacial erosion
         above:
 
         d. ``icedir`` is the number of MFD flow directions used to route the ice accumulation into the discharge :math:`Q`,
-        e. ``eheight`` and ``fwidth`` are the Bahr thickness and width scaling factors in :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`,
-        f. ``melt`` is an ablation amplifier on the below-ELA melt rate,
+        e. ``eheight`` and ``fwidth`` are the Bahr thickness and width scaling factors in :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`. Only their **product** sets the thickness, so tune ``eheight * fwidth`` (the split between them has no separate effect),
+        f. ``melt`` controls how much the below-ELA **ablation** is subtracted from the accumulation when forming the discharge — i.e. how far/thick glacier tongues reach. ``0`` (default) ignores ablation (accumulation-only, the legacy behaviour); ``1`` is the true net balance; ``> 1`` amplifies ablation so tongues are shorter and thinner. It changes only the ice extent — the raw ablation still drives the till melt-out and meltwater,
         g. ``slide`` is the basal-sliding coefficient (Glen sliding law) and ``glen`` the Glen sliding exponent :math:`n` (usually 3), setting the bounded basal velocity :math:`u_b \propto H^{n-1}|\nabla s|^{n-1}\nabla s` that drives abrasion,
         h. ``accum_factor`` (default ``1.0``) and ``accum_max`` (default unset) control the **accumulation** part of the surface mass balance only (ablation is untouched). Full precipitation is rarely all snow/ice, so ``accum_factor`` is a precipitation→ice conversion fraction and ``accum_max`` caps the accumulation rate (m ice/yr) at a realistic ceiling (real ice sheets accumulate ~0.1–2 m/yr). **Set these for high-precipitation runs** — converting several m/yr of rainfall directly to ice produces unphysically thick ice.
 
@@ -261,6 +262,36 @@ Ice sheets and glacial erosion
         When flexural isostasy is enabled, the diagnostic ice thickness is
         automatically used as the ice load contribution to the isostatic
         computation — no extra parameters are needed.
+
+        .. tip::
+
+            **Tuning the glacial model.** A few relationships are worth knowing
+            before turning the knobs:
+
+            - **Ice thickness is one knob, not two.** :math:`H` depends only on
+              the *product* ``eheight * fwidth`` (in
+              :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`), so
+              raise/lower that product until the ``iceH`` output matches the
+              thickness you expect (~10\ :sup:`2`–10\ :sup:`3` m); splitting it
+              between the two factors has no separate effect.
+            - **Accumulation.** ``accum_factor`` is a *fraction* of precipitation
+              that becomes ice — keep it **≤ 1** (it is not an amplifier; values
+              > 1 are unphysical). Use ``accum_max`` (m ice/yr, ~0.1–2 for real
+              ice) as the realistic ceiling, and raise the *precipitation forcing*
+              or the Bahr product — not ``accum_factor`` — if you need thicker
+              ice.
+            - **Glacier extent / melt.** ``melt`` sets how much ablation eats the
+              ice discharge: ``0`` ignores it (accumulation-only), ``1`` is the
+              true net balance, ``> 1`` gives shorter/thinner tongues. Use it to
+              control how far ice reaches below the ELA; it does not change the
+              accumulation-zone thickness.
+            - **Erosion: deepen vs widen.** ``Kg`` (vertical abrasion)
+              **deepens** the trough; ``Kl`` (lateral wall erosion) **widens** it
+              toward a U-profile. Keep ``Kl`` the *same order of magnitude* as
+              ``Kg`` (e.g. both ~``1e-3``): an ``Kl`` orders of magnitude larger
+              than ``Kg`` makes the walls retreat far faster than the floor
+              incises (runaway widening). Increasing ``Kg`` alone deepens — it
+              does not widen.
 
         .. important::
 
