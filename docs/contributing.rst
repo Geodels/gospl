@@ -158,6 +158,31 @@ If you don't have black, you can install it using pip::
 
     pip install black
 
+Parallel (MPI) code
+~~~~~~~~~~~~~~~~~~~
+
+goSPL runs in parallel on a PETSc DMPlex (one MPI rank per partition). The most
+common way to break a parallel run is to gate a **collective** call on a
+**rank-local** condition: if a collective (``dm.localToGlobal`` /
+``globalToLocal``, ``MPI.COMM_WORLD.Allreduce`` / ``Bcast``, ``ksp.solve`` /
+``snes.solve``, ``vec.norm`` / ``vec.sum`` / ``vec.max``, ``mat.norm``,
+``vec.assemblyBegin``, ``petsc4py.PETSc.garbage_cleanup``, …) is reached by some
+ranks but not others, the ranks that called it block forever waiting for the
+ones that skipped — the job **hangs** (and, crucially, **serial always passes**,
+because there is no partner to wait for).
+
+So a collective must never sit inside ``if MPIrank == 0:``, a rank-local
+``if mask.any():`` / ``if len(local) > 0:``, an early ``return``/``continue`` on
+a per-rank value, or a ``for``/``while`` whose trip-count differs per rank.
+Note that ``vec.sum()`` / ``vec.norm()`` *look* local but are collective — a
+frequent trap. If a genuinely rank-local decision must gate a collective, reduce
+it across ranks first (``do_it = MPI.COMM_WORLD.allreduce(local_flag,
+op=MPI.LOR)``) and branch on the reduced value; or compute the collective on
+every rank and gate only the ``print``/IO. Always test new or moved collectives
+with ``mpirun -n 2`` (the regression suite includes ``mpirun``-based parallel
+tests). The maintainer notes in ``AGENTS.md`` (section *MPI contract*) document
+this rule and the recurring cases in detail.
+
 7. Submitting a Pull Request
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

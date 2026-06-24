@@ -7,6 +7,7 @@ vtk.vtkObject.GlobalWarningDisplayOff()
 
 import warnings
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 from scipy import spatial
 
@@ -396,7 +397,7 @@ class SEAMesh(object):
         self.dm.globalToLocal(self.tmp, self.tmpL)
         volDep = self.tmpL.getArray().copy() * self.larea
         volDep[volDep < 0] = 0.
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return volDep
 

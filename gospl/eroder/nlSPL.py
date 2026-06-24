@@ -2,6 +2,7 @@ import os
 import gc
 import sys
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 import numpy_indexed as npi
 
@@ -306,7 +307,7 @@ class nlSPL(object):
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 
@@ -383,7 +384,7 @@ class nlSPL(object):
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 

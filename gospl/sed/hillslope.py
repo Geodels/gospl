@@ -2,6 +2,7 @@ import os
 import gc
 import sys
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 
 from mpi4py import MPI
@@ -198,7 +199,7 @@ class hillSLP(object):
             ksp.getPC().setReusePreconditioner(self._hill_pc_ready)
             self._hill_pc_ready = True
             ksp.solve(self.hOld, self.hGlobal)
-            petsc4py.PETSc.garbage_cleanup()
+            safe_garbage_cleanup()
 
         # Update cumulative erosion/deposition and elevation
         self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
@@ -219,7 +220,7 @@ class hillSLP(object):
                 "Compute Linear Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 
@@ -388,7 +389,7 @@ class hillSLP(object):
         ksp.getPC().setReusePreconditioner(self._smooth_pc_ready)
         self._smooth_pc_ready = True
         ksp.solve(rhs, sol)
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 
@@ -509,7 +510,7 @@ class hillSLP(object):
                 "Compute Non-Linear Hillslope Processes (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 
@@ -674,7 +675,7 @@ class hillSLP(object):
         if self.memclear:
             del ndepo
             gc.collect()
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 
@@ -886,6 +887,6 @@ class hillSLP(object):
                 % (label, process_time() - t0, nsolve, nsub, npic),
                 flush=True,
             )
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return ndepo

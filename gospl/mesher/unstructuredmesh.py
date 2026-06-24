@@ -7,6 +7,7 @@ vtk.vtkObject.GlobalWarningDisplayOff()
 
 import warnings
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 import pandas as pd
 
@@ -1142,7 +1143,7 @@ class UnstMesh(object):
             if obj is not None:
                 obj.destroy()
 
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         del self.lcoords, self.lcells, self.inIDs
 

@@ -2,6 +2,7 @@ import os
 import gc
 import sys
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 import numpy_indexed as npi
 
@@ -43,16 +44,23 @@ class FAMesh(object):
         self._ksp_main = None
         self._ksp_fallback = None
 
-        # An (I - W^T) solve that fails to converge on only a HANDFUL of rows is
-        # the benign isolated-pocket / micro-cycle case (a few genuinely
+        # An (I - W^T) solve that fails to converge on only a SMALL fraction of
+        # rows is the benign isolated-pocket / micro-cycle case (genuinely
         # un-drainable cells that just pond; discharge there is clamped >=0, mass
-        # conserved). It is expected on a partitioned high-res mesh and no solver
-        # can converge it, so it is reported calmly rather than as a scary
-        # failure. A failure spanning MORE than this many nodes is a real problem
-        # (NaN source, broken partition) and keeps the full loud diagnostic. The
-        # observed benign region is O(1-10) nodes even at 240 ranks, so 256 is
-        # well clear of it and far below any genuine convergence failure.
-        self._undrained_benign_cap = 256
+        # conserved, and a filled pit overspills its excess downstream — bounded,
+        # NOT the unbounded escarpment-style pile-up, which was a *spill* failure
+        # with no valid outlet). It is expected on a partitioned and/or near-flat
+        # mesh (the flat-terrain IDA worst case, rho(W^T)~1) and no solver can
+        # converge it, so it is reported CALMLY. A failure spanning MORE than the
+        # cap is a real problem (NaN source, broken partition — which un-drains a
+        # LARGE fraction, e.g. a whole rank's region) and keeps the full loud
+        # diagnostic. The cap is RELATIVE to the global mesh size (with an
+        # absolute floor) so the same physical fraction reads as benign on a tiny
+        # test mesh and a multi-million-node global run: e.g. a near-flat 290k
+        # plateau ponds ~0.2% of nodes (~636) — calm under the 0.5% cap (~1450)
+        # — while a genuine drainage break (>>1%) stays loud. 0.5% sits well
+        # above observed benign ponding yet far below any real failure.
+        self._undrained_benign_cap = max(256, int(0.005 * self.mpoints))
 
         # Iteration cap for the NON-fatal IDA cascade solves (sediment/water
         # downstream routing). The well-posed bulk converges in O(100s) of
@@ -256,6 +264,21 @@ class FAMesh(object):
             # (Allreduced) and `fatal` is identical on every rank, so the branch
             # is collective-consistent.
             benign = (not fatal) and (0 <= nbad <= self._undrained_benign_cap)
+            # The RHS / matrix finiteness probes use Vec.norm / Mat.norm, which
+            # are COLLECTIVE (each does an MPI_Allreduce). They MUST run on every
+            # rank -- computing them inside `if MPIrank == 0` blocks rank 0 in the
+            # Allreduce waiting for ranks that skipped it, while those ranks march
+            # on to the next collective: a deadlock (and the source of the np>1
+            # hang / `garbage_cleanup` MPI_ERR_BUFFER on a non-benign un-drained
+            # region). `benign` is identical on every rank (`fatal` is a shared
+            # arg, `nbad` is Allreduced), so this guard is collective-consistent;
+            # only the print below is rank-0-local.
+            rhs_finite = mat_finite = True
+            if not benign:
+                rhs_finite = bool(np.isfinite(vector1.norm()))
+                mat_finite = bool(
+                    np.isfinite(matrix.norm(petsc4py.PETSc.NormType.FROBENIUS))
+                )
             if MPIrank == 0:
                 if benign:
                     print(
@@ -264,10 +287,6 @@ class FAMesh(object):
                         flush=True,
                     )
                 else:
-                    rhs_finite = bool(np.isfinite(vector1.norm()))
-                    mat_finite = bool(
-                        np.isfinite(matrix.norm(petsc4py.PETSc.NormType.FROBENIUS))
-                    )
                     print(
                         "KSP (richardson/none fallback) failed to converge after",
                         its,
@@ -297,7 +316,7 @@ class FAMesh(object):
             # Auxiliary / iterative-cascade solves degrade gracefully: drop
             # this solve's contribution (zero) and continue, as before.
             vector2.set(0.0)
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return vector2
 
@@ -403,7 +422,7 @@ class FAMesh(object):
             elif not np.isfinite(vector2.norm()):
                 vector2.set(0.0)
             vector2 = self._solve_KSP2(matrix, vector1, vector2, fatal=fatal)
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return vector2
 
@@ -454,7 +473,7 @@ class FAMesh(object):
 
         # Store flow accumulation matrix
         self.fMat.transpose()
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 

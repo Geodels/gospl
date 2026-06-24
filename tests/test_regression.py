@@ -3687,6 +3687,86 @@ def test_advection_parallel(tmp_path):
     )
 
 
+def test_mpi_abort_on_exception(tmp_path):
+    """
+    Protects: model.py `_install_mpi_abort_excepthook`.
+
+    At MPIsize>1 an uncaught exception on ANY rank must `MPI_Abort` the WHOLE
+    job, never leave the other ranks blocked in a collective. Silent failure
+    prevented: an exception on one rank (e.g. a fatal solve, or any bug) while
+    the others sit in an `Allreduce`/`Barrier` deadlocks the job — it hangs and
+    must be killed by hand (exactly the failure mode reported on the
+    implicit-timestepping model). The hook turns that into an immediate, clean
+    termination.
+
+    Here rank 0 raises right after init while rank 1 enters a Barrier rank 0
+    will never reach. Without the hook the run hangs to the timeout; with it the
+    job aborts in seconds and rank 1 never gets PAST the barrier.
+    """
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI abort.")
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch: nested mpirun segfaults at finalize.")
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    yml_src = fixtures_dir / "minimal.yml"
+    mesh_src = fixtures_dir / "mesh.npz"
+    if not yml_src.exists() or not mesh_src.exists():
+        pytest.skip("minimal fixtures not present.")
+
+    out_dir = tmp_path / "abort"
+    out_dir.mkdir()
+    shutil.copy(yml_src, out_dir / "minimal.yml")
+    shutil.copy(mesh_src, out_dir / "mesh.npz")
+    script = out_dir / "abort_run.py"
+    script.write_text(
+        "from mpi4py import MPI\n"
+        "from gospl.model import Model\n"
+        "rank = MPI.COMM_WORLD.Get_rank()\n"
+        "m = Model('minimal.yml', verbose=False)\n"
+        "MPI.COMM_WORLD.Barrier()\n"
+        "if rank == 0:\n"
+        "    raise RuntimeError('synthetic fatal error on rank 0')\n"
+        "MPI.COMM_WORLD.Barrier()  # rank 0 never arrives -> hang without the hook\n"
+        "print('RANK_PAST_BARRIER', flush=True)\n"
+    )
+
+    # Scrub inherited OpenMPI runtime env so the nested mpirun launches (see
+    # run_at_rank in test_parallel_correctness for the full rationale).
+    child_env = {
+        k: v for k, v in os.environ.items()
+        if not k.startswith(("OMPI_", "PMIX_", "PRTE_", "OPAL_"))
+    }
+    if "OPAL_PREFIX" in os.environ:
+        child_env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
+
+    try:
+        result = subprocess.run(
+            ["mpirun", "-n", "2", sys.executable, "abort_run.py"],
+            cwd=out_dir, timeout=90, capture_output=True, text=True, env=child_env,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            "Parallel run HUNG (>90s) after a rank-0 exception — the MPI abort "
+            "hook did not fire, so the surviving rank deadlocked in its Barrier."
+        )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, "expected a non-zero exit after the abort"
+    assert "RANK_PAST_BARRIER" not in result.stdout, (
+        "rank 1 proceeded past the barrier — the abort hook did not kill it.\n"
+        f"--- output ---\n{combined[:800]}"
+    )
+    assert ("MPI_ABORT" in combined) or ("synthetic fatal error" in combined), (
+        f"no sign of the clean-abort path in the output:\n{combined[:800]}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # TEST 8c - Cached diffusion operators: collective rebuild decision (np>1)
 # ---------------------------------------------------------------------------

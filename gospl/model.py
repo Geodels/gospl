@@ -1,4 +1,5 @@
 import os
+import sys
 
 from mpi4py import MPI
 from time import process_time
@@ -103,6 +104,40 @@ else:
 MPIrank = MPI.COMM_WORLD.Get_rank()
 MPIsize = MPI.COMM_WORLD.Get_size()
 
+_mpi_excepthook_installed = False
+
+
+def _install_mpi_abort_excepthook():
+    """
+    Install a ``sys.excepthook`` that ``MPI_Abort``s **every** rank on any
+    uncaught exception (parallel runs only; a no-op at ``MPIsize == 1``).
+
+    Why: without it, an exception on ONE rank — especially one raised inside a
+    collective (a failed KSP solve, a PETSc collective error such as the
+    PETSc-3.21 ``garbage_cleanup`` ``MPI_ERR_BUFFER`` bug, …) — leaves the OTHER
+    ranks blocked in MPI forever, so the whole job **hangs** and must be killed
+    by hand. ``MPI.COMM_WORLD.Abort(1)`` turns that deadlock into an immediate,
+    clean termination of all ranks that still surfaces the traceback. Idempotent
+    and chains to the previous hook so the traceback prints as usual first.
+    """
+    global _mpi_excepthook_installed
+    if _mpi_excepthook_installed or MPIsize == 1:
+        return
+    _prev_hook = sys.excepthook
+
+    def _hook(exc_type, exc, tb):
+        try:
+            _prev_hook(exc_type, exc, tb)
+            sys.stderr.flush()
+            sys.stdout.flush()
+        finally:
+            # A lone rank's exception otherwise deadlocks the others waiting in
+            # a collective — terminate the entire job.
+            MPI.COMM_WORLD.Abort(1)
+
+    sys.excepthook = _hook
+    _mpi_excepthook_installed = True
+
 
 class Model(
     _ReadYaml,
@@ -142,6 +177,11 @@ class Model(
     ):
 
         self.showlog = showlog
+
+        # Make any uncaught exception abort ALL ranks instead of deadlocking the
+        # job (parallel runs only). Installed first so even an init-time failure
+        # terminates cleanly. See _install_mpi_abort_excepthook.
+        _install_mpi_abort_excepthook()
 
         self.modelRunTime = process_time()
         self.verbose = verbose

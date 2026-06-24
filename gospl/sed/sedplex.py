@@ -2,6 +2,7 @@ import os
 import gc
 import sys
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 import numpy_indexed as npi
 
@@ -166,7 +167,7 @@ class SEDMesh(object):
                 "Update Sediment Load (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 

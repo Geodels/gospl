@@ -2,6 +2,7 @@ import os
 import gc
 import sys
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 import numpy_indexed as npi
 
@@ -349,7 +350,7 @@ class soilSPL(object):
         self.Lsoil.setArray(nHsoil)
         self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return
 
@@ -651,7 +652,7 @@ class soilSPL(object):
         self.tmpL.setArray(chgSoil)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         # Update cumulative erosion and deposition as well as elevation
         self.cumED.axpy(1.0, self.tmp)
