@@ -38,7 +38,9 @@ Initial mesh definition and simulation declaration
 
         a. the initial spherical or 2D surface mesh ``npdata`` (**.npz** file). This file contains the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells.
         b. the flow direction method to be used ``flowdir`` that takes an integer value between 1 (for SFD) and 6 (for MFD)
-        
+
+        The planet geometry defaults to **Earth** but can be overridden to model another body (both optional): ``radius`` is the planet radius in metres (default ``6378137.0``) used for the spherical-mesh geometry, and ``gravity`` is the surface gravity in m/s\ :sup:`2` (default ``9.81``) used by the flexural-isostasy solver. For example a Mars run would set ``radius: 3389500.0`` and ``gravity: 3.71``.
+
         In addition the following optional parameters could be set:
 
         c. boundary conditions (``bc``) when not running a global model: a 4-character string, one per edge in the order **north, east, south, west** (N at ``y = ymax``, E at ``x = xmax``, S at ``y = ymin``, W at ``x = xmin``). Each character is:

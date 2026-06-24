@@ -131,6 +131,29 @@ Optional parameters related to tectonics
             Learn more.
 
 
+Model outputs
+^^^^^^^^^^^^^
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Output variables & visualisation**
+        ^^^
+
+        The fields goSPL writes, what they mean, and how to view them in ParaView.
+
+        +++
+
+        .. button-ref:: outputs
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
+
 Performance on HPC
 ^^^^^^^^^^^^^^^^^^^
 
@@ -161,4 +184,5 @@ Performance on HPC
     surfproc
     optfile1
     optfile2
+    outputs
     hpc_scaling

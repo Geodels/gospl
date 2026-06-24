@@ -189,12 +189,16 @@ Ice sheets and glacial erosion
                     on: True          # default True (set False -> abrasion goes straight to rivers)
                     route: True       # default True (catchment-routed; False = global melt-spread)
 
-        Each goSPL step the model routes the ELA accumulation downhill on the
-        epsilon-filled bed into an ice discharge :math:`Q`, derives a Bahr ice
-        thickness :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`
+        Each goSPL step the model routes the ELA accumulation downhill on a
+        **terminus-anchored, drainage-conditioned bed** — filled in parallel so
+        that every cell above the glacier terminus strictly drains (no closed
+        depression, no flat), which is required for the single ice-discharge
+        solve to be well-posed — into an ice discharge :math:`Q`, derives a Bahr
+        ice thickness :math:`H = \mathrm{eheight}\cdot\mathrm{fwidth}\cdot Q^{0.3}`
         and a bounded basal sliding velocity from Glen's sliding law, and then
         drives the abrasion / till / loading machinery below — all in a single
-        linear solve, with no ice-thickness PDE time integration.
+        linear solve, with no ice-thickness PDE time integration. The fill is
+        partition-invariant, so results are identical at any processor count.
 
         ``melt_conserve`` (default ``True``) sets how glacial meltwater is
         delivered to the rivers. ``True`` is **discharge-conserving**: the

@@ -58,12 +58,23 @@ A degenerate-configuration guard zeroes the ice and returns immediately when
 Ice routing and discharge
 -------------------------
 
-The accumulated ice is **routed downhill** on the epsilon-filled bed using a
-multiple-flow-direction (MFD) algorithm — the same flow-matrix / KSP machinery
+The accumulated ice is **routed downhill** on a *drainage-conditioned* bed using
+a multiple-flow-direction (MFD) algorithm — the same flow-matrix / KSP machinery
 that builds the river flow accumulation, with the number of directions set by
 ``icedir``. A single linear solve turns the per-cell accumulation into an **ice
 discharge** :math:`Q` (m\ :sup:`3`/yr) at each cell: the volume of ice passing
 through it per year. There is no time integration of an ice-thickness PDE.
+
+Because the discharge is a single :math:`(\mathbf{I}-\mathbf{W}^{\!\top})`
+solve, the routing surface must let **every cell above the glacier terminus
+strictly drain** — no closed depressions and no flats — or the operator is
+singular and the solve collapses to zero discharge (no ice). This conditioning
+is built **in parallel**, anchored at the terminus (the physical ice outlet,
+where ice melts out): a parallel priority-flood removes depressions and a
+parallel flat-router gives every filled-flat cell a spill-ward direction, while
+cells at or below the terminus and the domain edges act as absorbing outlets.
+The result is partition-invariant (identical at any processor count) and
+avoids gathering the whole mesh to one rank, so it scales to large meshes.
 
 Ice thickness (Bahr scaling)
 ----------------------------
