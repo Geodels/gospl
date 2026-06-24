@@ -526,18 +526,26 @@ class soilSPL(object):
             Cp = np.multiply(self.Cd, np.exp(-dh / self.H0) / self.H0)
             nlC = jacobiancoeff(hl, Cd, Cp)
 
-            # Combine the diagonal and off-diagonal columns into one
-            # setValuesLocal call per row (was two), halving the Python -> PETSc
-            # transitions. CSR-style batch is not safe here because the mesh
-            # lgmap is keyed by mesh-local indices (length lpoints), not by
-            # matrix-local rows (length n_owned).
-            diag_col = np.arange(self.lpoints, dtype=petsc4py.PETSc.IntType)
-            cols_2d = np.column_stack([diag_col[:, None], self.FVmesh_ngbID]).astype(
+            # Assemble ONLY the rows this rank OWNS (self.glIDs). Looping over
+            # all self.lpoints rows would also set the GHOST rows, whose stencil
+            # is computed here from an INCOMPLETE neighbour set (the ghost's full
+            # neighbourhood is not all present on this rank). Those off-process
+            # ghost-row values collide under INSERT_VALUES with the owning rank's
+            # correct values, leaving the boundary rows of the Jacobian
+            # partition-dependent -- which drove an isolated elevation spike at
+            # sub-domain boundaries (np=1 clean, np>1 spiked). Owned-row-only
+            # assembly (mirroring _evalJacobianMardDiff) makes the matrix
+            # partition-invariant. The diagonal column for owned row r is r
+            # itself; its off-diagonal columns are r's FV neighbours.
+            ngb_cols = self.FVmesh_ngbID[self.glIDs, :]
+            cols_2d = np.column_stack([self.glIDs[:, None], ngb_cols]).astype(
                 petsc4py.PETSc.IntType
             )
-            vals_2d = np.column_stack([(a + nlC[:, 0])[:, None], nlC[:, 1:]])
-            for row in range(self.lpoints):
-                B.setValuesLocal(row, cols_2d[row], vals_2d[row])
+            vals_2d = np.column_stack(
+                [(a + nlC[self.glIDs, 0])[:, None], nlC[self.glIDs, 1:]]
+            )
+            for i, row in enumerate(self.glIDs):
+                B.setValuesLocal(row, cols_2d[i], vals_2d[i])
             B.assemble()
 
             if A != B:
