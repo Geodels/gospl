@@ -1089,6 +1089,65 @@ def test_wall_boundary_conservation(flat_wall_model):
     )
 
 
+def test_open_edge_non_rising(incising_model):
+    """
+    Protects: open ('o') boundary edges are a NON-RISING free-outflow base
+    level (`unstructuredmesh._drainOpenEdges`).
+
+    Silent failure prevented: historically an open edge was reset every step to
+    the neighbour AVERAGE (`getbc`/`fitedges`), so on an AGGRADING downstream
+    edge the edge rose with the interior, lost base-level control, and the
+    near-edge plain ponded sediment into a closed-sink deposition runaway
+    (tens-of-km spurious peaks on the low, downstream open edge of an
+    escarpment-retreat model). The fix sets each open node to
+    `min(current elevation, min(interior neighbours))`: it may follow the domain
+    DOWN (incision / subsidence) but must never be pushed UP by an aggrading
+    interior. This test pins both directions directly (fast + deterministic;
+    the full runaway is mesh-resolution dependent and impractical to reproduce
+    in a tiny fixture).
+    """
+    model = incising_model
+    assert model.flatModel
+    # incising.yml is all-open ('0000'); collect every open-edge node.
+    open_nodes = np.unique(np.concatenate([
+        pts for flag, pts in (
+            (model.north, model.northPts), (model.east, model.eastPts),
+            (model.south, model.southPts), (model.west, model.westPts),
+        ) if flag == 0 and pts is not None and len(pts) > 0
+    ]))
+    assert len(open_nodes) > 0, "incising fixture should have open edges"
+    is_open = np.zeros(model.lpoints, dtype=bool)
+    is_open[open_nodes] = True
+
+    base = model.hLocal.getArray().copy()
+    edge0 = base[open_nodes].copy()
+
+    # 1) AGGRADATION: raise the whole interior far above the edge. The edge must
+    #    NOT rise — min(current, min(neighbours)) stays at the current value.
+    agg = base.copy()
+    agg[~is_open] += 1000.0
+    out = model._drainOpenEdges(agg.copy())
+    assert np.all(out[open_nodes] <= edge0 + 1.0e-9), (
+        "open edge rose with an aggrading interior (lost base-level control): "
+        f"max rise = {float((out[open_nodes] - edge0).max()):.3e} m"
+    )
+    assert np.allclose(out[open_nodes], edge0, atol=1.0e-9), (
+        "open edge value drifted under pure aggradation"
+    )
+
+    # 2) INCISION: drop the whole interior below the edge. The edge MUST follow
+    #    down (free outflow tracks the lowering domain).
+    inc = base.copy()
+    inc[~is_open] -= 500.0
+    out2 = model._drainOpenEdges(inc.copy())
+    # every open node with an interior neighbour must have dropped
+    assert np.all(out2[open_nodes] <= edge0 + 1.0e-9), "incision case raised the edge"
+    assert float((edge0 - out2[open_nodes]).max()) > 1.0, (
+        "open edge did not track the incising interior down"
+    )
+    assert np.all(np.isfinite(out2)), "open-edge fill produced non-finite values"
+
+
 def test_cyclic_boundary(cyclic_cyl_model):
     """
     Protects: the cyclic (periodic) flow/sediment boundary option (`bc: '0c0c'`

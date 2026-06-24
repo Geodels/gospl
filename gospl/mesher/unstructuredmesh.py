@@ -22,7 +22,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import globalngbhs
     from gospl._fortran import definetin
     from gospl._fortran import setcurvedmesh
-    from gospl._fortran import fitedges
     from gospl._fortran import updatearea
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -466,15 +465,19 @@ class UnstMesh(object):
         if nib[0] > 0:
             self.flatModel = True
             # boundCond chars (normalised in the parser) -> edge flag:
-            #   'o' open  -> 0 : deep base-level outlet (elevation forced low
-            #                    below + it acts as an outlet / drain);
-            #   'f' fixed -> 1 : fixed base-level outlet at natural elevation
-            #                    (drains — the historic behaviour);
+            #   'o' open  -> 0 : non-rising free-outflow base-level outlet. Each
+            #                    step its nodes are reset to min(current,
+            #                    min(interior neighbours)) (`_drainOpenEdges`):
+            #                    the edge follows incision/subsidence DOWN but is
+            #                    never raised by an aggrading interior, so it
+            #                    keeps base-level control and always drains;
+            #   'f' fixed -> 1 : fixed base-level outlet held at natural
+            #                    elevation (drains — the historic behaviour);
             #   'c' cyclic-> 2 : periodic (wrap provided by the cylinder mesh);
             #   'w' wall  -> 3 : true no-flux wall — its edge nodes are EXCLUDED
             #                    from `outletIDs` below so they behave as interior
             #                    nodes (sediment is contained, not drained).
-            # Only 'o' is given the deep-sentinel treatment in `applyForces`.
+            # Only 'o' is reset in `applyForces` (via `_drainOpenEdges`).
             # Edge order is [North, East, South, West] (N=ymax, E=xmax, S=ymin,
             # W=xmin).
             _bc = {'o': 0, 'f': 1, 'c': 2, 'w': 3}
@@ -773,29 +776,95 @@ class UnstMesh(object):
         # Tectonic forcing
         self.applyTectonics()
 
-        # Assign mesh boundaries
+        # Assign mesh boundaries: open ('o') edges are reset to a free-outflow
+        # base level each step (see _drainOpenEdges). Fixed ('f') / wall ('w') /
+        # cyclic ('c') edges keep their current elevation here.
         if self.flatModel:
             tmp = self.hLocal.getArray().copy()
-            if self.south == 0 and len(self.southPts) > 0:
-                # tmp[self.southPts] = getbc(len(self.southPts), tmp, self.southPts)
-                tmp[self.southPts] = MISSING_DATA_SENTINEL
-                tmp = fitedges(tmp)
-            if self.north == 0 and len(self.northPts) > 0:
-                # tmp[self.northPts] = getbc(len(self.northPts), tmp, self.northPts)
-                tmp[self.northPts] = MISSING_DATA_SENTINEL
-                tmp = fitedges(tmp)
-            if self.east == 0 and len(self.eastPts) > 0:
-                # tmp[self.eastPts] = getbc(len(self.eastPts), tmp, self.eastPts)
-                tmp[self.eastPts] = MISSING_DATA_SENTINEL
-                tmp = fitedges(tmp)
-            if self.west == 0 and len(self.westPts) > 0:
-                # tmp[self.westPts] = getbc(len(self.westPts), tmp, self.westPts)
-                tmp[self.westPts] = MISSING_DATA_SENTINEL
-                tmp = fitedges(tmp)
+            tmp = self._drainOpenEdges(tmp)
             self.hLocal.setArray(tmp)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
         return
+
+    def _drainOpenEdges(self, tmp):
+        """
+        Reset every open ('o') boundary node to a non-rising free-outflow base
+        level.
+
+        An open edge represents free outflow to a deep/low base level. It must
+        provide **base-level control**: it may follow the domain DOWN (incision,
+        tectonic subsidence) but must never be pushed UP by sediment that piles
+        against it. Historically the edge was set to the neighbour **average**
+        (``getbc``, later ``fitedges`` on a sentinel) — a "smooth" open boundary
+        that simply tracks the interior in BOTH directions. That is fine on a
+        steady or incising edge, but on an **aggrading downstream** edge the
+        average (and even the neighbour minimum) rises with the aggrading plain,
+        the edge loses base-level control, the outward drainage gradient
+        vanishes, and sediment ponds just inside the edge → a closed-sink
+        deposition runaway (tens-of-km spurious peaks on the low, downstream
+        open edge of an escarpment-retreat model).
+
+        Fix — two combined rules:
+
+        1. Candidate elevation = **minimum** of the node's interior (non-open)
+           neighbours, so the edge is never a barrier to its own neighbours and
+           stays bounded by real topography (no ``MISSING_DATA_SENTINEL`` slope
+           blow-up). ``min`` is order-independent ⇒ partition-invariant.
+        2. The edge is then set to ``min(current elevation, candidate)`` — a
+           per-node running minimum. Open edge nodes never erode/deposit
+           (``E``/``fDep`` are zeroed on ``outletIDs``) and feel only tectonics
+           + this reset, so their stored value is the previous base level. Taking
+           the min lets incision and tectonic subsidence lower the edge while
+           **blocking aggradation from raising it** — the missing base-level
+           control. Tectonic uplift still propagates (it raises the stored value
+           in ``applyTectonics`` before this reset).
+
+        This gives 'o' a distinct, stable meaning vs 'f': open is a low
+        free-outflow base level that the domain can incise toward but cannot
+        aggrade away; fixed holds its prescribed natural per-node elevation.
+
+        Operates in place on ``tmp`` (a copy of the ``hLocal`` array) and
+        returns it; no scratch Vec is touched.
+        """
+        open_pts = [
+            pts for flag, pts in (
+                (self.north, self.northPts), (self.east, self.eastPts),
+                (self.south, self.southPts), (self.west, self.westPts),
+            ) if flag == 0 and pts is not None and len(pts) > 0
+        ]
+        if not open_pts:
+            return tmp
+
+        open_nodes = np.unique(np.concatenate(open_pts))
+        ngb = self.FVmesh_ngbID                       # (n, K) local ids, -1 pad
+        is_open = np.zeros(tmp.shape[0], dtype=bool)
+        is_open[open_nodes] = True
+        # Interior nodes already carry a valid elevation; open nodes are filled
+        # below. A label-correcting sweep first fills open nodes that have at
+        # least one interior neighbour, then propagates to any open node whose
+        # neighbours are ALL open (corners) from its now-filled open neighbours.
+        assigned = ~is_open
+        vals = tmp.copy()
+        pending = open_nodes
+        for _ in range(open_nodes.size + 1):
+            nb = ngb[pending]                         # (m, K)
+            valid = nb >= 0
+            nb_idx = np.where(valid, nb, 0)
+            usable = valid & assigned[nb_idx]
+            cand = np.where(usable, vals[nb_idx], np.inf)
+            mn = cand.min(axis=1)
+            ok = np.isfinite(mn)
+            vals[pending[ok]] = mn[ok]
+            assigned[pending[ok]] = True
+            pending = pending[~ok]
+            if pending.size == 0:
+                break
+
+        # Running minimum: the edge follows the domain down but is never raised
+        # by an aggrading interior (see rule 2 in the docstring).
+        tmp[open_nodes] = np.minimum(tmp[open_nodes], vals[open_nodes])
+        return tmp
 
     def applyTectonics(self):
         """
