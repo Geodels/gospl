@@ -6,16 +6,10 @@ import numpy as np
 from mpi4py import MPI
 from time import process_time
 
-from gospl.tools.constants import (
-    BOUNDARY_FLOW_SENTINEL,
-    MISSING_DATA_SENTINEL,
-)
-
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import ice_velocity
     from gospl._fortran import ice_lateral_erosion
     from gospl._fortran import mfdreceivers
-    from gospl._fortran import epsfill
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
@@ -137,41 +131,62 @@ class IceMesh(object):
     def _matrixIceFlow(self, dir_ice=1, terminus=None):
         """
         Build the multiple-flow-direction (MFD) routing matrix for ice on the
-        (epsilon-filled) bed surface — used by the diagnostic ``mfd`` flow model
-        to accumulate the ELA mass balance into an ice discharge. Mirrors the
-        water flow-direction matrix; deterministic slope tie-break via ``gid``.
+        bed surface — used by the diagnostic glacial driver to accumulate the
+        ELA mass balance into an ice discharge.
 
-        The eps-fill is seeded from the glacier **terminus** (``terminus``, the
-        physical ice outlet — ice melts out at/below it), and every cell at or
-        below the terminus is made an absorbing sink in the routing matrix. This
-        is essential for a well-posed solve: seeding/draining the whole bed down
-        to sea level instead leaves the ice-free sub-terminus region as interior
-        drainage targets that are NOT absorbed, so ``(I − Wᵀ)`` is singular, the
-        discharge KSP diverges, and the bounded fallback zeroes it — producing
-        no ice anywhere. Anchoring the outlet at the terminus drains the
-        above-terminus ice region to a well-posed boundary.
+        The ice discharge is a single linear solve of ``(I − Wᵀ)``, so the
+        routing surface must have NO closed depressions and NO flats above the
+        glacier terminus — every above-terminus cell must strictly drain, or the
+        operator is singular and the KSP diverges (zeroing the discharge: no
+        ice). The previous serial ``epsfill`` (gather the whole mesh to rank 0,
+        fill, broadcast) gave that property but does NOT scale.
+
+        Here the same property is obtained in PARALLEL by reusing the flow pit
+        machinery, seeded at the **terminus** (the physical ice outlet — ice
+        melts out at/below it):
+
+        * ``_performFilling`` — the partition-invariant parallel Barnes flood —
+          removes depressions so the above-terminus surface drains to the mesh
+          edges (no pits);
+        * ``_pitInformation`` (→ ``_dirFlats``) — the partition-invariant flat
+          router — gives every filled-flat cell a downhill direction to its
+          spill, replacing the epsilon gradient (no flats).
+
+        Cells at/below the terminus (the ice-free melt-out region) and the
+        domain borders are made absorbing sinks, so the above-terminus ice
+        region drains to a well-posed outlet. ``self.lFill`` / ``pitIDs`` /
+        ``flatDirs`` overwritten here are all recomputed by the flow
+        accumulation that runs immediately after the ice step, so there is no
+        cross-contamination (nothing reads them in between).
         """
-        hl = self.hLocal.getArray().copy()
+        bed = self.hLocal.getArray().copy()
         if terminus is None:
             terminus = max(self.hGlobal.min()[1] + 0.1, self.sealevel)
-        # Absorbing outlet = the ice-free melt-out region (bed at/below the
-        # terminus) plus the domain borders. Captured on the BED elevation
-        # (matches the `fa[zbed < terminus] = 0` discharge mask downstream).
-        sinks = hl <= terminus
-        if self.flatModel:
-            hl[self.idBorders] = BOUNDARY_FLOW_SENTINEL
-            sinks[self.idBorders] = True
-        fillz = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
-        fillz[self.locIDs] = hl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, fillz, op=MPI.MAX)
-        if MPIrank == 0:
-            fillz = epsfill(terminus, fillz)
-        fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
-        fillz = fillEPS[self.locIDs]
 
-        rcv, _, wght = mfdreceivers(
-            dir_ice, 1.0, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
-        )
+        # Parallel terminus-anchored fill + flat directions (no serial epsfill).
+        self._performFilling(bed - terminus, terminus, sed=True)
+        self.lFill += terminus
+        self._pitInformation(bed, terminus, sed=True)
+        fillz = self.lFill
+
+        # MFD receivers on the filled ice surface.
+        rcv, _, wght = mfdreceivers(dir_ice, 1.0, fillz, self.sealevel, self.gid)
+        # Flats (filled-depression cells left with no MFD receiver) drain along
+        # the spill-ward flat direction — the parallel replacement for epsilon.
+        sum_weight = np.sum(wght, axis=1)
+        flat = (
+            (self.pitIDs > -1) & (self.flatDirs > -1) & (sum_weight == 0.0)
+        ).nonzero()[0]
+        rcv[flat, :] = np.tile(flat, (dir_ice, 1)).T
+        rcv[flat, 0] = self.flatDirs[flat]
+        wght[flat, :] = 0.0
+        wght[flat, 0] = 1.0
+
+        # Absorbing outlet: ice-free melt-out region (bed at/below the terminus,
+        # matching the downstream `fa[zbed < terminus] = 0` mask) + the borders.
+        sinks = bed <= terminus
+        if self.flatModel:
+            sinks[self.idBorders] = True
         sink_ids = np.where(sinks)[0]
         rcv[sink_ids, :] = sink_ids[:, None]
         wght[sink_ids, :] = 0.0
@@ -191,7 +206,7 @@ class IceMesh(object):
             self.iceMat.axpy(-1.0, tmpMat)
             tmpMat.destroy()
         if self.memclear:
-            del data, indptr, nodes, hl, fillz, fillEPS, rcv, wght
+            del data, indptr, nodes, bed, fillz, rcv, wght
             gc.collect()
         self.iceMat.transpose()
         return
