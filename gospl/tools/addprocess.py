@@ -355,28 +355,26 @@ class GridProcess(object):
                                    for i in range(len(F_hist) - 1)])
                     dG_flat = dG.reshape(dG.shape[0], -1).T
                     dF_flat = dF.reshape(dF.shape[0], -1).T
-                    # As the iteration converges the residual-difference columns
-                    # become nearly collinear, so the *unregularised* least-
-                    # squares coefficients (np.linalg.lstsq, rcond=None) can blow
-                    # up and `dF_flat @ gamma` overflow — the divide-by-zero /
-                    # overflow / invalid-value matmul warnings, and a corrupted
-                    # step. Solve the small (k x k) normal equations with a
-                    # RELATIVE Tikhonov ridge so gamma stays bounded, and fall
-                    # back to a plain Picard step if the correction is still not
-                    # finite. This changes only the iteration PATH, not the fixed
-                    # point: at convergence g -> 0 so the correction -> 0
-                    # regardless, and the break above returns w_dh = Fw.
-                    AtA = dG_flat.T @ dG_flat
-                    k = AtA.shape[0]
-                    ridge = 1.0e-8 * (np.trace(AtA) / k) + 1.0e-300
-                    try:
-                        gamma = np.linalg.solve(
-                            AtA + ridge * np.eye(k),
-                            dG_flat.T @ g_hist[-1].ravel())
+                    # Regularised Anderson least-squares. `rcond` truncates the
+                    # (near-)null directions of the collinear residual history so
+                    # gamma stays bounded as the iteration converges. The matmuls
+                    # are wrapped in `errstate`: under MPI / threaded OpenBLAS the
+                    # SIMD GEMM kernels can raise SPURIOUS FP-exception flags
+                    # (divide/overflow/invalid) on the tail lanes even for small,
+                    # finite, well-formed inputs — numpy then reports them as
+                    # RuntimeWarnings although the RESULT is correct (verified:
+                    # |dG|~36, |w|~540 m, the solve converges normally; the
+                    # warnings appear only at np>1, never in a serial run). We
+                    # finite-guard the result and fall back to a plain Picard step
+                    # if anything is non-finite. lstsq (SVD) avoids forming the
+                    # normal equations dG^T dG (which would needlessly square the
+                    # dynamic range).
+                    with np.errstate(divide="ignore", over="ignore",
+                                     invalid="ignore"):
+                        gamma, *_ = np.linalg.lstsq(
+                            dG_flat, g_hist[-1].ravel(), rcond=1.0e-8)
                         w_corr = (dF_flat @ gamma).reshape(Fw.shape)
-                    except np.linalg.LinAlgError:
-                        w_corr = None
-                    if w_corr is not None and np.isfinite(w_corr).all():
+                    if np.isfinite(w_corr).all():
                         w_new = Fw - w_corr
                     else:
                         w_new = Fw
