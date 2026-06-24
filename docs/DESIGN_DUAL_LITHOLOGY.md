@@ -212,7 +212,16 @@ machinery already has the two end-members dual lithology needs:
 
 Dual-lithology deposition is therefore **not new geometry** — it splits the per-
 pit deposited volume `depo → depoC, depoF` and routes each through the existing
-path, with `pitInletBias` per fraction (coarse high, fine ~0). New work:
+path, with `pitInletBias` per fraction (coarse high, fine ~0).
+
+> **Implemented (3b):** rather than a per-fraction *geometry* split, the shipped
+> path keeps a single shared pit deposit (geometry unchanged) and sets the
+> per-node composition in `_pitFineFraction`. `pitInletBias` is now **live**: its
+> `coarse − fine` contrast is the segregation strength of the depth-proportional
+> fine bias (`1 + (coarse − fine)(d/d̄ − 1)`), conserving each pit's retained
+> fine at any strength. Contrast 0 ⇒ uniform composition; 1 ⇒ full depth split.
+
+New work:
 
 1. **Per-fraction pit budget** — carry `vSedC`/`vSedF` through `_moveDownstream`;
    both fractions draw down the shared `self.pitVol` accommodation while placing

@@ -878,8 +878,18 @@ class SEDMesh(object):
           - Bathymetric depth ``d = max(lFill − hl, 0)`` is the depocenter
             proxy (deep at the centre, shallow at the rim/inlet — independent
             of where the deposit piled).
-          - Fine fraction is biased ∝ d and renormalised to the deposit-weighted
-            mean depth, so ``Σ(delta·larea·ffrac) == ff_pit·Σ(delta·larea) ==``
+          - The split STRENGTH is the per-fraction inlet-bias contrast
+            ``seg = clip(pitInletBias.coarse − pitInletBias.fine, −1, 1)``:
+            coarse is pulled to the inlet/rim and fine to the depocenter, so
+            their contrast sets how strongly the composition tracks depth.
+            ``coarse == fine`` ⇒ no segregation (uniform ``ff_pit``);
+            ``coarse > fine`` ⇒ fine concentrates in the deep depocenter (the
+            geological norm, e.g. ``{coarse: 0.5, fine: 0.0}``); the
+            full-strength end ``coarse − fine == 1`` recovers the pure
+            depth-proportional profile.
+          - Fine fraction is biased toward the depocenter via the shape factor
+            ``1 + seg·(d/d̄ − 1)`` about the deposit-weighted mean depth ``d̄``,
+            so ``Σ(delta·larea·ffrac) == ff_pit·Σ(delta·larea) ==``
             the fine volume retained in the pit.
 
         :arg hl: pre-deposition local elevation
@@ -913,12 +923,20 @@ class SEDMesh(object):
         depthbar = np.divide(dwd, dw, out=np.zeros(num_pits), where=dw > 0)
 
         # ---- per-node biased fine fraction (depocenter-weighted) ----
+        # Segregation strength = the per-fraction inlet-bias contrast
+        # (strata.pitInletBias). coarse - fine == 1 recovers the pure
+        # depth-proportional profile; == 0 gives a uniform composition; < 0
+        # inverts it (fine to the rim). The shape factor (d/d̄ - 1) has
+        # deposit-weighted mean 0, so the per-pit fine volume is conserved for
+        # ANY strength (mean ffrac stays ff_pit).
+        seg = float(
+            np.clip(self.pit_inlet_bias_coarse - self.pit_inlet_bias_fine, -1.0, 1.0)
+        )
         pit_safe = np.where(in_pit, self.pitIDs, 0)
         ffp = ff_pit[pit_safe]
         db = depthbar[pit_safe]
-        ffrac = np.where(
-            in_pit & (db > 0.0), ffp * depth / np.maximum(db, 1.0e-30), 0.0
-        )
+        shape = np.where(db > 0.0, depth / np.maximum(db, 1.0e-30) - 1.0, 0.0)
+        ffrac = np.where(in_pit & (db > 0.0), ffp * (1.0 + seg * shape), 0.0)
         np.clip(ffrac, 0.0, 1.0, out=ffrac)
         self.depoFineFrac[in_pit] = ffrac[in_pit]
 

@@ -160,6 +160,16 @@ builds the **inlet/margins**, and in the marine domain fine concentrates in
 volume is conserved by this re-partition; the deposit geometry (and therefore
 the elevation evolution) is unchanged relative to the total-sediment result.
 
+In lakes/depressions the strength of this segregation is the ``pitInletBias``
+**contrast** ``coarse − fine``: the per-node fine fraction varies about each
+pit's mean by the depth shape factor :math:`1 + (\mathrm{coarse}-\mathrm{fine})\,(d/\bar{d} - 1)`,
+with bathymetric depth :math:`d` and deposit-weighted mean depth :math:`\bar{d}`.
+Equal biases give a uniform composition (no segregation), ``coarse > fine``
+(e.g. ``{coarse: 0.5, fine: 0.0}``) concentrates fine in the deep depocenter,
+and ``coarse − fine == 1`` is the maximum, fully depth-proportional split. The
+shape factor has deposit-weighted mean zero, so the pit's retained fine volume
+is conserved at any strength.
+
 *Fine-enriched overspill* is also modelled: in a filled depression coarse
 settles first (is retained up to the pit capacity), so the deposit kept in the
 pit is coarse-enriched while the excess that overspills is fine-enriched and

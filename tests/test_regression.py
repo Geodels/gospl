@@ -2051,6 +2051,9 @@ def test_dual_lithology_pit_fine_bias():
     depo = np.array([4.0])                   # retained volume (Σ delta*larea)
     m._pitRetFine = np.array([1.2])          # retained fine → ff_pit = 1.2/4 = 0.3
     m.depoFineFrac = np.zeros(n)
+    # Default lacustrine bias: coarse delta vs fine depocenter (seg = 0.5).
+    m.pit_inlet_bias_coarse = 0.5
+    m.pit_inlet_bias_fine = 0.0
 
     m._pitFineFraction(hl, delta, depo)
 
@@ -2065,6 +2068,29 @@ def test_dual_lithology_pit_fine_bias():
     fine_vol = float(np.sum(delta * m.larea * ff))
     assert np.isclose(fine_vol, 0.3 * 4.0, rtol=1e-9), (
         f"Pit fine volume not conserved: {fine_vol} != 1.2"
+    )
+
+    # (c) the pitInletBias contrast controls the segregation STRENGTH: a larger
+    # coarse-vs-fine contrast steepens the depth gradient, while equal biases
+    # remove it (uniform composition) — all conserving the same fine volume.
+    m.depoFineFrac = np.zeros(n)
+    m.pit_inlet_bias_coarse = 1.0           # seg = 1.0 (full depth-proportional)
+    m.pit_inlet_bias_fine = 0.0
+    m._pitFineFraction(hl, delta, depo)
+    ff_strong = m.depoFineFrac.copy()
+    span_default = ff[order][-1] - ff[order][0]
+    span_strong = ff_strong[order][-1] - ff_strong[order][0]
+    assert span_strong > span_default, (
+        "Stronger pitInletBias contrast must steepen the depth gradient."
+    )
+    assert np.isclose(float(np.sum(delta * m.larea * ff_strong)), 1.2, rtol=1e-9)
+
+    m.depoFineFrac = np.zeros(n)
+    m.pit_inlet_bias_coarse = 0.3           # seg = 0 → no compositional split
+    m.pit_inlet_bias_fine = 0.3
+    m._pitFineFraction(hl, delta, depo)
+    assert np.allclose(m.depoFineFrac, 0.3, atol=1e-12), (
+        "Equal coarse/fine inlet bias must give a uniform pit composition."
     )
 
 
