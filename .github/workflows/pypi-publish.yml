@@ -34,7 +34,15 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  # Release gate: the full regression suite + analytical benchmarks must pass
+  # before the sdist is built or published (see _release-gate.yml). The publish
+  # jobs already `needs: build`, so the chain is tests -> build -> publish; the
+  # OIDC trusted-publishing step is untouched (it stays in this workflow).
+  tests:
+    uses: ./.github/workflows/_release-gate.yml
+
   build:
+    needs: tests
     name: Build sdist
     runs-on: ubuntu-latest
     outputs:

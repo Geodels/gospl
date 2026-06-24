@@ -21,7 +21,13 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  # Release gate: the full regression suite + analytical benchmarks must pass
+  # before anything is built or uploaded (see _release-gate.yml).
+  tests:
+    uses: ./.github/workflows/_release-gate.yml
+
   build:
+    needs: tests
     name: ${{ matrix.os }} / py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     strategy:

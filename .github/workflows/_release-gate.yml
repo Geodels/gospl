@@ -1,0 +1,76 @@
+name: _release-gate
+
+# Reusable release test-gate. Called as a `tests` job by conda-build.yml,
+# pypi-publish.yml and docker-build.yml; their publish jobs `needs: tests`, so a
+# `v*` tag CANNOT publish a package unless the suite passes. It runs both tiers:
+#   - the tests-pr tier  (`pytest tests/` — the full regression incl. the
+#     mpirun-based parallel-correctness tests), and
+#   - the tests-slow tier (`pytest benchmarks/ -m benchmark` — the analytical
+#     SPL / hillslope / knickpoint validation).
+#
+# Kept deliberately LEAN (py3.11; benchmarks on ubuntu only) because the full
+# OS x Python matrix already runs on branch CI (tests-pr / tests-slow) before a
+# release is tagged — this is the at-tag safety net, not a full re-validation.
+# The env setup mirrors tests-pr.yml exactly (shares the same conda cache key).
+
+on:
+  workflow_call:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  gate:
+    name: release gate / ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      # Any cell failing MUST block the release — stop the rest immediately.
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        python: ['3.11']
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Cache conda environment
+        # Same key as tests-pr.yml / tests-slow.yml so the gate reuses their
+        # populated env cache (see tests-pr.yml for the path rationale).
+        id: cache-env
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.os == 'Linux' && '/home/runner/miniconda3/envs/gospl' || '/Users/runner/miniconda3/envs/gospl' }}
+          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v2-${{ hashFiles('environment.yml') }}
+          restore-keys: |
+            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v2-
+
+      - name: Set up conda env from environment.yml
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          channel-priority: strict
+          conda-remove-defaults: true
+          environment-file: environment.yml
+          activate-environment: gospl
+          python-version: ${{ matrix.python }}
+
+      - name: Install goSPL (editable, builds the Fortran extension)
+        run: pip install --no-deps --no-build-isolation -e . -v
+
+      - name: Regression suite (tests-pr tier — full tests/, incl. parallel)
+        run: pytest tests/ -v --tb=short
+
+      - name: Analytical benchmarks (tests-slow tier)
+        # Physics validation (SPL / hillslope / knickpoint). Run on ubuntu only
+        # to bound the gate wall-clock; the benchmarks are platform-independent.
+        if: matrix.os == 'ubuntu-latest'
+        run: pytest benchmarks/ -m benchmark -v --tb=short

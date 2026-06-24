@@ -25,7 +25,13 @@ env:
   IMAGE: docker.io/geodels/gospl-hpc
 
 jobs:
+  # Release gate: the full regression suite + analytical benchmarks must pass
+  # before the HPC image is built or pushed (see _release-gate.yml).
+  tests:
+    uses: ./.github/workflows/_release-gate.yml
+
   build-push:
+    needs: tests
     name: build + push HPC image (linux/amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 180
