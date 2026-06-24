@@ -319,19 +319,26 @@ class soilSPL(object):
             self.hGlobal.copy(result=x)
             fb.solve(None, x)
             r = fb.getConvergedReason()
+            # Name the actual solvers: the primary is `self.soil_solver` and the
+            # fallback is its complement (qn <-> ngmres), so the label is correct
+            # whichever way the YAML `solver:` key is set.
+            primary_name = self.soil_solver
+            fallback_name = "ngmres" if self.soil_solver == "qn" else "qn"
             if MPIrank == 0:
                 if r >= 0:
                     print(
-                        "Soil SPL: primary SNES stalled (reason %d after %d its); "
-                        "quasi-Newton fallback converged (reason %d, %d its)."
-                        % (r0, it0, r, fb.getIterationNumber()),
+                        "Soil SPL: primary (%s) stalled (reason %d after %d its); "
+                        "%s fallback converged (reason %d, %d its)."
+                        % (primary_name, r0, it0, fallback_name, r,
+                           fb.getIterationNumber()),
                         flush=True,
                     )
                 else:
                     print(
-                        "Soil SPL SNES failed to converge: primary (reason %d) and "
-                        "quasi-Newton fallback (reason %d) both diverged; continuing "
-                        "with the best available iterate." % (r0, r),
+                        "Soil SPL SNES failed to converge: primary (%s, reason %d) "
+                        "and %s fallback (reason %d) both diverged; continuing "
+                        "with the best available iterate."
+                        % (primary_name, r0, fallback_name, r),
                         flush=True,
                     )
 
