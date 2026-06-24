@@ -5,7 +5,7 @@
    artefact name matches the PyPI sdist filename and gospl.__version__.
    conda-build resolves this jinja at build time; the literal below is
    the only line that needs updating per release. #}
-{% set version = "2026.6.23rc1" %}
+{% set version = "2026.6.24" %}
 
 package:
   name: {{ name|lower }}
