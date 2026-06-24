@@ -1313,6 +1313,37 @@ def test_orography_rain_shadow(oro_hill_model):
     assert 9000.0 <= xpeak <= 11500.0, f"precip peak misplaced at x={xpeak:.0f}"
 
 
+def test_orography_wind_direction_convention(oro_hill_model):
+    """
+    Protects: `wind_dir` is the meteorological "comes FROM" bearing
+    (0=N, 90=E, 180=S, 270=W) consistently in BOTH the East and North
+    components (`addprocess._windVector`).
+
+    Silent failure prevented: the North component was historically `+cos`
+    (a "goes toward" sign) while the East component was `-sin` (a "comes from"
+    sign). The mix was invisible on E/W winds (cos of 90/270 is 0) and on the
+    rain-shadow fixture (wind_dir=270), so a northerly (wind_dir=0) blew toward
+    the North instead of the South. A wind COMING FROM bearing d blows TOWARD
+    d+180, i.e. velocity (u_east, v_north) = speed * (-sin d, -cos d).
+    """
+    model = oro_hill_model
+    speed = model.wind_speed
+    # (wind_dir, expected unit blow direction): comes-from -> blows opposite.
+    cases = {
+        0.0:   (0.0, -1.0),   # from N -> toward S (-y)
+        90.0:  (-1.0, 0.0),   # from E -> toward W (-x)
+        180.0: (0.0, 1.0),    # from S -> toward N (+y)
+        270.0: (1.0, 0.0),    # from W -> toward E (+x)  (rain-shadow fixture)
+    }
+    for d, (ex, ey) in cases.items():
+        model.wind_dir = d
+        u, v = model._windVector()
+        assert np.allclose([u, v], [ex * speed, ey * speed], atol=1.0e-9 * speed + 1.0e-12), (
+            f"wind_dir={d} (comes-from) should blow toward "
+            f"({ex:+.0f},{ey:+.0f})*speed; got ({u/speed:+.3f},{v/speed:+.3f})*speed"
+        )
+
+
 def test_pit_unifyLabels_unionfind():
     """
     Protects: PITFill._unifyLabels — the union-find that collapses cross-rank

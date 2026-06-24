@@ -164,7 +164,7 @@ goSPL implements the Linear Theory of Orographic Precipitation following `Smith 
         **Wind** (sets the advection of moisture over the terrain):
 
         a. ``wind_speed``: uniform wind speed [m/s]; default 10. Together with the timescales below it sets the *advection length* ``wind_speed × conv/fall_time`` — how far moisture drifts downwind before it rains out. Faster wind pushes the precipitation maximum further onto the lee.
-        b. ``wind_dir``: wind direction the flow comes **from** [degrees, ``0`` = north, ``90`` = east, ``180`` = south, ``270`` = west]; default 0. It fixes which slopes are windward (uplift, rain) and which are lee (subsidence, rain shadow).
+        b. ``wind_dir``: wind direction the flow comes **from** (meteorological convention) [degrees, ``0`` = north, ``90`` = east, ``180`` = south, ``270`` = west]; default 0. The wind therefore *blows toward* the opposite bearing — e.g. ``wind_dir: 270`` is a westerly that blows **eastward**, and ``wind_dir: 0`` is a northerly that blows **southward**. It fixes which slopes are windward (uplift, rain) and which are lee (subsidence, rain shadow).
 
         **Moisture sensitivity** (combine into the uplift coefficient ``Cw = ref_density × moist_lapse_rate / env_lapse_rate``, which scales the condensation source ``Cw·(v·∇h)`` and hence the overall orographic rain intensity):
 

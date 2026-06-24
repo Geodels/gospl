@@ -2,6 +2,7 @@ import os
 import gc
 import sys
 import petsc4py
+from gospl.tools.petscgc import safe_garbage_cleanup
 import numpy as np
 import pandas as pd
 import pyshtools as pysh
@@ -733,9 +734,32 @@ class GridProcess(object):
         ksp = self._oroKSP
         ksp.setOperators(matrix, matrix)
         ksp.solve(rhs, sol)
-        petsc4py.PETSc.garbage_cleanup()
+        safe_garbage_cleanup()
 
         return sol
+
+    def _windVector(self):
+        """
+        Uniform wind velocity ``(u_east, v_north)`` in m/s from ``wind_dir``.
+
+        ``wind_dir`` is the **meteorological** convention used throughout the
+        docs: the compass bearing the wind COMES FROM (0=N, 90=E, 180=S, 270=W),
+        so the wind BLOWS TOWARD bearing ``wind_dir + 180``. With ``x`` = East,
+        ``y`` = North and a bearing ``α`` mapping to ``(East=sin α, North=cos α)``::
+
+            (u, v) = speed * (sin(dir+180), cos(dir+180)) = speed * (-sin, -cos)
+
+        e.g. ``wind_dir=270`` (from the West) blows toward +x (East);
+        ``wind_dir=0`` (from the North, a northerly) blows toward -y (South).
+
+        Historical bug (fixed 2026-06-24): ``v`` used ``+cos`` (a "goes toward"
+        North component) while ``u`` used ``-sin`` (a "comes from" East
+        component) — internally inconsistent. The error was invisible on E/W
+        winds (``cos`` of 90/270 is 0) and on the rain-shadow fixture
+        (``wind_dir=270``), so only N/S winds blew the wrong way.
+        """
+        a = self.wind_dir * 2.0 * np.pi / 360.0
+        return (-np.sin(a) * self.wind_speed, -np.cos(a) * self.wind_speed)
 
     def cptOrography(self):
         """
@@ -789,8 +813,7 @@ class GridProcess(object):
         # on the uniform wind and the fixed mesh, so this is done once.
         if self._oroAc is None:
             # Uniform wind in the flat (x, y) plane.
-            u0 = -np.sin(self.wind_dir * 2 * np.pi / 360) * self.wind_speed
-            v0 = np.cos(self.wind_dir * 2 * np.pi / 360) * self.wind_speed
+            u0, v0 = self._windVector()
             nodeVel = np.zeros((self.lpoints, 3))
             nodeVel[:, 0] = u0
             nodeVel[:, 1] = v0
