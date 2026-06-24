@@ -1048,6 +1048,31 @@ def test_flex_fem_2d_clamped(flat_fem_flex_model):
     )
 
 
+def test_closed_sink_deposition_scope(incising_model, flat_wall_model, minimal_model):
+    """
+    Protects: `_closedDepo` (sedplex) is gated on `_domainHasOutlet` so a
+    flow-terminal stray sink (`lsink & pitID<0`, e.g. a near-flat low pocket the
+    flat-routing can't connect to its outlet) is deposited in place ONLY on a
+    fully-CLOSED domain (sphere / all-wall) — to conserve mass — and is otherwise
+    let LEAVE the domain on an OPEN domain.
+
+    Silent failure prevented: PR #473's closed-sink closure fired on open domains
+    too, needling all such sediment onto one near-flat edge node (a ~9 km spike
+    on the glacial soil example), which then stalled the SPL/soil SNES. The fix
+    keeps conservation on closed domains (sphere / all-wall) while open domains
+    drain it out. `_domainHasOutlet` must therefore be False exactly when there
+    is no draining outlet.
+    """
+    # Open flat domain (incising.yml is '0000') -> has draining outlets.
+    assert incising_model._domainHasOutlet is True
+    assert len(incising_model.outletIDs) > 0
+    # All-wall flat box -> no outlet -> closed (conserves via _closedDepo).
+    assert flat_wall_model._domainHasOutlet is False
+    assert len(flat_wall_model.outletIDs) == 0
+    # Global sphere -> no borders at all -> closed.
+    assert minimal_model._domainHasOutlet is False
+
+
 def test_wall_boundary_conservation(flat_wall_model):
     """
     Protects: WALL (closed) boundaries contain flow AND sediment for a SINGLE

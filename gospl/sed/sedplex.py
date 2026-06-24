@@ -36,6 +36,22 @@ class SEDMesh(object):
         self.vSed = self.hGlobal.duplicate()
         self.vSedLocal = self.hLocal.duplicate()
 
+        # Does the domain have a drainable outlet (any open / fixed edge)? Global
+        # flag (reduced across ranks; fixed for the run). It decides what happens
+        # to sediment that reaches a flow-TERMINAL stray sink which is not a
+        # labelled pit (`lsink & pitID<0`) during the cascade:
+        #   - CLOSED domain (sphere = no borders, or all-wall = no outlet): the
+        #     sediment can neither drain nor fill a pit, so it is deposited in
+        #     place to conserve mass (the `_closedDepo` closure from PR #473).
+        #   - OPEN domain: it would have drained to the boundary, so it LEAVES
+        #     the domain (discarded). Depositing it in place instead needles a
+        #     single near-flat edge node into a km-scale spike (e.g. a 9 km
+        #     pillar on a shallow edge pocket), which then stalls the SPL / soil
+        #     SNES. See AGENTS.md > Fixed.
+        self._domainHasOutlet = bool(
+            MPI.COMM_WORLD.allreduce(len(self.outletIDs) > 0, op=MPI.LOR)
+        )
+
         # Dual-lithology fine sediment flux (m3/yr). vSed carries the TOTAL
         # (coarse+fine) sediment; vSedF carries the fine sub-flux, both routed
         # by the same upstream-integration operator. fineFrac is the per-node
@@ -209,17 +225,23 @@ class SEDMesh(object):
         if prov:
             vSedP = vSedP * self.inIDs[:, None]
 
-        # CLOSED terminal sinks: flow-terminal nodes that are not a labelled
-        # depression (and, via `lsink`, not an outlet or below sea level). On a
-        # closed (wall) domain the sediment arriving here can neither drain nor
-        # fill a pit, so the per-pit accounting below (which excludes pit-id -1)
-        # would silently drop it. Deposit it in place instead — accumulate it
-        # and remove it from the routed flux. Empty set on open/marine domains.
+        # Flow-TERMINAL stray sinks: flow-terminal nodes that are not a labelled
+        # depression (and, via `lsink`, not an outlet or below sea level) — e.g.
+        # a near-flat low pocket the flat-routing could not connect to its
+        # outlet. The per-pit accounting below excludes pit-id -1, so this
+        # sediment must be handled here. Either way it is removed from the routed
+        # flux; whether it is DEPOSITED depends on the domain (see
+        # `_domainHasOutlet` in __init__):
+        #   - CLOSED domain (no outlet): deposit in place to conserve mass.
+        #   - OPEN domain: it would have drained to the boundary, so it LEAVES
+        #     the domain (discarded). Depositing it would needle a single
+        #     near-flat edge node into a km-scale spike (-> SPL/soil SNES stall).
         closed = getattr(self, "_closedDepo", None)
         if closed is not None:
             csink = self.lsink & (self.pitIDs < 0)
             if csink.any():
-                self._closedDepo[csink] += vSed[csink]
+                if not self._domainHasOutlet:
+                    self._closedDepo[csink] += vSed[csink]
                 vSed = vSed.copy()
                 vSed[csink] = 0.0
                 if dual:
