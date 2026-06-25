@@ -1751,6 +1751,7 @@ def test_dual_lithology_initial_strata_composition(tmp_path):
     m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
     m.strataFile = str(f)
     m.lpoints = n
+    m.mpoints = n
     m.stratNb = 2                     # extra capacity beyond the initial layers
     m.locIDs = np.arange(n)
     m.phi0s, m.phi0f = 0.49, 0.63
@@ -1800,6 +1801,7 @@ def test_strata_bedrock_sentinel(tmp_path):
         m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
         m.strataFile = str(f)
         m.lpoints = n
+        m.mpoints = n
         m.stratNb = 2
         m.locIDs = np.arange(n)
         m.phi0s, m.phi0f = 0.49, 0.63
@@ -1828,6 +1830,72 @@ def test_strata_bedrock_sentinel(tmp_path):
     assert m0.initLay == nl and m0.bedrockLay == 0
     assert np.allclose(m0.stratH[:, 0], 10.0)        # deepest file layer is layer 0
     assert np.allclose(m0.stratHf[:, 0], 4.0)
+
+
+def test_strata_file_validation(tmp_path):
+    """
+    Protects: _checkStrataFile complains about a malformed npstrata file -- a
+    missing required field or a layer array whose shape does not match
+    'strataH' raises ValueError (fail fast) rather than a cryptic KeyError /
+    broadcast error deep in the loader.
+    """
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+    n, nl = 4, 2
+
+    def _mesh(npz):
+        m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+        m.strataFile = str(npz)
+        m.lpoints = n
+        m.mpoints = n
+        m.locIDs = np.arange(n)
+        m.phi0s, m.phi0f = 0.49, 0.63
+        m.stratNb = 2
+        m.memclear = False
+        m.stratLith = False
+        m.stratHf = None
+        m.phiF = None
+        return m
+
+    # Missing required field 'phiS' -> ValueError naming it.
+    f1 = tmp_path / "miss.npz"
+    np.savez(str(f1), strataH=np.full((n, nl), 5.0), strataZ=np.zeros((n, nl)))
+    with pytest.raises(ValueError, match="phiS"):
+        _mesh(f1).readStratLayers()
+
+    # Shape mismatch: phiS has the wrong number of layers.
+    f2 = tmp_path / "shape.npz"
+    np.savez(
+        str(f2),
+        strataH=np.full((n, nl), 5.0),
+        strataZ=np.zeros((n, nl)),
+        phiS=np.full((n, nl + 1), 0.49),
+    )
+    with pytest.raises(ValueError, match="phiS"):
+        _mesh(f2).readStratLayers()
+
+    # Wrong mesh dimension on strataH -> ValueError mentioning mesh_points.
+    f3 = tmp_path / "mesh.npz"
+    np.savez(
+        str(f3),
+        strataH=np.full((n + 1, nl), 5.0),
+        strataZ=np.zeros((n + 1, nl)),
+        phiS=np.full((n + 1, nl), 0.49),
+    )
+    with pytest.raises(ValueError, match="mesh_points"):
+        _mesh(f3).readStratLayers()
+
+    # Valid file -> loads cleanly (no exception), proving the gate is not
+    # over-eager.
+    f4 = tmp_path / "ok.npz"
+    np.savez(
+        str(f4),
+        strataH=np.full((n, nl), 5.0),
+        strataZ=np.zeros((n, nl)),
+        phiS=np.full((n, nl), 0.49),
+    )
+    m = _mesh(f4)
+    m.readStratLayers()
+    assert m.initLay == nl
 
 
 def test_dual_lithology_erosion_split():
@@ -2238,6 +2306,36 @@ def test_dual_model_runs_and_invariants(minimal_dual_model):
     assert (model.fineFrac >= 0.0).all() and (model.fineFrac <= 1.0).all()
     # The dual path actually moved fine material (bedrock contributes it).
     assert float(Hf.sum()) > 0.0
+
+
+@pytest.mark.slow
+def test_dual_lithology_surf_fine_frac_output(minimal_dual_model):
+    """
+    Protects: the dual-lithology surface composition field. A dual-lithology
+    run must write ``surfFineFrac`` (the surface exposed mud share, 0-1) into
+    the mesh HDF5, and reference it from the per-step XMF, so ``gospl.xdmf`` can
+    be coloured by the in-place sand/mud composition in ParaView (the in-place
+    complement to the ``sedLoadF`` flux).
+    """
+    import glob as _glob
+
+    h5py = pytest.importorskip("h5py")
+
+    m = minimal_dual_model
+    assert m.stratLith
+    m.runProcesses()
+    out = m.outputDir
+
+    # Surface fine fraction written into the mesh output, physical range.
+    mh5 = sorted(_glob.glob(os.path.join(out, "h5", "%s.*.p0.h5" % m.file)))[-1]
+    with h5py.File(mh5, "r") as hf:
+        assert "surfFineFrac" in hf, "surfFineFrac missing from mesh output"
+        sf = np.array(hf["surfFineFrac"])
+        assert (sf >= -1e-6).all() and (sf <= 1.0 + 1e-6).all()
+
+    # The per-step XMF advertises it so ParaView exposes the field.
+    xmf = sorted(_glob.glob(os.path.join(out, "xmf", "%s*.xmf" % m.file)))[-1]
+    assert "surfFineFrac" in open(xmf).read()
 
 
 @pytest.mark.slow

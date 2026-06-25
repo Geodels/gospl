@@ -140,6 +140,15 @@ Enable it with a ``strata`` block in the input file:
        fine_diff_factor: 2.0                         # fine diffuses 2x faster
        pitInletBias: {coarse: 0.5, fine: 0.0}        # lake delta vs depocenter
 
+The initial per-vertex coarse/fine distribution is supplied through the
+``npstrata`` file (the ``strataHf``/``phiF`` layer arrays — see
+:ref:`the input-file guide <inputfile>`). On load goSPL validates that the
+required fields are present and that every layer array shares the
+``(mesh_points, n_layers)`` shape of ``strataH``, raising a clear error
+otherwise; under dual lithology a missing ``strataHf`` triggers a rank-0
+warning (the initial pile is then all-coarse). Running with ``-v`` prints a
+one-line summary of the stratigraphy setup.
+
 Each stratigraphic layer stores a total thickness and a fine-fraction
 thickness, plus a porosity for each lithology. The two fractions are governed
 by independent physical parameters:

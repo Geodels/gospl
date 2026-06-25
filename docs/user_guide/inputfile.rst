@@ -59,8 +59,8 @@ Initial mesh definition and simulation declaration
         f. to start a simulation using a previous erosion/deposition map use the ``nperodep`` key and specify a file (**.npz** format with the erosion deposition defined with the key ``ed``) containing for each vertex of the mesh the cumulative erosion deposition values in metres. 
         g. to start a simulation using an initial stratigraphic layer use the ``npstrata`` key (**.npz** file) and specify a file containing for each vertex of the mesh the stratigraphic layer thickness ``strataH``, the elevation at time of deposition ``strataZ``, and the porosities of the sediment ``phiS``. An optional ``stratK`` key (same ``(mesh_points, init_layers)`` shape) may be provided to impose a **per-layer erodibility multiplier**. When the layer is exposed at the surface, the effective SPL erodibility becomes ``K * stratK`` where ``K`` is the value declared in the ``spl`` block. Values ``< 1`` model softer-than-default bedrock; values ``> 1`` model more resistant lithologies; the default (key absent, or value ``1.0``) keeps the SPL behaviour unchanged. Sediment eroded from such a layer and re-deposited downstream loses the multiplier and reverts to ``1.0`` (i.e. the YAML-default ``K``).
 
-        h. when dual lithology is enabled (``strata: dual: True``), two further optional keys (same ``(mesh_points, init_layers)`` shape) let each initial layer carry its **own coarse/fine composition**: ``strataHf`` is the fine-fraction bulk thickness of each layer (so the coarse thickness is ``strataH - strataHf``, and the per-layer fine fraction is ``strataHf / strataH``), and ``phiF`` is the per-layer fine porosity. ``strataHf`` is clamped to ``[0, strataH]`` on load; if it is absent the initial column is all-coarse, and if ``phiF`` is absent it defaults to the fine surface porosity ``phi0f``. These keys are ignored (with a warning) when dual lithology is off.
-        h. ``advect`` define the advection scheme used when applying horizontal displacements. Choices are ``upwind``, ``iioe1``, ``iioe2`` and ``interp``  (go to the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ in the documentation for more information). 
+        h. when dual lithology is enabled (``strata: dual: True``), two further optional keys (same ``(mesh_points, init_layers)`` shape) let each initial layer carry its **own per-vertex coarse/fine composition**: ``strataHf`` is the fine-fraction bulk thickness of each layer (so the coarse thickness is ``strataH - strataHf``, and the per-layer fine fraction is ``strataHf / strataH``), and ``phiF`` is the per-layer fine porosity. Because both arrays are indexed by vertex **and** by layer, the initial sand/mud distribution can vary freely across the mesh and with depth (see the per-vertex recipe in the note below). ``strataHf`` is clamped to ``[0, strataH]`` on load; if it is absent the initial column is all-coarse (a rank-0 warning is printed under dual lithology), and if ``phiF`` is absent it defaults to the fine surface porosity ``phi0f``. These keys are ignored (with a warning) when dual lithology is off. The required fields (``strataH``/``strataZ``/``phiS``) and the shape consistency of every layer array are validated on load, so a missing field or a mismatched shape stops the run with a clear error rather than failing cryptically later. Running with ``-v`` prints a one-line summary of the stratigraphy setup (mode, compaction curves, layer count, whether a per-vertex composition was supplied, and the bedrock-floor model).
+        i. ``advect`` define the advection scheme used when applying horizontal displacements. Choices are ``upwind``, ``iioe1``, ``iioe2`` and ``interp``  (go to the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ in the documentation for more information).
 
 .. warning::
 
@@ -69,6 +69,41 @@ Initial mesh definition and simulation declaration
 .. note::
 
   It is also possible to have only one **.npz** file containing the required keys. For example you could set an input file containing the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells, and ``ed`` the erosion deposition node values and call it for both the ``npdata`` and ``nperodep`` parameters.
+
+.. note::
+
+  **Setting a per-vertex initial coarse/fine distribution (dual lithology).**
+  To prescribe how sand (coarse) and mud (fine) are distributed across the mesh
+  at the start of a dual-lithology run, build the ``npstrata`` file with the
+  optional ``strataHf`` (and ``phiF``) arrays alongside the mandatory
+  ``strataH``/``strataZ``/``phiS``. Every array is shaped
+  ``(mesh_points, init_layers)`` — one row per global mesh vertex, one column
+  per initial layer (deepest layer first). The per-vertex, per-layer fine
+  fraction is simply ``strataHf / strataH``:
+
+  .. code-block:: python
+
+     import numpy as np
+
+     mpoints, nlayers = mesh_vertices, 3
+     strataH = np.full((mpoints, nlayers), 50.0)          # 50 m thick layers
+     strataZ = np.zeros((mpoints, nlayers))               # deposition elevation
+     phiS    = np.full((mpoints, nlayers), 0.49)          # coarse porosity
+
+     # Per-vertex fine fraction (e.g. muddier basin centre, sandier margins):
+     fine_frac = my_spatial_fine_fraction(mpoints, nlayers)   # in [0, 1]
+     strataHf  = fine_frac * strataH                          # fine bulk thickness
+     phiF      = np.full((mpoints, nlayers), 0.63)            # fine porosity
+
+     np.savez("input/init_strata",
+              strataH=strataH, strataZ=strataZ, phiS=phiS,
+              strataHf=strataHf, phiF=phiF)
+
+  Reference it with ``npstrata: 'input/init_strata'`` and enable
+  ``strata: dual: True``. Add ``strata: bedrock_sentinel: True`` to place a
+  dedicated, infinite bedrock reservoir (composition ``bedrock_coarse_frac``)
+  *beneath* these finite layers, so erosion that exhumes the whole initial pile
+  then taps bedrock rather than the deepest supplied layer.
 
 
 Setting model temporal evolution

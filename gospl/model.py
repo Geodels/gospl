@@ -107,6 +107,43 @@ MPIsize = MPI.COMM_WORLD.Get_size()
 _mpi_excepthook_installed = False
 
 
+class _IndentWriter(object):
+    """
+    Thin stdout proxy that prepends a fixed prefix to every physical line it
+    forwards. Used by ``Model._phase`` so the existing per-substep verbose
+    ``print(...)`` calls scattered across the sub-modules are visually nested
+    under their phase header without editing any of them. Restored to the real
+    stream when the phase context exits.
+    """
+
+    def __init__(self, stream, prefix):
+        self._s = stream
+        self._p = prefix
+        self._bol = True            # at the beginning of a line?
+
+    def write(self, s):
+        if not s:
+            return
+        i, n = 0, len(s)
+        while i < n:
+            if self._bol:
+                self._s.write(self._p)
+                self._bol = False
+            j = s.find("\n", i)
+            if j == -1:
+                self._s.write(s[i:])
+                break
+            self._s.write(s[i : j + 1])
+            self._bol = True
+            i = j + 1
+
+    def flush(self):
+        self._s.flush()
+
+    def isatty(self):
+        return getattr(self._s, "isatty", lambda: False)()
+
+
 def _install_mpi_abort_excepthook():
     """
     Install a ``sys.excepthook`` that ``MPI_Abort``s **every** rank on any
@@ -260,6 +297,31 @@ class Model(
 
         return
 
+    def _phase(self, tag, detail=""):
+        """
+        Verbose grouping context manager: print a ``[tag]`` header (rank 0,
+        ``-v`` only) and indent every ``print(...)`` emitted inside it, so the
+        per-substep timings from the sub-modules read as a nested block under
+        their phase. A zero-cost no-op when not verbose or off rank 0. Restores
+        ``sys.stdout`` on exit (even on exception).
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _ctx():
+            if MPIrank != 0 or not getattr(self, "verbose", False):
+                yield
+                return
+            print("  [%s]%s" % (tag, (" " + detail) if detail else ""), flush=True)
+            old = sys.stdout
+            sys.stdout = _IndentWriter(old, "      ")
+            try:
+                yield
+            finally:
+                sys.stdout = old
+
+        return _ctx()
+
     def runProcesses(self):
         """
         Runs simulation over time.
@@ -285,6 +347,14 @@ class Model(
             if self.flexOn:
                 self.flexCount += 1
 
+            # Verbose step banner (rank 0, -v): the per-phase output below is
+            # grouped under tagged headers and indented (see `_phase`).
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "=== %.0f yr ==================================" % self.tNow,
+                    flush=True,
+                )
+
             # Output time step
             with self.profiler.phase("tectonics"):
                 _Tectonics.updatePaleoZ(self)
@@ -300,20 +370,20 @@ class Model(
                 self.saveStrat += self.strat
 
             # Perform advection and tectonics
-            with self.profiler.phase("tectonics"):
+            with self.profiler.phase("tectonics"), self._phase("tectonics"):
                 _Tectonics.getTectonics(self)
 
             if not self.fast:
                 if self.iceOn:
                     # Compute ice accumulation
-                    with self.profiler.phase("ice"):
+                    with self.profiler.phase("ice"), self._phase("ice"):
                         _IceMesh.iceAccumulation(self)
                 # Compute flow accumulation
-                with self.profiler.phase("flow"):
+                with self.profiler.phase("flow"), self._phase("flow"):
                     _FAMesh.flowAccumulation(self)
 
                 # Perform River Incision/Deposition based on Stream Power Law (different flavors)
-                with self.profiler.phase("erosion"):
+                with self.profiler.phase("erosion"), self._phase("erosion"):
                     if self.cptSoil:
                         # Non-linear coupled to soil production
                         _soilSPL.erodepSPLsoil(self)
@@ -329,27 +399,32 @@ class Model(
                 # till only; no-op otherwise). Done before fluvial deposition
                 # so the moraine is reworked by meltwater/rivers this step.
                 if self.iceOn:
-                    with self.profiler.phase("till"):
+                    with self.profiler.phase("till"), self._phase("glacial-till"):
                         _IceMesh.glacialTill(self)
 
                 if not self.nodep:
                     # Downstream sediment deposition over the continents
-                    with self.profiler.phase("flow"):
+                    with self.profiler.phase("flow"), self._phase("flow"):
                         _FAMesh.flowAccumulation(self)
-                    with self.profiler.phase("sed"):
+                    with self.profiler.phase("sed"), self._phase("sediment"):
                         _SEDMesh.sedChange(self)
                     if self.seaDepo:
                         # Downstream sediment deposition in marine environments
-                        with self.profiler.phase("sea"):
+                        with self.profiler.phase("sea"), self._phase("marine"):
                             _SEAMesh.seaChange(self)
 
                 # Hillslope diffusion (linear and non-linear)
-                with self.profiler.phase("hillslope"):
+                with self.profiler.phase("hillslope"), self._phase("hillslope"):
                     _hillSLP.getHillslope(self)
+
+                # Per-step dual-lithology status line ([dual]; verbose only,
+                # no-op when dual lithology is off). Keeps the sand/mud balance
+                # visible throughout the run, not just in the init summary.
+                _STRAMesh.logDualState(self)
 
             if newLayer:
                 # Stratigraphic layer porosity and thicknesses under compaction
-                with self.profiler.phase("strat"):
+                with self.profiler.phase("strat"), self._phase("compaction"):
                     _STRAMesh.getCompaction(self)
 
             # Apply flexural isostasy (local and global). With flex_interval > 1
@@ -358,12 +433,12 @@ class Model(
             if self.flexOn and (
                 self.flexCount % self.flex_interval == self.flex_interval - 1
             ):
-                with self.profiler.phase("flexure"):
+                with self.profiler.phase("flexure"), self._phase("flexure"):
                     _GridProcess.applyFlexure(self)
 
             # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:
-                with self.profiler.phase("forcing"):
+                with self.profiler.phase("forcing"), self._phase("forcing"):
                     _UnstMesh.applyForces(self)
 
             # Advance time
@@ -371,7 +446,7 @@ class Model(
 
             if MPIrank == 0:
                 print(
-                    "--- Computational Step (%0.02f seconds) | Time Step: %d years"
+                    "--- step done in %0.02f s (now %d yr)"
                     % (process_time() - tstep, self.tNow),
                     flush=True,
                 )

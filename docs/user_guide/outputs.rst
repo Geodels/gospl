@@ -8,8 +8,8 @@ goSPL writes its results to the directory given by the ``output: dir`` key of
 the input file. Each output interval (``time: tout``) produces, per MPI rank, an
 **HDF5** data file plus a small **XDMF** descriptor; a top-level ``.xmf`` /
 ``.xdmf`` file ties the per-step, per-rank pieces together. **Open the top-level
-``.xdmf`` in ParaView** (or any XDMF reader) — it exposes every field below as a
-node-centred scalar that can be coloured, warped and filtered.
+``gospl.xdmf`` in ParaView** (or any XDMF reader) — it exposes every surface
+field below as a node-centred scalar that can be coloured, warped and filtered.
 
 This page lists the fields goSPL can write and what they mean, then shows how to
 turn the flat-mesh or global-sphere output into a 3-D surface in ParaView.
@@ -64,7 +64,10 @@ Water & drainage
      - River **sediment load** carried downstream (m³/yr).
      - always
    * - ``sedLoadF``
-     - Fine-fraction sediment load (dual-lithology runs only).
+     - Fine-fraction sediment **load**/flux (dual-lithology runs only); coarse flux = ``sedLoad − sedLoadF``.
+     - dual lithology
+   * - ``surfFineFrac``
+     - Surface exposed **fine fraction** (mud share, 0–1, of the topmost stratigraphic layer) — the in-place composition, complementing the ``sedLoadF`` flux.
      - dual lithology
    * - ``rain``
      - Precipitation rate forcing the run (m/yr).
@@ -136,12 +139,19 @@ accumulation — there is no ice-thickness time integration.
 Stratigraphy
 ^^^^^^^^^^^^
 
-Written when stratigraphic recording is on (``strat`` interval set). These are
-**per-layer** arrays (one column per recorded layer): ``stratZ`` (layer
-elevation), ``stratH`` (layer thickness), ``phiS`` (porosity), ``stratK``
-(mean grain size / permeability proxy), ``stratP`` (per-layer position), and,
-under dual lithology, ``stratHf`` (fine-fraction thickness) and ``phiF`` (fine
-porosity).
+Written when stratigraphic recording is on (``strat`` interval set), in the
+separate ``h5/stratal.<step>.p<rank>.h5`` files. These are **per-layer** arrays
+(one column per recorded layer): ``stratZ`` (layer elevation), ``stratH`` (layer
+thickness), ``phiS`` (porosity), ``stratK`` (erodibility multiplier), ``stratP``
+(per-layer provenance), and, under dual lithology, ``stratHf`` (fine-fraction
+thickness) and ``phiF`` (fine porosity). The per-layer fine fraction is
+``stratHf / stratH``.
+
+The stratal HDF5 files have no XDMF wrapper, so the layered pile is not opened
+directly in ParaView; visualise it with a dedicated post-processing script that
+reads these arrays. For the **surface** composition over time, colour the main
+``gospl.xdmf`` by ``surfFineFrac`` (the in-place mud share) or ``sedLoadF`` (the
+fine transport flux).
 
 Visualising in ParaView
 -----------------------

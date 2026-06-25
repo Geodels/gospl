@@ -446,6 +446,17 @@ class WriteMesh(object):
                 dataF = self.vSedFLocal.getArray().copy()
                 dataF[dataF <= DISCHARGE_FLOOR] = DISCHARGE_FLOOR
                 f["sedLoadF"][:, 0] = dataF
+                # Surface exposed fine fraction (mud share of the topmost
+                # non-empty stratigraphic layer): the in-place composition,
+                # directly viewable in ParaView. Complements sedLoadF (the
+                # fine *flux*). 1 - coarse fraction from _surfaceComposition.
+                f.create_dataset(
+                    "surfFineFrac",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["surfFineFrac"][:, 0] = 1.0 - self._surfaceComposition()
             if self.upsub is not None:
                 f.create_dataset(
                     "uplift",
@@ -794,6 +805,18 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/sedLoadF</DataItem>\n'
+                    % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+                f.write(
+                    '         <Attribute Type="Scalar" Center="Node" Name="surfFineFrac">\n'
+                )
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/surfFineFrac</DataItem>\n'
                     % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")

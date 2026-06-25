@@ -83,8 +83,13 @@ class STRAMesh(object):
 
         if self.strataFile is not None:
             fileData = np.load(self.strataFile)
+            # Fail fast on a malformed file (missing required field / wrong
+            # shape) and warn about an under-specified dual-lithology setup.
+            nlay = self._checkStrataFile(fileData)
+            has_hf = "strataHf" in fileData.files
+            has_phiF = "phiF" in fileData.files
+            has_K = "stratK" in fileData.files
             stratVal = fileData["strataH"]
-            nlay = stratVal.shape[1]
             # Optionally reserve layer 0 as a dedicated infinite-bedrock
             # sentinel BELOW the file-provided layers (strata.bedrock_sentinel).
             # The file's `nlay` layers then occupy indices [off : off+nlay] and
@@ -171,6 +176,10 @@ class STRAMesh(object):
                 # All layers in the file are real sediment; no bedrock sentinel.
                 self.bedrockLay = 0
 
+            self._logStratInit(
+                nfile_lay=nlay, has_hf=has_hf, has_phiF=has_phiF, has_K=has_K
+            )
+
             if self.memclear:
                 del fileData, stratVal
                 gc.collect()
@@ -196,9 +205,176 @@ class STRAMesh(object):
                 self.stratHf[:, 0] = BEDROCK_SENTINEL * (1.0 - self.bedrock_coarse_frac)
                 self.phiF[:, 0] = self.phi0f
 
+            self._logStratInit()
+
         if getattr(self, "provOn", False):
             self._initProvenance()
 
+        return
+
+    def _checkStrataFile(self, fileData):
+        """
+        Validate an ``npstrata`` initial-stratigraphy file before it is loaded.
+
+        Complains (raises ``ValueError``) when a required field is missing or
+        an array shape is inconsistent, so a malformed file fails fast with a
+        clear message instead of a cryptic ``KeyError`` / broadcast error deep
+        in the loader. Under dual lithology it also warns (rank 0) when the
+        per-layer coarse/fine composition (``strataHf``) is absent, since the
+        initial pile then silently defaults to all-coarse.
+
+        :arg fileData: the opened ``np.load`` archive.
+        :return: the number of initial layers ``nlay`` (``strataH`` columns).
+        """
+        avail = set(fileData.files)
+
+        # 1) Fields required for ANY npstrata file.
+        required = ("strataH", "strataZ", "phiS")
+        missing = [k for k in required if k not in avail]
+        if missing:
+            raise ValueError(
+                "npstrata file '%s' is missing required field(s): %s. An "
+                "initial stratigraphy file must provide 'strataH' (per-layer "
+                "thickness), 'strataZ' (deposition elevation) and 'phiS' "
+                "(coarse porosity), each shaped (mesh_points, n_layers)."
+                % (self.strataFile, ", ".join(missing))
+            )
+
+        # 2) Shape consistency: strataH is (mesh_points, n_layers); every other
+        # layer field must match it (arrays are indexed by global vertex id).
+        ref = fileData["strataH"].shape
+        if len(ref) != 2 or ref[0] != self.mpoints:
+            raise ValueError(
+                "npstrata file '%s': 'strataH' has shape %s but must be "
+                "(mesh_points=%d, n_layers); each row is one mesh vertex."
+                % (self.strataFile, ref, self.mpoints)
+            )
+        for k in ("strataZ", "phiS", "stratK", "strataHf", "phiF"):
+            if k in avail and fileData[k].shape != ref:
+                raise ValueError(
+                    "npstrata file '%s': field '%s' has shape %s but must "
+                    "match 'strataH' %s."
+                    % (self.strataFile, k, fileData[k].shape, ref)
+                )
+
+        # 3) Dual-lithology composition: warn if the fine split is unspecified.
+        if self.stratLith and "strataHf" not in avail and MPIrank == 0:
+            print(
+                "Warning: dual lithology is enabled but the npstrata file '%s' "
+                "provides no 'strataHf' (per-layer fine bulk thickness); the "
+                "initial layers will be treated as ALL-COARSE. Add a 'strataHf' "
+                "array (and optionally 'phiF'), shaped like 'strataH', to set a "
+                "per-vertex initial coarse/fine distribution." % self.strataFile,
+                flush=True,
+            )
+
+        return ref[1]
+
+    def _logStratInit(self, nfile_lay=0, has_hf=False, has_phiF=False, has_K=False):
+        """
+        Rank-0 verbose summary of the stratigraphy setup (run with ``-v``).
+
+        Reports the single- vs dual-lithology mode and, under dual lithology,
+        the per-fraction compaction curves and contrast knobs, the source of
+        the initial layers (file vs bedrock-only), whether a per-vertex
+        coarse/fine distribution was supplied, and the bedrock-floor model.
+        """
+        if MPIrank != 0 or not getattr(self, "verbose", False):
+            return
+
+        if self.stratLith:
+            print(
+                "Dual-lithology stratigraphy ON — coarse phi0/z0 = %.3g/%.0f m, "
+                "fine phi0/z0 = %.3g/%.0f m, fine K x%.3g, fine diffusivity x%.3g"
+                % (
+                    self.phi0c, self.z0c, self.phi0f, self.z0f,
+                    getattr(self, "fine_k_factor", 1.0),
+                    getattr(self, "fine_diff_factor", 1.0),
+                ),
+                flush=True,
+            )
+        else:
+            print("Single-lithology stratigraphy ON", flush=True)
+
+        if self.strataFile is not None:
+            if not self.stratLith:
+                comp = "single-fraction"
+            elif has_hf:
+                comp = "per-vertex coarse/fine from 'strataHf'" + (
+                    "" if has_phiF else " (phiF defaulted to phi0f)"
+                )
+            else:
+                comp = "all-coarse (no 'strataHf' in file)"
+            print(
+                "   initial layers from '%s': %d layer(s); composition: %s%s"
+                % (
+                    self.strataFile, nfile_lay, comp,
+                    "; per-layer K from 'stratK'" if has_K else "",
+                ),
+                flush=True,
+            )
+            if self.bedrockLay > 0:
+                print(
+                    "   + dedicated infinite-bedrock sentinel beneath them"
+                    + (
+                        " (bedrock_coarse_frac = %.3g)" % self.bedrock_coarse_frac
+                        if self.stratLith else ""
+                    ),
+                    flush=True,
+                )
+            else:
+                print(
+                    "   deepest file layer is the infinite-bedrock floor "
+                    "(set strata.bedrock_sentinel: True for a dedicated one)",
+                    flush=True,
+                )
+        else:
+            print(
+                "   infinite-bedrock sentinel only (no npstrata file)"
+                + (
+                    "; bedrock_coarse_frac = %.3g" % self.bedrock_coarse_frac
+                    if self.stratLith else ""
+                ),
+                flush=True,
+            )
+        return
+
+    def logDualState(self):
+        """
+        Rank-0 per-step verbose line summarising the dual-lithology sediment
+        state (run with ``-v``): the area-weighted mean surface fine fraction
+        and the fine share of the whole recorded pile (excluding the bedrock
+        sentinel). Called from the time loop so dual lithology stays visible
+        throughout the run, not only in the one-off init summary
+        (:meth:`_logStratInit`). No-op unless dual lithology is on and verbose.
+
+        The reductions are COLLECTIVE, so the method runs on every rank (gated
+        only by the uniform ``stratLith``/``verbose``); the line prints on rank
+        0.
+        """
+        if not self.stratLith or not getattr(self, "verbose", False):
+            return
+
+        owned = self.inIDs == 1
+        a = self.larea
+        ff = 1.0 - self._surfaceComposition()             # surface fine fraction
+        comm = MPI.COMM_WORLD
+        surfNum = comm.allreduce(float(np.sum((ff * a)[owned])), op=MPI.SUM)
+        area = comm.allreduce(float(np.sum(a[owned])), op=MPI.SUM)
+        # Pile fine share over the recorded (non-sentinel) layers.
+        b = self.bedrockLay
+        H = self.stratH[:, b : self.stratStep + 1].sum(axis=1)
+        Hf = self.stratHf[:, b : self.stratStep + 1].sum(axis=1)
+        vH = comm.allreduce(float(np.sum((H * a)[owned])), op=MPI.SUM)
+        vHf = comm.allreduce(float(np.sum((Hf * a)[owned])), op=MPI.SUM)
+        if MPIrank == 0:
+            surf = surfNum / area if area > 0.0 else 0.0
+            pile = vHf / vH if vH > 0.0 else 0.0
+            print(
+                "  [dual] surface fine fraction %.3f | recorded-pile fine "
+                "share %.3f" % (surf, pile),
+                flush=True,
+            )
         return
 
     def _initProvenance(self):
