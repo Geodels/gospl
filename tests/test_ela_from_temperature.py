@@ -9,20 +9,8 @@ import os
 import numpy as np
 import pytest
 
-_HELPER = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "scripts",
-    "ela_from_temperature.py",
-)
-
-
 def _load_helper():
-    if not os.path.exists(_HELPER):
-        pytest.skip("ela_from_temperature.py helper not present")
-    spec = importlib.util.spec_from_file_location("ela_from_temperature", _HELPER)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return pytest.importorskip("gospl.tools.ela_from_temperature")
 
 
 def test_derive_ela_surface_reference():
