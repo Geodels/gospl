@@ -223,6 +223,12 @@ class Model(
         self.modelRunTime = process_time()
         self.verbose = verbose
 
+        # Announce the goSPL version first thing in a verbose run (rank 0).
+        if self.verbose and MPIrank == 0:
+            from gospl import __version__
+
+            print("goSPL version %s" % __version__, flush=True)
+
         # Read input dataset
         _ReadYaml.__init__(self, filename)
 

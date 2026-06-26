@@ -71,8 +71,21 @@ packages = [
 dev = ["pip-tools", "pytest"]
 # Post-processing analysis tools (gospl.analyse). numba accelerates the
 # sediment-provenance routing sweep; geopandas assigns source/sink classes from
-# shapefiles. Both are optional — the tools fall back / error clearly without them.
-analysis = ["numba", "geopandas"]
+# shapefiles; netCDF4 backs the gridexport NetCDF writer; matplotlib draws the
+# river profiles, stratigraphic sections, wells and Wheeler diagrams. All
+# optional — the tools fall back / error clearly without them.
+analysis = ["numba", "geopandas", "netCDF4", "matplotlib"]
+
+# Console entry points for the post-processing tools, so they can be called
+# directly as commands (equivalent to `python -m gospl.analyse.<tool>`).
+# Available after a (re)install of the package.
+[project.scripts]
+gospl = "gospl.cli:main"
+gospl-strata-volume = "gospl.analyse.stratamesh:main"
+gospl-provenance = "gospl.analyse.provenance:main"
+gospl-grid = "gospl.analyse.gridexport:main"
+gospl-section = "gospl.analyse.stratasection:main"
+gospl-ela = "gospl.tools.ela_from_temperature:main"
 
 [tool.pytest.ini_options]
 # Marker registry — discovered no matter which directory pytest is

@@ -24,6 +24,13 @@ import petsc4py
 
 petsc4py.init(sys.argv)
 
+# goSPL forwards the program argv to PETSc so PETSc command-line options work,
+# but that also makes PETSc report the app's own argparse flags (e.g. `-i`,
+# `--verbose`) as "unused options" at finalize. Silence that spurious check —
+# it is pure noise for goSPL and keeps the CLI output clean. (Set the env var
+# `PETSC_OPTIONS="-options_left 1"` before import to re-enable it.)
+petsc4py.PETSc.Options().setValue("options_left", "0")
+
 # --- version ---
 try:
     from importlib.metadata import version, PackageNotFoundError
