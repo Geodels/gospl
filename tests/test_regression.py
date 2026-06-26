@@ -1492,12 +1492,10 @@ def test_provenance_opt_in():
 
     # On with stratigraphy -> parsed.
     p = _strata_parser(stratNb=5)
-    p.input = {"provenance": {"classes": 3, "uniform": 0,
-                              "cu_weight": [1.0, 0.0, 0.3]}}
+    p.input = {"provenance": {"classes": 3, "uniform": 0}}
     p._extraStrata()
     assert p.provOn is True and p.provNb == 3
     assert p._provSourceUniform == 0 and p._provSourceMap is None
-    assert np.allclose(p.prov_cu_weight, [1.0, 0.0, 0.3])
 
     # On but stratigraphy off -> forced off.
     p = _strata_parser(stratNb=0)

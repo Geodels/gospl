@@ -600,7 +600,6 @@ Sediment provenance tracers
                 classes: 3
                 source: ['input/source', 'rock']    # per-vertex source class
                 # uniform: 0                          #   ... or one class everywhere
-                cu_weight: [1.0, 0.0, 0.3]            # optional copper fertility
 
         When stratigraphy is enabled (a positive ``strat`` interval in the
         ``time`` block), adding a ``provenance`` block carries **N source-rock
@@ -620,11 +619,14 @@ Sediment provenance tracers
         a. ``classes`` — number of source classes,
         b. ``source`` — a per-vertex integer class map ``[file, key]`` (values
            in ``[0, classes)``), **or**
-        c. ``uniform`` — a single source class everywhere,
-        d. ``cu_weight`` (optional) — copper fertility per class, for a
-           Cu-sourced fraction diagnostic.
+        c. ``uniform`` — a single source class everywhere.
 
         The per-layer composition is written to the stratal output (``stratP``).
+        The optional **copper-fertility weighting** is *not* a model input: it
+        is supplied at post-processing to the standalone
+        :mod:`gospl.analyse.provenance` tool (its ``--cu-weights`` argument),
+        which reads the recorded ``stratP`` and blends a Cu-sourced fraction —
+        a what-if weighting best varied without re-running the model.
 
         .. note::
 

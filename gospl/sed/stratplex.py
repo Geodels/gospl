@@ -377,6 +377,64 @@ class STRAMesh(object):
             )
         return
 
+    def _logProvInit(self):
+        """
+        Rank-0 ``-v`` setup summary for the in-model provenance tracers: the
+        number of source classes and where the per-vertex bedrock class comes
+        from (a uniform constant or a ``[file, key]`` map). Descriptive only
+        (no reductions); the evolving per-class shares are reported each step
+        by :meth:`logProvState`.
+        """
+        if MPIrank != 0 or not getattr(self, "verbose", False):
+            return
+        if getattr(self, "_provSourceMap", None) is not None:
+            src = "per-vertex map '%s':'%s'" % (
+                self._provSourceMap[0], self._provSourceMap[1]
+            )
+        else:
+            src = "uniform class %d (single source)" % int(self._provSourceUniform)
+        print(
+            "Provenance tracers ON — %d source class(es); bedrock source: %s"
+            % (self.provNb, src),
+            flush=True,
+        )
+        return
+
+    def logProvState(self):
+        """
+        Rank-0 per-step verbose line: the source-class composition of the
+        recorded stratigraphic pile (area-weighted volume share per class,
+        excluding the bedrock sentinel) — i.e. where the deposited sediment has
+        come from so far. No-op unless provenance is on and verbose.
+
+        The reductions are COLLECTIVE (run on every rank, gated only by the
+        uniform ``provOn``/``verbose``); the line prints on rank 0.
+        """
+        if not getattr(self, "provOn", False) or not getattr(self, "verbose", False):
+            return
+
+        owned = self.inIDs == 1
+        a = self.larea
+        b = self.bedrockLay
+        # Per-class and total recorded-pile volume (area-weighted, owned nodes).
+        P = self.stratP[:, b : self.stratStep + 1, :].sum(axis=1)   # (lpoints, prov)
+        H = self.stratH[:, b : self.stratStep + 1].sum(axis=1)      # (lpoints,)
+        comm = MPI.COMM_WORLD
+        volP = np.ascontiguousarray(
+            (P * a[:, None])[owned].sum(axis=0), dtype=np.float64
+        )
+        comm.Allreduce(MPI.IN_PLACE, volP, op=MPI.SUM)
+        vH = comm.allreduce(float(np.sum((H * a)[owned])), op=MPI.SUM)
+        if MPIrank == 0:
+            if vH > 0.0:
+                shares = " ".join(
+                    "c%d %.3f" % (c, volP[c] / vH) for c in range(self.provNb)
+                )
+            else:
+                shares = "(empty pile)"
+            print("  [prov] recorded-pile source shares: %s" % shares, flush=True)
+        return
+
     def _initProvenance(self):
         """
         Allocate and seed the provenance state (opt-in `provenance:`; Phase 0).
@@ -406,6 +464,8 @@ class STRAMesh(object):
             (self.lpoints, self.stratNb, self.provNb), dtype=np.float64
         )
         self.stratP[np.arange(self.lpoints), :, self.source_class] = self.stratH
+
+        self._logProvInit()
         return
 
     def _fillZeroPorosity(self, phiS):

@@ -191,8 +191,9 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
 ### Phases (in-model, branch per phase, PR into `dev`)
 
 - **B0 — foundation** ✅ *(done)*: `_extraProvenance` parser (`provenance:` →
-  `provOn`, `provNb`, source-class `uniform`/`source` map, `cu_weight`; requires
-  `stratNb > 0`); state `stratP[node, layer, class]` (per-class layer thickness,
+  `provOn`, `provNb`, source-class `uniform`/`source` map; requires
+  `stratNb > 0`; note `cu_weight` is an analysis-tool argument, not a model
+  input — see §"Cu layer"); state `stratP[node, layer, class]` (per-class layer thickness,
   Σ = `stratH`) seeded to the bedrock `source_class` in `readStratLayers`; routed
   sub-flux vecs `vSedP[c]` + `provFrac`/`depoProvFrac` + `_provEroded`/
   `_provDeposited` diagnostics in `sedplex`; `destroy_DMPlex` registration.

@@ -27,7 +27,6 @@ diffusion:
 provenance:
     classes: 2
     uniform: 1          # all bedrock is source class 1 (tests non-zero seeding)
-    cu_weight: [0.0, 1.0]
 
 sea:
     position: -100.

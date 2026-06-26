@@ -1644,17 +1644,22 @@ class ReadYaml(object):
         record, giving conservation-exact, recycling-aware provenance per layer.
         See ``docs/DESIGN_PROVENANCE.md`` §6.
 
-        Sets ``self.provOn`` (master opt-in), ``self.provNb`` (class count), the
-        per-vertex source-class source (``uniform`` scalar or ``source``
-        ``[file, key]`` map, resolved post-mesh in ``readStratLayers``), and an
-        optional ``cu_weight``. All inert while ``provOn`` is False; like dual
-        lithology it requires stratigraphy (``stratNb > 0``).
+        Sets ``self.provOn`` (master opt-in), ``self.provNb`` (class count) and
+        the per-vertex source-class source (``uniform`` scalar or ``source``
+        ``[file, key]`` map, resolved post-mesh in ``readStratLayers``). All
+        inert while ``provOn`` is False; like dual lithology it requires
+        stratigraphy (``stratNb > 0``).
+
+        Note: the copper-fertility weighting (``cu_weight``) is **not** a model
+        input — it is a post-processing parameter supplied to the standalone
+        ``gospl.analyse.provenance`` tool (its ``--cu-weights`` argument), since
+        the fertility is a what-if weighting applied to the recorded per-class
+        deposits and is best varied without re-running the model.
         """
         self.provOn = False
         self.provNb = 0
         self._provSourceUniform = None
         self._provSourceMap = None
-        self.prov_cu_weight = None
         try:
             provDict = self.input["provenance"]
         except KeyError:
@@ -1663,9 +1668,6 @@ class ReadYaml(object):
         self.provNb = int(provDict.get("classes", 0))
         self._provSourceUniform = provDict.get("uniform")
         self._provSourceMap = provDict.get("source")          # [file, key] or None
-        cw = provDict.get("cu_weight")
-        if cw is not None:
-            self.prov_cu_weight = np.asarray(cw, dtype=np.float64)
 
         self.provOn = self.provNb > 0
         if self.provOn and self.stratNb == 0:

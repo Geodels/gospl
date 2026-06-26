@@ -417,10 +417,12 @@ class Model(
                 with self.profiler.phase("hillslope"), self._phase("hillslope"):
                     _hillSLP.getHillslope(self)
 
-                # Per-step dual-lithology status line ([dual]; verbose only,
-                # no-op when dual lithology is off). Keeps the sand/mud balance
-                # visible throughout the run, not just in the init summary.
+                # Per-step dual-lithology + provenance status lines ([dual] /
+                # [prov]; verbose only, no-op when each is off). Keeps the
+                # sand/mud balance and source-class mix visible throughout the
+                # run, not just in the one-off init summaries.
                 _STRAMesh.logDualState(self)
+                _STRAMesh.logProvState(self)
 
             if newLayer:
                 # Stratigraphic layer porosity and thicknesses under compaction

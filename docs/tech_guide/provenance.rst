@@ -163,7 +163,10 @@ Enabled by a ``provenance:`` block (requires stratigraphy, ``time: strat``):
         classes: 3                          # number of source-rock classes
         source: ['input/source', 'rock']    # per-vertex int class in [0, classes)
         # uniform: 0                         #   ... or a single class everywhere
-        cu_weight: [1.0, 0.0, 0.3]           # optional copper fertility per class
+
+(The copper fertility ``cu_weight`` is **not** a model input — it is supplied to
+the post-processing :mod:`gospl.analyse.provenance` tool via ``--cu-weights``;
+see the *Inputs* table above.)
 
 How it works:
 
