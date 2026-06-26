@@ -179,20 +179,35 @@ How it works:
   upstream-integration operator as the total (linear, so the sub-fluxes sum to
   the total exactly).
 - **Deposition** (``deposeStrat``) lays the deposit into the layer composition
-  with the arriving (routed) fractions. Marine deposits take the basin-delivered
-  mix (``_marineProvFraction``) and continental pit/lake deposits take each pit's
-  cascade-retained mix (``_pitProvFraction``).
-- **Advection & I/O** — ``stratP`` is advected with the pile under horizontal
-  tectonics and written to / restored from the stratal HDF5 (the ``stratP``
-  dataset).
+  with the arriving (routed) fractions. Each depositing environment gets a
+  spatially-resolved source mix:
+
+  - **Marine** — the per-class sediment delivered to the sea is routed through
+    the clinoform cascade *and* diffused in lockstep with the total deposit
+    (``_distOcean`` + ``_diffuseProvTracers``), so each offshore cell carries the
+    source that actually drained to it rather than an ocean-wide average
+    (``_marineProvFraction``).
+  - **Continental pit / lake** — each depression keeps its cascade-retained mix,
+    tracked through the overspill so downstream-lake chains stay exact
+    (``_pitProvFraction``).
+  - **Hillslope creep** — a creep deposit takes the flux-weighted eroded
+    composition of its higher (donor) neighbours (``_hillslopeProvFraction``);
+    locally-derived deposits with no eroding upslope neighbour fall back to the
+    in-situ bedrock source class.
+
+  A depositing node left with no arriving composition falls back to its bedrock
+  source class, and every depositing node is renormalised so the layer is
+  exactly partitioned (no missing-source cells).
+- **Advection, compaction & I/O** — ``stratP`` is advected with the pile under
+  horizontal tectonics, rescaled by ``getCompaction`` when burial compacts the
+  layer (compaction is composition-neutral), and written to / restored from the
+  stratal HDF5 (the ``stratP`` dataset).
 
 **Conservation** is structural: ``stratP`` partitions ``stratH`` exactly for any
-number of sources — with a single source every layer stays 100 % that class. Both
-sinks now carry the exact delivered source mix: the **marine** sink uses the
-basin-delivered composition (``_marineProvFraction``) and **intracontinental
-pit/lake** deposits use each pit's cascade-retained mix (``_pitProvFraction``),
-tracked through the overspill cascade so downstream-lake chains stay exact. The
-recorded composition matches the eroded supply to ~1e-6.
+number of sources — with a single source every layer stays 100 % that class. All
+three sinks (marine, pit/lake, hillslope) carry a spatially-resolved delivered
+source mix; the recorded composition matches the eroded supply to ~1e-6 and the
+per-class partition stays machine-exact.
 
 .. note::
 

@@ -1161,7 +1161,7 @@ class UnstMesh(object):
             "_ts_marine", "_ts_marine_x",
             "_smoothMat", "_ksp_smooth",
             "_hillMat", "_ksp_hill_lin",
-            "_ksp_picard",
+            "_ksp_picard", "_ksp_provdiff",
             "_flexLm", "_flexA", "_flexKSP",
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
             "_advMatLeft", "_advMatRight", "_advKSP",

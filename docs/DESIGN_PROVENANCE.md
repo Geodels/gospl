@@ -211,18 +211,64 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   `depoProvFrac` (no sorting bias — passive) is what `deposeStrat` lays down.
 - **B3 — deposition** ✅: `deposeStrat` adds `depo · depoProvFrac` to the new
   layer's `stratP` (keeps Σ over classes == `stratH`) and accumulates
-  `_provDeposited`. Guarded by `test_provenance_conservation` — with a single
-  source, every layer stays 100 % that class after a full run (class-0 leakage ==
-  0; `stratP` partitions `stratH` to ~3e-8).
-- **B2b — marine composition** ✅ *(done)*: `seaChange._marineProvFraction` sets
-  the marine deposit's source composition to the **basin-delivered mix**
-  (`ff_mar[c] = Σ provFrac[c]·sedFlux / Σ sedFlux`, uniform — no depth bias, the
-  passive-label analogue of `_marineFineFraction`). This was the dominant sink
-  (≈79 % of deposition in the test) and was the weakest spot of B2 (marine-only
-  nodes had a near-zero through-flux composition). With it the recorded
-  composition matches the eroded supply ratio to ~1e-6 and the partition becomes
-  machine-exact (Σ over classes == `stratH`, ~1e-24). Domain-uniform, the same
-  standard as the dual marine fraction.
+  `_provDeposited`. A depositing node whose `depoProvFrac` sums to ~0 (no
+  arriving composition — e.g. off-channel hillslope creep with no river
+  through-flux) falls back to the in-situ bedrock `source_class`; then **every**
+  depositing node is renormalised so the layer is exactly partitioned (`Σ_c
+  stratP == stratH`). Without this a deposited layer can have thickness but zero
+  provenance, surfacing in post-processing as a cell with no source
+  (`dominant == -1`). Guarded by `test_provenance_conservation` (single source
+  ⇒ every layer 100 % that class) and `test_provenance_deposit_no_holes`.
+- **B2b — marine composition** ✅ *(done; spatially-resolved since 2026-06-26)*:
+  the marine deposit's source composition is now the **per-node mix that was
+  actually routed to each offshore cell**, not a single ocean-wide average.
+  `_distOcean` accepts the per-class incoming marine flux `provFlux[c] =
+  provFrac[c]·sedFlux` (Σ_c == `sedFlux`, nonzero only at the river-fed marine
+  nodes) and routes each class through the **same** clinoform cascade in lockstep
+  with the total: capacity `marVol` is shared (set by the total flux) and a
+  node's deposited/continuing fractions of its arriving flux carry the arriving
+  composition unchanged (a passive label has no settling bias). The result is a
+  per-node deposited composition `self._marDepProv` (Σ_c == `vdep` exactly);
+  `seaChange._marineProvFraction` sets `depoProvFrac[node] = _marDepProv[node] /
+  Σ_c _marDepProv[node]`. **Why this matters:** the previous version set every
+  marine node to the basin-delivered *average* `ff_mar[c] = Σ provFrac[c]·sedFlux
+  / Σ sedFlux`, which smeared a single-margin source across the whole ocean
+  rather than confining it to its delta/depocenter. The old average survives
+  only as a **fallback** for the few nodes that receive a deposit purely from
+  `_diffuseOcean` lateral spread (no routed flux, `Σ_c _marDepProv == 0` there).
+  A tiny-flux guard (`arr > 1e-12 m³`) avoids a denormal `1/arr → inf → nan`. The
+  `Gmar > 0` two-pass path (`_depMarineSystem` then a second `_distOcean`) carries
+  the pass-1 per-node composition onto the redistributed volume. This is the
+  dominant sink (≈79 % of deposition in the test) and was the weakest spot of B2
+  (marine-only nodes have a near-zero *through-flux* composition — now supplied by
+  the routing instead). Conservation stays machine-exact (Σ over classes ==
+  `stratH`, relerr ~9e-25), validated np=1-vs-np=2 (deadlock-free; clean
+  per-region separation, frac0 ≈ 1.0 in source-0 territory vs ≈ 2e-8 in source-1).
+
+  **Diffusion lockstep** (`hillslope._diffuseProvTracers`): `_distOcean` only
+  deposits at the proximal, clinoform-capacity-limited marine nodes (~10-15 %),
+  then the non-linear marine diffusion `_diffuseOcean` (`∂h/∂t = ∇·(Cd∇h)`,
+  `nlK`) spreads that thickness across the basin — the diffused far field
+  (~85-90 % of marine nodes, ~20-40 % of the deposited *volume*) had no routed
+  composition and fell back to the domain average (the residual far-field
+  smearing). Fix: `Cd` depends on the **total** deposited surface, not the
+  class, so once the total solve fixes the deposited state every class diffuses
+  through the *same* linear operator `M = I + Δt_sub·L(Cd)` (built from
+  `jacobiancoeff`, as the Picard solver does), advanced with `picardSub`
+  backward-Euler **sub-steps** per class. Sub-stepping (not one full-`dt` step)
+  matters: a single large implicit step is far more dissipative than the true
+  diffusion and would over-blur the composition relative to the adaptively
+  sub-stepped total deposit — diluting the focused source of a thick proximal
+  clinoform lens with its neighbours' classes (lenticular deposits showing the
+  wrong / under-filled source). The post-diffusion per-class thickness is
+  `_marDiffProv`; `_marineProvFraction` normalises `q_c / Σ_c q_c` per node
+  (composition is a ratio, so all classes share one operator and spread
+  identically). On `dual_lithology/input-provenance` this drops the fraction of
+  deposited marine volume getting the domain-average mix from ~22-39 % to
+  **0.00 %** and gives a volume-weighted dominant-class fraction of ~0.997 (well
+  focused, not blurred); conservation holds (relerr ~3e-12), np=1-vs-np=4
+  deadlock-free. The domain average survives only as the fallback for nodes with
+  no diffused tracer.
 - **B2b — continental pit cascade** ✅ *(done)*: pit/lake deposits now carry each
   pit's **cascade-retained** source mix rather than the through-flux composition.
   `_distributeSediment` builds a per-class sub-flux `vSedP[c]·dt` and threads it
@@ -238,14 +284,34 @@ and no depositional sorting, so there is no `_surfaceLithoK/D` or
   and `stratP` partitions `stratH` machine-exactly. Guarded by
   `test_provenance_pit_fraction` (the uniform-mix invariant) plus the existing
   conservation tests (now run with pit attribution active).
-- **B4 — advection + I/O + restart** ✅: `stratalRecord` advects each class's
-  `stratP[:,:,c]` with the same `strataonesed` interpolation as `stratHf`
-  (re-normalised so Σ over classes == `stratH`); `_outputStrat` writes the
-  `(lpoints, layers, classes)` `stratP` to the stratal HDF5 and the restart path
-  restores it. Provenance per pixel/per layer reads directly off `stratP`.
-  Tested via the I/O round-trip (`test_provenance_output_io`); the advection
-  branch mirrors the tested `stratHf` path (a horizontal-tectonics fixture would
-  exercise it directly).
+- **B2b — hillslope creep** ✅ *(done 2026-06-26)*: subaerial (and submarine)
+  hillslope-creep deposits now carry the **transported** source mix rather than
+  the bedrock fallback. `hillslope._hillslopeProvFraction`, called between
+  `erodeStrat` (which produces `provEro`, the per-class composition stripped from
+  each eroding node) and `deposeStrat`, sets the creep deposit's `depoProvFrac`
+  to the flux-weighted eroded composition of the **higher neighbours** that fed
+  each deposition node:
+  `depoProvFrac_i = Σ_j a_ij·max(z_j−z_i,0)·c_j / Σ_j a_ij·max(z_j−z_i,0)`,
+  with `a_ij` the FV creep stencil weight (`sethillslopecoeff`, the same operator
+  the diffusion solve used), `z` the pre-diffusion elevation and `c_j` the
+  donor's `provEro` (normalised, ghost-synced). Creep is short-range (small
+  `Cd`), so one hop captures it; deposition nodes with no eroding upslope
+  neighbour fall back to the bedrock `source_class` (in `deposeStrat`). Applied
+  to both the linear (`_hillSlope` smooth=0) and non-linear (`_hillSlopeNL`)
+  solves. Conservation machine-exact (`Σ_c stratP == stratH`, relerr ~6e-23),
+  np=1-vs-np=4 consistent. Guarded by `test_provenance_hillslope_routing`.
+- **B4 — advection + I/O + restart + compaction** ✅: `stratalRecord` advects each
+  class's `stratP[:,:,c]` with the same `strataonesed` interpolation as `stratHf`
+  (re-normalised so Σ over classes == `stratH`); `getCompaction` rescales
+  `stratP` by the same per-layer ratio when it compacts `stratH` (compaction is
+  composition-neutral — only pore water leaves — but shrinks the layer; without
+  the rescale `Σ_c stratP > stratH` after burial and the post-processed
+  `stratP[c]/stratH` fraction exceeds 1; `test_provenance_compaction_rescale`);
+  `_outputStrat` writes the `(lpoints, layers, classes)` `stratP` to the stratal
+  HDF5 and the restart path restores it. Provenance per pixel/per layer reads
+  directly off `stratP`. Tested via the I/O round-trip
+  (`test_provenance_output_io`); the advection branch mirrors the tested
+  `stratHf` path.
 
 ## 7. Phasing
 

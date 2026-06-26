@@ -56,6 +56,13 @@ class hillSLP(object):
         # TS (opt-in via self.marineSolver == 'picard'); cached linear KSP.
         self._ksp_picard = None
 
+        # Cached linear KSP for diffusing the per-class provenance deposit
+        # thickness through the SAME marine diffusion as the total (so the
+        # source label follows the sediment into the far field instead of the
+        # diffused tail getting a domain-average mix). Created lazily only when
+        # provenance is on; see _diffuseProvTracers.
+        self._ksp_provdiff = None
+
         # Cached marine-morphology smoothing operator (_hillSlope smooth=2) and
         # its KSP. The smoothing diffusivity is mesh-size-based and timestep-
         # independent, so the operator depends only on the (fixed) mesh and the
@@ -213,6 +220,7 @@ class hillSLP(object):
 
         if self.stratNb > 0:
             self.erodeStrat()
+            self._hillslopeProvFraction()
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
@@ -503,6 +511,7 @@ class hillSLP(object):
 
         if self.stratNb > 0:
             self.erodeStrat()
+            self._hillslopeProvFraction()
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
@@ -511,6 +520,94 @@ class hillSLP(object):
                 flush=True,
             )
         safe_garbage_cleanup()
+
+    def _hillslopeProvFraction(self):
+        r"""
+        In-model provenance: set the per-class composition of the hillslope-creep
+        **deposit** (``depoProvFrac``, read by ``deposeStrat``) to the flux-
+        weighted mix of the material eroded from the upslope neighbours that fed
+        each deposition node — threading provenance through the hillslope
+        diffusion the same way it is threaded through the river/marine routing.
+
+        Called **between** ``erodeStrat`` (which produces ``provEro``, the per-
+        class composition of the material stripped from each eroding node) and
+        ``deposeStrat`` (which lays the creep deposit down). For each node that
+        gained elevation this step (``Δh > 0``) the deposited material arrived by
+        diffusive creep from its higher neighbours, so its composition is
+
+        .. math::
+            \mathrm{depoProvFrac}_i = \frac{\sum_j a_{ij}\,\max(z_j - z_i, 0)\,
+            c_j}{\sum_j a_{ij}\,\max(z_j - z_i, 0)}
+
+        with ``a_ij`` the FV creep stencil weight (``sethillslopecoeff``, the same
+        operator the diffusion solve used), ``z`` the pre-diffusion elevation and
+        ``c_j`` the eroded composition at the donor ``j`` (``provEro`` normalised,
+        ghost-synced so cross-partition donors carry their owner's value). Creep
+        is short-range (small ``Cd``), so this is dominated by the immediately
+        higher neighbours — the physically-derived alternative to the bedrock-
+        ``source_class`` fallback in ``deposeStrat``. Deposition nodes with no
+        higher contributing neighbour are left to that fallback (zeroed here).
+
+        Uses ``self.tmpL`` / ``self.tmp1`` as scratch; deliberately does NOT
+        touch ``self.tmp`` (which holds Δh, read by ``erodeStrat``/``deposeStrat``).
+        """
+
+        if not getattr(self, "provOn", False):
+            return
+
+        nC = self.provNb
+        maxnb = self.maxnb
+
+        # Pre-diffusion elevation (incl. ghosts) and this step's elevation change.
+        self.dm.globalToLocal(self.hOld, self.tmpL)
+        zOld = self.tmpL.getArray().copy()
+        dz = self.hLocal.getArray() - zOld
+
+        # Donor (eroded) composition per node, ghost-synced so cross-partition
+        # neighbours carry their owner's value (provEro owned rows are exact).
+        prov = self.provEro
+        ptot = prov.sum(axis=1)
+        comp = np.divide(
+            prov, ptot[:, None], out=np.zeros_like(prov), where=ptot[:, None] > 0.0
+        )
+        for c in range(nC):
+            self.tmpL.setArray(comp[:, c])
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            comp[:, c] = self.tmpL.getArray()
+
+        # FV creep stencil weights a_ij (>= 0) = -off-diagonal of (I - L), the
+        # same operator the diffusion solve used. Rebuilt from Cd here (the
+        # cached non-dual operator does not keep Cd around).
+        Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
+        Cd[self.seaID] = self.Cdm
+        if self.stratLith:
+            Cd = Cd * self._surfaceLithoD()
+        coeffs = sethillslopecoeff(self.lpoints, Cd * self.dt)
+        a = -coeffs[:, 1 : 1 + maxnb]
+        ngb = self.FVmesh_ngbID[:, :maxnb]
+        selfidx = np.arange(self.lpoints)
+
+        # Flux-weighted inflow composition from the higher (donor) neighbours.
+        num = np.zeros((self.lpoints, nC))
+        den = np.zeros(self.lpoints)
+        for k in range(maxnb):
+            w = a[:, k]
+            j = ngb[:, k].copy()
+            bad = w <= 0.0
+            j[bad] = selfidx[bad]                  # f == 0 there; keep index valid
+            f = w * np.maximum(zOld[j] - zOld, 0.0)
+            den += f
+            num += f[:, None] * comp[j, :]
+
+        # Assign the routed composition at deposition nodes; nodes with no
+        # contributing higher neighbour are zeroed so deposeStrat falls back to
+        # the in-situ bedrock source_class.
+        depo = dz > 0.0
+        self.depoProvFrac[depo, :] = 0.0
+        good = depo & (den > 0.0)
+        self.depoProvFrac[good, :] = num[good, :] / den[good, None]
+        return
 
         return
 
@@ -639,7 +736,7 @@ class hillSLP(object):
 
         return
 
-    def _diffuseOcean(self, dh):
+    def _diffuseOcean(self, dh, provThick=None):
         r"""
         For river-transported sediments reaching the marine realm, this function computes the related marine deposition diffusion. It is based on a non-linear diffusion approach.
 
@@ -657,6 +754,12 @@ class hillSLP(object):
             PETSc SNES and time stepping TS approaches are used to solve the non-linear equation above over the considered time step.
 
         :arg dh: Numpy Array of incoming marine depositional thicknesses
+        :arg provThick: optional per-class incoming deposit thickness
+            ``(lpoints, provNb)`` with ``Σ_c provThick == dh``. When given, the
+            per-class thickness is diffused by the SAME marine operator (see
+            ``_diffuseProvTracers``) so the source label follows the sediment as
+            it spreads, and the post-diffusion composition is stored in
+            ``self._marDiffProv``.
         """
 
         t0 = process_time()
@@ -665,6 +768,9 @@ class hillSLP(object):
         )
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
+
+        if provThick is not None:
+            self._diffuseProvTracers(ndepo, provThick)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -677,6 +783,84 @@ class hillSLP(object):
             gc.collect()
         safe_garbage_cleanup()
 
+        return
+
+    def _diffuseProvTracers(self, ndepo, provThick):
+        r"""
+        In-model provenance (B2b-marine, diffusion lockstep): spread each source
+        class's deposit thickness with the SAME marine diffusion operator the
+        total just used, so the source label rides along as ``_diffuseOcean``
+        moves sediment into the far field. Without this the diffused tail (the
+        ~80-90% of marine nodes that ``_distOcean`` never deposited at but
+        diffusion reaches) would fall back to the domain-average mix — the
+        residual far-field smearing.
+
+        The marine diffusivity ``Cd(h)`` depends on the **total** deposited
+        surface, not on the class, so once the total solve has fixed the
+        deposited state every class diffuses through the *same* linear operator
+        ``M = I + Δt_sub·L(Cd)`` (built from ``jacobiancoeff`` exactly as the
+        Picard solver does). Each class is advanced with ``picardSub``
+        backward-Euler **sub-steps** of ``dt/picardSub`` (NOT one step of the
+        full ``dt``): a single large implicit step is far more dissipative than
+        the true diffusion, which would over-blur the composition relative to the
+        adaptively sub-stepped total deposit — diluting the focused source of a
+        thick proximal clinoform lens with its neighbours' classes. Sub-stepping
+        ``BE(dt/n)^n`` tracks the true diffusion closely, so the composition
+        spreads at the same rate the thickness did. The per-class result is read
+        off as ``_marDiffProv[:, c] = q_c``; ``_marineProvFraction`` then
+        normalises ``q_c / Σ_c q_c`` per node (composition is a ratio, so all
+        that matters is that every class spreads identically — guaranteed by the
+        shared operator).
+
+        :arg ndepo: post-diffusion total deposit thickness (m), from the total
+            marine solve (defines the converged ``Cd`` field).
+        :arg provThick: per-class incoming deposit thickness ``(lpoints, nC)``.
+        """
+
+        mask = self.seaID
+        nC = provThick.shape[1]
+        nsub = int(getattr(self, "picardSub", 10))
+        dt_sub = self.dt / nsub
+
+        # Converged marine diffusivity at the post-diffusion deposit state,
+        # identical formula/gating to _diffuseImplicitPicard (dhdep<0.1 -> 0).
+        Cd0 = np.zeros(self.lpoints)
+        Cd0[mask] = self.nlK
+        minDiff_vec = np.zeros(self.lpoints)
+        minDiff_vec[mask] = self.minDiff
+        dhdep = ndepo.copy()
+        dhdep[dhdep < 0.1] = 0.0
+        Cd = minDiff_vec + np.multiply(Cd0, 1.0 - np.exp(-self.dexp * dhdep))
+
+        hloc = self.hLocal.getArray() + ndepo            # post-diffusion surface
+        zeroKp = np.zeros(self.lpoints)
+        nlC = jacobiancoeff(hloc, Cd, zeroKp)
+        coeffs = dt_sub * nlC
+        coeffs[:, 0] += 1.0                              # M = I + dt_sub * L(Cd)
+        M = self._assembleDiffMatCSR(coeffs)
+
+        if self._ksp_provdiff is None:
+            self._ksp_provdiff = self._makeDiffusionKSP("provdiff_")
+        ksp = self._ksp_provdiff
+        ksp.setOperators(M, M)
+
+        rhs = self.tmp.duplicate()
+        sol = self.tmp.duplicate()
+        q = np.zeros((self.lpoints, nC), dtype=np.float64)
+        for c in range(nC):
+            self.tmpL.setArray(provThick[:, c])
+            self.dm.localToGlobal(self.tmpL, sol)        # h^start (sub-step RHS)
+            for _ in range(nsub):
+                sol.copy(result=rhs)                     # BE: M sol = sol_prev
+                ksp.solve(rhs, sol)
+            self.dm.globalToLocal(sol, self.tmpL)
+            qc = self.tmpL.getArray().copy()
+            qc[qc < 0.0] = 0.0
+            q[:, c] = qc
+        rhs.destroy()
+        sol.destroy()
+        M.destroy()
+        self._marDiffProv = q
         return
 
     def _diffuseImplicit(self, dh, mask, Cd_val, label="diffusion"):

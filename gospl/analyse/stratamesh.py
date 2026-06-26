@@ -16,8 +16,9 @@ Two field modes (``--field``):
 
 * ``lithology`` — coarse / fine thickness, fine fraction and the per-fraction
   porosities (needs the dual-lithology ``stratHf``/``phiF`` fields).
-* ``provenance`` — per-source-class volume fraction and the dominant source
-  (needs the provenance ``stratP`` field).
+* ``provenance`` — per-source-class volume fraction, the dominant source and
+  the per-layer ``porosity`` (plus ``phiFine`` if the run is also dual
+  lithology); needs the provenance ``stratP`` field.
 
 The basal **bedrock sentinel** layer (the ~1e6 m infinite reservoir goSPL keeps
 under the recorded deposits) is auto-detected and skipped, so the volume spans
@@ -43,7 +44,7 @@ Options
     cell-field set (default ``lithology``). ``lithology`` = coarse/fine
     thickness, fine fraction and per-fraction porosity (needs the dual-lithology
     ``stratHf``/``phiF`` fields); ``provenance`` = per-source-class volume
-    fraction + dominant source (needs ``stratP``).
+    fraction + dominant source + per-layer ``porosity`` (needs ``stratP``).
 ``--steps S0,S1,...``
     comma-separated output steps to convert (default: all found). Steps with
     fewer than 2 recorded layers are skipped.
@@ -183,6 +184,13 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
                     "(was the run provenance-enabled?)" % stratal_path
                 )
             stratP = np.asarray(f["stratP"], dtype=np.float64)   # (n, L, C)
+            # Per-layer porosity (always recorded). For a dual-lithology run the
+            # fine-fraction porosity phiF is also present; attach both.
+            phiS = np.asarray(f["phiS"], dtype=np.float64)
+            phiF = (
+                np.asarray(f["phiF"], dtype=np.float64)
+                if "phiF" in avail else None
+            )
 
     n = coords.shape[0]
     m = tris.shape[0]
@@ -235,6 +243,16 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
         "n_classes": 0,
     }
     out["cells"]["thickness"] = _cell(stratH[:, lay])
+    # Per-cell elevation = mid-height of the wedge (mean of its bottom/top
+    # interface elevations). Interval i sits between selected surfaces i and
+    # i+1, i.e. recorded surfaces lo+i and lo+i+1.
+    midZ = 0.5 * (surfZ[:, lo : nlay - 1] + surfZ[:, lo + 1 : nlay])   # (n, nint)
+    out["cells"]["elevation"] = _cell(midZ)
+    # Per-cell recorded-layer index (interval i is the slab of original layer
+    # lo+1+i). Interval-major to match the `wedges` ordering used by `_cell`.
+    out["cells"]["layer"] = np.repeat(
+        np.arange(lo + 1, nlay, dtype=np.int32), m
+    )
 
     if litho:
         Hl = stratH[:, lay]
@@ -255,12 +273,29 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
             fnode = np.where(Hl[..., None] > 0.0, P / Hl[..., None], 0.0)
         # Per-wedge per-class fraction (interval-major to match `wedges`).
         fcell = fnode[tris].mean(axis=1)                        # (m, nint, C)
+        # Cells with no source composition (Σ_c == 0) are eroded / pinched-out
+        # layers (stratH == 0). Give each the composition of the cell directly
+        # below it in the same triangular column (the next lower interval), so a
+        # collapsed layer carries the underlying source rather than showing as a
+        # no-source cell (dominant == -1). Interval 0 is the deepest, so filling
+        # in ascending order lets a stack of empty layers cascade the nearest
+        # defined underlying composition upward. Only interval 0 can stay empty
+        # (nothing beneath it within the selected layers).
+        ctot = fcell.sum(axis=2)                                # (m, nint)
+        for i in range(1, fcell.shape[1]):
+            empty = ctot[:, i] <= 0.0
+            fcell[empty, i, :] = fcell[empty, i - 1, :]
+            ctot[empty, i] = ctot[empty, i - 1]
         frac = np.transpose(fcell, (1, 0, 2)).reshape(-1, C).astype(np.float32)
         tot = frac.sum(axis=1)
         dominant = np.where(tot > 0.0, frac.argmax(axis=1), -1).astype(np.int32)
         out["frac"] = frac
         out["n_classes"] = C
         out["cells"]["dominant"] = dominant
+        # Per-layer porosity alongside the provenance composition.
+        out["cells"]["porosity"] = _cell(phiS[:, lay])
+        if phiF is not None:
+            out["cells"]["phiFine"] = _cell(phiF[:, lay])
 
     return out
 
@@ -336,7 +371,7 @@ def write_xdmf(out_prefix, meta, field, times=None):
                 "      </Geometry>\n" % (nv, h5)
             )
             for name in blk["cells"]:
-                dt = "Int" if name == "dominant" else "Float"
+                dt = "Int" if name in ("dominant", "layer") else "Float"
                 L.append("   " + _attr_cell(name, h5, name, nw, dtype=dt))
             if field == "provenance":
                 for c in range(blk["ncl"]):

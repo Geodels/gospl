@@ -608,7 +608,27 @@ class STRAMesh(object):
             # Lay the deposit into the layer's provenance composition (the
             # arriving routed composition; a passive tracer, so no sorting).
             # Keeps Σ over classes == stratH for the deposited thickness.
-            provDepo = depo[:, None] * self.depoProvFrac
+            frac = self.depoProvFrac.copy()
+            fsum = frac.sum(axis=1)
+            # Depositing nodes with no arriving composition (Σ_c ≈ 0) — e.g.
+            # off-channel hillslope-creep deposits, which have no river
+            # through-flux so `provFrac` is zero there. Without a fallback the
+            # layer gets thickness but zero provenance (Σ_c stratP < stratH), so
+            # the post-processed cell shows no source class (`dominant == -1`).
+            # Attribute such locally-derived deposits to the in-situ bedrock
+            # `source_class` (the best label available without threading
+            # provenance through hillslope diffusion). Then renormalise every
+            # depositing node so the layer is exactly partitioned (Σ_c == depo);
+            # routed/pit/marine fractions already sum to 1, so this is a no-op
+            # for them and only repairs the hillslope holes.
+            holes = (depo > 0.0) & (fsum < 1.0e-6)
+            if holes.any():
+                frac[holes, :] = 0.0
+                frac[holes, self.source_class[holes]] = 1.0
+                fsum = frac.sum(axis=1)
+            good = fsum > 0.0
+            frac[good] /= fsum[good, None]
+            provDepo = depo[:, None] * frac
             self.stratP[:, self.stratStep, :] += provDepo
             self._provDeposited += np.sum(
                 (provDepo * self.larea[:, None])[self.inIDs == 1], axis=0
@@ -1000,6 +1020,23 @@ class STRAMesh(object):
 
         # Update each layer thicknesses
         self.stratH[:, : self.stratStep + 1] = newH
+
+        # Provenance: compaction only expels pore water — it is composition-
+        # neutral (every source class's solid grains are preserved in the same
+        # proportion), but it shrinks the layer thickness. Rescale stratP by the
+        # same per-layer ratio so Σ over classes == the compacted stratH stays
+        # exact; without this stratP keeps the pre-compaction (larger) thickness
+        # and the post-processed fraction stratP[c]/stratH exceeds 1. Same renorm
+        # idiom as erodeStrat and the advection step. (stratHf is already
+        # recompacted consistently inside _depthPorosityDual.)
+        if getattr(self, "provOn", False):
+            top = self.stratStep + 1
+            psum = self.stratP[:, :top, :].sum(axis=2)
+            scale = np.divide(
+                self.stratH[:, :top], psum, out=np.ones_like(psum), where=psum > 0
+            )
+            self.stratP[:, :top, :] *= scale[:, :, None]
+
         if self.memclear:
             del dz, newH, totH, topZ
             del depth, zlay, cumZ, elev

@@ -86,6 +86,16 @@ lithology|provenance``, ``--tout``/``--tstart`` (label time in years),
 ``--steps``, ``--first-layer``. Runs serially or under ``mpirun`` (partitions
 split across ranks, independent of the run's processor count).
 
+Per-cell fields attached to every wedge: ``thickness``, ``elevation``
+(wedge mid-height) and ``layer`` (the recorded stratigraphic-layer index)
+always; ``--field lithology`` adds coarse/fine thickness,
+fine fraction and per-fraction porosity; ``--field provenance`` adds the
+per-class volume fraction (``src_classN``), the ``dominant`` source class and
+the per-layer ``porosity`` (plus ``phiFine`` for a dual-lithology run). An
+eroded / pinched-out layer (zero thickness, hence no source) inherits the
+``dominant`` source and composition of the cell directly below it in the
+column, so it never renders as a no-source cell.
+
 Publication sections, wells & Wheeler — ``gospl-section``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

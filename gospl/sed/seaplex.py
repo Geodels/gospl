@@ -401,11 +401,25 @@ class SEAMesh(object):
 
         return volDep
 
-    def _distOcean(self, sedflux):
+    def _distOcean(self, sedflux, provFlux=None):
         """
         Based on the incoming marine volumes of sediment and maximum clinoforms slope we distribute locally sediments downslope.
 
+        In-model provenance (B2b-marine, lockstep): when ``provFlux`` is given
+        (the per-class incoming marine flux, shape ``(lpoints, provNb)`` with
+        ``Σ_c provFlux == sedflux``), each class's sub-flux is routed through the
+        **same** ``dMat1`` cascade in lockstep with the total and deposited in
+        the **same proportion** at every node (capacity ``marVol`` is shared, set
+        by the total flux; provenance is a passive label, so the deposited and
+        continuing fractions of a node's arriving flux carry its arriving
+        composition unchanged). This yields a spatially-resolved per-node
+        deposited composition ``self._marDepProv`` (shape ``(lpoints, provNb)``,
+        ``Σ_c == vdep`` exactly) — the source that actually drained to each
+        offshore cell — instead of the old domain-wide average. This is the
+        marine analogue of the continental ``_moveDownstream`` lockstep.
+
         :arg sedflux: incoming marine sediment volumes
+        :arg provFlux: optional per-class incoming marine flux (lpoints, provNb)
 
         :return: vdep (the deposited volume of the distributed sediments)
         """
@@ -413,6 +427,18 @@ class SEAMesh(object):
         marVol = self.maxDepQs.copy()
         sinkVol = sedflux.copy()
         vdep = np.zeros(self.lpoints, dtype=float)
+
+        # Provenance lockstep state: one routed sub-flux per source class,
+        # carried in parallel with the total `sinkVol`/`self.tmp`. `pvCur[c]`
+        # holds class c's "flux to route this pass" (the analogue of self.tmp);
+        # `vdepP[:, c]` accumulates its deposited volume (Σ_c vdepP == vdep).
+        prov = provFlux is not None
+        if prov:
+            nC = self.provNb
+            sinkVolP = provFlux.copy()
+            vdepP = np.zeros((self.lpoints, nC), dtype=float)
+            pvCur = [self.tmp.duplicate() for _ in range(nC)]
+            pvNxt = self.tmp.duplicate()
 
         # Drain initial sediment at terminal sinks BEFORE the routing loop.
         # dMat1 has zero columns at sink cells (rcv==self for every flow
@@ -432,9 +458,16 @@ class SEAMesh(object):
             if (sink_mass != 0).any():
                 vdep[self.is_sink_local] += sink_mass
                 sinkVol[self.is_sink_local] = 0.0
+                if prov:
+                    vdepP[self.is_sink_local, :] += sinkVolP[self.is_sink_local, :]
+                    sinkVolP[self.is_sink_local, :] = 0.0
 
         self.tmpL.setArray(sinkVol)
         self.dm.localToGlobal(self.tmpL, self.tmp)
+        if prov:
+            for c in range(nC):
+                self.tmpL.setArray(sinkVolP[:, c])
+                self.dm.localToGlobal(self.tmpL, pvCur[c])
 
         # Convergence threshold: relative to initial input volume (1e-6 of
         # total) with a fixed floor of 1 m^3. Scales with input magnitude so
@@ -464,6 +497,18 @@ class SEAMesh(object):
 
             # In case there is too much sediment coming in
             sinkVol = self.tmpL.getArray().copy()
+
+            # Provenance: route each class's flux through the SAME dMat1 (linear,
+            # so Σ_c stays == the total) and snapshot the per-node arriving total
+            # `arr` before the deposition block consumes `sinkVol`.
+            if prov:
+                arr = sinkVol.copy()
+                sinkVolP = np.zeros((self.lpoints, nC), dtype=float)
+                for c in range(nC):
+                    self.dMat1.mult(pvCur[c], pvNxt)
+                    self.dm.globalToLocal(pvNxt, self.tmpL)
+                    sinkVolP[:, c] = self.tmpL.getArray()
+
             excess = sinkVol >= marVol
             sinkVol[excess] -= marVol[excess]
             vdep[excess] += marVol[excess]
@@ -491,9 +536,35 @@ class SEAMesh(object):
                 vdep[sink_mask] += sinkVol[sink_mask]
                 sinkVol[sink_mask] = 0.0
 
+            # Provenance: split each node's arriving per-class flux into the
+            # deposited part and the continuing part in the SAME proportion the
+            # total split (a passive label has no settling bias). `cont` is the
+            # post-block continuing total; `dep_inc` what deposited this pass.
+            # Outlet cells discard their inflow (outflux leaves the domain), so
+            # force their deposit increment to zero — matching vdep[outlet]=0.
+            # Only split where the arriving flux is non-negligible: below the
+            # tiny floor `arr` is denormal round-off (1/arr would overflow to
+            # inf, then 0*inf -> nan), and the per-class flux there (Σ_c == arr)
+            # is equally negligible, so dropping it is mass-neutral for the label.
+            if prov:
+                cont = sinkVol
+                dep_inc = arr - cont
+                dep_inc[self.outletIDs] = 0.0
+                safe = arr > 1.0e-12
+                frac_dep = np.zeros(self.lpoints)
+                frac_cont = np.zeros(self.lpoints)
+                np.divide(dep_inc, arr, out=frac_dep, where=safe)
+                np.divide(cont, arr, out=frac_cont, where=safe)
+                vdepP += sinkVolP * frac_dep[:, None]
+                sinkVolP *= frac_cont[:, None]
+
             # Find where excess and sink
             self.tmpL.setArray(sinkVol)
             self.dm.localToGlobal(self.tmpL, self.tmp)
+            if prov:
+                for c in range(nC):
+                    self.tmpL.setArray(sinkVolP[:, c])
+                    self.dm.localToGlobal(self.tmpL, pvCur[c])
 
             # One Allreduce per iteration that doubles as the loop condition
             # for the next pass and the print value for this pass.
@@ -528,6 +599,18 @@ class SEAMesh(object):
         if residual.any():
             vdep += residual
             vdep[self.outletIDs] = 0.0
+
+        # Provenance: drain the per-class residual in lockstep (Σ_c == residual),
+        # store the per-node deposited composition for _marineProvFraction, and
+        # release the per-class scratch vectors.
+        if prov:
+            for c in range(nC):
+                self.dm.globalToLocal(pvCur[c], self.tmpL)
+                vdepP[:, c] += self.tmpL.getArray()
+                pvCur[c].destroy()
+            vdepP[self.outletIDs, :] = 0.0
+            pvNxt.destroy()
+            self._marDepProv = vdepP
 
         if self.memclear:
             del marVol, sinkVol
@@ -590,37 +673,66 @@ class SEAMesh(object):
 
     def _marineProvFraction(self, sedFlux):
         """
-        In-model provenance (B2b, marine): set the marine deposit's source
-        composition to the **domain-wide composition of sediment reaching the
-        sea** — ``ff_mar[c] = Σ(provFrac[c]·sedFlux) / Σ sedFlux`` — applied
-        uniformly (no depth bias: provenance is a passive label, unlike the
-        grain-size sorting in ``_marineFineFraction``).
+        In-model provenance (B2b, marine, lockstep): set each marine node's
+        deposit source composition to the **per-node mix that was actually
+        routed there** by ``_distOcean`` — ``depoProvFrac[node, c] =
+        _marDepProv[node, c] / Σ_c _marDepProv[node, c]`` — so a source confined
+        to one margin's rivers stays confined to its offshore depocenter instead
+        of being smeared across the whole ocean (the previous domain-uniform
+        average, see DESIGN_PROVENANCE.md §6). Provenance is a passive label, so
+        deposition does not sort by class — the lockstep split is exactly
+        proportional, hence ``Σ_c depoProvFrac == 1`` and ``stratP`` still
+        partitions ``stratH``.
 
-        This is the marine analogue of the through-flux ``provFrac`` used on
-        land: it replaces the (often near-zero) through-flux composition at
-        marine-only nodes with the basin-delivered mix, so marine sink deposits
-        carry the right provenance. ``Σ_c ff_mar == 1`` (since ``Σ_c provFrac ==
-        1`` where there is flux), so ``stratP`` still partitions ``stratH``.
-
-        Like the dual marine fraction this is **domain-uniform** — it gets the
-        right total per-class fraction into the marine record, not a per-river-
-        mouth spatial split (the same standard as dual lithology).
+        Fallback: ``_diffuseOcean`` may give a marine node a thin deposit by
+        lateral diffusion from neighbours after the routing pass, so it has
+        deposit thickness but no routed composition (``Σ_c _marDepProv == 0``
+        there). Those few nodes get the domain-wide basin-delivered mix
+        ``Σ(provFrac·sedFlux)/Σ sedFlux`` — the old uniform value — which keeps
+        them sensible and conserving without affecting the spatially-resolved
+        bulk.
 
         :arg sedFlux: marine input sediment volume per node (m^3).
         """
-        owned = self.inIDs == 1
-        den = MPI.COMM_WORLD.allreduce(float(np.sum(sedFlux[owned])), op=MPI.SUM)
-        if den <= 0.0:
+        # Prefer the post-diffusion per-class composition (_marDiffProv): the
+        # class thicknesses spread by the SAME marine diffusion as the total, so
+        # the diffused far field carries the locally-mixed source rather than the
+        # domain average. Fall back to the pre-diffusion routed deposit if the
+        # diffusion tracer was not run (e.g. diffusion disabled).
+        mdp = getattr(self, "_marDiffProv", None)
+        if mdp is None:
+            mdp = getattr(self, "_marDepProv", None)
+        if mdp is None:
             return
-        ffmar = np.zeros(self.provNb)
-        for c in range(self.provNb):
-            num = MPI.COMM_WORLD.allreduce(
-                float(np.sum((self.provFrac[:, c] * sedFlux)[owned])), op=MPI.SUM
-            )
-            ffmar[c] = num / den
+
+        # Marine deposit mask: post-diffusion deposited thickness in self.tmp.
         self.dm.globalToLocal(self.tmp, self.tmpL)
         marine = self.tmpL.getArray() > 0.0
-        self.depoProvFrac[marine, :] = ffmar
+
+        # Per-node routed composition (spatially resolved).
+        denom = mdp.sum(axis=1)
+        routed = denom > 0.0
+        comp = np.divide(
+            mdp, denom[:, None], out=np.zeros_like(mdp), where=denom[:, None] > 0.0
+        )
+        sel = marine & routed
+        self.depoProvFrac[sel, :] = comp[sel, :]
+
+        # Domain-average fallback for diffusion-only marine nodes (no routed
+        # composition). Computed collectively (every rank participates, so the
+        # Allreduce is safe even when only some ranks own such nodes).
+        owned = self.inIDs == 1
+        den = MPI.COMM_WORLD.allreduce(float(np.sum(sedFlux[owned])), op=MPI.SUM)
+        if den > 0.0:
+            ffmar = np.zeros(self.provNb)
+            for c in range(self.provNb):
+                num = MPI.COMM_WORLD.allreduce(
+                    float(np.sum((self.provFrac[:, c] * sedFlux)[owned])), op=MPI.SUM
+                )
+                ffmar[c] = num / den
+            fallback = marine & ~routed
+            if fallback.any():
+                self.depoProvFrac[fallback, :] = ffmar
         return
 
     def seaChange(self):
@@ -659,10 +771,27 @@ class SEAMesh(object):
 
         # Downstream direction matrix for ocean distribution
         self._matOcean()
-        marDep = self._distOcean(sedFlux)
+        # In-model provenance (B2b-marine): the per-class incoming marine flux
+        # is `provFrac · sedFlux` (Σ_c == sedFlux, nonzero only at the river-fed
+        # marine nodes), routed in lockstep with the total through _distOcean so
+        # each offshore deposit carries the source that drained to it.
+        provOn = getattr(self, "provOn", False)
+        provFlux = (self.provFrac * sedFlux[:, None]) if provOn else None
+        marDep = self._distOcean(sedFlux, provFlux=provFlux)
         if not self.flatModel and self.Gmar > 0.:
             vdep = self._depMarineSystem(marDep)
-            marDep = self._distOcean(vdep)
+            if provOn:
+                # The coupled deposition solve re-distributes the routed volume;
+                # carry the pass-1 per-node composition onto it (passive label),
+                # so the second routing pass keeps tracking provenance.
+                mdp = self._marDepProv
+                denom = mdp.sum(axis=1)
+                comp = np.divide(
+                    mdp, denom[:, None],
+                    out=np.zeros_like(mdp), where=denom[:, None] > 0.0,
+                )
+                provFlux = vdep[:, None] * comp
+            marDep = self._distOcean(vdep, provFlux=provFlux)
         self.dMat1.destroy()
 
         # Diffuse downstream
@@ -674,7 +803,20 @@ class SEAMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.dm.globalToLocal(self.tmp, self.tmpL)
         dh = self.tmpL.getArray().copy()
-        self._diffuseOcean(dh)
+
+        # Provenance: hand the per-class deposit thickness (composition of the
+        # routed deposit × the floored total dh, so Σ_c == dh) to _diffuseOcean
+        # so each class is spread by the SAME marine diffusion as the total and
+        # the source label follows the sediment into the diffused far field.
+        provThick = None
+        if provOn:
+            mdp = self._marDepProv
+            denom = mdp.sum(axis=1)
+            comp = np.divide(
+                mdp, denom[:, None], out=np.zeros_like(mdp), where=denom[:, None] > 0.0
+            )
+            provThick = comp * dh[:, None]
+        self._diffuseOcean(dh, provThick=provThick)
 
         # Update cumulative erosion and deposition as well as elevation
         self.cumED.axpy(1.0, self.tmp)

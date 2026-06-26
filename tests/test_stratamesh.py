@@ -100,6 +100,69 @@ def test_stratamesh_provenance_fields(tmp_path):
     assert d["frac"].shape == (m, C)                     # 1 interval, m wedges
     assert np.allclose(d["frac"], [0.6, 0.4])
     assert np.all(d["cells"]["dominant"] == 0)           # class 0 dominates
+    # Per-layer porosity is attached alongside the provenance composition.
+    assert np.allclose(d["cells"]["porosity"], 0.49)
+    assert np.allclose(d["cells"]["phiFine"], 0.63)      # dual run -> phiF too
+    # Per-cell thickness + elevation (mid-height of the wedge: layer 2 spans
+    # surfaces stratZ -50 .. -20 -> mid -35; thickness 30).
+    assert np.allclose(d["cells"]["thickness"], 30.0)
+    assert np.allclose(d["cells"]["elevation"], -35.0)
+    # Per-cell recorded-layer index (only layer 2 here).
+    assert np.all(d["cells"]["layer"] == 2)
+
+
+def test_stratamesh_provenance_inherits_underlying(tmp_path):
+    """
+    An eroded / pinched-out layer (stratH == 0 -> no source composition) takes
+    the composition of the cell directly below it in the column, so it is never
+    a no-source cell (dominant == -1).
+    """
+    sm = pytest.importorskip("gospl.analyse.stratamesh")
+    h5py = pytest.importorskip("h5py")
+    d = tmp_path
+    coords = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], float)
+    cells = np.array([[1, 2, 3], [2, 4, 3]], int)            # 1-indexed
+    n, C = 4, 2
+    L = 5                                                    # sentinel + 4 layers
+    stratZ = np.zeros((n, L))
+    stratZ[:, 1] = -80.0
+    stratZ[:, 2] = -60.0
+    stratZ[:, 3] = -40.0
+    stratZ[:, 4] = -20.0
+    stratH = np.zeros((n, L))
+    stratH[:, 0] = 1.0e6                                     # basal sentinel
+    stratH[:, 1:4] = 20.0                                    # layers 1-3 present
+    stratH[:, 4] = 0.0                                       # top layer eroded
+    # Wedge intervals are layers lo+1..L-1 = 2,3,4. layer 2 -> class 0,
+    # layer 3 -> class 1, layer 4 eroded -> should inherit layer 3's class 1.
+    stratP = np.zeros((n, L, C))
+    stratP[:, 1, 0] = stratH[:, 1]
+    stratP[:, 2, 0] = stratH[:, 2]                           # interval 0 -> class 0
+    stratP[:, 3, 1] = stratH[:, 3]                           # interval 1 -> class 1
+    with h5py.File(str(d / "topology.p0.h5"), "w") as f:
+        f["coords"] = coords
+        f["cells"] = cells
+    with h5py.File(str(d / "stratal.0.p0.h5"), "w") as f:
+        f["stratZ"] = stratZ
+        f["stratH"] = stratH
+        f["phiS"] = np.full((n, L), 0.49)
+        f["stratP"] = stratP
+
+    out = sm.build_partition(
+        str(d / "stratal.0.p0.h5"), str(d / "topology.p0.h5"), 1, "provenance"
+    )
+    m = cells.shape[0]
+    dom = out["cells"]["dominant"]
+    assert dom.shape == (3 * m,)                             # 3 intervals
+    assert not np.any(dom == -1)                             # no no-source cells
+    assert np.all(dom[0:m] == 0)                             # interval 0 = class 0
+    assert np.all(dom[m : 2 * m] == 1)                       # interval 1 = class 1
+    # Top interval (eroded layer 4) inherits the underlying layer 3 -> class 1.
+    assert np.all(dom[2 * m : 3 * m] == 1)
+    # Per-cell recorded-layer index: intervals map to original layers 2, 3, 4.
+    lyr = out["cells"]["layer"]
+    assert np.all(lyr[0:m] == 2) and np.all(lyr[m : 2 * m] == 3)
+    assert np.all(lyr[2 * m : 3 * m] == 4)
 
 
 def test_stratamesh_eroded_no_overhang(tmp_path):

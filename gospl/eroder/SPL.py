@@ -305,8 +305,21 @@ class SPL(object):
         # Accounting for continental sediment deposition
         else:
             t1 = process_time()
-            # Dimensionless depositional coefficient
-            self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+            # Dimensionless depositional coefficient fDep = fDepa*area / PA.
+            # PA (discharge) can be a denormal-tiny positive at near-stagnant
+            # cells; `where=PA != 0` would then divide by it and overflow to inf
+            # (the RuntimeWarning) before the 0.99 cap below clamps it. Floor the
+            # denominator at the value where fDep reaches the cap (PA_floor =
+            # num/0.99): for PA <= PA_floor the ratio is exactly 0.99 (what the
+            # clamp gave anyway), for larger PA it is unchanged, and PA == 0 still
+            # yields 0 via the `where` mask — so the result is bit-identical, only
+            # the overflow is gone.
+            num = self.fDepa * self.larea
+            PA_floor = num / 0.99
+            self.fDep = np.divide(
+                num, np.maximum(PA, PA_floor),
+                out=np.zeros_like(PA), where=PA != 0,
+            )
             self.fDep[self.seaID] = 0.
             # Cap fDep to keep the coupled (I - W^T) Q + (1-fDep) h block
             # well-conditioned; values approaching 1 lead to a singular system.

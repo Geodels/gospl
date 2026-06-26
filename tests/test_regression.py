@@ -1688,6 +1688,61 @@ def test_provenance_multisource(minimal_prov_multi_model):
     if ero.sum() > 0 and dep.sum() > 0:
         assert abs(dep[1] / dep.sum() - ero[1] / ero.sum()) < 1.0e-2
 
+    # B2b marine diffusion lockstep: the per-class deposit thickness is spread
+    # by the SAME marine diffusion as the total (_diffuseProvTracers), so the
+    # diffused far field carries a routed composition instead of the domain
+    # average. Confirm the path ran and the post-diffusion composition partitions
+    # the deposit (Σ_c == 1, never > 1) on every marine deposit node.
+    md = getattr(m, "_marDiffProv", None)
+    assert md is not None and md.shape == (m.lpoints, m.provNb)
+    m.dm.globalToLocal(m.tmp, m.tmpL)
+    denom = md.sum(axis=1)
+    routed = denom > 0.0
+    if routed.any():
+        comp = md[routed] / denom[routed, None]
+        assert comp.max() <= 1.0 + 1e-9
+        assert np.allclose(comp.sum(axis=1), 1.0)
+
+
+def test_provenance_hillslope_routing(minimal_prov_multi_model):
+    """
+    Protects: _hillslopeProvFraction threads provenance through the hillslope
+    diffusion — a creep deposit gets the flux-weighted eroded composition of its
+    higher (donor) neighbours, not the bedrock fallback. Mesh-independent
+    invariant: if ALL eroded material is one class, every fed deposition node's
+    routed composition must be exactly that class (pure), and valid (≤1) /
+    never > 1 elsewhere.
+    """
+    m = minimal_prov_multi_model
+    n, C = m.lpoints, m.provNb
+
+    # Tilted pre-diffusion surface (increases with x): every interior node has a
+    # higher (donor) neighbour towards +x.
+    x = m.lcoords[:, 0]
+    zOld = (x - float(x.min())).astype(np.float64)
+    m.hOld.setArray(zOld)
+    # Post-diffusion surface: deposit (dz > 0) on the lower-x half.
+    znew = zOld.copy()
+    lo = x < float(np.median(x))
+    znew[lo] += 0.5
+    m.hLocal.setArray(znew)
+
+    # All eroded material is class 0.
+    m.provEro = np.zeros((n, C), dtype=np.float64)
+    m.provEro[:, 0] = 1.0
+    m.depoProvFrac = np.zeros((n, C), dtype=np.float64)
+
+    m._hillslopeProvFraction()
+
+    fs = m.depoProvFrac.sum(axis=1)
+    routed = fs > 1.0e-6
+    assert routed.any(), "no creep deposit received a routed composition"
+    # Every routed node is pure class 0 (all donors are class 0).
+    assert np.allclose(m.depoProvFrac[routed, 0], 1.0)
+    assert np.allclose(m.depoProvFrac[routed, 1:], 0.0)
+    # Never over-filled.
+    assert m.depoProvFrac.max() <= 1.0 + 1.0e-9
+
 
 @pytest.mark.slow
 def test_provenance_output_io(minimal_prov_model):
@@ -1714,6 +1769,141 @@ def test_provenance_output_io(minimal_prov_model):
         relH = max(float(H.sum()), 1.0)
         assert float(np.abs(P.sum(axis=2) - H).sum()) / relH < 1.0e-6
         assert float(np.abs(P[:, :, 0]).max()) == 0.0      # single source -> class 1
+
+
+def test_provenance_deposit_no_holes():
+    """
+    Protects: deposeStrat — a depositing node with no arriving composition
+    (Σ_c depoProvFrac ≈ 0, e.g. off-channel hillslope creep with no river
+    through-flux) must NOT produce a layer with thickness but zero provenance
+    (Σ_c stratP < stratH), which surfaces in post-processing as a cell with no
+    source class (`dominant == -1`). Such locally-derived deposits fall back to
+    the in-situ bedrock `source_class`; routed nodes are renormalised to sum to
+    1 exactly. Every depositing node ends with Σ_c stratP == stratH.
+    """
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+    n, C = 3, 2
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = np.asarray(arr, dtype=np.float64)
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def globalToLocal(self, g, l):
+            l.setArray(g.getArray().copy())
+
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.lpoints = n
+    m.stratStep = 1
+    m.stratLith = False
+    m.provOn = True
+    m.provNb = C
+    m.memclear = False
+    m.phi0s = 0.49
+    m.larea = np.ones(n)
+    m.inIDs = np.ones(n, dtype=int)
+    m._provDeposited = np.zeros(C)
+    m.source_class = np.array([1, 0, 0])          # node 0 bedrock = class 1
+    m.dm = _StubDM()
+    depo = np.array([10.0, 5.0, 0.0])             # nodes 0,1 deposit; 2 none
+    m.tmp = _StubVec(depo)
+    m.tmpL = _StubVec(np.zeros(n))
+    m.stratH = np.zeros((n, 2))
+    m.phiS = np.zeros((n, 2))
+    m.stratK = np.zeros((n, 2))
+    m.stratP = np.zeros((n, 2, C))
+    # node 0: hole (no composition); node 1: routed mix; node 2: no deposit
+    m.depoProvFrac = np.array([[0.0, 0.0], [0.3, 0.7], [0.0, 0.0]])
+
+    m.deposeStrat()
+
+    P = m.stratP[:, 1, :]
+    H = m.stratH[:, 1]
+    # Hole node attributed to its bedrock source_class (1), fully.
+    assert np.allclose(P[0], [0.0, 10.0])
+    # Routed node keeps its mix.
+    assert np.allclose(P[1], [1.5, 3.5])
+    # Every depositing node: Σ_c stratP == stratH (no holes, no overshoot).
+    dep = H > 0
+    assert np.allclose(P[dep].sum(axis=1), H[dep])
+    # Post-processing dominant source is defined (never -1) where deposited.
+    assert (P[dep].sum(axis=1) > 0).all()
+
+
+def test_provenance_compaction_rescale():
+    """
+    Protects: provenance B4 — getCompaction shrinks stratH (pore-water expelled)
+    but compaction is composition-neutral, so stratP MUST be rescaled by the same
+    per-layer ratio. Without the rescale stratP keeps the pre-compaction (larger)
+    thickness while stratH shrinks, so the post-processed fraction stratP[c]/stratH
+    exceeds 1 (the over-represented bedrock source). The minimal-run conservation
+    tests miss this: burial depth ~0 there makes compaction a near no-op.
+
+    Three thick, deeply-buried layers with a non-uniform 2-class mix. After
+    compaction: stratH shrinks, Σ_c stratP == stratH stays exact, every per-class
+    fraction stays <= 1, and the composition is unchanged.
+    """
+    stratplex = pytest.importorskip("gospl.sed.stratplex")
+    n, L, C = 2, 3, 2
+
+    class _StubVec:
+        def __init__(self, arr):
+            self._a = np.asarray(arr, dtype=np.float64)
+        def getArray(self):
+            return self._a
+        def setArray(self, a):
+            self._a = np.asarray(a, dtype=np.float64)
+
+    class _StubDM:
+        def localToGlobal(self, l, g):
+            g.setArray(l.getArray().copy())
+
+    m = stratplex.STRAMesh.__new__(stratplex.STRAMesh)
+    m.lpoints = n
+    m.stratStep = L - 1
+    m.stratLith = False
+    m.provOn = True
+    m.provNb = C
+    m.bedrockLay = 0
+    m.memclear = False
+    m.verbose = False
+    m.phi0s = 0.5
+    m.z0s = 2000.0
+    m.dm = _StubDM()
+    m.hLocal = _StubVec(np.zeros(n))          # surface at z = 0
+    m.hGlobal = _StubVec(np.zeros(n))
+
+    # Thick layers (2000 m each) => deep burial => strong compaction.
+    m.stratH = np.full((n, L), 2000.0)
+    m.phiS = np.full((n, L), m.phi0s)         # freshly-deposited porosity
+    # Non-uniform composition, exactly partitioning each layer's thickness.
+    frac0 = np.array([[0.2, 0.5, 0.9], [0.7, 0.1, 0.4]])   # (n, L) class-0 share
+    P = np.zeros((n, L, C))
+    P[:, :, 0] = m.stratH * frac0
+    P[:, :, 1] = m.stratH * (1.0 - frac0)
+    m.stratP = P.copy()
+
+    H_before = m.stratH.copy()
+    m.getCompaction()
+
+    # Compaction actually shrank the pile (otherwise the test is vacuous).
+    assert (m.stratH < H_before - 1.0).any(), "compaction did not bite"
+
+    # Σ over classes == compacted stratH (exact).
+    psum = m.stratP.sum(axis=2)
+    assert np.allclose(psum, m.stratH, rtol=1e-12, atol=1e-9)
+
+    # No per-class fraction exceeds 1 (the reported symptom).
+    frac = np.divide(m.stratP, m.stratH[:, :, None],
+                     out=np.zeros_like(m.stratP), where=m.stratH[:, :, None] > 0)
+    assert frac.max() <= 1.0 + 1e-9, f"fraction > 1 after compaction: {frac.max()}"
+
+    # Composition preserved (class-0 share unchanged by pore-water loss).
+    assert np.allclose(frac[:, :, 0], frac0, rtol=1e-9, atol=1e-9)
 
 
 def test_dual_lithology_layer_allocation():
