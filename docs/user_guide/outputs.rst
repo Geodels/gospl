@@ -147,11 +147,19 @@ thickness), ``phiS`` (porosity), ``stratK`` (erodibility multiplier), ``stratP``
 thickness) and ``phiF`` (fine porosity). The per-layer fine fraction is
 ``stratHf / stratH``.
 
-The stratal HDF5 files have no XDMF wrapper, so the layered pile is not opened
-directly in ParaView; visualise it with a dedicated post-processing script that
-reads these arrays. For the **surface** composition over time, colour the main
-``gospl.xdmf`` by ``surfFineFrac`` (the in-place mud share) or ``sedLoadF`` (the
-fine transport flux).
+The stratal HDF5 files have no XDMF wrapper of their own. Several
+post-processing tools turn them into figures (all documented, with the exact
+commands, in :ref:`Running goSPL <running>`):
+
+* **3-D volume for ParaView** — ``gospl-strata-volume`` stacks the layers into a
+  wedge (triangular-prism) volume coloured by lithology or provenance.
+* **Publication sections / wells / Wheeler diagrams** — ``gospl-section`` draws
+  vector cross-sections (along x/y/a path), horizontal depth slices, synthetic
+  wells and chronostratigraphic (Wheeler) charts, coloured by deposition
+  elevation, thickness, lithology, porosity, age or provenance.
+* **Surface composition over time** — instead of the pile, colour the main
+  ``gospl.xdmf`` by ``surfFineFrac`` (in-place mud share) or ``sedLoadF`` (fine
+  transport flux).
 
 Visualising in ParaView
 -----------------------
@@ -211,3 +219,15 @@ For a global run the nodes already lie on a sphere of radius ~6 378 137 m, so a
 
 Re-colour the warped surface by any output field to inspect topography,
 drainage, ice or sediment in 3-D.
+
+Gridded export for PyGMT / ArcGIS (basins, χ, river profiles)
+-------------------------------------------------------------
+
+goSPL's native output is an unstructured triangular mesh, which PyGMT and ArcGIS
+do not read directly. The ``gospl-grid`` tool reassembles the global mesh,
+interpolates every surface field of a step onto a **regular CF-NetCDF grid**
+(lon/lat for global meshes), and runs a raster D8 hydrology pass to add
+``drainage_area``, ``basin`` and ``chi`` (:math:`\chi`); a companion notebook
+API extracts per-basin **river longitudinal profiles**. The base level for
+catchments/χ defaults to the run's sea level. See :ref:`Running goSPL <running>`
+for the command, options and the river-profile API.

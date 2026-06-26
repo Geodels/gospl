@@ -131,6 +131,30 @@ Optional parameters related to tectonics
             Learn more.
 
 
+Running goSPL
+^^^^^^^^^^^^^
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Launching a simulation**
+        ^^^
+
+        The ``gospl`` command (``mpirun -np 8 gospl -i input.yml``) and the
+        equivalent Python ``Model`` API.
+
+        +++
+
+        .. button-ref:: running
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
+
 Model outputs
 ^^^^^^^^^^^^^
 
@@ -184,5 +208,6 @@ Performance on HPC
     surfproc
     optfile1
     optfile2
+    running
     outputs
     hpc_scaling
