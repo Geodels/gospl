@@ -812,18 +812,32 @@ class UnstMesh(object):
            neighbours, so the edge is never a barrier to its own neighbours and
            stays bounded by real topography (no ``MISSING_DATA_SENTINEL`` slope
            blow-up). ``min`` is order-independent ⇒ partition-invariant.
-        2. The edge is then set to ``min(current elevation, candidate)`` — a
-           per-node running minimum. Open edge nodes never erode/deposit
-           (``E``/``fDep`` are zeroed on ``outletIDs``) and feel only tectonics
-           + this reset, so their stored value is the previous base level. Taking
-           the min lets incision and tectonic subsidence lower the edge while
-           **blocking aggradation from raising it** — the missing base-level
-           control. Tectonic uplift still propagates (it raises the stored value
-           in ``applyTectonics`` before this reset).
+        2. For **subaerial** edges (candidate at/above sea level) the edge is set
+           to ``min(current elevation, candidate)`` — a per-node running minimum.
+           Open edge nodes never erode/deposit (``E``/``fDep`` are zeroed on
+           ``outletIDs``) and feel only tectonics + this reset, so their stored
+           value is the previous base level. Taking the min lets incision and
+           tectonic subsidence lower the edge while **blocking aggradation from
+           raising it** — the missing base-level control. Tectonic uplift still
+           propagates (it raises the stored value in ``applyTectonics`` before
+           this reset).
+        3. For **marine** edges (the edge itself below sea level) the
+           min-of-neighbours reset is dropped and the edge simply **holds its
+           current elevation** (like a fixed edge). Below base level an open edge
+           is a marine depocenter, not a subaerial outflow: the min-neighbour
+           reset pulls it down to its deepest adjacent basin node, deepening it
+           relative to the aggrading basin and manufacturing accommodation — a
+           spurious sediment wedge against the edge (e.g. the lateral edges of a
+           prograding shelf). Holding the elevation removes that artefact;
+           tectonic subsidence is still reflected (it is applied before this
+           reset). The subaerial branch (rule 2) is untouched, so the escarpment
+           base-level control is preserved exactly.
 
         This gives 'o' a distinct, stable meaning vs 'f': open is a low
-        free-outflow base level that the domain can incise toward but cannot
-        aggrade away; fixed holds its prescribed natural per-node elevation.
+        free-outflow base level that a subaerial domain can incise toward but
+        cannot aggrade away; below sea level 'o' holds its base level like 'f'
+        (the free-outflow concept is subaerial). 'f' holds its prescribed
+        per-node elevation everywhere.
 
         Operates in place on ``tmp`` (a copy of the ``hLocal`` array) and
         returns it; no scratch Vec is touched.
@@ -862,9 +876,23 @@ class UnstMesh(object):
             if pending.size == 0:
                 break
 
-        # Running minimum: the edge follows the domain down but is never raised
-        # by an aggrading interior (see rule 2 in the docstring).
-        tmp[open_nodes] = np.minimum(tmp[open_nodes], vals[open_nodes])
+        # Apply the candidate (interior-neighbour minimum), gated by base level:
+        #
+        #  * SUBAERIAL (candidate >= sea level): running minimum
+        #    ``min(current, candidate)`` — the edge follows the domain DOWN but
+        #    is never raised by an aggrading interior. This is the escarpment
+        #    base-level control (rule 2 in the docstring).
+        #  * MARINE (candidate < sea level): track the neighbour minimum directly
+        #    (allowed to rise too). Below base level an open edge is a
+        #    depocenter, not an outflow; pinning it at a historical low while the
+        #    basin aggrades only manufactures accommodation and piles a spurious
+        #    sediment wedge against the edge. Tracking removes that step while
+        #    leaving the edge a (deep) marine outlet. The subaerial branch is
+        #    untouched, so the escarpment fix is preserved exactly.
+        cur = tmp[open_nodes]
+        runmin = np.minimum(cur, vals[open_nodes])
+        marine = cur < self.sealevel
+        tmp[open_nodes] = np.where(marine, cur, runmin)
         return tmp
 
     def applyTectonics(self):

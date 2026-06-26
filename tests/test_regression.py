@@ -1173,6 +1173,46 @@ def test_open_edge_non_rising(incising_model):
     assert np.all(np.isfinite(out2)), "open-edge fill produced non-finite values"
 
 
+def test_open_edge_marine_tracks(incising_model):
+    """
+    Protects: the sea-level gate in `_drainOpenEdges`. BELOW sea level an open
+    edge is a marine depocenter, not a subaerial outflow, so the min-neighbour
+    reset is dropped there — the edge HOLDS its current elevation (like fixed)
+    instead of being pulled down to its deepest interior neighbour. The
+    pull-down deepens the edge relative to the aggrading basin and manufactures
+    accommodation (a spurious sediment wedge against the lateral marine edges).
+    The subaerial running-min (test_open_edge_non_rising) is untouched, so the
+    escarpment base-level control is preserved.
+    """
+    model = incising_model
+    assert model.flatModel
+    open_nodes = np.unique(np.concatenate([
+        pts for flag, pts in (
+            (model.north, model.northPts), (model.east, model.eastPts),
+            (model.south, model.southPts), (model.west, model.westPts),
+        ) if flag == 0 and pts is not None and len(pts) > 0
+    ]))
+    assert len(open_nodes) > 0
+    is_open = np.zeros(model.lpoints, dtype=bool)
+    is_open[open_nodes] = True
+
+    sl = model.sealevel
+    # Whole domain below sea level (marine); the interior is DEEPER than the
+    # edge, so the old min-neighbour reset would pull the edge down to sl-400.
+    arr = np.full(model.lpoints, sl - 200.0)      # edge at sl-200
+    arr[~is_open] = sl - 400.0                     # interior deeper
+    out = model._drainOpenEdges(arr.copy())
+
+    # Marine edge HOLDS its elevation (sl-200); it is NOT dragged down to the
+    # deeper interior (sl-400), which would manufacture accommodation.
+    assert np.allclose(out[open_nodes], sl - 200.0, atol=1.0e-6), (
+        "marine open edge was pulled down to its deepest neighbour (would "
+        "manufacture accommodation against the basin)"
+    )
+    assert np.all(out[open_nodes] > sl - 400.0 + 1.0)
+    assert np.all(np.isfinite(out))
+
+
 def test_cyclic_boundary(cyclic_cyl_model):
     """
     Protects: the cyclic (periodic) flow/sediment boundary option (`bc: '0c0c'`
