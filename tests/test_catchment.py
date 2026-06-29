@@ -73,6 +73,36 @@ def test_basin_outflow_maxima_and_aliases(tmp_path, names):
     assert set(flow.index) == {0, 1}
 
 
+def test_fillfa_preferred_for_water(tmp_path):
+    """When both fillFA and FA are present, the water flux defaults to fillFA."""
+    netCDF4 = pytest.importorskip("netCDF4")
+    cm = pytest.importorskip("gospl.analyse.catchment")
+    lon = np.array([0.0, 1.0, 2.0, 3.0])
+    lat = np.array([0.0, 1.0, 2.0, 3.0])
+    basin = np.zeros((4, 4), dtype=np.int32)
+    fa = np.zeros((4, 4))
+    fillfa = np.zeros((4, 4))
+    fa[0, 0] = 100.0          # raw-FA max here
+    fillfa[3, 3] = 999.0      # filled-FA (trunk-through-lake) max elsewhere
+    p = tmp_path / "grid.nc"
+    with netCDF4.Dataset(str(p), "w") as ds:
+        ds.createDimension("lat", 4)
+        ds.createDimension("lon", 4)
+        ds.createVariable("lon", "f8", ("lon",))[:] = lon
+        ds.createVariable("lat", "f8", ("lat",))[:] = lat
+        ds.createVariable("FA", "f8", ("lat", "lon"))[:, :] = fa
+        ds.createVariable("fillFA", "f8", ("lat", "lon"))[:, :] = fillfa
+        ds.createVariable("sedLoad", "f8", ("lat", "lon"))[:, :] = np.zeros((4, 4))
+        ds.createVariable("basin", "i4", ("lat", "lon"))[:, :] = basin
+
+    # Default uses fillFA -> outlet at the fillFA max (3,3), value 999.
+    flow = cm.basin_outflow(str(p), min_cells=0)["flow"].set_index("basin")
+    assert (flow.loc[0, "lon"], flow.loc[0, "lat"], flow.loc[0, "val"]) == (3.0, 3.0, 999.0)
+    # Explicit flow_var="FA" overrides back to the raw-FA max (0,0), value 100.
+    flow_fa = cm.basin_outflow(str(p), min_cells=0, flow_var="FA")["flow"].set_index("basin")
+    assert (flow_fa.loc[0, "lon"], flow_fa.loc[0, "lat"], flow_fa.loc[0, "val"]) == (0.0, 0.0, 100.0)
+
+
 def test_min_cells_filter(tmp_path):
     """Basins with <= min_cells cells are dropped (each synthetic basin has 6)."""
     cm = pytest.importorskip("gospl.analyse.catchment")

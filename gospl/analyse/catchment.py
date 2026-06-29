@@ -4,12 +4,20 @@ discharge and the cell of maximum sediment load from a gridded goSPL output —
 i.e. each basin's **outflow point** (river mouth) and its flux.
 
 This is the natural downstream step after :mod:`gospl.analyse.gridexport`: that
-tool rasterises a goSPL surface to a CF-NetCDF grid carrying ``FA`` (flow
-accumulation / water discharge), ``sedLoad`` (sediment load) and ``basin`` (the
-drainage-basin id of every cell). Here, for every basin, we pick the single cell
-where ``FA`` peaks (the water outlet) and the single cell where ``sedLoad`` peaks
-(the sediment outlet), and write their ``lon``/``lat`` + value. Looped over a
-time series, this gives the migrating river-mouth fluxes used in flux maps.
+tool rasterises a goSPL surface to a CF-NetCDF grid carrying ``fillFA`` / ``FA``
+(water discharge, accumulated over the depression-filled / raw surface),
+``sedLoad`` (sediment load) and ``basin`` (the drainage-basin id of every cell).
+Here, for every basin, we pick the single cell where the **water discharge**
+peaks (the water outlet) and the single cell where ``sedLoad`` peaks (the
+sediment outlet), and write their ``lon``/``lat`` + value. Looped over a time
+series, this gives the migrating river-mouth fluxes used in flux maps.
+
+The water discharge defaults to ``fillFA`` (flow accumulation over the
+depression-filled surface) rather than the raw ``FA``: the filled-surface
+accumulation routes the trunk river *through* lakes / pits, so a basin's outlet
+carries its full upstream discharge even when the channel crosses a depression
+(raw ``FA`` can drop to zero inside a lake). It falls back to ``FA`` then the
+legacy name when ``fillFA`` is absent.
 
 Consistent variable names
 -------------------------
@@ -20,7 +28,7 @@ renaming step:
 ================  ====================  ===========================
 quantity          gridexport name       legacy fallback (mapOutputs)
 ================  ====================  ===========================
-water discharge   ``FA``                ``flowDischarge``
+water discharge   ``fillFA`` / ``FA``   ``flowDischarge``
 sediment load     ``sedLoad``           ``sedimentLoad``
 basin id          ``basin``             ``basinID``
 longitude         ``lon``               ``longitude``
@@ -69,8 +77,10 @@ import numpy as np
 
 
 # Variable-name aliases: the gridexport name first, the legacy mapOutputs name
-# second. The first one present in the file is used (unless overridden).
-_FLOW_ALIASES = ("FA", "flowDischarge")
+# last. The first one present in the file is used (unless overridden). Water
+# discharge prefers the depression-filled accumulation (`fillFA`) over the raw
+# `FA` so the outlet carries the trunk discharge through lakes (see module doc).
+_FLOW_ALIASES = ("fillFA", "FA", "flowDischarge")
 _SED_ALIASES = ("sedLoad", "sedimentLoad")
 _BASIN_ALIASES = ("basin", "basinID")
 _LON_ALIASES = ("lon", "longitude")
@@ -280,7 +290,7 @@ def main(argv=None):
     p.add_argument("--min-cells", type=int, default=10,
                    help="ignore basins with <= this many cells (default 10)")
     p.add_argument("--flow-var", default=None,
-                   help="water-discharge variable (default: FA, else flowDischarge)")
+                   help="water-discharge variable (default: fillFA, else FA / flowDischarge)")
     p.add_argument("--sed-var", default=None,
                    help="sediment-load variable (default: sedLoad, else sedimentLoad)")
     p.add_argument("--basin-var", default=None,

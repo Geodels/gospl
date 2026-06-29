@@ -193,9 +193,12 @@ Per-basin outflow fluxes — ``gospl-catchment``
 For every drainage **basin** of a gridded surface, extract the cell of maximum
 water discharge and the cell of maximum sediment load — i.e. each basin's
 **river-mouth (outflow) point** and its flux. It reads the ``gospl-grid``
-NetCDF directly (it uses the same variable names — ``FA``, ``sedLoad``,
-``basin``, ``lon``/``lat`` — falling back to the legacy ``flowDischarge`` /
-``sedimentLoad`` / ``basinID`` names, so old files still work)::
+NetCDF directly (it uses the same variable names — ``fillFA``/``FA``,
+``sedLoad``, ``basin``, ``lon``/``lat`` — falling back to the legacy
+``flowDischarge`` / ``sedimentLoad`` / ``basinID`` names, so old files still
+work). The water flux defaults to ``fillFA`` (flow accumulation over the
+depression-filled surface) so each basin's outlet carries its trunk discharge
+*through* lakes; pass ``--flow-var FA`` for the raw accumulation::
 
     gospl-catchment -i index.csv -o flowsed
 
