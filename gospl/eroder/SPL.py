@@ -225,7 +225,7 @@ class SPL(object):
             KSPReasons = self._make_reasons(petsc4py.PETSc.KSP.ConvergedReason())
             if MPIrank == 0:
                 print(
-                    "Detachment-limited SPL KSP (TFQMR/fieldsplit) failed to "
+                    "Transport-limited SPL KSP (TFQMR/fieldsplit) failed to "
                     "converge after iterations",
                     ksp.getIterationNumber(),
                     flush=True,

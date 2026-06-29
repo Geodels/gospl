@@ -685,6 +685,70 @@ class FAMesh(object):
 
         return excess, pitVol, nFA
 
+    def _losingStreamSolve(self, rainA):
+        r"""
+        "Losing stream" flow accumulation: evaporation is debited from the
+        **accumulated discharge** as the water flows, so a river can shrink and
+        dry out downstream (`FA -> 0`).
+
+        Each cell evaporates up to ``e_i = evapVal_i · larea_i`` (m³/yr) of the
+        water passing through it; the discharge **leaving** the cell is
+        ``q_i = max(0, inflow_i + runoff_i − e_i)``. With ``arriving_i = (Wᵀq)_i
+        + rainA_i`` this is the bounded fixed point ``q = max(0, Wᵀq + rainA −
+        e)`` with the actual evaporated sink ``s_i = min(e_i, arriving_i)``.
+
+        Solved by Picard iteration over the cached FA KSP: each pass solves the
+        SAME linear `(I − Wᵀ) q = rainA − s` system (fast `fgmres`) and refines
+        the sink ``s``; the drying then propagates one reach downstream per pass.
+        Converges in a couple of passes for modest evaporation, more where
+        rivers genuinely dry out (cap ``_evap_stream_maxit``). Water-conserving:
+        the evaporated volume ``Σ s · dt`` (owned nodes) is added to
+        ``self.evapLoss``. Writes the converged discharge to ``self.FAL`` /
+        ``self.FAG``.
+
+        :arg rainA: local runoff source array (m³/yr), sea cells already zeroed.
+        """
+        e = self.evapVal * self.larea                 # per-cell capacity (m³/yr)
+        e[self.seaID] = 0.0
+        owned = self.inIDs == 1
+        s = np.zeros_like(rainA)
+        maxit = getattr(self, "_evap_stream_maxit", 20)
+        q = rainA.copy()
+        prev = None
+        converged = False
+        for it in range(maxit):
+            self.bL.setArray(rainA - s)
+            self.dm.localToGlobal(self.bL, self.bG)
+            # First pass MUST converge (fatal); the refinement passes degrade
+            # gracefully on the bounded fallback if a near-singular cell stalls.
+            self._solve_KSP(True, self.fMat, self.bG, self.FAG,
+                            fatal=(it == 0), seed=True)
+            self.dm.globalToLocal(self.FAG, self.FAL)
+            q = self.FAL.getArray().copy()
+            np.clip(q, 0.0, None, out=q)
+            # arriving = Wᵀq + rainA = q + s (from the solved system); clamp the
+            # round-off, then the actual evaporated sink is capped at what is
+            # available to evaporate.
+            arriving = np.clip(q + s, 0.0, None)
+            s = np.minimum(e, arriving)
+            tot = MPI.COMM_WORLD.allreduce(float(s[owned].sum()), op=MPI.SUM)
+            if prev is not None and abs(tot - prev) <= 1.0e-4 * max(prev, 1.0):
+                converged = True
+                break
+            prev = tot
+        # Write back the converged, clamped discharge so every downstream
+        # consumer sees a non-negative FA.
+        self.FAL.setArray(q)
+        self.dm.localToGlobal(self.FAL, self.FAG)
+        self.evapLoss += (prev if prev is not None else 0.0) * self.dt
+        if MPIrank == 0 and self.verbose and not converged:
+            print(
+                "  --- losing-stream evaporation did not fully converge after "
+                "%d passes (residual evap change tracked); continuing." % maxit,
+                flush=True,
+            )
+        return
+
     def flowAccumulation(self):
         """
         This function is the **main entry point** for flow accumulation computation.
@@ -733,8 +797,11 @@ class FAMesh(object):
         # larea is m^2, rainA is m^3/yr — same units. channelLoss is clamped
         # at the available rain so an arid cell cannot produce negative
         # runoff; the unused evap capacity is silently dropped (the
-        # groundwater path is out of scope).
-        if self.evapVal is not None:
+        # groundwater path is out of scope). In "losing stream" mode the
+        # evaporation is applied to the ACCUMULATED discharge instead (in the
+        # solve below), so skip the source-side debit here to avoid double
+        # counting.
+        if self.evapVal is not None and not self.evapStream:
             channelLoss = np.minimum(rainA, self.evapVal * self.larea)
             rainA = rainA - channelLoss
             self.evapLoss += channelLoss.sum() * self.dt
@@ -760,17 +827,21 @@ class FAMesh(object):
             rainA[self.seaID] = 0.
 
         #  Solve flow/ice accumulation
-        self.bL.setArray(rainA)
-        self.dm.localToGlobal(self.bL, self.bG)
         self.profiler.stop("flow_dir")
         self.profiler.start("flow_ksp")
-        # seed=True: cold-start the discharge from the runoff vector b (valid
-        # lower bound on the (I - W^T) system) so init does not blow past
-        # max_it -> DIVERGED_MAX_IT. fatal=True: a failed discharge solve here
-        # would silently zero all rivers and feed a degenerate state into
-        # erosion/sediment, so abort instead.
-        self._solve_KSP(True, self.fMat, self.bG, self.FAG, fatal=True, seed=True)
-        self.dm.globalToLocal(self.FAG, self.FAL)
+        if self.evapVal is not None and self.evapStream:
+            # "Losing stream": evaporate from the accumulated discharge.
+            self._losingStreamSolve(rainA)
+        else:
+            self.bL.setArray(rainA)
+            self.dm.localToGlobal(self.bL, self.bG)
+            # seed=True: cold-start the discharge from the runoff vector b (valid
+            # lower bound on the (I - W^T) system) so init does not blow past
+            # max_it -> DIVERGED_MAX_IT. fatal=True: a failed discharge solve
+            # here would silently zero all rivers and feed a degenerate state
+            # into erosion/sediment, so abort instead.
+            self._solve_KSP(True, self.fMat, self.bG, self.FAG, fatal=True, seed=True)
+            self.dm.globalToLocal(self.FAG, self.FAL)
         self.profiler.stop("flow_ksp")
 
         # Volume of water flowing downstream

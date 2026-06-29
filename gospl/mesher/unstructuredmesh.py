@@ -61,6 +61,11 @@ class UnstMesh(object):
         self.rainVal = None
         self.evapVal = None
         self.evapLoss = 0.0
+        # Evaporation mode: False (default) = source-side channel evap (local
+        # runoff only); True = "losing stream" (evaporation debited from the
+        # ACCUMULATED discharge as it flows, so a river can dry out downstream).
+        # Set from any climate event's `evap_stream: True`.
+        self.evapStream = False
         self.sedfacVal = None
         self.memclear = False
         self.southPts = None

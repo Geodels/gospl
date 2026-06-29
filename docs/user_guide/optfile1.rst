@@ -75,6 +75,8 @@ Climatic (rainfall) forcing conditions
     Negative values of :math:`\mathrm{P_i}` (which can occur for low ``B`` and sub-sea-level nodes) are clamped to zero before being routed through the flow accumulation, so coastal depressions do not act as moisture sinks.
 
 
+.. _evaporation:
+
 Evaporation (optional)
 ^^^^^^^^^^^^^^^^^^^^^^
 
@@ -107,6 +109,16 @@ Each climate event may additionally declare an **evaporation rate** that is subt
 
         Elevation-banded evaporation (an analogue of ``zscale``) is not yet supported.
 
+        By default evaporation is **source-side**: it removes only each cell's
+        *local* runoff before flow accumulation, so a river fed from upstream
+        keeps its discharge as it crosses an arid cell. Add ``evap_stream: True``
+        to any climate event to switch (globally) to a **losing stream**: the
+        evaporation is then debited from the **accumulated discharge** as the
+        water flows, so a river progressively loses water and can dry out
+        downstream (``FA → 0``). The discharge is clamped at ``0`` (it never goes
+        negative) and the evaporated volume is tracked in ``evapLoss`` (bounded
+        by the total rainfall that fell).
+
 .. note::
 
     Evaporation is applied as a **single rate**, used identically over channels and over lake surfaces. Cells with ``evap > rain`` produce zero runoff (the excess evaporative capacity is dropped — groundwater is out of scope). Lakes whose lake-surface evaporation budget exceeds their inflow simply do not form; ``waterFill`` stays at the bare-topography level in those depressions.
@@ -114,6 +126,22 @@ Each climate event may additionally declare an **evaporation rate** that is subt
     The lake-evaporation budget per depression is computed using the **maximum-fill surface area** (the full extent the lake would occupy at spillover) rather than the actual fill area. This is intentionally conservative: it over-estimates lake evaporation at partial-fill levels, which biases the model towards drier basins — the physically appropriate direction when potential evaporation is the limiting term.
 
     Channels and lakes share the same per-cell rate; users who need a higher lake-surface rate (e.g. to capture open-water evaporation over endorheic basins) should encode the spatial pattern directly in ``evap_map``.
+
+    With ``evap_stream: True`` (losing-stream mode) the channel evaporation is
+    solved by Picard iteration over the flow-accumulation system — a few extra
+    linear solves per step — so it is more expensive than the source-side
+    default; it is opt-in for that reason. The losing-stream loss is applied to
+    the through-flowing river network; lake-surface evaporation continues to be
+    handled by the separate lake-evaporation budget, and evaporation of
+    pit-overflow water is approximate when a channel terminates in a closed
+    depression.
+
+    Because the reduced discharge is the flow-accumulation field every eroder
+    reads, evaporation couples directly to the :ref:`transport-limited stream
+    power law <ero>` (``spl: G > 0``, and likewise ``nlSPL``/``soilSPL``): as a
+    river loses water it erodes less and **deposits more**, building aggradation
+    / alluvial and terminal fans where it dries out. See the transport-limited
+    note in the technical guide.
 
 .. important::
 

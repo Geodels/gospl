@@ -287,8 +287,15 @@ class soilSPL(object):
         self.K_soil = self.Ksoil * self.dt * (PA ** self.spl_m) * elimiter
         self.K_soil[self.seaID] = 0.0
 
-        # Dimensionless depositional coefficient
-        self.fDep = np.divide(self.fDepa * self.larea, PA, out=np.zeros_like(PA), where=PA != 0)
+        # Dimensionless depositional coefficient fDep = fDepa*area / PA. Floor
+        # the denominator at the cap value (num/0.99) so a denormal-tiny PA — far
+        # more likely with evaporation reducing the discharge — does not overflow
+        # to inf before the 0.99 cap; bit-identical to dividing then clamping.
+        num = self.fDepa * self.larea
+        self.fDep = np.divide(
+            num, np.maximum(PA, num / 0.99),
+            out=np.zeros_like(PA), where=PA != 0,
+        )
         self.fDep[self.seaID] = 0.
         self.fDep[self.fDep > 0.99] = 0.99
         if self.flatModel:

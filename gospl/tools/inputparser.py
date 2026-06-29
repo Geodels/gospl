@@ -1386,6 +1386,11 @@ class ReadYaml(object):
                 rMap = rainSort[k].get("map")
                 eUniform = rainSort[k].get("evap_uniform")
                 eMap = rainSort[k].get("evap_map")
+                # Opt-in "losing stream": evaporation debited from the
+                # accumulated discharge (not just local runoff). A global
+                # numeric mode — enabled if ANY climate event requests it.
+                if rainSort[k].get("evap_stream"):
+                    self.evapStream = True
 
                 if rMap is not None:
                     if self.meshFile != rMap[0] + ".npz":

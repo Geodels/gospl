@@ -2967,6 +2967,80 @@ def test_water_balance_with_evap(minimal_model):
 
 
 # ---------------------------------------------------------------------------
+# TEST 2f - losing-stream evaporation (debited from accumulated discharge)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_evap_losing_stream(minimal_model):
+    """
+    Protects: the opt-in "losing stream" mode (`flowplex._losingStreamSolve`) —
+    evaporation debited from the **accumulated discharge**, not just the local
+    runoff. With high evaporation downstream (lower-elevation half) and none
+    upstream, the source-side hook can only remove the small LOCAL runoff there
+    (the through-flowing river keeps its discharge), whereas the losing-stream
+    hook evaporates the through-flow and strongly reduces downstream FA. Both
+    keep FA >= 0 and conserve water (evaporated <= total rain that fell).
+    """
+    import numpy as np
+    from mpi4py import MPI
+
+    m = minimal_model
+    m.applyForces()
+    rainVal = m.rainVal.copy()
+    larea = m.larea
+    owned = m.inIDs == 1
+    rain_total = MPI.COMM_WORLD.allreduce(
+        float(np.sum((rainVal * larea)[owned])), op=MPI.SUM)
+    if rain_total < 1.0:
+        pytest.skip("fixture too small for a meaningful losing-stream check")
+
+    # Baseline (no evap) to locate the actual channel cells (high discharge);
+    # evaporating LAKE-interior cells would do nothing (their FA is 0), so the
+    # losing-stream effect must be tested on the through-flowing channels.
+    m.evapVal = None
+    m.evapStream = False
+    m.evapLoss = 0.0
+    m.flowAccumulation()
+    fa0 = m.FAL.getArray().copy()
+    fa_base = float(m.FAG.sum())
+    pos = fa0[owned & (fa0 > 0.0)]
+    if pos.size < 5:
+        pytest.skip("no channels in the fixture")
+    thr = np.percentile(pos, 90)            # top-decile discharge = main channels
+    evap = np.where(fa0 > thr, 50.0 * rainVal, 0.0)   # strong channel evaporation
+    evap[m.seaID] = 0.0
+
+    # Source-side (current default): evaporates only the LOCAL runoff of those
+    # cells, so the through-flowing river keeps most of its discharge.
+    m.applyForces()
+    m.evapVal = evap.copy()
+    m.evapStream = False
+    m.evapLoss = 0.0
+    m.flowAccumulation()
+    fa_src = float(m.FAG.sum())
+    loss_src = MPI.COMM_WORLD.allreduce(float(m.evapLoss), op=MPI.SUM)
+
+    # Losing-stream: evaporates the ACCUMULATED discharge passing through.
+    m.applyForces()                       # reset the runoff source (bL)
+    m.evapVal = evap.copy()
+    m.evapStream = True
+    m.evapLoss = 0.0
+    m.flowAccumulation()
+    fa_los = float(m.FAG.sum())
+    loss_los = MPI.COMM_WORLD.allreduce(float(m.evapLoss), op=MPI.SUM)
+    famin = MPI.COMM_WORLD.allreduce(float(m.FAL.getArray().min()), op=MPI.MIN)
+
+    assert famin >= -1.0e-9, "losing-stream FA went negative"
+    assert loss_los > 0.0, "no evaporation accumulated in losing-stream mode"
+    # Can't evaporate more water than fell as rain (conservation bound).
+    assert loss_los <= rain_total * m.dt * (1.0 + 1.0e-6)
+    # Losing-stream removes MORE than source-side and cuts downstream FA further.
+    assert loss_los > loss_src
+    assert fa_los < fa_src < fa_base
+
+
+# ---------------------------------------------------------------------------
 # TEST 3 - rcvIDi must be a snapshot, not an alias
 # ---------------------------------------------------------------------------
 

@@ -164,10 +164,37 @@ which gives:
 
 This system of coupled equations is solved implicitly using PETSc by assembling the matrix and vectors using the nested submatrix and subvectors and by using the ``fieldsplit`` preconditioner combining two separate preconditioners for the collections of variables. 
 
-The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used to solve the coupled system with sub KSPs set to ``preonly`` and preconditioner set to ``hypre``. (See PETSC documentation for more details about the solver and preconditoner options and settings).  
+The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used to solve the coupled system with sub KSPs set to ``preonly`` and preconditioner set to ``hypre``. (See PETSC documentation for more details about the solver and preconditoner options and settings).
+
+.. note::
+
+   **The deposition coefficient is discharge-dependent**, so it couples directly
+   to the water budget. The dimensionless coefficient that controls how much of
+   the through-going sediment is dropped at a cell is
+   :math:`\mathrm{G' = G\,\Omega_i / \bar{P}A}` — it grows as the discharge
+   :math:`\mathrm{\bar{P}A}` (the flow-accumulation field) **decreases**. When
+   :ref:`evaporation <evaporation>` is enabled the discharge is reduced (and, in
+   the *losing-stream* mode, can fall to zero downstream), so a transport-limited
+   river that is drying out simultaneously **erodes less**
+   (:math:`\mathrm{\propto (\bar{P}A)^m}`) and **deposits more**
+   (:math:`\mathrm{\propto 1/\bar{P}A}`). This reproduces the expected
+   source-to-sink signature of arid / endorheic systems — aggradation, alluvial
+   and terminal fans where the stream loses its transport capacity — with the
+   remaining load routed on to the terminal depression or the sea. The same
+   discharge-dependent deposition law is used in all three eroders (the linear
+   ``spl``, the non-linear-slope ``nlSPL``, and the soil-aware ``soilSPL``), so
+   the behaviour is consistent whether or not ``n`` differs from 1 or soil is
+   tracked.
+
+   :math:`\mathrm{G'}` is **capped just below 1** (at 0.99) — this is a purely
+   numerical safeguard that keeps the :math:`\mathrm{(1-G')}` elevation block of
+   the coupled system non-singular; it is *not* a deposition limiter. The
+   implicit solve and the bounded incoming sediment flux
+   :math:`\mathrm{Q_{s_i}}` already prevent any unphysical build-up, so deposits
+   stay mass-conserving rather than forming numerical spikes.
 
 
-Dynamic soil 
+Dynamic soil
 ^^^^^^^^^^^^^
 
 goSPL could also simulate **dynamic soil production and transport**. In this case, the implementation tracks a layer of regolith (defined as unconsolidated and potentially mobile sediment, such as soil or alluvium) in combination with sediment entrainment–deposition erosion law. 
