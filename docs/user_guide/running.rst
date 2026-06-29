@@ -103,20 +103,61 @@ Vector (PDF/SVG) stratigraphic figures via matplotlib::
 
     # vertical cross-section coloured by lithology, with surface + basement lines
     gospl-section --h5dir myrun/h5 --mesh input/mesh.npz:v:c --kind cross \
-        --along x --color-by lithology --sea-level 0 --out section.pdf
+        --along x --color-by lithology --out section.pdf
 
     gospl-section ... --kind slice   --z -50          # map at elevation z
     gospl-section ... --kind well    --xy 4.2e5,3.1e5  # synthetic borehole
-    gospl-section ... --kind wheeler --color-by thickness --sea-level 0 \
+    gospl-section ... --kind wheeler --color-by thickness \
         --strat-dt 1e4                                 # chronostratigraphic chart
 
+    # depositional facies from the deposition water depth, exaggerated x10,
+    # custom figure size, an interface line every 2 layers
+    gospl-section ... --kind cross --color-by facies --vexag 10 \
+        --figsize 12,3 --layer-lines 2
+
 ``--color-by`` ∈ {deposition, thickness, lithology, coarse, porosity, age,
-provenance}; ``--along x|y`` or ``--path x0,y0;x1,y1;...``; ``--vexag`` vertical
-exaggeration. The same functions are importable for notebooks
+provenance, **facies**}; ``--along x|y`` or ``--path x0,y0;x1,y1;...``. The
+cross-section y-axis shows **true elevation**; ``--vexag`` applies a real
+vertical exaggeration (data aspect, labels stay true); ``--figsize W,H`` sets
+the figure size; ``--layer-lines N`` overlays a thin interface line every N
+layers. **``facies``** classifies each layer by the **water depth at
+deposition** (``sea_level − stratZ``): fluvial/deltaic plain (subaerial),
+shoreface (0–20 m), distal offshore (20–50 m), upper slope (50–75 m), lower
+slope (>75 m) — all tunable via ``--facies-depths`` (bin edges) and
+``--facies-colors``; ``--color-by facies`` works for both ``cross`` and
+``wheeler`` (the Wheeler shoreline overlay is the subaerial↔marine boundary,
+consistent with the facies). ``--figsize`` applies to every ``--kind``. The
+**time axis** of the Wheeler / ``age`` colouring is the **real simulation
+time**: the per-layer interval is derived from the step's stratal display time
+(the ``.xmf`` ``Time``) so the surface layer maps to that time —
+``--strat-dt YR`` overrides it. The sea-level datum (section line / Wheeler
+shoreline trajectory / facies depth reference) is **read from the simulation**
+for the step by default (the step's ``.xmf`` ``sea`` constant);
+``--sea-level FLOAT`` overrides it. ``--legend-loc`` positions the legend
+(e.g. ``'upper left'``), ``--title-fontsize`` sets the title size, and
+``--xlim MIN,MAX`` / ``--ylim MIN,MAX`` clip the cross-section / Wheeler to a
+distance / elevation (or time) window (pinning a limit leaves the aspect auto,
+so ``--vexag`` then has no effect). ``--figsize`` is honoured in the saved file
+by default (pass
+``--tight`` to crop to content instead); for the cross-section, ``--vexag``
+exaggerates via the data aspect *without* overriding ``--figsize``. Horizontal
+**distance is labelled in km and time in ky** (the data stay in m / yr). The
+synthetic **well** draws its colour bar **horizontally at the base** (few ticks,
+small font, so it stays readable for a tall narrow ``figsize`` like ``1,8``);
+:func:`~gospl.analyse.stratasection.well_panel` draws **several wells on one
+figure** with a shared colour scale and a single colour bar (titled ``well 1``,
+``well 2``, … by default, or pass ``labels``).
+The same functions are importable for
+notebooks (with extra keyword args — ``figsize``, ``layer_lines``,
+``facies_depths``, ``facies_colors``, ``facies_labels``, ``legend_loc``,
+``title_fontsize``, ``xlim``, ``ylim``, well ``cbar_orientation`` / ``vmin`` /
+``vmax`` / ``colorbar`` / ``ylim``, panel ``labels`` / ``vmin`` / ``vmax`` /
+``ylim``)
 (:func:`~gospl.analyse.stratasection.cross_section`,
 :func:`~gospl.analyse.stratasection.horizontal_slice`,
 :func:`~gospl.analyse.stratasection.synthetic_well`,
-:func:`~gospl.analyse.stratasection.wheeler`).
+:func:`~gospl.analyse.stratasection.wheeler`,
+:func:`~gospl.analyse.stratasection.well_panel`).
 
 Regular-grid NetCDF for PyGMT / ArcGIS — ``gospl-grid``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -128,11 +169,23 @@ drainage area; auto lon/lat for global meshes::
         --spacing 1000 --mn 0.5
 
 Base level for catchments/chi defaults to the run's sea level (``--base-level``
-overrides); ``--latlim`` crops the polar caps (default 89.9). The companion
-notebook API extracts/plots per-basin river longitudinal profiles
+overrides); ``--latlim`` crops the polar caps (default 89.9). The sea level
+used is written into the NetCDF as the global attribute ``sea_level`` and a
+scalar ``sea_level`` variable (and returned in the result dict as
+``base_level``), so the grid is self-describing. The priority-flood-**filled**
+elevation is also written (``filled``). Every NetCDF variable carries its
+``units`` and a ``long_name`` definition (CF-style), so the file is
+self-describing. The companion notebook API extracts /
+plots per-basin river longitudinal profiles
 (:func:`~gospl.analyse.gridexport.basin_rivers`,
 :func:`~gospl.analyse.gridexport.plot_long_profile`,
-:func:`~gospl.analyse.gridexport.plot_basin_map`).
+:func:`~gospl.analyse.gridexport.plot_basin_map`). ``plot_long_profile`` plots
+the **raw** elevation by default (``which='elev'`` — keeps real lakes /
+depressions + interpolation roughness as small peaks); ``which='filled'`` plots
+the hydrologically-conditioned elevation, which is **strictly monotonic**
+upstream. ``plot_basin_map`` overlays the **sea-level coastline** (the
+``elev == sea_level`` contour; defaults to the run's sea level) and takes a
+``figsize``.
 
 Sediment provenance — ``gospl-provenance``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

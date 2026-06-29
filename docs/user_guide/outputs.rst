@@ -155,8 +155,11 @@ commands, in :ref:`Running goSPL <running>`):
   wedge (triangular-prism) volume coloured by lithology or provenance.
 * **Publication sections / wells / Wheeler diagrams** — ``gospl-section`` draws
   vector cross-sections (along x/y/a path), horizontal depth slices, synthetic
-  wells and chronostratigraphic (Wheeler) charts, coloured by deposition
-  elevation, thickness, lithology, porosity, age or provenance.
+  wells (one, or several side by side via ``well_panel``) and
+  chronostratigraphic (Wheeler) charts, coloured by deposition elevation,
+  thickness, lithology, porosity, age, provenance or **depositional facies**
+  (water depth at deposition). Distance is shown in km, time in ky; see
+  :ref:`Running goSPL <running>` for the full option list.
 * **Surface composition over time** — instead of the pile, colour the main
   ``gospl.xdmf`` by ``surfFineFrac`` (in-place mud share) or ``sedLoadF`` (fine
   transport flux).

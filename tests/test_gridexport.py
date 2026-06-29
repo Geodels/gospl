@@ -52,6 +52,13 @@ def test_gridexport_hydrology(tmp_path):
 
     g = gx.grid_export(h5dir, mesh, spacing=dx)
     mask = g["mask"]
+    # Sea level (hydrology base level) is exposed; defaults to 0 with no xmf.
+    assert isinstance(g["base_level"], float) and g["base_level"] == 0.0
+    assert gx.grid_export(h5dir, mesh, spacing=dx, base_level=3.5)["base_level"] == 3.5
+    # Variable metadata table (units + definition), incl. flexure / rainfall.
+    assert gx._VAR_META["elev"] == ("m", "surface elevation")
+    assert gx._VAR_META["flexIso"][0] == "m" and "isostatic" in gx._VAR_META["flexIso"][1]
+    assert gx._VAR_META["rain"][0] == "m/yr"
     assert g["elev"].shape == (g["y"].size, g["x"].size)
     # Drainage area grows toward the western (low) outlet.
     area = g["drainage_area"]
@@ -72,18 +79,28 @@ def test_gridexport_basin_rivers_and_plots(tmp_path):
     h5dir, mesh, dx = _synthetic_run(tmp_path)
 
     g = gx.grid_export(h5dir, mesh, spacing=dx)
+    assert "filled" in g                              # hydrologically-filled DEM
     riv = gx.basin_rivers(g, area_threshold=2.0 * dx * dx)
     assert riv["main_stem"] is not None
     ms = riv["main_stem"]
-    for k in ("x", "y", "dist", "elev", "chi", "area"):
+    for k in ("x", "y", "dist", "elev", "chi", "area", "elev_filled"):
         assert k in ms and len(ms[k]) >= 2
     # Main-stem elevation is monotonic along the channel (tilted plane).
     assert np.all(np.diff(np.sort(ms["elev"])) >= -1e-6)
+    # The FILLED profile is strictly monotonic along the stem (packed
+    # source -> outlet, so it decreases: each cell drains to a lower receiver),
+    # unlike the raw elevation which can have small reversals.
+    assert np.all(np.diff(ms["elev_filled"]) <= 1e-9)
 
-    ax = gx.plot_long_profile(riv)
+    ax = gx.plot_long_profile(riv)                    # raw
     assert ax is not None
-    ax2 = gx.plot_basin_map(g, riv)
+    axf = gx.plot_long_profile(riv, which="filled")   # conditioned (monotonic)
+    assert axf is not None
+    # plot_basin_map draws the sea-level coastline (proxy in the legend).
+    ax2 = gx.plot_basin_map(g, riv, sea_level=50.0, figsize=(6, 4))
     assert ax2 is not None
+    labels = [t.get_text() for t in ax2.get_legend().get_texts()]
+    assert any("sea level" in s for s in labels)
 
 
 def test_gridexport_geographic(tmp_path):
@@ -132,7 +149,8 @@ def test_gridexport_netcdf(tmp_path):
     nc = pytest.importorskip("netCDF4")
     h5dir, mesh, dx = _synthetic_run(tmp_path)
 
-    g = gx.grid_export(h5dir, mesh, spacing=dx)
+    g = gx.grid_export(h5dir, mesh, spacing=dx, base_level=5.0)
+    assert g["base_level"] == 5.0                       # exposed in the result
     out = str(tmp_path / "surface.nc")
     gx.to_netcdf(g, out, time=1000.0)
     assert os.path.exists(out)
@@ -141,3 +159,11 @@ def test_gridexport_netcdf(tmp_path):
         for v in ("elev", "basin", "chi", "drainage_area"):
             assert v in ds.variables
         assert ds.variables["elev"].dimensions == ("y", "x")
+        # Sea level recorded as a scalar variable + global attribute.
+        assert "sea_level" in ds.variables
+        assert float(ds.variables["sea_level"][...]) == 5.0
+        assert float(ds.sea_level) == 5.0
+        # Per-variable metadata (units + definition) is attached.
+        assert ds.variables["elev"].units == "m"
+        assert "drainage" in ds.variables["drainage_area"].long_name
+        assert ds.variables["chi"].units == "m"

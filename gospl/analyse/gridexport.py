@@ -124,19 +124,25 @@ def _read_sealevel(h5dir, file_base, step):
     return float(m.group(1)) if m else None
 
 
-def _rasterise(x, y, cells, values, gx, gy, tri_mask=None):
+def _read_time(h5dir, file_base, step):
     """
-    Linear interpolation of a nodal field onto the grid via the mesh TIN.
-    ``tri_mask`` (per-triangle bool) drops triangles — used to mask the
-    antimeridian-spanning ones on a lon/lat (geographic) grid.
+    Read the model display time (years) for a step from its companion ``xmf``
+    (goSPL writes ``<Time Value="..."/>``). Returns the float, or ``None`` if the
+    file is absent / unparseable.
     """
-    import matplotlib.tri as mtri
+    import re
 
-    tri = mtri.Triangulation(x, y, cells)
-    if tri_mask is not None:
-        tri.set_mask(tri_mask)
-    z = mtri.LinearTriInterpolator(tri, values)(gx, gy)   # masked outside hull
-    return z
+    xmf = os.path.join(
+        os.path.dirname(os.path.normpath(h5dir)), "xmf",
+        "%s%d.xmf" % (file_base, step),
+    )
+    try:
+        with open(xmf) as f:
+            txt = f.read()
+    except OSError:
+        return None
+    m = re.search(r'<Time\s+Value="(-?[0-9.eE+]+)"', txt)
+    return float(m.group(1)) if m else None
 
 
 def _seam_mask(lon_of_cells):
@@ -144,24 +150,56 @@ def _seam_mask(lon_of_cells):
     return (lon_of_cells.max(axis=1) - lon_of_cells.min(axis=1)) > 180.0
 
 
-def _rasterise_periodic(lon, lat, cells, values, gx, gy):
+def _build_tri_interp(x, y, cells, gx, gy, tri_mask=None):
     """
-    Seam-continuous rasterisation for a longitude-periodic (global) grid.
+    Precompute a reusable linear (barycentric) interpolation operator from the
+    mesh TIN onto a regular grid, and return a closure ``interp(values) -> 2-D
+    grid``.
 
-    Interpolate in two longitude framings — seam at ±180° and seam at 0°/360° —
-    each a *valid* triangulation with its seam triangles masked (so each leaves a
-    no-data stripe at a DIFFERENT meridian), then merge: take the ±180 frame
-    where it is valid and fall back to the 0/360 frame for its seam stripe. The
-    two stripes don't overlap, so the merged field is gap-free across the
-    antimeridian.
+    The expensive part of rasterising — building the triangulation's point-
+    location structure (trapezoid map) and locating every grid point in its
+    containing triangle — depends only on the **geometry**, not on the field
+    values. Doing it once here and caching the containing triangle + barycentric
+    weights turns each subsequent field into a cheap gather + weighted sum.
+    Rebuilding a fresh ``Triangulation``/``LinearTriInterpolator`` per field (the
+    previous behaviour) re-located all grid points every time, which dominated
+    runtime on large global grids (minutes per field at 0.1°).
+
+    Results are identical to ``LinearTriInterpolator`` (same triangulation and
+    point location); points outside the convex hull / in masked triangles are
+    ``NaN``.
     """
-    za = _rasterise(lon, lat, cells, values, gx, gy, _seam_mask(lon[cells]))
-    lonb = lon % 360.0                         # frame B: longitudes in [0, 360)
-    zb = _rasterise(lonb, lat, cells, values, gx % 360.0, gy,
-                    _seam_mask(lonb[cells]))
-    za = np.ma.filled(za, np.nan)
-    zb = np.ma.filled(zb, np.nan)
-    return np.where(np.isfinite(za), za, zb)
+    import matplotlib.tri as mtri
+
+    tri = mtri.Triangulation(x, y, cells)
+    if tri_mask is not None:
+        tri.set_mask(tri_mask)
+    finder = tri.get_trifinder()                      # built once, reused
+
+    shape = gx.shape
+    pxv = np.ascontiguousarray(gx.ravel(), dtype=np.float64)
+    pyv = np.ascontiguousarray(gy.ravel(), dtype=np.float64)
+    ti = finder(pxv, pyv)                             # containing triangle, -1 outside
+    valid = ti >= 0
+    tv = tri.triangles[ti[valid]]                     # (nvalid, 3) node indices
+    i0, i1, i2 = tv[:, 0], tv[:, 1], tv[:, 2]
+    x0, y0 = x[i0], y[i0]
+    x1, y1 = x[i1], y[i1]
+    x2, y2 = x[i2], y[i2]
+    px, py = pxv[valid], pyv[valid]
+    det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+    inv = np.where(det != 0.0, 1.0 / det, 0.0)        # det==0 only for degenerate tris
+    w0 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) * inv
+    w1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) * inv
+    w2 = 1.0 - w0 - w1
+
+    def interp(values):
+        v = np.asarray(values)
+        out = np.full(pxv.shape, np.nan, dtype=np.float64)
+        out[valid] = w0 * v[i0] + w1 * v[i1] + w2 * v[i2]
+        return out.reshape(shape)
+
+    return interp
 
 
 def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
@@ -250,18 +288,34 @@ def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
         xs = xs[:-1]
     gx, gy = np.meshgrid(xs, ys)
 
+    # Build the interpolation operator(s) ONCE (point location + barycentric
+    # weights), then reuse for every field — the per-field cost drops to a
+    # gather + weighted sum (was a full triangulation + re-location per field).
     if periodic:
+        # Two longitude framings (seam at ±180° and at 0°/360°), each with its
+        # seam-spanning triangles masked so their no-data stripes fall on
+        # DIFFERENT meridians; merging takes frame A where valid and frame B for
+        # its seam stripe, so the field is gap-free across the antimeridian.
+        # Each operator is precomputed once and reused for every field.
+        _interp_a = _build_tri_interp(x, y, cells, gx, gy, _seam_mask(x[cells]))
+        lonb = x % 360.0
+        _interp_b = _build_tri_interp(lonb, y, cells, gx % 360.0, gy,
+                                      _seam_mask(lonb[cells]))
+
         def _raster(vals):
-            return _rasterise_periodic(x, y, cells, vals, gx, gy)
+            za = _interp_a(vals)
+            zb = _interp_b(vals)
+            return np.where(np.isfinite(za), za, zb)
     else:
         # Mask any antimeridian-spanning triangle (regional geographic grids).
         tri_mask = None
         if geographic:
             tlon = x[cells]
             tri_mask = (tlon.max(axis=1) - tlon.min(axis=1)) > 180.0
+        _interp = _build_tri_interp(x, y, cells, gx, gy, tri_mask)
 
         def _raster(vals):
-            return _rasterise(x, y, cells, vals, gx, gy, tri_mask)
+            return _interp(vals)
 
     grids = {}
     for n in names:
@@ -296,6 +350,7 @@ def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
     out = {
         "x": xs, "y": ys, "mask": mask, "spacing": (dx, dy),
         "geographic": geographic, "periodic": periodic,
+        "base_level": float(base_level),
         "receiver": hydro["receiver"], "order": hydro["order"],
         "main_basin": hydro["main_basin"],
     }
@@ -451,6 +506,12 @@ def _d8_hydrology(elev, mask, dx, dy, mn, a0, periodic=False):
         "basin": _grid(basin, fill=-1, dtype=np.int64),
         "chi": _grid(chi),
         "flowdist": _grid(fdist),
+        # Priority-flood-filled (hydrologically-conditioned) elevation: pits /
+        # lakes raised to their spill level. A long profile drawn on THIS is
+        # strictly monotonic upstream (each cell drains to a lower receiver),
+        # unlike the raw `elev` which keeps real depressions + interpolation
+        # roughness as small peaks/dips.
+        "filled": _grid(fflat),
     }
     return {"grids": grids, "receiver": recv, "order": order,
             "main_basin": main_basin}
@@ -459,6 +520,31 @@ def _d8_hydrology(elev, mask, dx, dy, mn, a0, periodic=False):
 # ---------------------------------------------------------------------------
 # NetCDF export
 # ---------------------------------------------------------------------------
+
+# (units, long_name/definition) attached to each NetCDF variable so the file is
+# self-describing (CF-style). Unknown fields are written without attributes.
+_VAR_META = {
+    "elev": ("m", "surface elevation"),
+    "erodep": ("m", "cumulative erosion (negative) / deposition (positive)"),
+    "EDrate": ("m/yr", "erosion (negative) / deposition (positive) rate"),
+    "FA": ("m3/yr", "flow accumulation (water discharge)"),
+    "fillFA": ("m3/yr", "flow accumulation over the depression-filled surface"),
+    "waterFill": ("m", "filled water-surface elevation (lake / depression level)"),
+    "sedLoad": ("m3/yr", "river sediment load (total)"),
+    "sedLoadF": ("m3/yr", "river sediment load (fine fraction)"),
+    "drainage_area": ("m2", "drainage area from D8 routing on the gridded surface"),
+    "basin": ("1", "drainage-basin id (subaerial; -1 = marine / outside)"),
+    "chi": ("m", "chi, integral of (A0/A)^(m/n) dl from the outlet"),
+    "flowdist": ("m", "flow distance along the network to the outlet"),
+    "filled": ("m", "priority-flood-filled (hydrologically-conditioned) elevation"),
+    "flexIso": ("m", "cumulative isostatic (flexural) response"),
+    "rain": ("m/yr", "rainfall (precipitation) rate"),
+    # spoken-name aliases, in case a field is written under these names
+    "flexiso": ("m", "cumulative isostatic (flexural) response"),
+    "rainfall": ("m/yr", "rainfall (precipitation) rate"),
+    "precipitation": ("m/yr", "rainfall (precipitation) rate"),
+}
+
 
 def to_netcdf(result, path, time=None):
     """
@@ -470,7 +556,7 @@ def to_netcdf(result, path, time=None):
     import netCDF4
 
     skip = {"x", "y", "mask", "spacing", "receiver", "order", "main_basin",
-            "geographic", "periodic"}
+            "geographic", "periodic", "base_level"}
     geo = result.get("geographic", False)
     xname, yname = ("lon", "lat") if geo else ("x", "y")
     ny, nx = result["y"].size, result["x"].size
@@ -487,8 +573,20 @@ def to_netcdf(result, path, time=None):
             yv.units, yv.standard_name = "degrees_north", "latitude"
         else:
             xv.long_name, yv.long_name = "x", "y"
+            xv.units = yv.units = "m"
         if time is not None:
             ds.time = float(time)
+            ds.time_units = "yr"
+        # Sea level used as the hydrology base level (drainage outlets + chi
+        # datum). Recorded as a global attribute and a scalar variable so the
+        # NetCDF is self-describing.
+        if result.get("base_level") is not None:
+            sl = float(result["base_level"])
+            ds.sea_level = sl
+            sv = ds.createVariable("sea_level", "f8", ())
+            sv[...] = sl
+            sv.long_name = "sea level used as hydrology base level"
+            sv.units = "m"
         for name, grid in result.items():
             if name in skip or not isinstance(grid, np.ndarray) or grid.ndim != 2:
                 continue
@@ -497,6 +595,9 @@ def to_netcdf(result, path, time=None):
             v = ds.createVariable(name, dt, (yname, xname), fill_value=fill,
                                   zlib=True)
             v[:, :] = grid
+            meta = _VAR_META.get(name)
+            if meta is not None:
+                v.units, v.long_name = meta
     return path
 
 
@@ -557,16 +658,23 @@ def basin_rivers(result, basin_id=None, area_threshold=None):
     on_main = np.zeros(ny * nx, dtype=bool)
     on_main[main] = True
 
+    filled = result.get("filled")
+    fillflat = filled.ravel() if filled is not None else None
+
     def _pack(flat_list):
         a = np.array(flat_list)
         r, c = np.divmod(a, nx)
-        return {
+        out = {
             "x": xs[c], "y": ys[r],
             "dist": fd[a],
             "elev": elev.ravel()[a],
             "chi": chi.ravel()[a],
             "area": area.ravel()[a],
         }
+        # Hydrologically-filled elevation (monotonic upstream) when available.
+        if fillflat is not None:
+            out["elev_filled"] = fillflat[a]
+        return out
 
     # Tributaries: each channel head (no channel donor) not on the main stem,
     # traced DOWN its receivers until it meets the main stem.
@@ -591,48 +699,87 @@ def basin_rivers(result, basin_id=None, area_threshold=None):
     }
 
 
-def plot_long_profile(rivers, xaxis="dist", ax=None):
+def plot_long_profile(rivers, xaxis="dist", ax=None, which="elev", figsize=(7, 4)):
     """
     Longitudinal profile (``xaxis`` = ``'dist'`` distance-to-outlet, or
-    ``'chi'``) vs elevation: main stem bold, tributaries thin. Returns the axes.
+    ``'chi'``) vs elevation: main stem bold, tributaries thin.
+
+    :arg which: ``'elev'`` (default) plots the **raw** gridded elevation — which
+        keeps real depressions/lakes and TIN-interpolation roughness as small
+        peaks/dips; ``'filled'`` plots the priority-flood-filled elevation, which
+        is **strictly monotonic** upstream (each cell drains to a lower
+        receiver) — the smooth, hydrologically-conditioned profile.
     """
     import matplotlib.pyplot as plt
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 4))
+        _, ax = plt.subplots(figsize=figsize)
+    key = "elev_filled" if which == "filled" else "elev"
     ms = rivers["main_stem"]
     for t in rivers["tributaries"]:
-        ax.plot(t[xaxis], t["elev"], color="0.6", lw=0.6)
+        ax.plot(t[xaxis], t.get(key, t["elev"]), color="0.6", lw=0.6)
     if ms is not None:
-        ax.plot(ms[xaxis], ms["elev"], color="C3", lw=2.0, label="main stem")
-    ax.set_xlabel("χ" if xaxis == "chi" else "distance to outlet (m)")
-    ax.set_ylabel("elevation (m)")
+        ax.plot(ms[xaxis], ms.get(key, ms["elev"]), color="C3", lw=2.0,
+                label="main stem")
+    if xaxis == "chi":
+        ax.set_xlabel("χ")
+    else:
+        from matplotlib.ticker import FuncFormatter
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % (v / 1000.0)))
+        ax.set_xlabel("distance to outlet (km)")
+    ax.set_ylabel("elevation (m)" + (" (filled)" if which == "filled" else ""))
     ax.set_title("Basin %s longitudinal profile" % rivers["basin_id"])
     ax.legend(loc="best")
     return ax
 
 
-def plot_basin_map(result, rivers, background="elev", ax=None):
+def plot_basin_map(result, rivers, background="elev", ax=None, figsize=(7, 5),
+                   sea_level=None):
     """
     Map the channel network on the surface: ``background`` field as an image,
-    main stem (red) + tributaries (cyan) overlaid. Returns the axes.
+    main stem (red) + tributaries (cyan) overlaid, plus the **sea-level
+    coastline** (the ``elev == sea_level`` contour). Returns the axes.
+
+    :arg sea_level: elevation of the coastline contour; defaults to the run's
+        sea level used for the hydrology (``result['base_level']``). Pass a float
+        to override, or ``None`` is used (no line) if neither is available.
     """
     import matplotlib.pyplot as plt
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 5))
+        _, ax = plt.subplots(figsize=figsize)
     xs, ys = result["x"], result["y"]
     bg = result[background]
     ax.imshow(bg, origin="lower", extent=[xs[0], xs[-1], ys[0], ys[-1]],
               cmap="terrain", aspect="equal")
+    if sea_level is None:
+        sea_level = result.get("base_level")
+    if sea_level is not None:
+        X, Y = np.meshgrid(xs, ys)
+        ax.contour(X, Y, result["elev"], levels=[float(sea_level)],
+                   colors="steelblue", linewidths=1.4, linestyles="--")
+        # Legend proxy (contour sets aren't directly legendable across mpl
+        # versions; QuadContourSet.collections was removed in mpl 3.8+).
+        ax.plot([], [], color="steelblue", lw=1.4, ls="--",
+                label="sea level (%.0f m)" % float(sea_level))
     for t in rivers["tributaries"]:
         ax.plot(t["x"], t["y"], color="c", lw=0.7)
     ms = rivers["main_stem"]
     if ms is not None:
-        ax.plot(ms["x"], ms["y"], color="r", lw=1.8)
+        ax.plot(ms["x"], ms["y"], color="r", lw=1.8, label="main stem")
+    ax.legend(loc="best", fontsize=8)
     ax.set_title("Basin %s channel network" % rivers["basin_id"])
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
+    # Planar (UTM, m) grids: label axes in km; geographic grids stay in degrees.
+    if not result.get("geographic", False):
+        from matplotlib.ticker import FuncFormatter
+        kmf = FuncFormatter(lambda v, _: "%g" % (v / 1000.0))
+        ax.xaxis.set_major_formatter(kmf)
+        ax.yaxis.set_major_formatter(kmf)
+        ax.set_xlabel("x (km)")
+        ax.set_ylabel("y (km)")
+    else:
+        ax.set_xlabel("longitude")
+        ax.set_ylabel("latitude")
     return ax
 
 
@@ -686,8 +833,10 @@ def main(argv=None):
     if args.tout is not None and args.step is not None:
         time = args.tstart + args.step * args.tout
     to_netcdf(g, args.out, time=time)
-    print("wrote %s (%d x %d grid; %d basins) — open in PyGMT / ArcGIS"
-          % (args.out, g["x"].size, g["y"].size, int(g["basin"].max()) + 1))
+    print("wrote %s (%d x %d grid; %d basins; sea level %.3f m) "
+          "— open in PyGMT / ArcGIS"
+          % (args.out, g["x"].size, g["y"].size,
+             int(g["basin"].max()) + 1, g["base_level"]))
     return 0
 
 
