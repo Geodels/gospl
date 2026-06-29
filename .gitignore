@@ -33,6 +33,8 @@ tests/fixtures/minimal_ice_seed/
 tests/fixtures/minimal_prov/
 tests/fixtures/minimal_prov2/
 tests/fixtures/flat_wall*/
+tests/fixtures/cyclic_cyl_advect*/
+tests/fixtures/flat_advect*/
 tests/fixtures/prov_src.npz
 *.so
 .eggs

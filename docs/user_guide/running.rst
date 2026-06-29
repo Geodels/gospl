@@ -77,18 +77,22 @@ Stratigraphic volume for ParaView — ``gospl-strata-volume``
 Stacks the recorded layers into a 3-D **wedge (triangular-prism) volume** and
 writes an XDMF (per-partition HDF5 + one ``.xdmf``) for ParaView::
 
+    gospl-strata-volume --h5dir myrun/h5                       # --field basic (default)
     gospl-strata-volume --h5dir myrun/h5 --field lithology     # or provenance
     mpirun -np 4 gospl-strata-volume --h5dir myrun/h5 --field provenance \
         --tout 100000                                          # ParaView time in yr
 
 Key options: ``--outdir``/``--out`` (default ``strata``), ``--field
-lithology|provenance``, ``--tout``/``--tstart`` (label time in years),
+basic|lithology|provenance``, ``--tout``/``--tstart`` (label time in years),
 ``--steps``, ``--first-layer``. Runs serially or under ``mpirun`` (partitions
 split across ranks, independent of the run's processor count).
 
 Per-cell fields attached to every wedge: ``thickness``, ``elevation``
 (wedge mid-height) and ``layer`` (the recorded stratigraphic-layer index)
-always; ``--field lithology`` adds coarse/fine thickness,
+always. ``--field basic`` (the **default**) adds just the per-layer
+``porosity`` and needs nothing beyond a plain stratigraphy run (no dual
+lithology, no provenance) — use it for a single-lithology run. ``--field
+lithology`` adds coarse/fine thickness,
 fine fraction and per-fraction porosity; ``--field provenance`` adds the
 per-class volume fraction (``src_classN``), the ``dominant`` source class and
 the per-layer ``porosity`` (plus ``phiFine`` for a dual-lithology run). An

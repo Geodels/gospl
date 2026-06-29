@@ -12,13 +12,18 @@ deposition elevation ``stratZ``, and each surface triangle becomes a column of
 wedge cells between consecutive layers. The layer properties are written as
 **cell data** on the wedges, so colouring a slab shows that layer's composition.
 
-Two field modes (``--field``):
+Three field modes (``--field``):
 
+* ``basic`` (default) — just the always-recorded per-layer ``thickness``,
+  ``elevation``, ``layer`` index and ``porosity``. Works for **any** run (a
+  plain stratigraphy run needs neither dual lithology nor provenance).
 * ``lithology`` — coarse / fine thickness, fine fraction and the per-fraction
   porosities (needs the dual-lithology ``stratHf``/``phiF`` fields).
 * ``provenance`` — per-source-class volume fraction, the dominant source and
   the per-layer ``porosity`` (plus ``phiFine`` if the run is also dual
   lithology); needs the provenance ``stratP`` field.
+
+(``thickness``, ``elevation`` and ``layer`` are attached in every mode.)
 
 The basal **bedrock sentinel** layer (the ~1e6 m infinite reservoir goSPL keeps
 under the recorded deposits) is auto-detected and skipped, so the volume spans
@@ -40,9 +45,10 @@ Options
 ``--out PREFIX``
     output file prefix (default ``strata``); writes ``<outdir>/<out>.xdmf`` plus
     ``<outdir>/<out>.<step>.p<p>.h5``.
-``--field {lithology,provenance}``
-    cell-field set (default ``lithology``). ``lithology`` = coarse/fine
-    thickness, fine fraction and per-fraction porosity (needs the dual-lithology
+``--field {basic,lithology,provenance}``
+    cell-field set (default ``basic``). ``basic`` = thickness/elevation/layer/
+    porosity only (works for any run); ``lithology`` = coarse/fine thickness,
+    fine fraction and per-fraction porosity (needs the dual-lithology
     ``stratHf``/``phiF`` fields); ``provenance`` = per-source-class volume
     fraction + dominant source + per-layer ``porosity`` (needs ``stratP``).
 ``--steps S0,S1,...``
@@ -167,26 +173,30 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
         avail = set(f.keys())
         litho = field == "lithology"
         prov = field == "provenance"
+        basic = not (litho or prov)          # thickness/elevation/porosity only
+        # Per-layer porosity (phiS) is recorded for ANY stratigraphy run, so it is
+        # read here and attached for every field mode (including "basic", which
+        # needs neither dual lithology nor provenance).
+        phiS = np.asarray(f["phiS"], dtype=np.float64) if "phiS" in avail else None
         if litho:
             if "stratHf" not in avail or "phiF" not in avail:
                 raise ValueError(
                     "field 'lithology' needs the dual-lithology 'stratHf'/'phiF' "
-                    "fields, absent from %s (was the run dual lithology?)"
-                    % stratal_path
+                    "fields, absent from %s (was the run dual lithology? use "
+                    "--field basic for a single-lithology run)" % stratal_path
                 )
             stratHf = np.asarray(f["stratHf"], dtype=np.float64)
-            phiS = np.asarray(f["phiS"], dtype=np.float64)
             phiF = np.asarray(f["phiF"], dtype=np.float64)
         if prov:
             if "stratP" not in avail:
                 raise ValueError(
                     "field 'provenance' needs the 'stratP' field, absent from %s "
-                    "(was the run provenance-enabled?)" % stratal_path
+                    "(was the run provenance-enabled? use --field basic for a run "
+                    "without provenance)" % stratal_path
                 )
             stratP = np.asarray(f["stratP"], dtype=np.float64)   # (n, L, C)
-            # Per-layer porosity (always recorded). For a dual-lithology run the
-            # fine-fraction porosity phiF is also present; attach both.
-            phiS = np.asarray(f["phiS"], dtype=np.float64)
+            # For a dual-lithology run the fine-fraction porosity phiF is also
+            # present; attach it alongside phiS.
             phiF = (
                 np.asarray(f["phiF"], dtype=np.float64)
                 if "phiF" in avail else None
@@ -253,6 +263,11 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
     out["cells"]["layer"] = np.repeat(
         np.arange(lo + 1, nlay, dtype=np.int32), m
     )
+
+    # Basic mode: no lithology / provenance — just attach the recorded porosity
+    # (the surface + thickness + layer cells above are written for every mode).
+    if basic and phiS is not None:
+        out["cells"]["porosity"] = _cell(phiS[:, lay])
 
     if litho:
         Hl = stratH[:, lay]
@@ -386,16 +401,19 @@ def write_xdmf(out_prefix, meta, field, times=None):
 def main(argv=None):
     p = argparse.ArgumentParser(
         description="Build a 3-D wedge volume of the goSPL stratigraphy for "
-        "ParaView (lithology or provenance)."
+        "ParaView (basic, lithology or provenance)."
     )
     p.add_argument("--h5dir", required=True, help="goSPL output 'h5' directory")
     p.add_argument("--outdir", default="strata",
                    help="output directory, created if needed (default: strata)")
     p.add_argument("--out", default="strata",
                    help="output file prefix (default: strata)")
-    p.add_argument("--field", default="lithology",
-                   choices=["lithology", "provenance"],
-                   help="cell field set to attach (default: lithology)")
+    p.add_argument("--field", default="basic",
+                   choices=["basic", "lithology", "provenance"],
+                   help="cell field set to attach: 'basic' (thickness, "
+                        "elevation, layer, porosity — works for any run), "
+                        "'lithology' (dual-lithology coarse/fine + porosities), "
+                        "or 'provenance' (per-source fractions). Default: basic")
     p.add_argument("--steps", default=None,
                    help="comma-separated steps (default: all found)")
     p.add_argument("--tout", type=float, default=None,

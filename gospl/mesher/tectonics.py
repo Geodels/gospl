@@ -254,9 +254,13 @@ class Tectonics(object):
         diffmin = newv - vmin
         diffmin[diffmin > 0] = 0.
         diff = np.abs(diffmax) + np.abs(diffmin)
+        # Sum the overshoot into `tmp1` (NOT `tmp`): `tmp` still holds the
+        # Scheme-1 advected field, which is the result to keep when there is no
+        # overshoot (excess == 0). Clobbering it here would leave the field as
+        # the all-zero `diff` and zero the elevation on every no-overshoot step.
         self.tmpL.setArray(diff)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        excess = self.tmp.sum()
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        excess = self.tmp1.sum()
 
         if excess > 0.:
             lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, vL, vmin, vmax)

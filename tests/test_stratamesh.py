@@ -238,6 +238,49 @@ def test_stratamesh_missing_field_errors(tmp_path):
         )
 
 
+def test_stratamesh_basic_field_no_lithology_or_provenance(tmp_path):
+    """
+    `--field basic` builds the wedge for a plain stratigraphy run (no dual
+    lithology, no provenance): only stratZ/stratH/phiS are recorded. It must
+    attach thickness/elevation/layer/porosity and NO lithology/provenance
+    fields, with n_classes == 0 (the reported failure: --field rejected
+    anything but lithology/provenance, so a plain run had no usable mode).
+    """
+    sm = pytest.importorskip("gospl.analyse.stratamesh")
+    h5py = pytest.importorskip("h5py")
+    d = tmp_path / "h5"
+    d.mkdir()
+    n, L = 4, 3
+    coords = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], float)
+    with h5py.File(str(d / "topology.p0.h5"), "w") as f:
+        f["coords"] = coords
+        f["cells"] = np.array([[1, 2, 3], [2, 4, 3]], int)
+    stratH = np.zeros((n, L))
+    stratH[:, 0] = 1.0e6                                  # bedrock sentinel
+    stratH[:, 1] = 50.0
+    stratH[:, 2] = 30.0
+    with h5py.File(str(d / "stratal.0.p0.h5"), "w") as f:
+        f["stratZ"] = np.zeros((n, L))
+        f["stratH"] = stratH
+        f["phiS"] = np.full((n, L), 0.49)
+
+    out = sm.build_partition(
+        str(d / "stratal.0.p0.h5"), str(d / "topology.p0.h5"), 1, "basic"
+    )
+    assert out is not None
+    assert out["n_classes"] == 0 and out["frac"] is None
+    # Base + porosity attached; no lithology / provenance fields.
+    assert set(out["cells"]) == {"thickness", "elevation", "layer", "porosity"}
+    assert np.allclose(out["cells"]["thickness"], 30.0)    # slab = layer 2
+    assert np.allclose(out["cells"]["porosity"], 0.49)
+
+    # The CLI accepts --field basic (was rejected before) and defaults to it.
+    outdir = str(tmp_path / "vol")
+    assert sm.main(["--h5dir", str(d), "--outdir", outdir, "--steps", "0"]) == 0
+    txt = open(os.path.join(outdir, "strata.xdmf")).read()
+    assert 'Name="porosity"' in txt and "src_class" not in txt
+
+
 def test_stratamesh_cli_end_to_end(tmp_path):
     """
     The CLI creates the output directory, writes a per-partition HDF5 per step,
