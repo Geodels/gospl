@@ -32,6 +32,7 @@ tests/fixtures/minimal_ice_dual/
 tests/fixtures/minimal_ice_seed/
 tests/fixtures/minimal_prov/
 tests/fixtures/minimal_prov2/
+tests/fixtures/flat_wall*/
 tests/fixtures/prov_src.npz
 *.so
 .eggs
