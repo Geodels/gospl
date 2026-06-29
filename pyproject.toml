@@ -84,6 +84,7 @@ gospl = "gospl.cli:main"
 gospl-strata-volume = "gospl.analyse.stratamesh:main"
 gospl-provenance = "gospl.analyse.provenance:main"
 gospl-grid = "gospl.analyse.gridexport:main"
+gospl-catchment = "gospl.analyse.catchment:main"
 gospl-section = "gospl.analyse.stratasection:main"
 gospl-ela = "gospl.tools.ela_from_temperature:main"
 

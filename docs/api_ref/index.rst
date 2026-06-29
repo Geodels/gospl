@@ -289,6 +289,22 @@ API reference
 
             See functions and source code.
 
+    .. grid-item-card::
+        :text-align: center
+
+        **Post-processing tools**
+        ^^^
+
+        Analysis scripts (``gospl-grid``, ``gospl-catchment``, ``gospl-section``, ``gospl-strata-volume``, ``gospl-provenance``, ``gospl-ela``): NetCDF grids, river profiles, outflow fluxes, stratigraphic sections and provenance.
+
+        +++
+
+        .. button-ref:: analyse_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
 .. toctree::
     :maxdepth: 3
     :hidden:
@@ -310,3 +326,4 @@ API reference
     in_ref
     grid_ref
     out_ref
+    analyse_ref

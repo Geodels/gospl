@@ -187,6 +187,33 @@ upstream. ``plot_basin_map`` overlays the **sea-level coastline** (the
 ``elev == sea_level`` contour; defaults to the run's sea level) and takes a
 ``figsize``.
 
+Per-basin outflow fluxes — ``gospl-catchment``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For every drainage **basin** of a gridded surface, extract the cell of maximum
+water discharge and the cell of maximum sediment load — i.e. each basin's
+**river-mouth (outflow) point** and its flux. It reads the ``gospl-grid``
+NetCDF directly (it uses the same variable names — ``FA``, ``sedLoad``,
+``basin``, ``lon``/``lat`` — falling back to the legacy ``flowDischarge`` /
+``sedimentLoad`` / ``basinID`` names, so old files still work)::
+
+    gospl-catchment -i index.csv -o flowsed
+
+The index CSV has two columns ``time,netcdf`` (one row per step)::
+
+    time,netcdf
+    1,results/surface1.nc
+    5,results/surface5.nc
+    10,results/surface10.nc
+
+For each step it writes ``flowsed/flow{time}.csv`` and ``flowsed/sed{time}.csv``
+(columns ``basin,lon,lat,val``; ``val`` in m³/yr). Basins with ``<= --min-cells``
+cells (default 10) are skipped. The per-basin maximum is a single vectorised
+``lexsort`` (grouped arg-max), so a global 0.1° grid is processed in ~1 s per
+step **serially** — the old MPI fan-out is no longer needed. From a notebook:
+:func:`~gospl.analyse.catchment.catchment_flux` (batch → CSVs) and
+:func:`~gospl.analyse.catchment.basin_outflow` (one file → two DataFrames).
+
 Sediment provenance — ``gospl-provenance``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -211,7 +238,8 @@ whether the temperature map is at the surface or reduced to sea level.
 .. note::
 
    The console commands (``gospl``, ``gospl-strata-volume``, ``gospl-section``,
-   ``gospl-grid``, ``gospl-provenance``, ``gospl-ela``) appear after installing
+   ``gospl-grid``, ``gospl-catchment``, ``gospl-provenance``, ``gospl-ela``)
+   appear after installing
    goSPL. Until then, use the equivalent ``python -m gospl.<module>`` form. The
    analysis tools need the optional extras: ``pip install gospl[analysis]``
    (numba, geopandas, netCDF4, matplotlib).

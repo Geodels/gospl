@@ -8,17 +8,25 @@ goSPL analysis tools (post-processing of model output).
 - :mod:`gospl.analyse.gridexport` — rasterise a surface to a CF-NetCDF grid for
   PyGMT / ArcGIS (fields + drainage basins + chi) and extract/plot per-basin
   river longitudinal profiles.
+- :mod:`gospl.analyse.catchment` — per-basin outflow points (cell of maximum
+  water discharge / sediment load) from a gridded NetCDF — the river-mouth
+  fluxes; reads the gridexport NetCDF directly.
 - :mod:`gospl.analyse.stratasection` — publication stratigraphic cross-sections,
   horizontal (depth) slices, synthetic wells and Wheeler diagrams (matplotlib).
 
 Runnable as commands — ``gospl-provenance`` / ``gospl-strata-volume`` /
-``gospl-grid`` / ``gospl-section`` (after install) — or via
+``gospl-grid`` / ``gospl-catchment`` / ``gospl-section`` (after install) — or via
 ``python -m gospl.analyse.<tool>``. See :doc:`the running guide </user_guide/running>`.
 """
 
+from . import catchment  # noqa: F401  (submodule; also runnable via -m)
 from . import gridexport  # noqa: F401  (submodule; also runnable via -m)
 from . import stratamesh  # noqa: F401  (submodule; also runnable via -m)
 from . import stratasection  # noqa: F401  (submodule; also runnable via -m)
+from .catchment import (  # noqa: F401
+    basin_outflow,
+    catchment_flux,
+)
 from .gridexport import (  # noqa: F401
     basin_rivers,
     grid_export,
