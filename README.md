@@ -13,6 +13,10 @@
 
 > Yet, we were still missing a tool to evaluate global scale evolution of Earth surface and its interaction with the atmosphere, the hydrosphere, the tectonic and mantle dynamics. gospl is the first model designed to address this gap. It can be used to better characterise many aspects of the Earth system ranging from the role of atmospheric circulation on physical denudation, from the influence of erosion and deposition of sediments on mantle convection, from the location and abundance of natural resources to the evolution of life.
 
+[![PyPI](https://img.shields.io/pypi/v/gospl?logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/gospl/)
+[![Conda](https://img.shields.io/conda/vn/geodels/gospl?logo=anaconda&logoColor=white&label=conda)](https://anaconda.org/geodels/gospl)
+[![Docker](https://img.shields.io/docker/v/geodels/gospl-hpc?sort=semver&logo=docker&logoColor=white&label=Docker%20Hub)](https://hub.docker.com/r/geodels/gospl-hpc)
+
 ## Documentation
 
 1. an overview of the different ways to **install** the code,
