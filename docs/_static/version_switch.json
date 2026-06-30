@@ -1,9 +1,14 @@
 [
     {
         "name": "stable (latest)",
-        "version": "v2026.6.13",
+        "version": "v2026.6.30",
         "preferred": true,
         "url": "https://gospl.readthedocs.io/en/stable/"
+    },
+    {
+        "name": "v2026.6.30",
+        "version": "v2026.6.30",
+        "url": "https://gospl.readthedocs.io/en/v2026.6.30/"
     },
     {
         "name": "v2026.6.13",
