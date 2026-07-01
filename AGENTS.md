@@ -1,6 +1,8 @@
 # AGENTS.md
 
-Last reviewed 2026-06-13 against `v2026.6.13` (+ dual-lithology and SIA ice-sheet features on `dev`). Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
+Last reviewed 2026-07-01 against `v2026.6.30` (the current shipped release on `master`/`dev`). Read this at the start of every session. Update it when an invariant here changes. See `REFACTOR_AUDIT.md` for the long-form rationale behind each rule.
+
+What has shipped since `v2026.6.13` (all now in `v2026.6.30`, no longer `dev`-only): dual-lithology sediment, the **diagnostic glacial model** (the SIA ice-sheet solve was implemented then **removed** — see `## Ice sheet`; there is no `flow_model`/`sia`/`hinit`), the flat FV-biharmonic **FEM flexure** (`method='fem'`; gFlex + FFT removed), mesh-native **orographic precipitation** (regular grid removed), the reworked flat-model **NESW boundary conditions** (`o/f/w/c`, non-rising open edges), **provenance tracers**, and the standalone post-processing toolkit (`gospl-grid`/`-section`/`-strata-volume`/`-provenance`/`-catchment`/`-ela`) plus the `gospl` run command. See `## Milestones` for the full per-change log.
 
 ## What goSPL does
 goSPL is a parallel landscape-evolution model that integrates the stream-power law (river incision), linear and non-linear hillslope diffusion, marine sediment transport, glacial accumulation, flexural isostasy, and horizontal/vertical tectonics on an unstructured Voronoi/Delaunay finite-volume mesh. The mesh is either a 2D flat plane (`self.flatModel == True`) or a global sphere; partitioning, halo exchange, and all linear/non-linear solves run on PETSc DMPlex via petsc4py. Time integration is an explicit outer Euler loop in `Model.runProcesses` with implicit KSP/SNES/TS inner solves for diffusion, flow accumulation, and sediment routing.
@@ -10,7 +12,7 @@ Every state field exists in two parallel representations.
 
 **Numpy land** (raw arrays indexed by local node ID, dimensional, no halo): `self.lcoords` (m), `self.mCoords` (m), `self.larea` (m²), `self.rainVal` (m/yr), `self.upsub` (m/yr), `self.stratH/stratZ/phiS/stratK`, `self.stratHf/phiF` (dual-lithology fine pile — see `## Dual lithology`), `self.fineFrac/depoFineFrac` (dual), `self.pitParams`, `self.pitIDs`, `self.lFill`, `self.localFlex`, plus any `vec.getArray().copy()` view.
 
-**PETSc land** (parallel Vec with halo, mutated via `setArray`/`getArray`/`localToGlobal`): `self.hLocal`/`self.hGlobal`, `self.cumED`/`self.cumEDLocal`, `self.FAL`/`self.FAG`, `self.fillFAL`, `self.Eb`/`self.EbLocal`, `self.bL`/`self.bG`, `self.areaLocal`/`self.areaGlobal`, `self.iceHL`/`self.iceMeltL`/`self.iceUbL`/`self.iceAbrL`/`self.iceFlex` (SIA ice — see `## Ice sheet`), `self.Lsoil`/`self.Gsoil`, `self.lHbed`/`self.gHbed`, `self.vSed`/`self.vSedLocal`, `self.vSedF`/`self.vSedFLocal` (dual-lithology fine flux), `self.fiso`.
+**PETSc land** (parallel Vec with halo, mutated via `setArray`/`getArray`/`localToGlobal`): `self.hLocal`/`self.hGlobal`, `self.cumED`/`self.cumEDLocal`, `self.FAL`/`self.FAG`, `self.fillFAL`, `self.Eb`/`self.EbLocal`, `self.bL`/`self.bG`, `self.areaLocal`/`self.areaGlobal`, `self.iceHL`/`self.iceMeltL`/`self.iceUbL`/`self.iceAbrL`/`self.iceFlex` (diagnostic glacial model — see `## Ice sheet`), `self.Lsoil`/`self.Gsoil`, `self.lHbed`/`self.gHbed`, `self.vSed`/`self.vSedLocal`, `self.vSedF`/`self.vSedFLocal` (dual-lithology fine flux), `self.fiso`.
 
 Both sides hold physical units; the boundary is about **who owns halo synchronisation**, not units. Cross only via `self.dm.localToGlobal(local, global)`, `self.dm.globalToLocal(global, local)`, `vec.getArray()`, `vec.setArray(arr)`. After mutating a `*Local` array view, you MUST `localToGlobal` before the next collective solve, or ranks see stale halos.
 
@@ -39,7 +41,7 @@ try:
 except PackageNotFoundError:
     __version__ = "unknown"
 ```
-The metadata version is driven by `meson.build` line 4 (`version: '2026.6.13'`). `gospl.__version__` derives from it via `importlib.metadata` — never hardcode the version in `__init__.py`. The `PackageNotFoundError` fallback covers the case where the package is cloned but not installed (e.g. bare `git clone` without `pip install -e .`).
+The metadata version is driven by `meson.build` line 4 (`version: '2026.6.30'` as of this review). `gospl.__version__` derives from it via `importlib.metadata` — never hardcode the version in `__init__.py`. The `PackageNotFoundError` fallback covers the case where the package is cloned but not installed (e.g. bare `git clone` without `pip install -e .`).
 
 **There is one other version literal that MUST be kept in sync** with `meson.build` at every bump: `conda/meta.yaml` line 2 (`{% set version = "..." %}`). conda-build does NOT introspect `meson.build`; it resolves the jinja `version` literally and embeds it in the `.conda` artefact filename. A drift between the two means the conda channel publishes a different version number than the installed `gospl.__version__`, and the workflow's `anaconda upload --skip-existing` silently no-ops if the conda value matches an already-published release. This bit us once between `v2026.6.12` (PyPI+Docker only) and `v2026.6.13`; the inline comment in `conda/meta.yaml` flags it for future contributors. **Bump checklist: change `meson.build:4` AND `conda/meta.yaml:2` together, always.**
 
@@ -93,7 +95,7 @@ snes = self._snes_x
 # Do NOT call snes.destroy() — destroy_DMPlex handles it at simulation end.
 ```
 
-**CRITICAL**: any new cached solver MUST be added to the `destroy_DMPlex` loop in `mesher/unstructuredmesh.py:738-799`. The loop iterates over a hardcoded list of attribute names; forgetting to add yours leaks the PETSc object at simulation end. Same applies to cached helper Vecs (`self._snes_X_f`, `self._snes_X_x`, `self._snes_X_J`, etc.).
+**CRITICAL**: any new cached solver MUST be added to the `destroy_DMPlex` loop in `mesher/unstructuredmesh.py:1096-1206`. The loop iterates over a hardcoded list of attribute names; forgetting to add yours leaks the PETSc object at simulation end. Same applies to cached helper Vecs (`self._snes_X_f`, `self._snes_X_x`, `self._snes_X_J`, etc.).
 
 ### AD-HOC — nested-matrix fieldsplit solves (2 sites)
 Solvers that build a `Mat().createNest(...)` whose sub-matrices change every call AND configure `pc.setType("fieldsplit")` with IS sets derived from the nested-mat structure. The fieldsplit PC's IS configuration is tied to the specific sysMat instance, so re-using a cached KSP via `setOperators(new_sysMat)` does NOT automatically re-derive the splits. Caching is theoretically possible but requires careful experimentation with `pc.reset()` and the nested-mat lifecycle.
@@ -103,7 +105,7 @@ Solvers that build a `Mat().createNest(...)` whose sub-matrices change every cal
 | `eroder/SPL.py` | `_coupledEDSystem` | `self.fDepa != 0` (transport-limited branch with non-zero `G`) |
 | `sed/seaplex.py` | `_depMarineSystem` | `not flatModel AND self.Gmar > 0`, AND only inside the second `_distOcean` pass |
 
-**Lifecycle**: create at the top of the method, configure, solve, then explicitly destroy everything (KSP, sub-KSPs, sub-ISes, PC, sysMat, RHS/solution vectors) at the end. See `SPL.py:191-243` for the canonical pattern. Both sites are COLD-path (conditional, not every step), so the cumulative create+destroy overhead is small.
+**Lifecycle**: create at the top of the method, configure, solve, then explicitly destroy everything (KSP, sub-KSPs, sub-ISes, PC, sysMat, RHS/solution vectors) at the end. See `SPL.py:116-259` (`_coupledEDSystem`) for the canonical pattern. Both sites are COLD-path (conditional, not every step), so the cumulative create+destroy overhead is small.
 
 If a future contributor wants to convert one of these to CACHED, the obstacle is the fieldsplit-PC + nested-mat IS lifecycle, not the KSP object itself. Do it on a focused branch with full regression run.
 
@@ -137,27 +139,27 @@ The four roots + fixes (all keyed on the partition-invariant input-mesh id):
 **Dead Fortran removal (2026-06).** The partition-invariance work orphaned `fill_rcvs` (flat-routing receiver pick, now Python in `_dirFlats`) and `spill_pts` (spill selection, now Python in `_pitInformation`). Removed together with eight pre-existing never-called kernels — `definegtin`, `distocean`, `donorslist`, `donorsmax`, `gfill`, `scale_volume`, `stencil`, `stratathreesed` — from both `fortran/functions.F90` and `fortran/functions.pyf`. Each was verified to have **zero invocations** in Python (`from gospl._fortran import …`) and zero internal Fortran callers before removal. **`filllabel` and `definetin` were deliberately kept** (along with everything `definetin` calls — `distance`/`euclid`/`gtriarea`/`gtriareasphere`/`slerpmidpt`/`slerpvec`/`striarea`). `filllabel` is itself uncalled/unimported (it stays in both `.F90` and `.pyf` by intent — do NOT remove it on a dead-code sweep). The priority-queue/queue infrastructure (`PQpush`/`PQpop`/`shiftdown`/`pop`/`push`/`spop`/`spush`/`ppop`/`ppush`/`wpop`/`wpush`) stays — it's used by the priority-flood and `filllabel`. **A second sweep (2026-06-24)** removed the Numerical-Recipes FFT chain `four1`/`realft`/`sinft` and the gFlex grid helper `addw` — orphaned by the gFlex/FFT-flexure + spectral-orography removals (none were in the `.pyf`, none imported, the only callers were each other), `functions.F90`-only edit. **Before removing any Fortran routine, confirm both: no `from gospl._fortran import <name>` anywhere AND no internal `call <name>`/`<name>(` in `functions.F90` — the f2py `.pyf` interface and the `.F90` body must be edited together.**
 
 ## The Model god-class
-`gospl/model.py:93-110` declares `Model` as multi-inheritance of 16 mixins. `model.py:126-198` calls each parent's `__init__` **by name, not via `super()`**. The init order is load-bearing and differs from the MRO declaration order — adding `super().__init__()` will break the chain.
+`gospl/model.py:179-195` declares `Model` as multi-inheritance of 16 mixins. `model.py:233-287` calls each parent's `__init__` **by name, not via `super()`**. The init order is load-bearing and differs from the MRO declaration order — adding `super().__init__()` will break the chain.
 
 | # | Init call (model.py line) | Assumes already populated | Allocates / sets |
 |---|---|---|---|
-| 1 | `_ReadYaml(filename)` :136 | — | `self.input`, every YAML attr, `self.tNow` |
-| 2 | `_STRAMesh()` :139 | ReadYaml (`strataFile`) | `stratH/stratZ/phiS/stratK = None` |
-| 3 | `_VoroBuild()` :142 | — | Voronoi cache attrs reset |
-| 4 | `_UnstMesh()` :145 | ReadYaml + STRAMesh | `dm`, `hLocal`, `hGlobal`, `locIDs`, `glbIDs`, `lpoints`, `mpoints`, `lcoords`, `mCoords`, `larea`, `FVmesh_ngbID`, `lgmap_*`, `idBorders/idLBounds/ghostIDs`, `bL/bG`, calls `readStratLayers` |
-| 5 | `_WriteMesh()` :148 | UnstMesh | `step`, `outputDir`, `upsG/upsL` |
-| 6 | `_FAMesh()` :151 | UnstMesh | `iMat`, `fillFAL`, `FAG`, `FAL`, `rtol`; defines `_matrix_build`, `_matrix_build_diag`, `_solve_KSP*` for every downstream class |
-| 7 | `_IceMesh()` :154 | FAMesh | `iceHL/iceMeltL/iceMeltRiverL/iceUbL/iceAbrL/iceFAL/iceFAG/iceFlex` + cached `iceMat` (only if `iceOn`) |
-| 8 | `_SPL()` :157 | FAMesh | `hOld`, `hOldLocal`, `hOldFlex`, `Eb`, `EbLocal`, `stepED`, `newH` |
-| 9 | `_nlSPL()` :160 | SPL | `snes_rtol/atol/maxit`, lazy `_snes_ed/_snes_nl` |
-| 10 | `_soilSPL()` :163 | nlSPL | `Gsoil`, `Lsoil`, `lHbed`, `gHbed`, `prodSoil`, `soil_transition` |
-| 11 | `_PITFill()` :166 | UnstMesh | `borders`, `outEdges` |
-| 12 | `_SEDMesh()` :169 | FAMesh | **`tmp`, `tmpL`, `tmp1`**, `Qs`, `QsL`, `nQs`, `vSed`, `vSedLocal`, `maxnb` |
-| 13 | `_hillSLP()` :172 | SEDMesh | **`h`, `hl`, `dh`**, `mat`, `Dlimit/dexp/minDiff`, lazy `_snes_hill`, `_ts_marine` |
-| 14 | `_SEAMesh()` :175 | FAMesh | `zMat` |
-| 15 | `_GridProcess()` :178 | ReadYaml + UnstMesh | `localFlex`, cached FEM operator/KSP (flat `fem`) or DH grid (`global`); cached orography advection operators if orography on (no regular grid) |
-| 16 | `_UnstMesh.applyForces(self)` :181 | everything above | `rainVal`, `upsub`, `sealevel` |
-| 17 | `_Tectonics()` :184 | UnstMesh (`hGlobal`) | `fiso`, `tecNb=-1` |
+| 1 | `_ReadYaml(filename)` :233 | — | `self.input`, every YAML attr, `self.tNow` |
+| 2 | `_STRAMesh()` :242 | ReadYaml (`strataFile`) | `stratH/stratZ/phiS/stratK = None` |
+| 3 | `_VoroBuild()` :245 | — | Voronoi cache attrs reset |
+| 4 | `_UnstMesh()` :248 | ReadYaml + STRAMesh | `dm`, `hLocal`, `hGlobal`, `locIDs`, `glbIDs`, `lpoints`, `mpoints`, `lcoords`, `mCoords`, `larea`, `FVmesh_ngbID`, `lgmap_*`, `idBorders/idLBounds/ghostIDs`, `bL/bG`, calls `readStratLayers` |
+| 5 | `_WriteMesh()` :251 | UnstMesh | `step`, `outputDir`, `upsG/upsL` |
+| 6 | `_FAMesh()` :254 | UnstMesh | `iMat`, `fillFAL`, `FAG`, `FAL`, `rtol`; defines `_matrix_build`, `_matrix_build_diag`, `_solve_KSP*` for every downstream class |
+| 7 | `_IceMesh()` :257 | FAMesh | `iceHL/iceMeltL/iceMeltRiverL/iceUbL/iceAbrL/iceFAL/iceFAG/iceFlex` + cached `iceMat` (only if `iceOn`) |
+| 8 | `_SPL()` :260 | FAMesh | `hOld`, `hOldLocal`, `hOldFlex`, `Eb`, `EbLocal`, `stepED`, `newH` |
+| 9 | `_nlSPL()` :263 | SPL | `snes_rtol/atol/maxit`, lazy `_snes_ed/_snes_nl` |
+| 10 | `_soilSPL()` :266 | nlSPL | `Gsoil`, `Lsoil`, `lHbed`, `gHbed`, `prodSoil`, `soil_transition` |
+| 11 | `_PITFill()` :269 | UnstMesh | `borders`, `outEdges` |
+| 12 | `_SEDMesh()` :272 | FAMesh | **`tmp`, `tmpL`, `tmp1`**, `Qs`, `QsL`, `nQs`, `vSed`, `vSedLocal`, `maxnb` |
+| 13 | `_hillSLP()` :275 | SEDMesh | **`h`, `hl`, `dh`**, `mat`, `Dlimit/dexp/minDiff`, lazy `_snes_hill`, `_ts_marine` |
+| 14 | `_SEAMesh()` :278 | FAMesh | `zMat` |
+| 15 | `_GridProcess()` :281 | ReadYaml + UnstMesh | `localFlex`, cached FEM operator/KSP (flat `fem`) or DH grid (`global`); cached orography advection operators if orography on (no regular grid) |
+| 16 | `_UnstMesh.applyForces(self)` :284 | everything above | `rainVal`, `upsub`, `sealevel` |
+| 17 | `_Tectonics()` :287 | UnstMesh (`hGlobal`) | `fiso`, `tecNb=-1` |
 
 Permuting any line silently uses an unallocated attribute or overwrites one another mixin has already set.
 
@@ -166,15 +168,15 @@ The following PETSc Vecs are **scratch**. Any kernel may overwrite them at any t
 
 | Vec | Allocated at | Local/Global |
 |---|---|---|
-| `self.tmp` | sedplex.py:30 | global |
-| `self.tmpL` | sedplex.py:31 | local |
-| `self.tmp1` | sedplex.py:32 | global |
-| `self.Qs`, `self.QsL`, `self.nQs` | sedplex.py:33-35 | g, l, l |
-| `self.h` | hillslope.py:39 | global |
-| `self.hl` | hillslope.py:40 | local |
-| `self.dh` | hillslope.py:41 | global |
-| `self.newH` | SPL.py:41 | global (also held by SNES) |
-| `self.stepED` | SPL.py:39 | global |
+| `self.tmp` | sedplex.py:29 | global |
+| `self.tmpL` | sedplex.py:30 | local |
+| `self.tmp1` | sedplex.py:31 | global |
+| `self.Qs`, `self.QsL`, `self.nQs` | sedplex.py:32-34 | g, l, l |
+| `self.h` | hillslope.py:40 | global |
+| `self.hl` | hillslope.py:41 | local |
+| `self.dh` | hillslope.py:42 | global |
+| `self.newH` | SPL.py:40 | global (also held by SNES) |
+| `self.stepED` | SPL.py:38 | global |
 | `self.upsG`, `self.upsL` | outmesh.py:64-65 | global, local |
 
 **Reading `self.h` for elevation gives you whatever the last hillslope step wrote.** Use `self.hLocal/hGlobal` for elevation, `self.cumED/cumEDLocal` for cumulative ED, `self.FAL/FAG` for flow accumulation, `self.Eb/EbLocal` for erosion rate, `self.vSed/vSedLocal` for sediment volume.
@@ -182,7 +184,7 @@ The following PETSc Vecs are **scratch**. Any kernel may overwrite them at any t
 Rule: any new method that uses a scratch Vec MUST document which ones in its docstring and MUST leave them in a defined state on exit (typically `set(0.0)` or a freshly-written array, never mid-computation).
 
 ## The rcvID / rcvIDi convention (CRITICAL)
-`flowAccumulation` (`flowplex.py:421-426`) snapshots six arrays **after the first `_buildFlowDirection` on the unfilled topography, before pit filling and before downstream-routing rebuilds the flow matrix**:
+`flowAccumulation` (`flowplex.py:787-791`) snapshots five arrays **after the first `_buildFlowDirection` on the unfilled topography, before pit filling and before downstream-routing rebuilds the flow matrix**:
 ```
 self.wghtVali = self.wghtVal.copy()
 self.rcvIDi   = self.rcvID.copy()
@@ -317,7 +319,7 @@ All sentinels and threshold values are defined in `gospl/tools/constants.py` and
 Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but distinct role; do not replace` comment so future readers know the coincidence is intentional.
 
 ## High-risk modules (do not edit without full regression run)
-- **`mesher/unstructuredmesh.py`** — owns `dm`, every shared mesh attribute, forcing dispatch (`applyForces` → `_updateRain`/`_updateIce`/…), and `destroy_DMPlex` (~line 849) which names every Vec/Mat by hand. Adding a new persistent Vec elsewhere requires adding it to that destroy list or it leaks (e.g. the dual-lithology `self.vSedF`/`self.vSedFLocal` and the SIA `self.iceMeltL`/`self.iceUbL`/`self.iceAbrL` are registered there).
+- **`mesher/unstructuredmesh.py`** — owns `dm`, every shared mesh attribute, forcing dispatch (`applyForces` → `_updateRain`/`_updateIce`/…), and `destroy_DMPlex` (~line 1096, runs to EOF) which names every Vec/Mat by hand. Adding a new persistent Vec elsewhere requires adding it to that destroy list or it leaks (e.g. the dual-lithology `self.vSedF`/`self.vSedFLocal` and the diagnostic-glacial `self.iceMeltL`/`self.iceUbL`/`self.iceAbrL` are registered there).
 - **`flow/flowplex.py`** — owns `_solve_KSP`, `_solve_KSP2`, `_matrix_build`, `_matrix_build_diag`, `_buildFlowDirection`. Consumed by every downstream module.
 - **`tools/inputparser.py`** — owns all parameter parsing; forcing DataFrame column order is API; the `_extra*` chain is mandatory.
 
@@ -726,7 +728,7 @@ installed `gospl.__version__` equals `GOSPL_VERSION`, so the build arg and
    (pytest tests/ -v)?
 3. If you added a column to a forcing DataFrame, did you use named access (df.at[nb, col]) not iloc?
 4. If you used a scratch Vec, did you document which ones in the method's docstring?
-5. If you changed a method called by `Model.runProcesses` (`model.py:217-286`), did you check every caller AND the mixin init order (`model.py:126-198`)?
+5. If you changed a method called by `Model.runProcesses` (`model.py:331-467`), did you check every caller AND the mixin init order (`model.py:233-287`)?
 6. If you added a new KSP/SNES/TS solver, did you pick the right lifecycle (CACHED for hot-path solvers, AD-HOC for nested-fieldsplit) AND, if cached, add the attribute to the `destroy_DMPlex` list in `unstructuredmesh.py`?
 6b. If you added or moved a **collective** call (`localToGlobal`/`Allreduce`/`ksp.solve`/`vec.norm`/`vec.sum`/`garbage_cleanup`/…), is it reached by ALL ranks — i.e. NOT inside `if MPIrank==0`, a rank-local `.any()`/`.size`/early-`return`, or a `for`/`while` with a per-rank trip-count? If a rank-local decision must gate it, reduce the flag first (`allreduce(..., op=MPI.LOR)`). See AGENTS.md > MPI contract > "THE #1 parallel deadlock class". Re-run the grep sweep there.
 7. If you added a new forcing type, did you follow `docs/HOW_TO_ADD_FORCING.md` including the `destroy_DMPlex` registration?
