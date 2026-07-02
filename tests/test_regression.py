@@ -1128,6 +1128,51 @@ def test_duricrust_weathering_rate():
         m.destroy()
 
 
+def test_duricrust_armors_K():
+    """
+    Protects (water-table + duricrust, **Phase 4** — DESIGN_WATERTABLE_DURICRUST.md
+    §5): the single erodibility hook `_surfaceArmoringK` cuts `K` at an indurated
+    cell so it erodes ≪ a bare one, composing multiplicatively in `_surfaceLithoK`
+    with **no branching** in the eroders. And it is a byte-identical **no-op** when
+    the duricrust is off (returns the scalar 1.0).
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert m.duriOn, "expected duricrust on"
+        n = m.lpoints
+        armor = float(m.duriArmorMax)
+
+        # No-op when off: the armoring factor is the scalar 1.0 and _surfaceLithoK
+        # is exactly the lithology-only multiplier.
+        m.duriOn = False
+        assert m._surfaceArmoringK() == 1.0
+        base_litho = m._surfaceLithoK().copy()
+
+        # Turn it on with a half-indurated pattern (duriF = 1 on a subset, 0 else).
+        m.duriOn = True
+        m.duriF = np.zeros(n, dtype=np.float64)
+        hard = np.arange(0, n, 3)
+        m.duriF[hard] = 1.0
+        bare = np.setdiff1d(np.arange(n), hard)
+
+        arm = m._surfaceArmoringK()
+        assert isinstance(arm, np.ndarray)
+        assert np.allclose(arm[hard], 1.0 - armor)     # fully indurated
+        assert np.allclose(arm[bare], 1.0)             # bare unchanged
+
+        # Effective erodibility K = surfaceK * surfaceLithoK: hard cells reduced
+        # by exactly armor_max relative to their bare-litho value.
+        K_on = m._surfaceK() * m._surfaceLithoK()
+        K_bare_litho = m._surfaceK() * base_litho
+        assert np.allclose(K_on[hard], (1.0 - armor) * K_bare_litho[hard])
+        assert np.allclose(K_on[bare], K_bare_litho[bare])
+        # Indurated cells are strictly less erodible than bare (where K>0).
+        pos = K_bare_litho > 0
+        assert (K_on[hard[pos[hard]]] < K_bare_litho[hard[pos[hard]]]).all()
+    finally:
+        m.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

@@ -541,20 +541,41 @@ class STRAMesh(object):
         np.clip(fc, 0.0, 1.0, out=fc)
         return fc
 
+    def _surfaceArmoringK(self):
+        """
+        Duricrust erodibility-armoring multiplier (≤ 1) — the **single hook**
+        (DESIGN_WATERTABLE_DURICRUST.md §5) through which the generic duricrust
+        modulates ALL three eroders (SPL / nlSPL / soilSPL) with **no branching**
+        in them: it composes multiplicatively inside ``_surfaceLithoK``.
+
+        Returns the scalar ``1.0`` (a byte-identical no-op) when the duricrust is
+        off. When on, ``1 − armor_max · duriF``: a fully indurated cell
+        (``duriF = 1``) cuts erodibility by ``armor_max`` (e.g. 0.9 ⇒ 10× more
+        resistant, producing relief inversion); ``duriF = 0`` leaves ``K``
+        unchanged. Rate-only — no elevation change, so flow/routing are untouched
+        this step (like dual-lithology deposition being composition-only).
+        """
+        if not getattr(self, "duriOn", False):
+            return 1.0
+        return 1.0 - self.duriArmorMax * self.duriF
+
     def _surfaceLithoK(self):
         """
         Per-node erodibility multiplier from the exposed surface
-        composition: ``fc + (1 - fc) * fine_k_factor``.
+        composition — ``(fc + (1 - fc) * fine_k_factor)`` — times the duricrust
+        armoring factor (``_surfaceArmoringK``).
 
-        Equals 1.0 everywhere when dual lithology is off (or
-        ``fine_k_factor == 1``, i.e. no lithology contrast), so it composes
-        multiplicatively with ``_surfaceK`` in the SPL flavours without
-        altering single-fraction behaviour.
+        Equals 1.0 everywhere when dual lithology **and** the duricrust are off
+        (or ``fine_k_factor == 1`` with no crust), so it composes multiplicatively
+        with ``_surfaceK`` in the SPL flavours without altering single-fraction
+        behaviour.
         """
-        if not self.stratLith:
-            return np.ones(self.lpoints, dtype=np.float64)
-        fc = self._surfaceComposition()
-        return fc + (1.0 - fc) * self.fine_k_factor
+        if self.stratLith:
+            fc = self._surfaceComposition()
+            litho = fc + (1.0 - fc) * self.fine_k_factor
+        else:
+            litho = np.ones(self.lpoints, dtype=np.float64)
+        return litho * self._surfaceArmoringK()
 
     def _surfaceLithoD(self):
         """
@@ -566,11 +587,17 @@ class STRAMesh(object):
         multiplicatively with the base hillslope coefficients (``Cda``/``Cdm``)
         without altering single-fraction behaviour. Fines diffuse faster when
         ``fine_diff_factor > 1`` (see DESIGN_DUAL_LITHOLOGY.md Section 7).
+        A cemented duricrust also resists creep when ``armor_diffusion`` is on
+        (off by default), scaling ``Cd`` by the same ``1 − armor_max · duriF``.
         """
-        if not self.stratLith:
-            return np.ones(self.lpoints, dtype=np.float64)
-        fc = self._surfaceComposition()
-        return fc + (1.0 - fc) * self.fine_diff_factor
+        if self.stratLith:
+            fc = self._surfaceComposition()
+            litho = fc + (1.0 - fc) * self.fine_diff_factor
+        else:
+            litho = np.ones(self.lpoints, dtype=np.float64)
+        if getattr(self, "duriOn", False) and self.duriArmorDiffusion:
+            litho = litho * (1.0 - self.duriArmorMax * self.duriF)
+        return litho
 
     def deposeStrat(self):
         """
