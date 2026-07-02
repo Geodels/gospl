@@ -60,6 +60,13 @@ class STRAMesh(object):
         # source_class = per-vertex bedrock class. Allocated only when provOn.
         self.stratP = None
         self.source_class = None
+        # Per-layer diagenetic induration degree ∈ [0,1] (the archived duricrust
+        # armoring record; DESIGN_WATERTABLE_DURICRUST.md §9). An INTENSIVE
+        # property (like phiS): advects with the pile, compaction-neutral, and —
+        # unlike stratK — 0 is a legitimate value (uncemented), so it is NEVER
+        # forward-filled. Allocated only when the water table is on (its
+        # producer) and stratigraphy is recorded (stratNb>0).
+        self.stratDuri = None
 
         return
 
@@ -209,6 +216,12 @@ class STRAMesh(object):
 
         if getattr(self, "provOn", False):
             self._initProvenance()
+
+        # Diagenetic induration archive (§9) — allocated uncemented (0) only when
+        # the groundwater/duricrust feature is on. Initial layers start with no
+        # crust; the record is grown by _recordInduration and restored on restart.
+        if getattr(self, "gwOn", False):
+            self.stratDuri = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
 
         return
 
@@ -831,6 +844,12 @@ class STRAMesh(object):
         self.stratH[neg] = 0.0
         self.phiS[neg] = 0.0
         self.stratK[neg] = 0.0
+        # Induration archive: emptied layers lose their crust record. NOT
+        # forward-filled (unlike stratK/phiS) — stratDuri=0 is a valid value
+        # (uncemented), and the exhumation re-arm (_recordInduration) reads the
+        # top NON-EMPTY layer directly, so no fill is needed.
+        if getattr(self, "stratDuri", None) is not None:
+            self.stratDuri[neg] = 0.0
         self.phiS[:, : self.stratStep + 1] = self._fillZeroPorosity(
             self.phiS[:, : self.stratStep + 1]
         )
@@ -1141,6 +1160,24 @@ class STRAMesh(object):
                 nstratHf[onIDs, :] = loc_stratHf[indices[onIDs, 0], :]
                 nphiF[onIDs, :] = loc_phiF[indices[onIDs, 0], :]
 
+        gwStrat = getattr(self, "stratDuri", None) is not None
+        if gwStrat:
+            # Advect the induration archive as an INTENSIVE per-layer property
+            # (thickness-weighted, exactly like phiS): pass stratDuri in the
+            # porosity slot; the re-interpolated H/Z are identical and discarded.
+            loc_duri = self.stratDuri[:, : self.stratStep]
+            _, _, nDuri = strataonesed(
+                self.lpoints,
+                self.stratStep,
+                indices,
+                weights,
+                loc_stratH,
+                loc_stratZ,
+                loc_duri,
+            )
+            if len(onIDs) > 0:
+                nDuri[onIDs, :] = loc_duri[indices[onIDs, 0], :]
+
         provOn = getattr(self, "provOn", False)
         if provOn:
             # Advect each provenance class's per-layer thickness with the same
@@ -1179,6 +1216,11 @@ class STRAMesh(object):
                 self.tmp.setArray(nphiF[:, k])
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 self.phiF[:, k] = self.tmpL.getArray().copy()
+
+            if gwStrat:
+                self.tmp.setArray(nDuri[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratDuri[:, k] = self.tmpL.getArray().copy()
 
             if provOn:
                 for c in range(self.provNb):

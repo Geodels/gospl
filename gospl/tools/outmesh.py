@@ -228,6 +228,20 @@ class WriteMesh(object):
                 )
                 f["phiF"][:, : self.stratStep + 1] = self.phiF[:, : self.stratStep + 1]
 
+            # Diagenetic induration archive (0..1 per layer). Only written when
+            # the groundwater/duricrust feature is on (self.stratDuri allocated);
+            # restored on restart. Model memory — the crust integrates over My.
+            if getattr(self, "stratDuri", None) is not None:
+                f.create_dataset(
+                    "stratDuri",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    **self._h5opts,
+                )
+                f["stratDuri"][:, : self.stratStep + 1] = self.stratDuri[
+                    :, : self.stratStep + 1
+                ]
+
             # In-model provenance: per-layer per-class thickness (lpoints,
             # layers, classes). Only written when provenance tracers are on.
             if getattr(self, "provOn", False):
@@ -664,6 +678,12 @@ class WriteMesh(object):
                     self.phiF.fill(0.0)
                     if "/phiF" in hf:
                         self.phiF[:, : self.stratStep] = np.array(hf["/phiF"])
+                # Diagenetic induration archive. Restarting a groundwater run
+                # from an output without /stratDuri falls back to uncemented
+                # zeros (the readStratLayers init), so the restore stays robust.
+                if self.stratDuri is not None and "/stratDuri" in hf:
+                    self.stratDuri.fill(0.0)
+                    self.stratDuri[:, : self.stratStep] = np.array(hf["/stratDuri"])
                 # In-model provenance: restore per-layer per-class thickness.
                 # Restarting a provenance run from an output without /stratP
                 # falls back to the bedrock-seeded stratP (set in

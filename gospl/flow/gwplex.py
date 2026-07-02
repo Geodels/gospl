@@ -164,6 +164,9 @@ class GWMesh(object):
         # Phase 3: evolve the capillary-fringe duricrust from the new water table.
         if getattr(self, "duriOn", False):
             self._updateDuricrust()
+            # Phase 6: sync the live crust with the per-layer stratigraphic
+            # induration archive (exhumation re-arm + formation write-down).
+            self._recordInduration()
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -522,3 +525,43 @@ class GWMesh(object):
         if prod is None:
             return np.inf
         return prod * self.rainVal
+
+    def _recordInduration(self):
+        r"""
+        Sync the live per-node induration ``duriF`` with the per-layer
+        stratigraphic archive ``stratDuri`` (DESIGN_WATERTABLE_DURICRUST.md §9),
+        at the **top non-empty layer** of each column (found as in
+        ``_surfaceComposition``). Two directions:
+
+        - **Exhumation (read-up)** — a previously buried, indurated layer now at
+          the surface (its overburden eroded through last step) re-arms the live
+          crust: ``duriF = max(duriF, stratDuri[top])`` (and ``duriKarmor`` is
+          refreshed). This is the stacked-duricrust / relief-inversion behaviour
+          of cratonic laterite terrains.
+        - **Formation (write-down)** — the live crust is recorded into that top
+          layer: ``stratDuri[top] = max(stratDuri[top], duriF)``, so a stable
+          surface's near-surface layer indurates over time and is **preserved**
+          when later buried by ``deposeStrat`` (fresh layers start at 0).
+
+        No-op (surface-only ``duriF``, no archive) when ``stratDuri`` is
+        unallocated (``stratNb == 0``). Composition-only — no geometry change.
+        Rank-local (per-node); no collective.
+        """
+        if getattr(self, "stratDuri", None) is None or self.stratNb == 0:
+            return
+        top = self.stratStep + 1
+        H = self.stratH[:, :top]
+        rev = (H > 0)[:, ::-1]
+        valid = rev.any(axis=1)                      # columns with any sediment
+        if not valid.any():
+            return
+        top_idx = (H.shape[1] - 1 - np.argmax(rev, axis=1))[valid]
+        rows = np.arange(H.shape[0])[valid]
+        arch = self.stratDuri[rows, top_idx]
+
+        # Read-up: exhumed crust re-arms the surface.
+        self.duriF[valid] = np.maximum(self.duriF[valid], arch)
+        self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
+        # Write-down: record the live crust into the exposed top layer.
+        self.stratDuri[rows, top_idx] = np.maximum(arch, self.duriF[valid])
+        return

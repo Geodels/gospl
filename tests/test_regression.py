@@ -1281,6 +1281,53 @@ def test_duricrust_regolith_limited():
         m.destroy()
 
 
+def test_duricrust_strata_exhumation():
+    """
+    Protects (water-table + duricrust, **Phase 6** — DESIGN_WATERTABLE_DURICRUST.md
+    §9): the per-layer induration archive `stratDuri` records the crust and a
+    **buried crust re-armors on re-exposure**. `_recordInduration` syncs the live
+    `duriF` with the top non-empty layer: while buried (fresh layers on top,
+    `stratDuri=0`) the surface stays weak; once erosion exhumes the indurated
+    layer, `duriF` (and `duriKarmor`) re-arm to the preserved value.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert m.gwOn and m.stratNb > 0, "need groundwater + stratigraphy"
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+        assert m.stratDuri is not None, "induration archive not allocated"
+
+        n = m.lpoints
+        # Build a 3-layer column everywhere: deep indurated crust (layer 0),
+        # then two fresh (uncemented) layers on top.
+        m.stratStep = 2
+        m.stratH[:] = 0.0
+        m.stratH[:, 0] = 5.0            # buried, indurated
+        m.stratH[:, 1] = 3.0
+        m.stratH[:, 2] = 2.0            # fresh surface
+        m.stratDuri[:] = 0.0
+        m.stratDuri[:, 0] = 1.0         # relict crust locked in the record
+
+        # Buried: the exposed top layer is uncemented → surface stays weak.
+        m.duriF = np.full(n, 0.1)
+        m._recordInduration()
+        assert (m.duriF < 0.5).all(), "buried crust wrongly armored the surface"
+        # Write-down recorded the (weak) live crust into the exposed top layer.
+        assert np.allclose(m.stratDuri[:, 2], 0.1)
+        # The buried relict is preserved.
+        assert np.allclose(m.stratDuri[:, 0], 1.0)
+
+        # Exhume: erode the two upper layers so layer 0 becomes the surface.
+        m.stratH[:, 1] = 0.0
+        m.stratH[:, 2] = 0.0
+        m.duriF = np.full(n, 0.1)
+        m._recordInduration()
+        assert np.allclose(m.duriF, 1.0), "exhumed crust did not re-arm the surface"
+        assert np.allclose(m.duriKarmor, 1.0 - m.duriArmorMax)
+    finally:
+        m.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

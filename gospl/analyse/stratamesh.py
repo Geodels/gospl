@@ -178,6 +178,13 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
         # read here and attached for every field mode (including "basic", which
         # needs neither dual lithology nor provenance).
         phiS = np.asarray(f["phiS"], dtype=np.float64) if "phiS" in avail else None
+        # Per-layer diagenetic induration (0..1), present only for a
+        # groundwater/duricrust run; attached (like porosity) for every mode so a
+        # cross-section shows buried/exhumed crusts. Absent -> skipped.
+        stratDuri = (
+            np.asarray(f["stratDuri"], dtype=np.float64)
+            if "stratDuri" in avail else None
+        )
         if litho:
             if "stratHf" not in avail or "phiF" not in avail:
                 raise ValueError(
@@ -263,6 +270,12 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
     out["cells"]["layer"] = np.repeat(
         np.arange(lo + 1, nlay, dtype=np.int32), m
     )
+
+    # Diagenetic induration (0..1), attached for every field mode when the run
+    # recorded it — a duricrust cross-section overlay independent of lithology /
+    # provenance.
+    if stratDuri is not None:
+        out["cells"]["induration"] = _cell(stratDuri[:, lay])
 
     # Basic mode: no lithology / provenance — just attach the recorded porosity
     # (the surface + thickness + layer cells above are written for every mode).
