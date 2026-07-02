@@ -69,6 +69,7 @@ class ReadYaml(object):
         self._readRain()
         self._readCompaction()
         self._readIce()
+        self._readGroundwater()
         self._readOrography()
         self._readFlex()
         self._readTeMap()
@@ -2062,6 +2063,82 @@ class ReadYaml(object):
             self.elaH = interp1d(year, iceval, kind="linear")
             iceval = np.full(len(year), iceH)
             self.iceH = interp1d(year, iceval, kind="linear")
+
+        return
+
+    def _readGroundwater(self):
+        """
+        Parse the optional ``groundwater:`` block (opt-in water table + generic
+        duricrust). See ``docs/DESIGN_WATERTABLE_DURICRUST.md``. When the block is
+        absent everything is inert (``gwOn = False``) and goSPL is byte-identical
+        to a run without it. Phase 0 = parse + flags + defaults only (no solve).
+        """
+
+        try:
+            gwDict = self.input["groundwater"]
+            self.gwOn = True
+            # Hydrology (implicit Dupuit-Boussinesq head solve).
+            self.gwKsat = float(gwDict.get("Ksat", 1.0))            # K_h (m/yr)
+            self.gwSpecificYield = float(gwDict.get("specific_yield", 0.1))  # S
+            # z_bed depth below surface (m): scalar OR the string 'from_soil'
+            # (tie to lHbed; requires soilSPL). Kept raw here; resolved later.
+            self.gwAquiferBase = gwDict.get("aquifer_base", 50.0)
+            self.gwBedrockDepth = float(gwDict.get("bedrock_depth", 0.0))
+            self.gwMinSatThick = float(gwDict.get("min_sat_thickness", 1.0))
+            self.gwInfiltration = float(gwDict.get("infiltration", 0.3))  # f_infil
+            self.gwConserveBaseflow = bool(gwDict.get("conserve_baseflow", True))
+            self.gwPicardIts = int(gwDict.get("picard_its", 3))
+            self.gwSeepagePasses = int(gwDict.get("seepage_passes", 4))
+
+            # Generic duricrust (capillary-fringe induration that armors K).
+            duri = gwDict.get("duricrust", {}) or {}
+            self.duriOn = bool(duri) if isinstance(duri, dict) else False
+            self.duriFormRate = float(duri.get("form_rate", 1.0e-4))       # k_form (m/yr)
+            self.duriMaxThick = float(duri.get("max_thickness", 5.0))      # duriH_max (m)
+            self.duriFringeDepth = float(duri.get("fringe_depth", 3.0))    # d0 (m)
+            self.duriFringeWidth = float(duri.get("fringe_width", 2.0))    # w (m)
+            self.duriSupplyExp = float(duri.get("supply_exp", 1.0))        # p on (rain-evap)
+            self.duriWeatherEa = float(duri.get("weather_Ea", 0.0))        # Arrhenius (0=off)
+            self.duriArmorMax = float(duri.get("armor_max", 0.9))          # max K reduction 0..1
+            self.duriArmorDiffusion = bool(duri.get("armor_diffusion", False))
+            self.duriBreakRate = float(duri.get("break_rate", 1.0))        # k_break
+            self.duriDecayRate = float(duri.get("decay_rate", 1.0e-6))     # k_decay (1/yr)
+            # Weathering-supply coupling (proxy | rate | prodsoil) — Level-A knobs
+            # parsed here, used from Phase 3 (see DESIGN §3a).
+            weath = duri.get("weathering", {}) or {}
+            self.duriWeatherMode = str(weath.get("mode", "proxy")).lower()
+            self.duriWeatherCeq = float(weath.get("C_eq", 1.0))
+            self.duriWeatherDw = float(weath.get("Dw", 1.0))
+            self.duriWeatherL = float(weath.get("path_length", 20.0))
+            self.duriWeatherability = weath.get("weatherability", 1.0)
+
+        except KeyError:
+            self.gwOn = False
+            self.duriOn = False
+            self.gwKsat = 1.0
+            self.gwSpecificYield = 0.1
+            self.gwAquiferBase = 50.0
+            self.gwBedrockDepth = 0.0
+            self.gwMinSatThick = 1.0
+            self.gwInfiltration = 0.3
+            self.gwConserveBaseflow = True
+            self.gwPicardIts = 3
+            self.gwSeepagePasses = 4
+            self.duriFormRate = 0.0
+            self.duriMaxThick = 5.0
+            self.duriFringeDepth = 3.0
+            self.duriFringeWidth = 2.0
+            self.duriSupplyExp = 1.0
+            self.duriWeatherEa = 0.0
+            self.duriArmorMax = 0.0
+            self.duriArmorDiffusion = False
+            self.duriBreakRate = 0.0
+            self.duriDecayRate = 0.0
+            self.duriWeatherMode = "proxy"
+            self.duriWeatherCeq = 1.0
+            self.duriWeatherDw = 1.0
+            self.duriWeatherL = 20.0
+            self.duriWeatherability = 1.0
 
         return
 

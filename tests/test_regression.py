@@ -685,6 +685,47 @@ def test_soil_hillslope_conservation(minimal_ice_soil_model):
     assert np.max(np.abs(dbed)) < 1.0e-6, "soil creep moved the bedrock (lHbed changed)"
 
 
+def test_groundwater_opt_in(minimal_model):
+    """
+    Protects (water-table + duricrust, **Phase 0** — DESIGN_WATERTABLE_DURICRUST.md):
+    the feature is OPT-IN and inert when off. Without a ``groundwater:`` block,
+    ``gwOn`` is False and no groundwater/duricrust state is allocated (the full
+    suite staying green confirms the default path is byte-identical). With the
+    block, ``gwOn`` is True, the persistent state Vecs exist, the head is seeded
+    to the surface, and a run completes — Phase 0 allocates state but does not yet
+    solve, so it remains byte-identical.
+    """
+    import os
+    from gospl.model import Model
+
+    # (a) default OFF — no groundwater block ⇒ inert, nothing allocated.
+    m = minimal_model
+    assert m.gwOn is False, "groundwater must default off"
+    assert not hasattr(m, "headG"), "no groundwater state should exist when off"
+
+    # (b) opt-in ON.
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, "minimal_gw.yml")):
+        pytest.skip("minimal_gw.yml fixture not present")
+    cwd = os.getcwd()
+    os.chdir(fx)
+    try:
+        B = Model("minimal_gw.yml", verbose=False, showlog=False)
+    finally:
+        os.chdir(cwd)
+
+    try:
+        assert B.gwOn is True and B.duriOn is True
+        for attr in ("headG", "headL", "duriHG", "duriHL", "rechargeL", "baseflowL"):
+            assert hasattr(B, attr), f"missing groundwater state: {attr}"
+        assert B.duriF.shape == (B.lpoints,)
+        # head seeded to the surface (a valid starting water table h = z).
+        assert np.allclose(B.headG.getArray(), B.hGlobal.getArray())
+        B.runProcesses()          # Phase 0: state allocated but unused ⇒ completes
+    finally:
+        B.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

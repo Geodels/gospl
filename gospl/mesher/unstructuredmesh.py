@@ -1147,6 +1147,14 @@ class UnstMesh(object):
             if self.flexOn:
                 self.iceFlex.destroy()
 
+        if getattr(self, "gwOn", False):
+            self.headL.destroy()
+            self.headG.destroy()
+            self.duriHL.destroy()
+            self.duriHG.destroy()
+            self.rechargeL.destroy()
+            self.baseflowL.destroy()
+
         self.iMat.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
@@ -1171,6 +1179,7 @@ class UnstMesh(object):
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
             "_advMatLeft", "_advMatRight", "_advKSP",
             "_oroAc", "_oroAf", "_oroKSP", "_oroQc", "_oroQs",
+            "_gwMat", "_ksp_gw",
         ):
             obj = getattr(self, name, None)
             if obj is not None:
