@@ -369,16 +369,28 @@ degrades in depocenters).
 
 ---
 
-## 8. Open questions
+## 8. Open questions — resolved by steps 1–4
 
-- **Emergent-fill weathering:** how fast should soil (re)establish on a newly subaerial
-  lake bed / marine terrace? Straight `prodSoil` from zero, or a head-start?
-- **Deposited-sediment softness without stratigraphy:** if `stratNb==0`, deposits erode as
-  bedrock. Acceptable, or should a minimal "fresh-deposit soft cover" exist independent of
-  stratigraphy?
-- **Smooth vs hard cap:** replace the `soil_transition` clip with a smooth saturation, or
-  keep it (post-solve, so harmless to convergence)?
-- **Hillslope/soil conservation:** is soil currently conserved across `diffuseSoil` +
-  `getHillslope`, or is there double-counting to fix?
-- **Scope commitment:** Option 2 now, or hold for Option 3 (full regolith profile) if the
-  duricrust is going to motivate that investment anyway?
+All five original open questions are now settled:
+
+- **Emergent-fill weathering — RESOLVED (no head-start).** When a lake bed / marine terrace
+  emerges (fills to spill, or sea regresses), the pedogenic mantle `Lsoil` is 0 there
+  (subaqueous-zeroed while submerged) and grows from 0 via `prodSoil` — correct for a fresh
+  surface. Its *erodibility* needs no head-start: the fresh deposit is already soft (regolith
+  mode: `stratK = Ksoil/K`; lumped mode: it *is* "soil"), so there is no bedrock→soil jump on
+  emergence — both the fresh-deposit and mantled branches are `Ksoil`-scaled (they differ only
+  by the minor climate `rainVal^coeffd` / litho factors on the bedrock term).
+- **Deposited-sediment softness without stratigraphy — RESOLVED (by decision, step 2).**
+  `mode: regolith` without `stratNb>0` erodes fresh deposits at bedrock `K` and emits a rank-0
+  warning; the remedy is `time: strat:` (soft `stratK`) or `mode: lumped` (the deposit becomes
+  soil). No strata-independent "soft cover" is added — that *is* lumped mode.
+- **Smooth vs hard cap — RESOLVED (keep clip now; recast with duricrust).** The hard clip is
+  post-solve (harmless to convergence); the `Sperc==0` fallback is now **`+inf`** (a true
+  no-cap). The smooth max-weathering-depth is **deferred into the water-table + duricrust
+  feature** (it shares that feature's max-weathering-depth), as an opt-in — see step 3.
+- **Hillslope/soil conservation — RESOLVED (audited sound, step 4).** `getHillslope` delegates
+  to `diffuseSoil` (no double-count); `diffuseSoil` is volume-conserving (divergence form),
+  couples `ΔLsoil = Δh`, and preserves `lHbed`. Guard `test_soil_hillslope_conservation`.
+- **Scope commitment — RESOLVED.** Option 2.5 implemented (steps 1–4). Option 3 (full regolith
+  profile) is out of scope at 500 m–km / My (spatial verdict, §4); the step-3 lumped profile
+  scalars are deferred into the duricrust feature (their consumer).
