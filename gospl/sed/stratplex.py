@@ -633,10 +633,18 @@ class STRAMesh(object):
             self._provDeposited += np.sum(
                 (provDepo * self.larea[:, None])[self.inIDs == 1], axis=0
             )
-        # Freshly deposited sediment carries the default erodibility (no
-        # multiplier). If you want re-deposited sediment to keep its
-        # source-layer K, this is the line to revisit.
-        self.stratK[ids, self.stratStep] = 1.0
+        # Freshly deposited sediment erodibility multiplier (top layer).
+        # - lumped mode: 1.0 (no multiplier) — the deposit becomes soil and gets
+        #   its soft erodibility (Ksoil) via updateSoilThickness.
+        # - regolith mode: the deposit stays in the stratigraphy, so it must
+        #   carry its own SOFT erodibility here. Set stratK = Ksoil/K so the SPL
+        #   bedrock term Kbr*stratK = Ksoil — fresh unconsolidated sediment erodes
+        #   like soil, reusing the already-defined soilK (regolith mode implies
+        #   cptSoil, so Ksoil is defined). See DESIGN_SOIL_REGOLITH.md §5.
+        if getattr(self, "regolithSoil", False) and self.K > 0.0:
+            self.stratK[ids, self.stratStep] = self.Ksoil / self.K
+        else:
+            self.stratK[ids, self.stratStep] = 1.0
 
         # Cleaning arrays
         if self.memclear:

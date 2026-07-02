@@ -264,13 +264,40 @@ goSPL's 500 m–km / My scales. **Option 3 is explicitly out of scope** at these
 its scale verdict: temporally apt, spatially unjustified). Staged so the disruptive part is
 optional and guarded:
 
-1. **Consistency fixes first (safe, ≈ Option 1):** make the submarine case coherent, gate
-   soil/duricrust on the subaerial mask (**not `seaID` and not ponded `pitIDs>=0`/`lFill>hl`**,
-   §3), and document `Lsoil`. Low risk, independent of the duricrust work.
-2. **Separation (opt-in behind a flag, default = current):** a `soil: mode: regolith`
-   switch that stops routing deposition into `Lsoil` and drives deposited-sediment
-   erodibility from `stratK`. Default preserves current behaviour byte-for-byte; the new
-   mode is validated against a soil+stratigraphy run.
+1. **Consistency fixes first (safe, ≈ Option 1) — DONE.** Subaerial gate + submarine
+   coherence + ice freeze-inert. `soilSPL._subaqueousMask` (marine + ponded lake → soil 0)
+   and `_iceFrozenMask` (ice-covered land → soil preserved, production off). §3.
+2. **Separation (opt-in behind a flag, default = current) — DONE.** `soil: mode: regolith`
+   (`self.regolithSoil`, default `lumped` → byte-identical). In regolith mode `Lsoil` is the
+   **weathering-produced regolith only**; deposited sediment stays in the stratigraphy and
+   carries its own soft erodibility there. Mechanism:
+   - **Deposition is not routed into `Lsoil`.** `updateSoilThickness(deposition=True/False)`:
+     the lake/pit (`sedplex`) and marine (`seaplex`) callers use `deposition=True` → the
+     increment is **skipped in regolith mode** (added in lumped); **the subaqueous/ice gates
+     still run in both modes** (so a cell newly ponded by this step's deposition is re-zeroed
+     consistently). Soil **creep** (`diffuseSoil`) uses `deposition=False` → always applied
+     (creep transports the regolith itself, both modes).
+   - **Fluvial transport-limited deposition growth** is removed at the `_solveSoil` write-back
+     (`nHsoil −= max(0, Δh)`) — **post-solve, so the SNES residual and its smoothness are
+     untouched**; erosion still strips soil.
+   - **Fresh deposits erode like soil (option C).** A freshly deposited layer is given a soft
+     `stratK = Ksoil/K` (`stratplex.deposeStrat`, regolith mode) so the SPL bedrock term
+     `Kbr·stratK = Ksoil` — reusing the already-defined `soilK` (regolith mode ⇒ `cptSoil`,
+     so `Ksoil` exists; **no new parameter**). Lumped mode keeps `stratK = 1.0` (there the
+     deposit becomes soil and gets `Ksoil` via `updateSoilThickness`). Unified erodibility:
+     bare bedrock `K`; weathering regolith `Ksoil`; fresh deposit `Ksoil`.
+
+   **Stratigraphy is required — and it is triggered by `time: strat:`, NOT a `strata:` block.**
+   `stratNb > 0` ⇔ a stratal time step is set (`inputparser`: `stratNb = (tEnd−tStart)/strat + 1`);
+   the `strata:` block is only for *initial* layers / dual-lithology / bedrock sentinel. Regolith
+   mode needs `stratNb > 0` so the excluded deposits are recorded with their soft `stratK`;
+   without it `_surfaceK`=1.0 and a fresh deposit erodes at raw bedrock `K`. Handled with a
+   **rank-0 warning** (`soilSPL.__init__`) pointing at `time: strat:`, not a hard failure
+   (erosional / low-deposition runs can still use regolith mode). Guard: `test_soil_mode_regolith`
+   on the **soil+stratigraphy** fixture `minimal_soil_strata.yml` (stratigraphy via `time: strat: 10`)
+   — one step from an identical state gives **identical elevations** (bookkeeping-only), the
+   subaerial gate holds, and fresh deposits carry `stratK = Ksoil/K` in regolith / `1.0` in lumped.
+   Docs: `soil: mode:` added to `user_guide/inputfile.rst`.
 3. **Lumped profile scalars (Option 2.5):** weathering-front depth, weathering-degree index,
    duricrust horizon; recast `soil_transition` as a **smooth** max-weathering-depth (§2, item 3).
 4. **Hillslope coupling audit:** verify/enforce joint soil conservation between

@@ -824,7 +824,10 @@ class SEAMesh(object):
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        # Update soil thickness
+        # Update soil thickness (both modes — updateSoilThickness applies the
+        # subaqueous/ice gates; in regolith mode it skips the deposition increment
+        # since marine deposition is stratigraphy, not soil). Marine soil is 0
+        # anyway via the subaerial gate. DESIGN_SOIL_REGOLITH.md §5.
         if self.cptSoil:
             self.updateSoilThickness()
 

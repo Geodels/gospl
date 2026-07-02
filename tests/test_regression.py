@@ -569,6 +569,78 @@ def test_soil_subaerial_gate(minimal_ice_soil_model):
         m.dm.localToGlobal(m.Lsoil, m.Gsoil)
 
 
+def test_soil_mode_regolith():
+    """
+    Protects: soil `mode: regolith` (DESIGN_SOIL_REGOLITH.md Option 2.5, step 2)
+    on the intended config — soil + stratigraphy (`time: strat:` → `stratNb>0`).
+
+    In regolith mode `Lsoil` is the WEATHERING-produced regolith only; deposited
+    sediment (fluvial transport-limited, lake/pit, marine) is NOT routed into
+    `Lsoil` — it lives in the stratigraphy and carries its own SOFT erodibility
+    there: a freshly deposited layer gets `stratK = Ksoil/K` (so the SPL bedrock
+    term `Kbr·stratK = Ksoil`, i.e. fresh sediment erodes like soil). In lumped
+    mode the deposit becomes soil instead, so its `stratK` stays `1.0`.
+
+    Default `mode: lumped` is byte-identical (`regolithSoil=False` → every gate
+    takes the legacy branch; the full suite staying green confirms it). Regolith
+    mode changes soil BOOKKEEPING (and the *next* step's deposit erodibility), not
+    the current step's elevation SOLVE — the depositional growth is removed
+    post-solve, the deposition→soil calls are skipped, and the fresh `stratK` is
+    written after the erosion solve. So one step from an identical initial state
+    gives **identical elevations**, while `Lsoil ≤` the lumped `Lsoil`.
+    """
+    import os
+    from gospl.model import Model
+
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, "minimal_soil_strata.yml")):
+        pytest.skip("minimal_soil_strata.yml fixture not present")
+
+    cwd = os.getcwd()
+    os.chdir(fx)
+    try:
+        A = Model("minimal_soil_strata.yml", verbose=False, showlog=False)  # lumped
+        B = Model("minimal_soil_strata.yml", verbose=False, showlog=False)  # regolith
+    finally:
+        os.chdir(cwd)
+
+    try:
+        assert A.cptSoil and A.stratNb > 0, "fixture must be soil + stratigraphy"
+        assert A.regolithSoil is False, "default soil mode must be lumped"
+        B.regolithSoil = True                     # regolith mode
+
+        A.tEnd = A.tNow + 0.5 * A.dt              # exactly one step each
+        B.tEnd = B.tNow + 0.5 * B.dt
+        A.runProcesses()
+        B.runProcesses()
+
+        La, Lb = A.Lsoil.getArray(), B.Lsoil.getArray()
+        ha, hb = A.hGlobal.getArray(), B.hGlobal.getArray()
+
+        # (1) regolith mode does not perturb the FIRST-step elevation solve.
+        assert np.allclose(ha, hb, rtol=1.0e-9, atol=1.0e-6), (
+            "regolith mode changed the elevation solve (should be bookkeeping-only)"
+        )
+        # (2) regolith soil never exceeds lumped soil (deposition not added).
+        assert (Lb <= La + 1.0e-9).all(), "regolith Lsoil exceeds lumped somewhere"
+        # (3) finite, non-negative, subaerial gate intact.
+        assert np.isfinite(Lb).all() and (Lb >= -1.0e-9).all()
+        assert (Lb[B.seaID] == 0.0).all()
+        # (4) fresh deposits carry the soft erodibility Ksoil/K in regolith mode,
+        #     and stay at 1.0 (never Ksoil/K) in lumped mode.
+        ratio = B.Ksoil / B.K
+        assert not np.isclose(ratio, 1.0), "fixture must have Ksoil != K to distinguish"
+        assert np.isclose(B.stratK, ratio).any(), (
+            "no freshly deposited layer carries the soft stratK = Ksoil/K"
+        )
+        assert not np.isclose(A.stratK, ratio).any(), (
+            "lumped-mode deposit stratK should be 1.0, never Ksoil/K"
+        )
+    finally:
+        A.destroy()
+        B.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

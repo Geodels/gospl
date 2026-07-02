@@ -33,6 +33,29 @@ class soilSPL(object):
         Initialisation of `soilSPL` class.
         """
 
+        # Regolith soil mode is only fully meaningful with stratigraphy on: it
+        # keeps deposited sediment OUT of Lsoil, expecting the stratigraphy
+        # (stratK) to carry that sediment's (soft) erodibility. Stratigraphy is
+        # enabled purely by the stratal time step `time: strat:` (which sets
+        # stratNb>0) — NOT by a `strata:` block (that is only for initial layers).
+        # Without it `_surfaceK` returns 1.0, so a fresh deposit erodes at raw
+        # bedrock K (harder than lumped mode would make it). Warn rather than
+        # hard-fail: erosional/low-deposition runs can still use regolith mode
+        # sensibly. See DESIGN_SOIL_REGOLITH.md §5.
+        if (
+            getattr(self, "regolithSoil", False)
+            and getattr(self, "cptSoil", False)
+            and getattr(self, "stratNb", 0) == 0
+            and MPIrank == 0
+        ):
+            print(
+                "[soil] WARNING: mode 'regolith' without stratigraphy — deposited "
+                "sediment has no soft-erodibility home and will erode as bedrock. "
+                "Define a stratal time step ('time: strat:', which sets stratNb>0) "
+                "so deposits are recorded with soft stratK, or use mode 'lumped'.",
+                flush=True,
+            )
+
         # Soil-SPL SNES controls. These are normally set from the YAML soil
         # block by the input parser; fall back to robust defaults when soilSPL
         # is built standalone (e.g. unit tests).
@@ -132,6 +155,13 @@ class soilSPL(object):
         # Compute soil thickness based on changes in elevation and soil production rates
         hSoil = self.soilH + h_array - self.hOldArray
         hSoil[hSoil < 0] = 0.
+        # Regolith mode: the fluvial transport-limited DEPOSITION part of the
+        # elevation change is sediment (stratigraphy), not weathering regolith,
+        # so record its growth to be removed from Lsoil at write-back (erosion
+        # still strips soil). Recomputed each residual eval; the eval at the SNES
+        # solution is the one used. See DESIGN_SOIL_REGOLITH.md §5.
+        if self.regolithSoil:
+            self._soilDepoGrowth = np.maximum(0.0, h_array - self.hOldArray)
         if self.tempFile is not None:
             # In this case, the soil production needs to be scaled with local rainfall as the soil production parameter refers here to the precipitation factor a0 in Norton et al. (2013) EQ. 8
             # http://dx.doi.org/10.1016/j.geomorph.2013.08.030
@@ -354,6 +384,13 @@ class soilSPL(object):
 
         # Update soil thicknesses
         nHsoil = self.nsoilH.copy()
+        # Regolith mode: remove the fluvial transport-limited DEPOSITION growth
+        # (post-solve, so the SNES residual — and its smoothness — is untouched).
+        # Lsoil then reflects weathering production + erosion only; the deposit is
+        # tracked by the stratigraphy. Erosion (negative elevation change) still
+        # strips soil via nsoilH. See DESIGN_SOIL_REGOLITH.md §5.
+        if self.regolithSoil:
+            nHsoil = nHsoil - self._soilDepoGrowth
         # No subaerial soil under standing water (marine seaID OR a ponded
         # continental lake). Extends the former marine-only mask to lakes for a
         # coherent subaerial gate — the rainfall-scaled production term would
@@ -467,21 +504,31 @@ class soilSPL(object):
         ice &= ~self._subaqueousMask(hl)          # subaqueous (zero) wins over ice
         return ice
 
-    def updateSoilThickness(self):
+    def updateSoilThickness(self, deposition=True):
         """
-        Updates soil thickness through time.
+        Updates soil thickness through time from the increment in ``self.tmp``.
 
-        ``Lsoil`` is a **subaerial** regolith cover, so the depositional increment
-        is not retained at subaqueous nodes (marine or ponded lake) — see
-        ``_subaqueousMask``. This is the coherent replacement for the former
-        marine add-then-zero (deposition added soil that only the next fluvial
-        solve wiped, and only at ``seaID`` — continental lakes kept a spurious
-        cover).
+        ``Lsoil`` is a **subaerial** regolith cover, so the increment is not
+        retained at subaqueous nodes (marine or ponded lake) — see
+        ``_subaqueousMask`` — and is frozen under ice (``_iceFrozenMask``). These
+        gates run in every mode, so callers invoke this unconditionally.
+
+        ``deposition`` distinguishes the two kinds of increment:
+
+        - **deposition=True** (lake/pit, marine): in **regolith mode** the deposit
+          is stratigraphy, not soil, so the increment is **skipped** (the gates
+          still run — a cell newly ponded by this step's deposition is re-zeroed
+          consistently with lumped mode). In lumped mode it is added.
+        - **deposition=False** (soil creep / hillslope transport): always added —
+          creep moves the weathering regolith itself, in both modes.
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
         prevL = self.Lsoil.getArray().copy()
-        nHsoil = prevL + self.tmpL.getArray()
+        if deposition and getattr(self, "regolithSoil", False):
+            nHsoil = prevL.copy()                       # regolith: deposit is strata, not soil
+        else:
+            nHsoil = prevL + self.tmpL.getArray()
 
         hl = self.hLocal.getArray()
         # No subaerial soil under standing water (marine or ponded lake).
@@ -755,8 +802,9 @@ class soilSPL(object):
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        # Update soil thickness
-        self.updateSoilThickness()
+        # Update soil thickness. Soil creep TRANSPORTS the weathering regolith
+        # itself (not a deposit), so it is applied in both modes — deposition=False.
+        self.updateSoilThickness(deposition=False)
 
         # Update erosion/deposition rates
         self.dm.globalToLocal(self.tmp, self.tmpL)

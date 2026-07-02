@@ -413,6 +413,7 @@ Soil production, erosion, transport and deposition
         .. code:: yaml
 
             soil:
+                mode: 'lumped'
                 soilK: 4.e-6
                 maxProd: 50.e-6
                 depthProd: 0.5
@@ -427,7 +428,20 @@ Soil production, erosion, transport and deposition
         c. ``depthProd`` is the soil production decay depth (m),
         d. ``roughnessL`` is the roughness length scale,
         e. ``decayDepth`` is the soil transport decay depth for non-linear diffusion where the coefficient of diffusion is set to the values of ``hillslopeKa`` and ``hillslopeKm``,
-        f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional). 
+        f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional).
+        g. ``mode`` selects how ``soil`` (the near-surface layer) is accounted (optional, default ``'lumped'``):
+
+           - ``'lumped'`` — the soil layer is a soft surface cover that absorbs **both** weathering-produced regolith **and** deposited sediment (fluvial, lake/pit, marine). This is the historical behaviour (unchanged).
+           - ``'regolith'`` — the soil layer is the **weathering-produced regolith only**; deposited sediment is instead kept in the stratigraphy, where freshly deposited layers are given a soft erodibility (``stratK = soilK/K``, i.e. fresh sediment erodes like soil). Underwater (marine or ponded lake) there is no soil, and under ice the regolith is frozen (preserved).
+
+        .. important::
+
+            ``mode: 'regolith'`` needs **stratigraphic recording turned on** so the deposited
+            sediment has somewhere to live — i.e. a stratal time step ``strat`` in the
+            ``time`` block (which sets the number of stratigraphic layers). No ``strata:``
+            block is required (that is only for *initial* layers). Without a ``strat`` time
+            step goSPL prints a warning and freshly deposited sediment erodes at bedrock
+            erodibility.
 
         Then the user can specify the initial soil thickness if any by setting **either**:
 

@@ -630,6 +630,15 @@ class ReadYaml(object):
             self.Sperc = soilDict.get("bedrockConv", 0.0001)
             # initial soil thickness
             self.cstSoilH = soilDict.get("uniform", 1.0)
+            # soil accounting mode (DESIGN_SOIL_REGOLITH.md Option 2.5 step 2):
+            #   "lumped"   (default) -> Lsoil is a soft cover that also absorbs
+            #                           deposited sediment (legacy behaviour;
+            #                           byte-identical to pre-step-2 runs).
+            #   "regolith"           -> Lsoil is the WEATHERING-produced regolith
+            #                           only; deposited sediment lives in the
+            #                           stratigraphy (its erodibility via stratK),
+            #                           not in Lsoil.
+            self.regolithSoil = str(soilDict.get("mode", "lumped")).lower() == "regolith"
             # TODO-REFACTOR: complex except, needs manual review (except sets BOTH local soilfile and self.soilFile)
             try:
                 soilfile = soilDict["soilMap"]
@@ -686,6 +695,7 @@ class ReadYaml(object):
 
         except KeyError:
             self.cptSoil = False
+            self.regolithSoil = False
             self.Ksoil = 0.0
             self.P0 = 0.0
             self.Hs = 0.0

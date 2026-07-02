@@ -1044,7 +1044,9 @@ class SEDMesh(object):
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        # Update soil thickness
+        # Update soil thickness (both modes — updateSoilThickness applies the
+        # subaqueous/ice gates; in regolith mode it skips the deposition increment
+        # since pit/lake infill is stratigraphy, not soil). DESIGN_SOIL_REGOLITH.md §5.
         if self.cptSoil:
             self.updateSoilThickness()
 
