@@ -9,7 +9,7 @@ import numpy_indexed as npi
 from mpi4py import MPI
 from time import process_time
 
-from gospl.tools.constants import BEDROCK_EXPOSED
+from gospl.tools.constants import BEDROCK_EXPOSED, ICE_COVER_MIN
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import fctcoeff
@@ -362,6 +362,10 @@ class soilSPL(object):
         nHsoil[nHsoil < BEDROCK_EXPOSED] = 0.
         # Limit soil thickness
         nHsoil[nHsoil > self.soil_transition] = self.soil_transition
+        # Ice-covered land: freeze the regolith inert (preserve the prior column,
+        # no production). Applied LAST so the preserved value is not re-clipped.
+        ice = self._iceFrozenMask(self.hOldArray)
+        nHsoil[ice] = self.Lsoil.getArray()[ice]
         self.Lsoil.setArray(nHsoil)
         self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
@@ -438,6 +442,31 @@ class soilSPL(object):
             sub |= (pitIDs > -1) & (lFill > hl)
         return sub
 
+    def _iceFrozenMask(self, hl):
+        """
+        Boolean mask (``lpoints``) of ice-covered LAND where soil is held **frozen
+        inert** — the pre-existing regolith is *preserved* (not zeroed) and no new
+        pedogenic soil is produced, since subaerial weathering does not operate
+        beneath ice (frozen, insulated from the atmosphere, no biota / rain
+        infiltration). This differs from the subaqueous case (marine / ponded lake),
+        where soil is held at 0: ice can preserve a buried regolith for a long time,
+        so glaciation freezes the soil column rather than removing it. Glacial
+        erosion / till are handled separately by the ice model.
+
+        Ice-covered ⇔ ``iceOn`` and ``iceHL > ICE_COVER_MIN``, restricted to LAND
+        (subaqueous cells are excluded — an ice shelf over sea/lake stays a
+        subaqueous, soil-free cell). Purely local; empty when ice is off.
+        """
+        ice = np.zeros(self.lpoints, dtype=bool)
+        if not getattr(self, "iceOn", False):
+            return ice
+        iceHL = getattr(self, "iceHL", None)
+        if iceHL is None:
+            return ice
+        ice = iceHL.getArray() > ICE_COVER_MIN
+        ice &= ~self._subaqueousMask(hl)          # subaqueous (zero) wins over ice
+        return ice
+
     def updateSoilThickness(self):
         """
         Updates soil thickness through time.
@@ -451,14 +480,21 @@ class soilSPL(object):
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
-        nHsoil = self.Lsoil.getArray() + self.tmpL.getArray()
+        prevL = self.Lsoil.getArray().copy()
+        nHsoil = prevL + self.tmpL.getArray()
 
+        hl = self.hLocal.getArray()
         # No subaerial soil under standing water (marine or ponded lake).
-        nHsoil[self._subaqueousMask(self.hLocal.getArray())] = 0.0
+        nHsoil[self._subaqueousMask(hl)] = 0.0
 
         # Limit soil thickness
         nHsoil[nHsoil < 0.] = 0.
         nHsoil[nHsoil > self.soil_transition] = self.soil_transition
+
+        # Ice-covered land: freeze the regolith inert (no deposition-into-soil
+        # increment under ice — glacial till is tracked by the stratigraphy).
+        ice = self._iceFrozenMask(hl)
+        nHsoil[ice] = prevL[ice]
 
         self.Lsoil.setArray(nHsoil)
         self.dm.localToGlobal(self.Lsoil, self.Gsoil)

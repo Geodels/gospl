@@ -496,10 +496,12 @@ def test_soil_subaerial_gate(minimal_ice_soil_model):
     next fluvial solve wiped, at `seaID` only — continental lakes kept a spurious
     cover). See `DESIGN_SOIL_REGOLITH.md` §3/§5.
 
-    Two-part guard: (a) end-to-end, no soil survives on marine (`seaID`) nodes after
-    a full run; (b) a deterministic unit check that a *ponded continental* cell is
-    flagged subaqueous (independent of whether the fixture has natural lakes) while
-    a non-pit / non-ponded cell is not.
+    Three-part guard: (a) end-to-end, no soil survives on marine (`seaID`) nodes
+    after a full run; (b) a deterministic unit check that a *ponded continental*
+    cell is flagged subaqueous (independent of whether the fixture has natural
+    lakes) while a non-pit / non-ponded cell is not; (c) ice-covered land is
+    **frozen inert** — a soil increment does not change it, and it is preserved
+    (not zeroed, unlike the subaqueous case).
     """
     from mpi4py import MPI
 
@@ -537,6 +539,34 @@ def test_soil_subaerial_gate(minimal_ice_soil_model):
             )
     finally:
         m.pitIDs[:], m.lFill[:] = pit_save, fill_save
+
+    # (c) ice-freeze gate — cover one land cell with ice, apply a uniform +0.5 m
+    # soil increment, and confirm the ice cell is preserved unchanged (frozen
+    # inert) while a non-ice land cell takes the increment. Distinguishes freeze
+    # (preserve) from the subaqueous zero.
+    assert getattr(m, "iceOn", False), "fixture is not ice-enabled"
+    hl = m.hLocal.getArray()
+    land_idx = np.where(~m._subaqueousMask(hl))[0]
+    assert len(land_idx) >= 2, "need >=2 subaerial land cells to exercise (c)"
+    L0 = m.Lsoil.getArray().copy()
+    ice_save = m.iceHL.getArray().copy()
+    try:
+        j = int(land_idx[0])                            # will be ice-covered
+        L0[j] = max(L0[j], 0.3)                         # ensure a nonzero column to preserve
+        m.Lsoil.setArray(L0)
+        m.iceHL.setArray(np.where(np.arange(m.lpoints) == j, 1.0, 0.0))
+        m.tmp.set(0.5)                                  # +0.5 m soil increment everywhere
+        m.updateSoilThickness()
+        L1 = m.Lsoil.getArray()
+        assert np.isclose(L1[j], L0[j]), "soil under ice not frozen (changed)"
+        assert L1[j] > 0.0, "frozen ice soil was zeroed (should be preserved)"
+        k = int(land_idx[1])                            # non-ice land cell (if not subaqueous)
+        if not m._subaqueousMask(hl)[k]:
+            assert L1[k] >= L0[k], "non-ice land soil should not lose the increment"
+    finally:
+        m.iceHL.setArray(ice_save)
+        m.Lsoil.setArray(L0)
+        m.dm.localToGlobal(m.Lsoil, m.Gsoil)
 
 
 def test_ice_lateral_erosion(minimal_ice_dual_model):

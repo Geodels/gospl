@@ -119,6 +119,11 @@ transport is handled by `seaplex`).
 - **Hillslope?** This is where soil coupling should be **strengthened**: creep is soil
   transport, so diffusivity should be soil-dependent, the flux soil-conserving, and
   creep should shut off / go bedrock-limited where soil is stripped.
+- **Soil under ice?** No subaerial *production* under ice (frozen, insulated, no biota /
+  rain infiltration), but — unlike underwater — the existing regolith is **preserved
+  (frozen inert)**, not zeroed: cold-based ice can keep a buried regolith for Myr, so
+  glaciation freezes the column rather than removing it. Glacial erosion / till are handled
+  by the ice model (abrasion → `Eb`; till → stratigraphy). See "Under ice" below.
 
 ### The subaerial gate — when a sink is land (goSPL already provides it)
 goSPL represents a sink as a depression with **`lFill > hl`** (bed `hl` below the spill/
@@ -140,6 +145,28 @@ is gated **only** on `seaID`, so continental lakes are wrongly treated as subaer
 their fill dumped into `Lsoil`) — that is the gap Option 2 closes. (The water table in
 `DESIGN_WATERTABLE_DURICRUST.md` generalizes this to `h ≥ z` seepage — wetlands, near-surface
 table — but the first-order lake mask exists now.)
+
+### Under ice — frozen inert (DECIDED)
+Ice-covered land is neither subaerial nor subaqueous — it is a third state. Pedogenic soil
+production must be suppressed there (no subaerial weathering under ice), but the pre-existing
+regolith is **preserved, not zeroed** — the "**freeze inert**" rule (chosen over the
+subaqueous *zero* because cold-based ice can preserve a buried regolith for Myr). Glacial
+erosion and till are the ice model's job (`_glacialAbrasion` → `Eb`; `glacialTill` →
+`deposeStrat`/stratigraphy), so "what erodes/deposits under ice" is already handled — the only
+gap was pedogenic soil growing under ice.
+
+Implementation (shipped in step 1): `soilSPL._iceFrozenMask` = `iceOn` and
+`iceHL > ICE_COVER_MIN` (`1e-2 m`, `constants.py`), restricted to LAND (subaqueous wins on
+overlap — an ice shelf over sea/lake stays a soil-free subaqueous cell). Both `Lsoil`
+write-backs (`_solveSoil`, `updateSoilThickness`) hold the ice column at its prior value
+(no production, no deposition-into-soil increment). Deglaciation (mask clears) resumes normal
+evolution from the preserved column. Duricrust formation (a subaerial weathering process) will
+reuse the same exposed-land gate — no induration under ice.
+
+**Refinement (open):** the freeze is a blanket rule; warm-based (fast, erosive) ice actually
+strips regolith while cold-based (slow) ice preserves it. The diagnostic ice model carries
+basal velocity (`iceUbL`), so a future refinement could strip under fast ice and freeze under
+slow ice. Deferred — the blanket freeze is the conservative first choice.
 
 ---
 
