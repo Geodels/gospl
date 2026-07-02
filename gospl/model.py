@@ -399,6 +399,13 @@ class Model(
                 with self.profiler.phase("flow"), self._phase("flow"):
                     _FAMesh.flowAccumulation(self)
 
+                # Groundwater (water table) + duricrust (opt-in). After
+                # flowAccumulation (needs seaID / drainage) and before erosion
+                # (which will read the duricrust K-armoring). No-op when gwOn off.
+                if self.gwOn:
+                    with self.profiler.phase("groundwater"), self._phase("groundwater"):
+                        _GWMesh.updateGroundwater(self)
+
                 # Perform River Incision/Deposition based on Stream Power Law (different flavors)
                 with self.profiler.phase("erosion"), self._phase("erosion"):
                     if self.cptSoil:

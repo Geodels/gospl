@@ -2085,7 +2085,16 @@ class ReadYaml(object):
             self.gwAquiferBase = gwDict.get("aquifer_base", 50.0)
             self.gwBedrockDepth = float(gwDict.get("bedrock_depth", 0.0))
             self.gwMinSatThick = float(gwDict.get("min_sat_thickness", 1.0))
-            self.gwInfiltration = float(gwDict.get("infiltration", 0.3))  # f_infil
+            # Infiltration fraction f_infil: a scalar, OR a per-vertex map
+            # ``[file, key]`` (loaded in _GWMesh, which has locIDs). Physically it
+            # varies with lithology / regolith / slope; see DESIGN §6.
+            infil = gwDict.get("infiltration", 0.3)
+            if isinstance(infil, (list, tuple)):
+                self._gwInfilMap = tuple(infil)
+                self.gwInfiltration = None
+            else:
+                self._gwInfilMap = None
+                self.gwInfiltration = float(infil)
             self.gwConserveBaseflow = bool(gwDict.get("conserve_baseflow", True))
             self.gwPicardIts = int(gwDict.get("picard_its", 3))
             self.gwSeepagePasses = int(gwDict.get("seepage_passes", 4))
@@ -2121,6 +2130,7 @@ class ReadYaml(object):
             self.gwBedrockDepth = 0.0
             self.gwMinSatThick = 1.0
             self.gwInfiltration = 0.3
+            self._gwInfilMap = None
             self.gwConserveBaseflow = True
             self.gwPicardIts = 3
             self.gwSeepagePasses = 4

@@ -726,6 +726,89 @@ def test_groundwater_opt_in(minimal_model):
         B.destroy()
 
 
+def test_groundwater_recharge():
+    """
+    Protects (water-table + duricrust, **Phase 1** — DESIGN_WATERTABLE_DURICRUST.md
+    §3): net recharge `R = f_infil · max(0, rain − evap)` (m/yr), held at 0 where
+    the surface is not subaerial land — marine `seaID`, ponded continental lake,
+    **or ice-covered** (rain doesn't infiltrate under ice). `f_infil` may be a
+    scalar OR a per-vertex field. Verified by calling `updateGroundwater` directly
+    so the mask matches the computation exactly.
+    """
+    import os
+    from gospl.model import Model
+    from gospl.tools.constants import ICE_COVER_MIN
+
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, "minimal_gw.yml")):
+        pytest.skip("minimal_gw.yml fixture not present")
+    cwd = os.getcwd()
+    os.chdir(fx)
+    try:
+        m = Model("minimal_gw.yml", verbose=False, showlog=False)
+    finally:
+        os.chdir(cwd)
+
+    try:
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()                      # populate rain / seaID / drainage
+        hl = m.hLocal.getArray()
+        rain = m.rainVal
+
+        def water_sub():
+            """marine + ponded-lake mask on the current state (no ice)."""
+            s = np.zeros(m.lpoints, dtype=bool)
+            s[m.seaID] = True
+            if getattr(m, "pitIDs", None) is not None and getattr(m, "lFill", None) is not None:
+                s |= (m.pitIDs > -1) & (m.lFill > hl)
+            return s
+
+        # (humid, scalar f) R = f·max(0, rain−evap) with the under-water zeroing.
+        m.updateGroundwater()
+        R = m.rechargeL.getArray()
+        exp = np.where(water_sub(), 0.0, m.gwInfiltration * np.maximum(0.0, rain))
+        assert np.allclose(R, exp), "recharge != f·max(0, rain−evap) (gated)"
+        assert (R[m.seaID] == 0.0).all(), "recharge left on submarine nodes"
+        assert (R >= 0.0).all() and np.isfinite(R).all()
+        assert R.max() > 0.0, "no recharge anywhere — test not exercised"
+
+        # (spatial infiltration) a per-vertex f field must be honoured node-wise.
+        f0 = m.gwInfiltration
+        f_arr = np.linspace(0.1, 0.6, m.lpoints)
+        m.gwInfiltration = f_arr
+        m.updateGroundwater()
+        Rs = m.rechargeL.getArray()
+        exps = np.where(water_sub(), 0.0, f_arr * np.maximum(0.0, rain))
+        assert np.allclose(Rs, exps), "per-vertex infiltration field not honoured"
+        m.gwInfiltration = f0
+
+        # (ice gate) ice-covered land gets no rain-recharge. Synthesise an ice
+        # cover on a few subaerial cells (minimal_gw has no ice block).
+        land = np.where(~water_sub())[0]
+        assert len(land) >= 3, "need subaerial land to exercise the ice gate"
+        icecells = land[:3]
+        m.iceOn = True
+        m.iceHL = m.hLocal.duplicate()
+        icearr = np.zeros(m.lpoints, dtype=np.float64)
+        icearr[icecells] = 10.0 * ICE_COVER_MIN
+        m.iceHL.setArray(icearr)
+        try:
+            m.updateGroundwater()
+            assert (m.rechargeL.getArray()[icecells] == 0.0).all(), (
+                "ice-covered land received rain-recharge"
+            )
+        finally:
+            m.iceHL.destroy()
+            m.iceOn = False
+
+        # (arid) evap > rain everywhere ⇒ net < 0 ⇒ no recharge at all.
+        m.evapVal = np.full(m.lpoints, float(rain.max()) + 1.0)
+        m.updateGroundwater()
+        assert (m.rechargeL.getArray() == 0.0).all(), "recharge should be 0 when evap > rain"
+    finally:
+        m.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

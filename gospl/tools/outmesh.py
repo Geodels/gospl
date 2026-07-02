@@ -423,6 +423,15 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["soilH"][:, 0] = self.Lsoil.getArray().copy()
+            if getattr(self, "gwOn", False):
+                # Net groundwater recharge (m/yr) — the water-table source term.
+                f.create_dataset(
+                    "recharge",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["recharge"][:, 0] = self.rechargeL.getArray().copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -784,6 +793,16 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/soilH</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+            if getattr(self, "gwOn", False):
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="recharge">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/recharge</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

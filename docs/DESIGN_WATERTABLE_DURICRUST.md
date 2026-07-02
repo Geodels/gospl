@@ -95,8 +95,13 @@ groundwater sets the armoring state that erosion then reads.
 `updateGroundwater()`:
 
 1. **Recharge.** `R = f_infil · max(0, rainVal − evapVal)` (m/yr), per node, from the
-   existing forcing arrays. `seaID` and closed-lake interiors get `R = 0` (their head
-   is pinned; see step 3). `f_infil` may be a scalar, per-lithology, or a map.
+   existing forcing arrays. `R = 0` where the surface is **not subaerial land**: `seaID` and
+   ponded continental lakes (head pinned; see step 3) **and ice-covered land** (`iceHL >
+   ICE_COVER_MIN` — rain falls as snow/ice and does not infiltrate the ground; parallels the
+   soil ice-freeze gate. Subglacial-meltwater recharge, via the ice model's `iceMeltRiverL`, is
+   a future refinement). `f_infil` may be a **scalar or a per-vertex map** `[file, key]`
+   (loaded in `_GWMesh`; physically varies with lithology / regolith / slope) — per-lithology
+   coupling (to dual-lithology `fc`/`ff` or slope) is a later opt-in.
 2. **Seepage set.** Nodes where the table is pinned to the surface: rivers/lakes
    (drainage-connected, from the flow graph) + coast/sea (`seaID`) + open boundary
    outlets (`outletIDs`). Dirichlet `h = z` there (partition-invariant — derived from
@@ -611,9 +616,9 @@ partition-safe; the design adds no new collective-gating hazards.
 
 | Phase | Deliverable | Guard test |
 |---|---|---|
-| −1 | **Prerequisite (soil):** Option-2.5 consistency fixes — subaerial lake/sea gate + submarine coherence (`DESIGN_SOIL_REGOLITH.md` §5). Stands alone; de-risks the duricrust coupling | `test_soil_subaerial_gate` (no soil under ponded/marine cells) |
-| 0 | `_readGroundwater`/`_extraGroundwater` parser + `gwOn` flag + state alloc + `destroy_DMPlex` | `test_groundwater_opt_in` (bitwise off) |
-| 1 | Recharge `R = f·(rain−evap)` from existing forcing; `recharge` output | `test_groundwater_recharge` (arid⇒0, humid⇒f·(P−E)) |
+| −1 | **DONE (soil PR #482).** Option-2.5 consistency fixes — subaerial lake/sea gate + submarine coherence + ice freeze-inert (`DESIGN_SOIL_REGOLITH.md` §5). | `test_soil_subaerial_gate` |
+| 0 | **DONE.** `_readGroundwater` parser + `gwOn`/`duriOn` flags + `_GWMesh` state alloc (head/duriH/recharge/baseflow Vecs, per-node state, cached `_gwMat`/`_ksp_gw`) + `destroy_DMPlex`; init after `_FAMesh`. | `test_groundwater_opt_in` (off ⇒ inert; on ⇒ state + head seeded) |
+| 1 | **DONE.** Recharge `R = f·max(0, rain−evap)` from existing forcing, zeroed under **water AND ice** (§3); `f_infil` scalar **or** per-vertex map; `recharge` output. | `test_groundwater_recharge` (humid⇒f·(P−E); arid⇒0; under-water/ice⇒0; per-vertex f honoured) |
 | 2 | Implicit head solve (`_solveHead`): Picard `T(h)` + seepage clip, cached `gw_` KSP; `wtable`/`wtdepth` outputs | `test_watertable_solve` (analytic Dupuit hillslope; np=1-vs-2) |
 | 3 | Duricrust ODE (`_updateDuricrust`): fringe Φ, supply Ψ (proxy default; opt-in Level-A explicit-rate `W` via `weathering:`, §3a), formation + breakdown; `duricrust`/`induration` outputs | `test_duricrust_forms_at_fringe`; `test_duricrust_soilfree` (forms with `cptSoil=False`); `test_duricrust_weathering_rate` (Level-A rate responds to `R`) |
 | 4 | Armor hook `_surfaceArmoringK` into `_surfaceLithoK`; relief-inversion behaviour | `test_duricrust_armors_K` (indurated cell erodes ≪ bare) |
