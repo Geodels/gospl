@@ -448,6 +448,22 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["wtdepth"][:, 0] = self.wtDepth.copy()
+                if getattr(self, "duriOn", False):
+                    # Duricrust thickness (m) and induration degree (0..1).
+                    f.create_dataset(
+                        "duricrust",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["duricrust"][:, 0] = self.duriHL.getArray().copy()
+                    f.create_dataset(
+                        "induration",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["induration"][:, 0] = self.duriF.copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -813,7 +829,10 @@ class WriteMesh(object):
                 f.write("         </Attribute>\n")
 
             if getattr(self, "gwOn", False):
-                for _gwname in ("recharge", "wtable", "wtdepth"):
+                _gwnames = ["recharge", "wtable", "wtdepth"]
+                if getattr(self, "duriOn", False):
+                    _gwnames += ["duricrust", "induration"]
+                for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'
                         % _gwname

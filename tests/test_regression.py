@@ -1002,6 +1002,132 @@ def test_watertable_steady():
         m.destroy()
 
 
+def _gw_model(fixture):
+    """Load a groundwater fixture from tests/fixtures (skip if absent)."""
+    import os
+    from gospl.model import Model
+
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, fixture)):
+        pytest.skip(f"{fixture} fixture not present")
+    cwd = os.getcwd()
+    os.chdir(fx)
+    try:
+        return Model(fixture, verbose=False, showlog=False)
+    finally:
+        os.chdir(cwd)
+
+
+def test_duricrust_forms_at_fringe():
+    """
+    Protects (water-table + duricrust, **Phase 3** — DESIGN_WATERTABLE_DURICRUST.md
+    §3 step 5): the capillary-fringe duricrust forms **selectively at the fringe**.
+    With a synthetic water-table depth, `_updateDuricrust` must grow `duriH` where
+    `wt ≈ fringe_depth` (Gaussian favourability `Φ→1`) and leave it ~0 where the
+    table is far from the fringe (`Φ→0`); the induration `duriF = duriH/duriH_max`
+    stays in [0,1] and drives `duriKarmor = 1 − armor_max·duriF`.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert m.duriOn, "expected duricrust on"
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()                       # populate rain / drainage
+
+        z = m.hLocal.getArray()
+        m.gwZlast = z.copy()                   # zero the incision term
+        n = m.lpoints
+        # Synthetic water table: most nodes far from the fringe (Φ≈0); a subset
+        # sitting exactly at the fringe depth (Φ=1).
+        m.wtDepth = np.full(n, 50.0)
+        fringe = np.arange(0, n, 7)
+        m.wtDepth[fringe] = m.duriFringeDepth
+        far = np.setdiff1d(np.arange(n), fringe)
+        m.duriHL.set(0.0)
+
+        for _ in range(200):
+            m._updateDuricrust()
+
+        duriH = m.duriHL.getArray()
+        assert np.isfinite(duriH).all()
+        assert (duriH >= 0.0).all() and (duriH <= m.duriMaxThick + 1e-9).all()
+        # Crust grows at the fringe, essentially none far from it.
+        assert duriH[fringe].min() > 0.0, "no crust formed at the fringe"
+        assert duriH[far].max() < 0.01 * duriH[fringe].mean(), (
+            "crust formed away from the capillary fringe"
+        )
+        # Induration + armor multiplier are consistent and in range.
+        assert np.allclose(m.duriF, duriH / m.duriMaxThick)
+        assert (m.duriF >= 0.0).all() and (m.duriF <= 1.0).all()
+        assert np.allclose(m.duriKarmor, 1.0 - m.duriArmorMax * m.duriF)
+        assert (m.duriKarmor <= 1.0).all() and (m.duriKarmor > 0.0).all()
+    finally:
+        m.destroy()
+
+
+def test_duricrust_soilfree():
+    """
+    Protects (Phase 3): the duricrust ships **soil-independent** — it forms on a
+    groundwater run with NO `soil:` block (`cptSoil` False). The default proxy
+    weathering supply `Ψ = max(0, rain−evap)^p` needs no regolith, so the fringe
+    crust must still grow.
+    """
+    m = _gw_model("minimal_gw_nosoil.yml")
+    try:
+        assert m.duriOn and not getattr(m, "cptSoil", False), (
+            "fixture must be groundwater+duricrust with soil OFF"
+        )
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+
+        z = m.hLocal.getArray()
+        m.gwZlast = z.copy()
+        m.wtDepth = np.full(m.lpoints, m.duriFringeDepth)   # all at the fringe
+        m.duriHL.set(0.0)
+        for _ in range(200):
+            m._updateDuricrust()
+
+        duriH = m.duriHL.getArray()
+        assert np.isfinite(duriH).all()
+        assert duriH.max() > 0.0, "no duricrust formed on a soil-free run"
+    finally:
+        m.destroy()
+
+
+def test_duricrust_weathering_rate():
+    """
+    Protects (Phase 3, §3a Level A): the explicit `weathering: mode: rate`
+    (Maher–Chamberlain) supply `W = R·C_eq·(1 − exp(−Dw/(R·L)))·…` **responds to
+    the recharge `R`** the head solve computes — a monotone, finite increase with
+    `R` (the control the climate proxy lacks), and `W=0` where `R=0`.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        # Switch the supply to the Level-A explicit rate.
+        m.duriWeatherMode = "rate"
+        m.duriWeatherCeq = 1.0
+        m.duriWeatherDw = 1.0
+        m.duriWeatherL = 20.0
+        m.duriWeatherEa = 0.0
+        m.duriWeatherability = 1.0
+        m.prodSoil = None                      # disable the regolith cap for the test
+        n = m.lpoints
+
+        def W_for(rval):
+            m.rechargeL.setArray(np.full(n, rval, dtype=float))
+            return m._weatheringSupply()
+
+        W0 = W_for(0.0)
+        W_lo = W_for(0.05)
+        W_hi = W_for(0.5)
+
+        assert np.isfinite(W_lo).all() and np.isfinite(W_hi).all()
+        assert (W0 == 0.0).all(), "W must be 0 where recharge is 0"
+        assert (W_lo > 0.0).all(), "no weathering at positive recharge"
+        assert (W_hi > W_lo).all(), "W must increase with recharge R"
+    finally:
+        m.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

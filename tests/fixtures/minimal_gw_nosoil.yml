@@ -1,0 +1,52 @@
+name: minimal water-table + duricrust WITHOUT soil (groundwater soil-free)
+
+# Opt-in groundwater (water table) + generic duricrust with NO `soil:` block —
+# proves the duricrust ships soil-INDEPENDENT (proxy weathering supply needs no
+# regolith). Same shared mesh as minimal_gw.yml. Stratigraphy off (no `strat:`),
+# so this is also the byte-identical-when-off control for the soil coupling.
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 40
+    tout: 20
+    dt: 10.
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 1.0
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+groundwater:
+    Ksat: 3.65e4
+    specific_yield: 0.1
+    aquifer_base: 50.0
+    infiltration: 0.02
+    conserve_baseflow: True
+    duricrust:
+        form_rate: 1.0e-4
+        max_thickness: 5.0
+        fringe_depth: 3.0
+        fringe_width: 2.0
+        armor_max: 0.9
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'gw_nosoil_out'

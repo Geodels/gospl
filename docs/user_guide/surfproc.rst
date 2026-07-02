@@ -421,7 +421,10 @@ Soil production, erosion, transport and deposition
                 decayDepth: 0.7
                 bedrockConv: 0.0001
                 uniform: 0.5
-                map: ['test_mesh8/hsoil', 'soil']
+                soilMap: ['test_mesh8/hsoil', 'soil']
+                tempMap: ['test_mesh8/temperature', 'temp']
+                activation: 40.e3
+                tempRef: 15.0
 
         a. ``soilK`` is the erodibility coefficient for soil,
         b. ``maxProd`` is the soil production maximum rate (m/yr),
@@ -445,23 +448,31 @@ Soil production, erosion, transport and deposition
 
         Then the user can specify the initial soil thickness if any by setting **either**:
 
-        g. ``uniform`` a uniform soil thickness on the entire surface (m),
+        h. ``uniform`` a uniform soil thickness on the entire surface (m),
 
         **or**:
 
-        h. ``map`` a soil thickness map. 
+        i. ``soilMap`` a soil thickness map given as ``[file, key]``.
 
         .. important::
 
-            When defining a soil thickness grid, one needs to use the **npz** format and needs to specify the key corresponding to the soil thickness value in the file. In the above example this key is ``'soil'``. The soil grid needs to define values for all vertices in the mesh in metres.
+            When defining a soil thickness grid, one needs to use the **npz** format and needs to specify the key corresponding to the soil thickness value in the file. In the ``soilMap`` example above the file is ``test_mesh8/hsoil.npz`` and this key is ``'soil'``. The soil grid needs to define values for all vertices in the mesh in metres.
+
+        Soil production can optionally be made **temperature-dependent** via an
+        Arrhenius scaling of ``maxProd`` (warmer ⇒ faster weathering). This is
+        activated by supplying an annual-mean surface-temperature map:
+
+        j. ``tempMap`` a temperature map given as ``[file, key]`` — an **npz** file whose ``key`` holds the annual-mean surface temperature (in **degrees Celsius**) at every mesh vertex. When present, the production rate becomes ``maxProd * exp( Ea/Rg * (1/T_ref - 1/T) )`` (temperatures internally converted to Kelvin; ``Rg = 8.314`` J/mol/K). When omitted, production uses the constant ``maxProd`` everywhere.
+        k. ``activation`` the Arrhenius activation energy ``Ea`` (J/mol, optional, default ``40.e3``); only used when ``tempMap`` is set.
+        l. ``tempRef`` the reference temperature (degrees Celsius, optional, default ``15.0``) at which the production rate equals ``maxProd``; only used when ``tempMap`` is set.
 
         The soil-aware non-linear SPL is solved with a PETSc ``SNES``. Its
         behaviour can be tuned (all optional) with:
 
-        i. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
-        j. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
-        k. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
-        l. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+        m. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
+        n. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
+        o. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
+        p. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
 
         .. tip::
 

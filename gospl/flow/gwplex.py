@@ -90,6 +90,14 @@ class GWMesh(object):
             self.duriF = np.zeros(self.lpoints, dtype=np.float64)       # induration 0..1
             self.duriKarmor = np.ones(self.lpoints, dtype=np.float64)   # K multiplier (<=1)
             self.gwSeepIDs = np.zeros(0, dtype=np.int64)                # Dirichlet seepage nodes
+            # Surface at the previous groundwater update — the duricrust breakdown
+            # term reads the per-step incision (z_last − z > 0 = surface lowered).
+            self.gwZlast = self.hLocal.getArray().copy()
+            # Cached local temperature (K) for the optional Arrhenius weathering
+            # term (loaded lazily from the soil tempMap when weather_Ea > 0), and
+            # a lazily-resolved per-vertex `weatherability` map (rate mode).
+            self._gwTempK = None
+            self._duriWeatherArr = None
 
             # Resolve a per-vertex infiltration map (done here — needs locIDs,
             # unavailable at parse time). `[file, key]` -> file + ".npz", subset
@@ -107,14 +115,18 @@ class GWMesh(object):
         """
         Per-step groundwater / duricrust update.
 
-        **Phase 1:** net recharge only — ``R = f_infil * max(0, rain - evap)``
-        (m/yr), held at 0 under standing water (marine ``seaID`` or a ponded
-        continental lake ``pitIDs>-1 & lFill>hl``), where the water table is
-        pinned to the surface. Stored in ``self.rechargeL`` for output. The
-        implicit head solve, duricrust ODE and K-armoring are added in later
-        phases — nothing consumes the recharge yet.
+        1. **Recharge** ``R = f_infil * max(0, rain - evap)`` (m/yr), held at 0
+           under standing water (marine ``seaID`` or a ponded continental lake
+           ``pitIDs>-1 & lFill>hl``) and under ice, where rain does not infiltrate.
+           Stored in ``self.rechargeL`` for output.
+        2. **Head solve** (``_solveHead``): the implicit Dupuit-Boussinesq water
+           table from that recharge; sets ``self.wtDepth = z - h``.
+        3. **Duricrust** (``_updateDuricrust``, only when ``duriOn``): evolve the
+           capillary-fringe crust ``duriH`` and the induration ``duriF`` / armor
+           multiplier ``duriKarmor`` from the new water-table depth.
 
-        No-op when ``gwOn`` is off. Purely local (per-node) — no collective.
+        No-op when ``gwOn`` is off. The head solve is collective (KSP); the
+        recharge and duricrust steps are purely rank-local (per-node).
         """
         if not getattr(self, "gwOn", False):
             return
@@ -148,6 +160,10 @@ class GWMesh(object):
 
         # Phase 2: solve the implicit water-table head from this recharge.
         self._solveHead()
+
+        # Phase 3: evolve the capillary-fringe duricrust from the new water table.
+        if getattr(self, "duriOn", False):
+            self._updateDuricrust()
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -286,4 +302,137 @@ class GWMesh(object):
         self.headL.setArray(hloc)
         self.dm.localToGlobal(self.headL, self.headG)
         self.wtDepth = z - hloc
+        return
+
+    def _arrhenius(self):
+        r"""
+        Optional Arrhenius temperature factor for the weathering supply,
+        ``exp(Ea/Rg · (1/T_ref − 1/T))`` (dimensionless, 1 at ``T = T_ref``).
+
+        Returns ``1.0`` (no temperature dependence) when ``weather_Ea <= 0`` OR
+        no temperature map is available — so duricrust runs soil-free by default.
+        Reuses the soil ``tempMap`` (``self.tempFile``/``tempData``/``tempRef``)
+        when present; loaded once and cached. Rank-local.
+        """
+        if self.duriWeatherEa <= 0.0:
+            return 1.0
+        if self._gwTempK is None:
+            tempFile = getattr(self, "tempFile", None)
+            if tempFile is None:
+                if MPIrank == 0 and self.verbose:
+                    print(
+                        "[gw] duricrust weather_Ea > 0 but no soil tempMap — "
+                        "Arrhenius term disabled (factor 1).",
+                        flush=True,
+                    )
+                self.duriWeatherEa = 0.0          # don't retry every step
+                return 1.0
+            data = np.load(tempFile)
+            self._gwTempK = data[self.tempData][self.locIDs] + 273.15
+        Tref = getattr(self, "tempRef", 15.0) + 273.15
+        return np.exp(self.duriWeatherEa * (1.0 / Tref - 1.0 / self._gwTempK) / 8.314)
+
+    def _weatheringSupply(self):
+        r"""
+        Solute-supply rate ``Ψ`` feeding in-situ fringe precipitation
+        (DESIGN_WATERTABLE_DURICRUST.md §3a). Three modes (``duriWeatherMode``);
+        all plug in at the same place, so the formation ODE is mode-agnostic.
+        Supply-only (no mass debit) — see §3a Level-A caveat. Rank-local.
+
+        - **proxy** (default): ``Ψ = max(0, rain − evap)^p · arrhenius(T)`` — a
+          climate/temperature stand-in, no new inputs.
+        - **rate** (Level A): Maher-Chamberlain kinetic×thermodynamic law
+          ``W = R·C_eq·(1 − exp(−Dw/(R·L)))·arrhenius·weatherability`` driven by
+          the recharge ``R`` the head solve already computes; ``L = Lsoil`` when
+          ``soilSPL`` is on (capped by the regolith production supply), else the
+          prescribed ``path_length``.
+        - **prodsoil**: reuse the temperature-scaled ``soilSPL.prodSoil`` directly,
+          scaled by water availability (the chemical∝physical congruency). Falls
+          back to the proxy when soil is not tracked.
+        """
+        rain = self.rainVal
+        evap = getattr(self, "evapVal", None)
+        net = np.maximum(0.0, rain if evap is None else (rain - evap))
+        mode = self.duriWeatherMode
+
+        if mode == "rate":
+            R = self.rechargeL.getArray()
+            if getattr(self, "cptSoil", False) and getattr(self, "Lsoil", None) is not None:
+                L = np.maximum(self.Lsoil.getArray(), 1.0e-3)   # regolith residence length
+            else:
+                L = max(float(self.duriWeatherL), 1.0e-3)
+            # weatherability: scalar OR a lazily-resolved per-vertex map.
+            wab = self.duriWeatherability
+            if isinstance(wab, (list, tuple)):
+                if self._duriWeatherArr is None:
+                    d = np.load(wab[0] + ".npz")
+                    self._duriWeatherArr = d[wab[1]][self.locIDs].astype(np.float64)
+                wab = self._duriWeatherArr
+            else:
+                wab = float(wab)
+            # R→0 ⇒ Dw/(R·L)→∞ ⇒ frac→1 ⇒ W→0 (guard the divide).
+            with np.errstate(divide="ignore", invalid="ignore"):
+                frac = 1.0 - np.exp(-self.duriWeatherDw / (R * L))
+            W = np.where(R > 0.0, R * self.duriWeatherCeq * frac, 0.0) * wab
+            W = W * self._arrhenius()
+            prod = getattr(self, "prodSoil", None)
+            if prod is not None:                                 # regolith supply cap
+                W = np.minimum(W, prod * rain)
+            return W
+
+        if mode == "prodsoil":
+            prod = getattr(self, "prodSoil", None)
+            if prod is None:
+                if MPIrank == 0 and self.verbose:
+                    print(
+                        "[gw] duricrust weathering mode 'prodsoil' needs soil "
+                        "production — falling back to the climate proxy.",
+                        flush=True,
+                    )
+                self.duriWeatherMode = "proxy"
+            else:
+                return prod * net
+
+        # proxy (default / fallback)
+        return net ** float(self.duriSupplyExp) * self._arrhenius()
+
+    def _updateDuricrust(self):
+        r"""
+        Evolve the generic capillary-fringe duricrust over ``self.dt``
+        (DESIGN_WATERTABLE_DURICRUST.md §3, step 5). Per-node, rank-local — no
+        collective; ``localToGlobal`` on ``duriH`` at the end for the halo.
+
+        - **Fringe favourability** ``Φ = exp(−((wt − d0)/w)²)`` — a Gaussian band
+          on the water-table depth ``wt = z − h`` centred on the mean fringe depth
+          ``d0`` (half-width ``w``); →1 at the fringe, →0 far above/below.
+        - **Formation** ``dduriH/dt = k_form·Φ·Ψ·(1 − duriH/duriH_max)``
+          (self-limiting to ``duriH_max``); ``Ψ`` from ``_weatheringSupply``.
+        - **Breakdown**: the per-step surface incision (``z_last − z > 0``) strips
+          the crust top (``−k_break·incision``), plus a slow disequilibrium decay
+          away from the fringe (``−k_decay·(1−Φ)·duriH``). Clipped to
+          ``[0, duriH_max]`` (a crust eroded through resets to 0).
+
+        Writes ``duriH`` (``duriHL``/``duriHG``), the induration ``duriF =
+        duriH/duriH_max`` and the armor multiplier ``duriKarmor = 1 −
+        armor_max·duriF`` (consumed by the Phase-4 erodibility hook).
+        """
+        z = self.hLocal.getArray()
+        wt = self.wtDepth                                        # z − h ≥ 0
+        Hmax = float(self.duriMaxThick)
+
+        Phi = np.exp(-(((wt - self.duriFringeDepth) / self.duriFringeWidth) ** 2))
+        Psi = self._weatheringSupply()
+
+        duriH = self.duriHL.getArray().copy()
+        duriH += self.dt * self.duriFormRate * Phi * Psi * (1.0 - duriH / Hmax)
+        incision = np.maximum(0.0, self.gwZlast - z)             # surface lowered
+        duriH -= self.duriBreakRate * incision
+        duriH -= self.dt * self.duriDecayRate * (1.0 - Phi) * duriH
+        duriH = np.clip(duriH, 0.0, Hmax)
+
+        self.duriHL.setArray(duriH)
+        self.dm.localToGlobal(self.duriHL, self.duriHG)
+        self.duriF = duriH / Hmax
+        self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
+        self.gwZlast = z.copy()
         return
