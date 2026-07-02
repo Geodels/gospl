@@ -486,6 +486,59 @@ def test_ice_soil_combined(minimal_ice_soil_model):
     assert np.isclose(dte, dtd, rtol=1.0e-9), "till solid eroded != deposited"
 
 
+def test_soil_subaerial_gate(minimal_ice_soil_model):
+    """
+    Protects: `Lsoil` is a **subaerial** regolith cover. `soilSPL._subaqueousMask`
+    flags marine nodes (`seaID`) AND ponded continental lakes (`pitIDs > -1` with
+    `lFill > hl`), and every `Lsoil` write-back (the soil solve + `updateSoilThickness`)
+    holds soil at 0 there. This is the coherent subaerial gate that replaced the
+    former marine-only add-then-zero (marine deposition added soil that only the
+    next fluvial solve wiped, at `seaID` only — continental lakes kept a spurious
+    cover). See `DESIGN_SOIL_REGOLITH.md` §3/§5.
+
+    Two-part guard: (a) end-to-end, no soil survives on marine (`seaID`) nodes after
+    a full run; (b) a deterministic unit check that a *ponded continental* cell is
+    flagged subaqueous (independent of whether the fixture has natural lakes) while
+    a non-pit / non-ponded cell is not.
+    """
+    from mpi4py import MPI
+
+    m = minimal_ice_soil_model
+    assert m.cptSoil
+    m.runProcesses()
+
+    soil = m.Lsoil.getArray()
+    assert np.isfinite(soil).all() and (soil >= -1.0e-9).all()
+
+    # (a) marine gate — seaID is stable across the step, so soil must be 0 there.
+    assert (soil[m.seaID] == 0.0).all(), "soil left on submarine (seaID) nodes"
+    assert MPI.COMM_WORLD.allreduce(len(m.seaID), op=MPI.SUM) > 0, (
+        "no marine nodes on the fixture — marine gate not exercised"
+    )
+
+    # (b) lake gate — force a synthetic ponded continental cell (a non-marine node
+    # made an in-pit cell whose fill/spill level sits above the bed) and confirm
+    # the mask flags it; a non-pit node at the same elevation must NOT be flagged.
+    hl = m.hLocal.getArray().copy()
+    pit_save, fill_save = m.pitIDs.copy(), m.lFill.copy()
+    try:
+        land = np.ones(m.lpoints, dtype=bool)
+        land[m.seaID] = False
+        idx = np.where(land)[0]
+        if len(idx) > 0:
+            j = int(idx[0])
+            m.pitIDs[j], m.lFill[j] = 0, hl[j] + 5.0   # ponded 5 m below spill
+            assert m._subaqueousMask(hl)[j], (
+                "ponded continental lake node not flagged subaqueous"
+            )
+            m.pitIDs[j] = -1                            # not in a pit anymore
+            assert not m._subaqueousMask(hl)[j], (
+                "non-pit continental node wrongly flagged subaqueous"
+            )
+    finally:
+        m.pitIDs[:], m.lFill[:] = pit_save, fill_save
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

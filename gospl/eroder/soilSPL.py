@@ -354,10 +354,11 @@ class soilSPL(object):
 
         # Update soil thicknesses
         nHsoil = self.nsoilH.copy()
-        # No subaerial soil production underwater: the soil-production term
-        # scales with rainfall (Norton et al. 2013), so without this mask the
-        # submarine nodes accumulate a spurious rainfall-scaled soil cover.
-        nHsoil[self.seaID] = 0.0
+        # No subaerial soil under standing water (marine seaID OR a ponded
+        # continental lake). Extends the former marine-only mask to lakes for a
+        # coherent subaerial gate — the rainfall-scaled production term would
+        # otherwise leave a spurious cover on submerged nodes.
+        nHsoil[self._subaqueousMask(self.hOldArray)] = 0.0
         nHsoil[nHsoil < BEDROCK_EXPOSED] = 0.
         # Limit soil thickness
         nHsoil[nHsoil > self.soil_transition] = self.soil_transition
@@ -411,13 +412,49 @@ class soilSPL(object):
 
         return
 
+    def _subaqueousMask(self, hl):
+        """
+        Boolean mask (``lpoints``) of **subaqueous** nodes — under standing water —
+        where subaerial soil is suppressed. ``self.Lsoil`` is a *subaerial* regolith
+        cover, so it is held at 0 on this mask; sediment deposited under water is
+        tracked by the stratigraphy, not as soil.
+
+        Two contributions:
+
+        - **marine** — ``self.seaID`` (filled level at/below sea level);
+        - **ponded continental lake** — a depression node (``pitIDs > -1``) whose
+          fill/spill level sits above the bed (``lFill > hl``), i.e. its
+          accommodation is still water-filled (a lake fills to its spillover
+          before emerging; see ``DESIGN_SOIL_REGOLITH.md`` §3).
+
+        Purely local (per-node) — no collective. Falls back to a marine-only mask
+        if the pit fields are not yet populated (bare ``STRAMesh.__new__`` stubs).
+        """
+        sub = np.zeros(self.lpoints, dtype=bool)
+        sub[self.seaID] = True
+        pitIDs = getattr(self, "pitIDs", None)
+        lFill = getattr(self, "lFill", None)
+        if pitIDs is not None and lFill is not None:
+            sub |= (pitIDs > -1) & (lFill > hl)
+        return sub
+
     def updateSoilThickness(self):
         """
         Updates soil thickness through time.
+
+        ``Lsoil`` is a **subaerial** regolith cover, so the depositional increment
+        is not retained at subaqueous nodes (marine or ponded lake) — see
+        ``_subaqueousMask``. This is the coherent replacement for the former
+        marine add-then-zero (deposition added soil that only the next fluvial
+        solve wiped, and only at ``seaID`` — continental lakes kept a spurious
+        cover).
         """
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
         nHsoil = self.Lsoil.getArray() + self.tmpL.getArray()
+
+        # No subaerial soil under standing water (marine or ponded lake).
+        nHsoil[self._subaqueousMask(self.hLocal.getArray())] = 0.0
 
         # Limit soil thickness
         nHsoil[nHsoil < 0.] = 0.
