@@ -1365,6 +1365,51 @@ def test_groundwater_dual_provenance_combo():
         m.destroy()
 
 
+def test_groundwater_restart(tmp_path, monkeypatch):
+    """
+    Protects (water-table + duricrust, **Phase 7 restart**): the water table
+    `head` and duricrust thickness `duriH` are model memory (they integrate over
+    My) and MUST survive restart. A run restarted from step 1 restores `headL`/
+    `duriHL` from the output HDF5 (and rebuilds `wtDepth`/`duriF`/`duriKarmor`),
+    matching the values written at that step.
+    """
+    import os
+    import shutil
+    from gospl.model import Model
+
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, "minimal_gw.yml")):
+        pytest.skip("minimal_gw.yml fixture not present")
+    monkeypatch.chdir(tmp_path)
+    for f in ("mesh.npz", "soiltemp.npz"):
+        shutil.copy(os.path.join(fx, f), tmp_path / f)
+    base = open(os.path.join(fx, "minimal_gw.yml")).read()
+    (tmp_path / "gw.yml").write_text(base)
+
+    # Full run, then read back head/duriH written at step 1.
+    m = Model("gw.yml", verbose=False, showlog=False)
+    m.runProcesses()
+    m.destroy()
+    import h5py
+
+    with h5py.File(tmp_path / "gw_out" / "h5" / "gospl.1.p0.h5", "r") as f:
+        h1 = np.array(f["wtable"])[:, 0].copy()
+        d1 = np.array(f["duricrust"])[:, 0].copy()
+
+    # Restart from step 1 and check the state was restored (not re-initialised).
+    (tmp_path / "gwr.yml").write_text(base.replace("start: 0.", "start: 0.\n    rstep: 1"))
+    mr = Model("gwr.yml", verbose=False, showlog=False)
+    try:
+        assert np.allclose(mr.headL.getArray(), h1, atol=1.0e-4), "head not restored"
+        assert np.allclose(mr.duriHL.getArray(), d1, atol=1.0e-6), "duriH not restored"
+        assert np.allclose(
+            mr.wtDepth, mr.hLocal.getArray() - mr.headL.getArray(), atol=1.0e-6
+        )
+        assert np.allclose(mr.duriKarmor, 1.0 - mr.duriArmorMax * mr.duriF)
+    finally:
+        mr.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall

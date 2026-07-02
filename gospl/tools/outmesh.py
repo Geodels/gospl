@@ -472,7 +472,8 @@ class WriteMesh(object):
                     )
                     f["baseflow"][:, 0] = self.baseflowL.getArray().copy()
                 if getattr(self, "duriOn", False):
-                    # Duricrust thickness (m) and induration degree (0..1).
+                    # Duricrust thickness (m), induration degree (0..1) and the
+                    # erodibility armoring multiplier Karmor = 1 - armor_max*duriF.
                     f.create_dataset(
                         "duricrust",
                         shape=(self.lpoints, 1),
@@ -487,6 +488,13 @@ class WriteMesh(object):
                         **self._h5opts,
                     )
                     f["induration"][:, 0] = self.duriF.copy()
+                    f.create_dataset(
+                        "Karmor",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["Karmor"][:, 0] = self.duriKarmor.copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -642,6 +650,22 @@ class WriteMesh(object):
                 else:
                     self.Lsoil.set(0.)
                 self.dm.localToGlobal(self.Lsoil, self.Gsoil)
+
+            # Groundwater / duricrust state is model memory (the water table and
+            # the crust integrate over My), so restore it like cumED/soilH. A run
+            # restarted from an output without these datasets falls back to the
+            # dry-start / uncemented init, so the restore stays robust.
+            if getattr(self, "gwOn", False):
+                if "/wtable" in hf:
+                    self.headL.setArray(np.array(hf["/wtable"])[:, 0])
+                    self.dm.localToGlobal(self.headL, self.headG)
+                    self.wtDepth = self.hLocal.getArray() - self.headL.getArray()
+                if getattr(self, "duriOn", False) and "/duricrust" in hf:
+                    self.duriHL.setArray(np.array(hf["/duricrust"])[:, 0])
+                    self.dm.localToGlobal(self.duriHL, self.duriHG)
+                    # Rebuild the induration / armor multiplier from duriH.
+                    self.duriF = self.duriHL.getArray() / float(self.duriMaxThick)
+                    self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
 
         if self.stratNb > 0 and self.stratStep > 0:
             h5file = (
@@ -862,7 +886,7 @@ class WriteMesh(object):
                 if getattr(self, "gwConserveBaseflow", False):
                     _gwnames += ["baseflow"]
                 if getattr(self, "duriOn", False):
-                    _gwnames += ["duricrust", "induration"]
+                    _gwnames += ["duricrust", "induration", "Karmor"]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

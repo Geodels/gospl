@@ -100,6 +100,12 @@ eroded / pinched-out layer (zero thickness, hence no source) inherits the
 ``dominant`` source and composition of the cell directly below it in the
 column, so it never renders as a no-source cell.
 
+When the run used the :ref:`groundwater / duricrust <surfproc>` feature, every
+field mode also attaches a per-layer ``induration`` (0–1) cell field — the
+archived diagenetic crust degree ``stratDuri`` — so a cross-section shows buried
+and exhumed duricrusts directly (no extra flag needed; absent for non-groundwater
+runs).
+
 Publication sections, wells & Wheeler — ``gospl-section``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

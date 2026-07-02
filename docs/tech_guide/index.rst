@@ -168,6 +168,22 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
 
             Learn more about provenance attribution.
 
+    .. grid-item-card::
+        :text-align: center
+
+        **Water table & duricrust**
+        ^^^
+
+        Implicit Dupuit–Boussinesq water table driving a generic capillary-fringe duricrust that armors erodibility — relief inversion, stacked/exhumed crusts, soil-coupled or standalone.
+
+        +++
+
+        .. button-ref:: groundwater
+            :color: secondary
+            :click-parent:
+
+            Learn more about the water table & duricrust.
+
 
 .. toctree::
     :maxdepth: 3
@@ -181,3 +197,4 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     tecto
     ice
     provenance
+    groundwater

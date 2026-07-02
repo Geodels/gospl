@@ -16,17 +16,42 @@ MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 class GWMesh(object):
     r"""
     Water table (groundwater) + generic duricrust — opt-in near-surface hydrology
-    and chemical armoring. See ``docs/DESIGN_WATERTABLE_DURICRUST.md``.
+    and chemical armoring. See ``docs/DESIGN_WATERTABLE_DURICRUST.md`` and the
+    technical guide ``docs/tech_guide/groundwater.rst``.
 
-    An implicit (backward-Euler) Dupuit-Boussinesq head solve on the DMPlex drives
-    a generic capillary-fringe duricrust that armors erodibility. Enabled by the
-    YAML ``groundwater:`` block (``self.gwOn``); when off, every path here is a
-    no-op and goSPL is byte-identical to a run without it.
+    Enabled by the YAML ``groundwater:`` block (``self.gwOn`` / ``self.duriOn``);
+    when absent, every path here is a no-op and goSPL is **byte-identical** to a
+    run without it. The whole update runs once per step in ``updateGroundwater``
+    (after flow accumulation, before erosion), so each process reads the previous
+    process's state — a slow, stable, explicit/sequential coupling.
 
-    **Phase 0 (this file so far):** state allocation only — the persistent Vecs,
-    the per-node numpy state and the cached-solver handles are created (gated on
-    ``gwOn``); the recharge, head solve, duricrust ODE and K-armoring land in
-    later phases. All new Vecs are registered in ``destroy_DMPlex``.
+    **Water table.** An implicit (backward-Euler) Dupuit-Boussinesq head solve on
+    the DMPlex (``_solveHead``): ``(I + (Δt/S)·L(T))·h = h_old + (Δt/S)·R`` with
+    transmissivity ``T = Ksat·max(h − z_bed, b_min)``, a seepage free boundary
+    (``h ≤ z`` at sea / lakes / open outlets) and a dry-aquifer floor
+    (``h ≥ z_bed``). ``z_bed`` is prescribed (``aquifer_base`` scalar/map) or tied
+    to the bedrock (``aquifer_base: from_soil`` ⇒ ``lHbed − bedrock_depth``).
+    Recharge ``R = f_infil·max(0, rain − evap)`` is zeroed under water and ice.
+    Opt-in baseflow closure returns the seepage discharge to the rivers
+    (``conserve_baseflow``).
+
+    **Duricrust.** A generic capillary-fringe crust (``_updateDuricrust``) grows
+    where the water-table depth sits in the fringe band (``Φ`` Gaussian on
+    ``wt = z − h``), fed by a weathering supply ``Ψ`` (climate proxy, an explicit
+    Maher-Chamberlain rate, or the soil-production congruency; regolith-limited
+    when soil is tracked). Its induration ``duriF ∈ [0,1]`` **armors erodibility**
+    through the single ``_surfaceArmoringK`` hook (``1 − armor_max·duriF``), which
+    slows erosion of crusted cells and drives relief inversion. When stratigraphy
+    is on, the induration is archived per layer (``stratDuri``) so buried crusts
+    are preserved and **re-arm on exhumation** (stacked-duricrust / cratonic
+    laterite behaviour).
+
+    **State & lifecycle.** Persistent Vecs (``headL/headG``, ``duriHL/duriHG``,
+    ``rechargeL``, ``baseflowL``) and the cached elliptic solver (``_ksp_gw``,
+    fgmres + hypre BoomerAMG) are registered in ``destroy_DMPlex``; ``head`` and
+    ``duriH`` are model memory written to / restored from the output HDF5 on
+    restart. Compatible with dual lithology and provenance (independent per-layer
+    fields; armoring composes at the shared K hook).
     """
 
     def __init__(self, *args, **kwargs):
@@ -37,7 +62,7 @@ class GWMesh(object):
         any ``getattr`` guards are safe.
         """
 
-        # Cached elliptic head solver + operator (built lazily in a later phase).
+        # Cached elliptic head solver + operator (built lazily on first solve).
         # Set unconditionally so destroy_DMPlex / guards never hit a missing attr.
         self._gwMat = None
         self._ksp_gw = None

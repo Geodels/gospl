@@ -1,0 +1,54 @@
+.. _gw_ref:
+
+
+==============
+Class GWMesh
+==============
+
+.. autoclass:: flow.gwplex.GWMesh
+
+   .. rubric:: Initialise
+
+   .. autosummary::
+
+      ~GWMesh.__init__
+
+   .. rubric:: Public Methods
+
+   .. autosummary::
+
+      ~GWMesh.updateGroundwater
+
+   .. rubric:: Private Methods
+
+   .. autosummary::
+
+      ~GWMesh._makeGWKSP
+      ~GWMesh._solveHead
+      ~GWMesh._gwZbed
+      ~GWMesh._baseflowClosure
+      ~GWMesh._arrhenius
+      ~GWMesh._weatheringSupply
+      ~GWMesh._updateDuricrust
+      ~GWMesh._regolithSupplyRate
+      ~GWMesh._recordInduration
+
+
+Public functions
+---------------------
+
+.. automethod:: flow.gwplex.GWMesh.updateGroundwater
+
+
+Private functions
+---------------------
+
+.. automethod:: flow.gwplex.GWMesh._makeGWKSP
+.. automethod:: flow.gwplex.GWMesh._solveHead
+.. automethod:: flow.gwplex.GWMesh._gwZbed
+.. automethod:: flow.gwplex.GWMesh._baseflowClosure
+.. automethod:: flow.gwplex.GWMesh._arrhenius
+.. automethod:: flow.gwplex.GWMesh._weatheringSupply
+.. automethod:: flow.gwplex.GWMesh._updateDuricrust
+.. automethod:: flow.gwplex.GWMesh._regolithSupplyRate
+.. automethod:: flow.gwplex.GWMesh._recordInduration

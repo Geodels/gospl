@@ -53,6 +53,7 @@ Class ReadYaml
       ~ReadYaml._extraIce
       ~ReadYaml._checkMap
       ~ReadYaml._loadIceMap
+      ~ReadYaml._readGroundwater
       ~ReadYaml._readOut
 
 
@@ -95,4 +96,5 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._extraIce
 .. automethod:: tools.inputparser.ReadYaml._checkMap
 .. automethod:: tools.inputparser.ReadYaml._loadIceMap
+.. automethod:: tools.inputparser.ReadYaml._readGroundwater
 .. automethod:: tools.inputparser.ReadYaml._readOut
