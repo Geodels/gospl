@@ -2080,9 +2080,18 @@ class ReadYaml(object):
             # Hydrology (implicit Dupuit-Boussinesq head solve).
             self.gwKsat = float(gwDict.get("Ksat", 1.0))            # K_h (m/yr)
             self.gwSpecificYield = float(gwDict.get("specific_yield", 0.1))  # S
-            # z_bed depth below surface (m): scalar OR the string 'from_soil'
-            # (tie to lHbed; requires soilSPL). Kept raw here; resolved later.
-            self.gwAquiferBase = gwDict.get("aquifer_base", 50.0)
+            # z_bed depth below surface (m): a scalar, the string 'from_soil'
+            # (tie to lHbed; requires soilSPL), OR a per-vertex map ``[file, key]``
+            # (loaded in _GWMesh, which has locIDs — physically the regolith /
+            # weathering-front depth varies in space). Kept raw here; resolved
+            # later.
+            base = gwDict.get("aquifer_base", 50.0)
+            if isinstance(base, (list, tuple)):
+                self._gwAquiferBaseMap = tuple(base)
+                self.gwAquiferBase = None
+            else:
+                self._gwAquiferBaseMap = None
+                self.gwAquiferBase = base
             self.gwBedrockDepth = float(gwDict.get("bedrock_depth", 0.0))
             self.gwMinSatThick = float(gwDict.get("min_sat_thickness", 1.0))
             # Infiltration fraction f_infil: a scalar, OR a per-vertex map
@@ -2127,6 +2136,7 @@ class ReadYaml(object):
             self.gwKsat = 1.0
             self.gwSpecificYield = 0.1
             self.gwAquiferBase = 50.0
+            self._gwAquiferBaseMap = None
             self.gwBedrockDepth = 0.0
             self.gwMinSatThick = 1.0
             self.gwInfiltration = 0.3

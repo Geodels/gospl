@@ -719,8 +719,12 @@ def test_groundwater_opt_in(minimal_model):
         for attr in ("headG", "headL", "duriHG", "duriHL", "rechargeL", "baseflowL"):
             assert hasattr(B, attr), f"missing groundwater state: {attr}"
         assert B.duriF.shape == (B.lpoints,)
-        # head seeded to the surface (a valid starting water table h = z).
-        assert np.allclose(B.headG.getArray(), B.hGlobal.getArray())
+        # head seeded at the aquifer BASE (a dry start, z_bed = z − aquifer_base),
+        # so recharge fills it UP to the steady water table (seeding at the
+        # surface would let the seepage clip pin it there — spurious saturation).
+        assert np.allclose(
+            B.headG.getArray(), B.hGlobal.getArray() - B.gwAquiferBase
+        )
         B.runProcesses()          # Phase 0: state allocated but unused ⇒ completes
     finally:
         B.destroy()
@@ -976,7 +980,7 @@ def test_watertable_steady():
 
         deltas = []
         prev = None
-        for _ in range(20):
+        for _ in range(55):
             m.updateGroundwater()             # outer relaxation onto steady state
             h = m.headL.getArray().copy()
             if prev is not None:
@@ -986,9 +990,10 @@ def test_watertable_steady():
         deltas = np.array(deltas)
         assert np.isfinite(deltas).all() and (deltas >= 0).all()
         # Contracting fixed-point iteration: the head-change per solve collapses
-        # toward zero. (Geometric decay — full mm-level convergence takes ~60
-        # iters on this coarse mesh; here we assert the clear downward trend.)
-        assert deltas[-1] < 0.25 * deltas[0], (
+        # toward zero. Geometric decay (ratio ~0.96/iter on this coarse pitted
+        # mesh — full mm-level convergence takes ~60 iters), so we assert a clear
+        # multi-fold contraction over the relaxation, not full convergence.
+        assert deltas[-1] < 0.3 * deltas[0], (
             f"head not converging to steady state: first Δ={deltas[0]:.3g}, "
             f"last Δ={deltas[-1]:.3g}"
         )

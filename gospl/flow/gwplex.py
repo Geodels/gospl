@@ -2,6 +2,7 @@ import os
 import petsc4py
 import numpy as np
 
+from time import process_time
 from mpi4py import MPI
 
 from gospl.tools.constants import ICE_COVER_MIN
@@ -54,11 +55,31 @@ class GWMesh(object):
             # Seepage return to rivers (m^3/yr) — only used when conserve_baseflow.
             self.baseflowL = self.hLocal.duplicate()
 
-            # Seed head to the current surface (a valid starting water table:
-            # h = z, i.e. fully saturated / at the surface) so the first solve
-            # has a bounded guess.
-            self.hGlobal.copy(result=self.headG)
-            self.hLocal.copy(result=self.headL)
+            # Resolve a per-vertex aquifer_base map (done here — needs locIDs).
+            # `[file, key]` -> file + ".npz" subset to the local partition; the
+            # z_bed depth below the surface (m) then varies in space (regolith /
+            # weathering-front depth). Scalar / 'from_soil' left untouched.
+            basemap = getattr(self, "_gwAquiferBaseMap", None)
+            if basemap is not None:
+                data = np.load(basemap[0] + ".npz")
+                self.gwAquiferBase = data[basemap[1]][self.locIDs].astype(
+                    np.float64
+                )
+
+            # Seed the head at the aquifer BASE (a dry start) so recharge fills
+            # it UP to the steady water table. Seeding at the surface is wrong:
+            # recharge would push h above z, the seepage clip would pin it there,
+            # and it could never drain below the surface (spurious full
+            # saturation). For a scalar / map aquifer_base, z_bed = z − base;
+            # for `from_soil` (Phase 5, a string) fall back to the surface.
+            base = self.gwAquiferBase
+            if isinstance(base, str):
+                self.hGlobal.copy(result=self.headG)
+                self.hLocal.copy(result=self.headL)
+            else:
+                self.headL.setArray(self.hLocal.getArray() - base)
+                self.dm.localToGlobal(self.headL, self.headG)
+                self.dm.globalToLocal(self.headG, self.headL)
             self.duriHL.set(0.0)
             self.duriHG.set(0.0)
             self.rechargeL.set(0.0)
@@ -98,6 +119,7 @@ class GWMesh(object):
         if not getattr(self, "gwOn", False):
             return
 
+        t0 = process_time()
         rain = self.rainVal
         evap = getattr(self, "evapVal", None)
         net = rain if evap is None else (rain - evap)
@@ -126,23 +148,30 @@ class GWMesh(object):
 
         # Phase 2: solve the implicit water-table head from this recharge.
         self._solveHead()
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Update Groundwater Table (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
         return
 
     def _makeGWKSP(self):
         """
-        Cached KSP for the elliptic head solve: fgmres + block-Jacobi (the stiff
-        biharmonic-free elliptic operator wants a Krylov accelerator, not the
-        stationary richardson used for the smoother), with the per-rank ILU
-        pivots shifted so PCSetUp cannot fail on a degenerate partition. Operator
-        prefix ``gw_`` scopes the shift / any override.
+        Cached KSP for the elliptic head solve: fgmres + **hypre BoomerAMG**
+        (algebraic multigrid). The head operator ``I + (Δt/S)·L(T)`` is a stiff,
+        high-condition 2-D elliptic operator; block-Jacobi/ILU does NOT converge
+        on it (it stalls at ``DIVERGED_ITS`` and returns a garbage iterate that
+        drifts to the surface) — an elliptic solve needs a multigrid PC. Same
+        rationale as the flexure biharmonic wanting a strong solver. Options
+        prefix ``gw_`` scopes any override (env ``-gw_pc_type ...``).
         """
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
         ksp.setType("fgmres")
-        ksp.getPC().setType("bjacobi")
-        ksp.setTolerances(rtol=1.0e-8, max_it=1000)
+        ksp.getPC().setType("hypre")
+        ksp.setTolerances(rtol=1.0e-10, max_it=500)
         ksp.setInitialGuessNonzero(True)
         ksp.setOptionsPrefix("gw_")
-        petsc4py.PETSc.Options()["gw_sub_pc_factor_shift_type"] = "nonzero"
         ksp.setFromOptions()
         return ksp
 
@@ -174,7 +203,8 @@ class GWMesh(object):
         ``self.headL/headG`` and ``self.wtDepth = z - h``.
         """
         z = self.hLocal.getArray()
-        zbed = z - float(self.gwAquiferBase)
+        # z_bed = surface − aquifer_base (scalar or per-vertex map, numpy-safe).
+        zbed = z - self.gwAquiferBase
         bmin = float(self.gwMinSatThick)
         gwdt = self.dt / float(self.gwSpecificYield)          # Δt/S
         R = self.rechargeL.getArray()
@@ -201,7 +231,10 @@ class GWMesh(object):
         hloc = self.headL.getArray().copy()
         hold = hloc.copy()
 
+        npass = 0
+        seep_converged = False
         for _ in range(int(self.gwSeepagePasses)):
+            npass += 1
             for _ in range(int(self.gwPicardIts)):
                 T = self.gwKsat * np.maximum(hloc - zbed, bmin)   # transmissivity (m²/yr)
                 coeffs = gwdt * jacobiancoeff(hloc, T, zeroKp)     # (Δt/S)·L(T)
@@ -232,7 +265,23 @@ class GWMesh(object):
             seep |= over
             hloc = np.clip(hloc, zbed, z)
             if n_new == 0:
+                seep_converged = True
                 break
+
+        if MPIrank == 0 and self.verbose:
+            # `reason > 0` = KSP converged; a non-converged elliptic solve (e.g.
+            # a too-weak PC) silently corrupts the water table, so surface it.
+            reason = int(ksp.getConvergedReason())
+            print(
+                "[gw] head solve: %d seepage pass(es)%s, last KSP reason %d%s"
+                % (
+                    npass,
+                    "" if seep_converged else " (seepage set still growing)",
+                    reason,
+                    "" if reason > 0 else " -- WARNING: KSP did not converge",
+                ),
+                flush=True,
+            )
 
         self.headL.setArray(hloc)
         self.dm.localToGlobal(self.headL, self.headG)

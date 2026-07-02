@@ -116,8 +116,11 @@ groundwater sets the armoring state that erosion then reads.
      mild, well-posed fixed point (2–4 outer passes typical). The "re-solve?" decision
      is **reduced across ranks** (`allreduce(any_new_seep, MPI.LOR)`) before it gates
      the collective re-solve (`AGENTS.md` #1 deadlock rule).
-   - Cached `gw_`-prefixed KSP (`_makeDiffusionKSP`); operator rebuilt per step (T varies),
-     KSP object reused, PC not reused.
+   - Cached `gw_`-prefixed KSP (`_makeGWKSP`: **fgmres + hypre BoomerAMG**); operator
+     rebuilt per step (T varies), KSP object reused. AMG is **required**: block-Jacobi/ILU
+     stalls (`DIVERGED_ITS`) on this stiff 2-D elliptic operator and returns a garbage
+     iterate that drifts the water table up to the surface (same reason the flexure
+     biharmonic wants a strong solver).
 4. **Water-table depth** `wtL = z − h` (≥ 0 by the clip), the field the duricrust reads.
 5. **Duricrust update** (`_updateDuricrust`, per-node, rank-local ODE over Δt):
    - **Fringe favourability** `Φ = exp(−((wt − d0)/w)²)` — a Gaussian band centred on the
@@ -558,8 +561,9 @@ partition-safe; the design adds no new collective-gating hazards.
   exchange, `lgmap`, and owned-rows-only assembly (`self.glIDs`) as the hillslope/marine
   diffusion operators — one of the three *safe* assembly patterns in `AGENTS.md` §"#2
   partition-dependence" (additive FV-Laplacian, `ADD_VALUES`). Partition-exact head to
-  KSP tolerance; the cached `gw_` KSP uses `fgmres`/`bjacobi` or CG (env-overridable),
-  the same class as the flow-accumulation solver.
+  KSP tolerance; the cached `gw_` KSP uses **fgmres + hypre BoomerAMG** (algebraic
+  multigrid — the stiff elliptic operator needs it; block-Jacobi/ILU does not converge),
+  env-overridable via the `gw_` prefix.
 - **Seepage Dirichlet set is partition-invariant.** It is derived from the drainage
   network (rivers/lakes) + `seaID` + `outletIDs`, all built from the partition-invariant
   `locIDs`-keyed drainage arrays (the mechanism-#2 fixes). Applied by `zeroRows`
@@ -619,7 +623,7 @@ partition-safe; the design adds no new collective-gating hazards.
 | −1 | **DONE (soil PR #482).** Option-2.5 consistency fixes — subaerial lake/sea gate + submarine coherence + ice freeze-inert (`DESIGN_SOIL_REGOLITH.md` §5). | `test_soil_subaerial_gate` |
 | 0 | **DONE.** `_readGroundwater` parser + `gwOn`/`duriOn` flags + `_GWMesh` state alloc (head/duriH/recharge/baseflow Vecs, per-node state, cached `_gwMat`/`_ksp_gw`) + `destroy_DMPlex`; init after `_FAMesh`. | `test_groundwater_opt_in` (off ⇒ inert; on ⇒ state + head seeded) |
 | 1 | **DONE.** Recharge `R = f·max(0, rain−evap)` from existing forcing, zeroed under **water AND ice** (§3); `f_infil` scalar **or** per-vertex map; `recharge` output. | `test_groundwater_recharge` (humid⇒f·(P−E); arid⇒0; under-water/ice⇒0; per-vertex f honoured) |
-| 2 | **DONE (first cut).** Implicit head solve `_solveHead`: `(I + (Δt/S)·L(T))h = h_old + (Δt/S)·R` via `jacobiancoeff`/`_assembleDiffMatCSR` (like the marine Picard), Picard on `T=Kh·max(h−z_bed, b_min)`, **two free boundaries** — seepage `h≤z` (Dirichlet `zeroRowsLocal` at `seaID`∪ponded-lake∪`outletIDs`, + clip-and-discover, `Allreduce`'d new-seepage break) and dry-aquifer floor `h≥z_bed`; cached fgmres+bjacobi `gw_` KSP; `aquifer_base` prescribed (`from_soil` = Phase 5); `wtable`/`wtdepth` outputs. | `test_watertable_solve` (bounded `z_bed≤h≤z`, finite, non-trivial water table); `test_watertable_steady` (repeated solves converge to the quasi-steady Dupuit fixed point); `test_watertable_parallel` (np=1-vs-2 head/recharge agree within the partition-drift floor — the flagged invariance unknown, **validated**). **Follow-up:** a full analytic Dupuit-parabola benchmark (flat hillslope fixture, `benchmarks/`) + at-scale convergence on a large mesh. |
+| 2 | **DONE + analytically validated.** Implicit head solve `_solveHead`: `(I + (Δt/S)·L(T))h = h_old + (Δt/S)·R` via `jacobiancoeff`/`_assembleDiffMatCSR` (like the marine Picard), Picard on `T=Kh·max(h−z_bed, b_min)`, **two free boundaries** — seepage `h≤z` (Dirichlet `zeroRowsLocal` at `seaID`∪ponded-lake∪`outletIDs`, + clip-and-discover, `Allreduce`'d new-seepage break) and dry-aquifer floor `h≥z_bed`; cached **fgmres + hypre BoomerAMG** `gw_` KSP (block-Jacobi/ILU does **not** converge on this stiff 2-D elliptic operator — it stalls at `DIVERGED_ITS` and the garbage iterate drifts to the surface; AMG is required, cf. the flexure biharmonic); `aquifer_base` prescribed — scalar **or per-vertex map** (`from_soil` = Phase 5); `wtable`/`wtdepth` outputs. | `test_watertable_solve` (bounded `z_bed≤h≤z`, finite, non-trivial); `test_watertable_steady` (repeated solves contract onto the quasi-steady Dupuit fixed point); `test_watertable_parallel` (np=1-vs-2 agree within the partition-drift floor). **`benchmarks/test_dupuit.py`: full analytic Dupuit-parabola benchmark** — west-draining ramp, flat base via an `aquifer_base` map, `bc='wwwf'`; steady head matches `s²=s_d²+(R/K)(2Wx−x²)` to **RMSE 0.00 %, R²=1.0**. |
 | 3 | Duricrust ODE (`_updateDuricrust`): fringe Φ, supply Ψ (proxy default; opt-in Level-A explicit-rate `W` via `weathering:`, §3a), formation + breakdown; `duricrust`/`induration` outputs | `test_duricrust_forms_at_fringe`; `test_duricrust_soilfree` (forms with `cptSoil=False`); `test_duricrust_weathering_rate` (Level-A rate responds to `R`) |
 | 4 | Armor hook `_surfaceArmoringK` into `_surfaceLithoK`; relief-inversion behaviour | `test_duricrust_armors_K` (indurated cell erodes ≪ bare) |
 | 5 | Baseflow conservation (opt-in); soil coupling (regolith supply limiter + `aquifer_base=lHbed`) | `test_groundwater_baseflow_conserves` (Σ baseflow ≈ Σ recharge) |
