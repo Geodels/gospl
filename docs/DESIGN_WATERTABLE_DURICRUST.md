@@ -11,6 +11,19 @@ Companion to `DESIGN_DUAL_LITHOLOGY.md`, `DESIGN_ICE_SHEET.md`,
 `DESIGN_PROVENANCE.md`. Honors the invariants in `AGENTS.md` (MPI contract,
 KSP/SNES lifecycle, scratch-vector contract, `destroy_DMPlex` registration).
 
+> **Status: IMPLEMENTED (branch `feat/watertable-duricrust`).** All phases −1…7
+> of the plan in §13 are done and merged behind the opt-in `groundwater:` block:
+> the implicit water-table solve (fgmres + hypre AMG, analytic-Dupuit validated),
+> recharge, seepage/baseflow, the duricrust ODE + K-armoring hook, the `stratDuri`
+> stratigraphic record, soil coupling (`from_soil`, regolith limiter), restart of
+> `head`/`duriH`, and the full user/tech/API docs. Guarded by the
+> `test_groundwater_*` / `test_duricrust_*` suite (serial + np=2). **Deferred
+> increments** are called out inline: baseflow **re-injection** into the surface
+> flow (§3 step 7 — currently a conserved diagnostic), the multi-layer formation
+> **depth range** (§9), and the geochemical **Level-B** solute transport (§3a/§15).
+> The sections below are the original design narrative, annotated with "as built"
+> notes where the implementation refined a choice.
+
 ---
 
 ## 1. Scope & decisions (locked)
@@ -143,9 +156,16 @@ groundwater sets the armoring state that erosion then reads.
 6. **Armor K.** `duriF` feeds the erodibility hook (§5). No elevation change here —
    duricrust modifies *rate*, not geometry, so flow/routing are unchanged this step
    (like dual-lithology deposition being composition-only).
-7. **Baseflow closure (opt-in).** Seepage discharge `Q_seep = Σ_owned (R − ΔS)` returned
-   to the river network at seepage nodes so total river discharge stays `≈ rain − evap`
-   over the quasi-steady step (mirrors ice `melt_conserve`; `Allreduce`d budget).
+7. **Baseflow closure (opt-in).** Seepage discharge `Q_seep = Σ_owned (R − ΔS)`
+   accounted at the seepage nodes so total river discharge stays `≈ rain − evap`
+   over the quasi-steady step (`Allreduce`d budget). **As built (Phase 5):** the
+   discharge is computed and stored in `self.baseflowL` as a **conserved
+   diagnostic** (distributed over owned seepage nodes by cell area, `Σ baseflow ≈
+   Σ recharge` at steady state) and written as the `baseflow` output. **Actually
+   re-injecting** it into the surface-flow source `bL` (making rivers physically
+   baseflow-fed, which redistributes discharge → erosion, mirroring ice
+   `iceMeltRiverL`) is a **deferred increment** — the plumbing is in place but the
+   flow source is not yet modified, so erosion is unchanged by enabling it.
 8. **Sync.** `localToGlobal` on `head`, `duriH` before the next collective (erosion).
 
 **Water sources — rainfall and lakes (complementary roles).** The table is fed by *both*, but
@@ -444,9 +464,12 @@ considered and rejected for exactly these reasons.)
 Per step, gated on `gwOn and stratNb>0`:
 
 - **Formation (varies with time).** After `_updateDuricrust`, the induration is written down into
-  the stratigraphic layers lying within the crust/fringe depth: `stratDuri[node, top layers]` is
-  raised toward the live `duriF`. On a stable, non-eroding surface the crust thickens over
-  10⁴–10⁶ yr → those near-surface layers' `stratDuri` **grows with time**.
+  the near-surface stratigraphy: `stratDuri[node, top]` is raised toward the live `duriF`
+  (`_recordInduration`). On a stable, non-eroding surface the crust thickens over 10⁴–10⁶ yr → the
+  near-surface layer's `stratDuri` **grows with time**. **As built:** the write-down targets the
+  **top non-empty layer** of each column (found as in `_surfaceComposition`); distributing it over a
+  multi-layer crust/fringe *depth range* is a possible refinement, unnecessary for the exhumation
+  behaviour below (which reads the top non-empty layer).
 - **Deposition (burial → preservation).** `deposeStrat` adds a new top layer with `stratDuri = 0`
   (fresh, uncemented sediment). The previously indurated layer keeps its `stratDuri` and is now
   **buried and preserved** — a relict crust locked into the record.
@@ -617,6 +640,9 @@ partition-safe; the design adds no new collective-gating hazards.
 ---
 
 ## 13. Phased implementation plan (branch per phase, PR into `dev`)
+
+**All phases below are DONE** on `feat/watertable-duricrust` (7 feature commits;
+full `tests/` 139 passed, serial + np=2). The status/notes are inline per row.
 
 | Phase | Deliverable | Guard test |
 |---|---|---|
