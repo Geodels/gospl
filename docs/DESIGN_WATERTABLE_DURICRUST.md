@@ -24,7 +24,7 @@ KSP/SNES lifecycle, scratch-vector contract, `destroy_DMPlex` registration).
 | 5 | Formation rule | **Water-table fringe** — induration accumulates where the surface sits within a depth band of the water table (the fluctuating capillary fringe), scaled by a temperature/water weathering-supply proxy. |
 | 6 | Opt-in | `groundwater:` YAML block. Absent ⇒ every path gated out ⇒ bit-identical to current `dev`. |
 | 7 | Target regime | Δt ≈ 10²–10³ yr, Δx ≈ 500 m – km, runs of 10⁶–10⁷ yr, annual-mean rain + temperature. |
-| 8 | Soil dependence | **Ships both**: runs **soil-independent** on any config, AND automatically **couples to `soilSPL`** when soil is tracked (regolith supply limiter + optional `aquifer_base = lHbed`). See §8. |
+| 8 | Soil dependence | Targets the **Option-2.5 soil model** (`DESIGN_SOIL_REGOLITH.md`: regolith-only `Lsoil`, deposits in stratigraphy, subaerial lake/sea gate). **Ships both**: runs **soil-independent** on any config, AND couples to `soilSPL` when tracked (regolith limiter + optional `aquifer_base = from_soil`). See §8. |
 | 9 | Stratigraphic record | Armoring is **recorded per layer** (`stratDuri` induration) when `stratNb>0`, so buried crusts are preserved, advect/compact with the pile, and **re-armor on exhumation** (multi-cycle relief inversion). See §9. |
 | 10 | Compatibility | **Composes with dual-lithology and provenance**, individually or all three at once: multiplicative erodibility/diffusivity hooks with dual, passive-label reflection with provenance; `stratDuri` is intensive so the conservation guards stay green. See §10. |
 
@@ -139,6 +139,24 @@ groundwater sets the armoring state that erosion then reads.
    to the river network at seepage nodes so total river discharge stays `≈ rain − evap`
    over the quasi-steady step (mirrors ice `melt_conserve`; `Allreduce`d budget).
 8. **Sync.** `localToGlobal` on `head`, `duriH` before the next collective (erosion).
+
+**Water sources — rainfall and lakes (complementary roles).** The table is fed by *both*, but
+they enter differently:
+- **Rainfall** is the distributed **source**: `R = f·(rain − evap)` drives the head up on subaerial
+  land (step 1).
+- **Lakes / rivers / sea** are **fixed-head boundaries** (`h = z`, step 2); `R = 0` there (the head
+  is pinned, not recharged). This makes the exchange **two-way and directional** — a lake ringed by
+  lower head **leaks into** the aquifer (recharge), one ringed by higher head **receives** groundwater
+  discharge (gaining lake). The head solve gets the flux sign automatically.
+
+**Known limitation — lake ↔ aquifer *volume* coupling.** Lakes are fixed-head BCs (standard for
+regional groundwater), so the water table responds to lakes correctly and rainfall recharges it
+correctly — **but the lake's own volumetric budget** (goSPL's fill / evaporation / spill in
+`flowplex._potentialLakeEvap` / `_distributeDownstream`) **is not yet reconciled with the
+across-bed groundwater flux.** If the aquifer leaks into or drains a lake, the lake's fill/spill
+budget does not see that exchange. Acceptable and conventional for a first version; full coupling
+(lake leakage debits the lake, groundwater discharge fills it — the lake analogue of the river
+baseflow closure, step 7) is an open decision (§15).
 
 ### 3a. Weathering-supply coupling (`Ψ`) — proxy vs explicit rate
 
@@ -311,23 +329,33 @@ recorded in the strata (see §9) is viewable as a per-layer `induration` propert
 
 ## 8. Soil-production dependence — and soil-free cells (the key question)
 
-**Duricrust does NOT require soil production (`soilSPL`) to be on.** The crust is a
-property of the *near-surface material*, not of the tracked soil layer specifically. The
-design deliberately keeps the water-table + duricrust mixin independent of `cptSoil`.
+**This design assumes the Option-2.5 soil model** (`DESIGN_SOIL_REGOLITH.md`): `Lsoil` is the
+*weathering-produced regolith* (subaerial, on bedrock), deposited sediment lives in the
+**stratigraphy** (not routed into soil), a few *lumped profile scalars* (weathering-front depth,
+weathering degree) ride the regolith, and subaerial exposure is gated by the lake/sea mask. The
+duricrust couples to that model — and, crucially, **degrades gracefully** so it still runs on any
+config.
 
-What the host medium and supply reference are, by run configuration:
+**Duricrust does NOT require soil production (`soilSPL`) to be on.** The crust is a property of
+the *near-surface material*, not of the tracked regolith specifically. The water-table + duricrust
+mixin stays independent of `cptSoil`. Host medium / supply reference and where the fringe depth is
+measured, by configuration:
 
-| Run config | Host / weathering-supply reference | Fringe depth measured from |
+| Run config | Host / weathering-supply reference | Fringe from |
 |---|---|---|
-| **soil production ON** | regolith thickness `Lsoil` over bedrock `lHbed` — the crust cements the regolith; formation supply is additionally *limited by available regolith* (`min(k_form·Φ·Ψ, regolith supply rate)`) | surface `z` (= `lHbed + Lsoil`) |
-| **soil production OFF** (or bare-bedrock cells where `Lsoil ≈ 0`) | the **surface material itself** (bedrock or deposited sediment). No `Lsoil` reference exists, so supply falls back purely to the **weathering proxy `Ψ`** (climate + temperature), i.e. in-situ replacement/cementation of the top of bedrock | surface `z` (= `hLocal`) |
+| **regolith ON** (`cptSoil`) | the weathering regolith `Lsoil` over bedrock `lHbed` (Option-2.5 mantle) — the crust indurates the regolith; formation supply is regolith-limited (`min(k_form·Φ·Ψ, regolith rate)`) | surface `z` |
+| **regolith OFF / bare bedrock** (`Lsoil ≈ 0`) | the surface material in-situ — bedrock, or the deposited-sediment top from the **stratigraphy**. No regolith reference, so supply falls back to the climate/temperature proxy `Ψ` (or the Level-A rate, §3a) | surface `z` |
 
-So **where there is no soil, the duricrust still forms** — it simply uses the climate/
-temperature weathering proxy `Ψ` for solute supply instead of a regolith-thickness supply
-limiter, and indurates the exposed surface (silcrete forming in bedrock, calcrete in
-sediment, etc. — all captured generically by `Ψ` + the fringe favourability `Φ`). This is
-physically reasonable: duricrusts form both in regolith and by in-situ replacement of
-bedrock.
+So **where there is no regolith, the duricrust still forms** — it uses the `Ψ` proxy / Level-A rate
+on the exposed surface (silcrete in bedrock, calcrete in sediment — generically via `Ψ`+`Φ`); it is
+physically reasonable that duricrusts form both in regolith and by in-situ replacement of bedrock.
+
+**Subaerial gate (Option-2.5).** Formation — like soil production — operates **only where the
+surface is subaerial**: **not marine (`seaID`) and not ponded** (a continental lake, `pitIDs≥0`
+with `lFill>hl`; `DESIGN_SOIL_REGOLITH.md` §3). A pit/lake deposit is **subaqueous soft sediment
+until it fills to its spillover**; once emergent, regolith and the duricrust fringe begin operating
+on it. The water table added here **generalizes** the gate to the seepage condition `h ≥ z`
+(wetlands, near-surface table), but the first-order lake/sea mask exists already.
 
 The water-table solve itself is independent of soil — it uses `z_bed` from the `aquifer_base`
 parameter, with the `lHbed` tie an opt-in refinement described next.
@@ -353,12 +381,17 @@ There is **no configuration in which duricrust is unavailable** — the soil cou
 automatic refinement, never a prerequisite. Guarded by `test_duricrust_soilfree` (forms with
 `cptSoil=False`) and a soil-on run.
 
-**Aquifer floor tied to bedrock (`aquifer_base: from_soil`).** When soil is tracked, the aquifer
-base can follow the bedrock elevation: `z_bed = lHbed − bedrock_depth` (with `bedrock_depth` the
-permeable weathered/fractured-rock zone below the regolith, and a `min_sat_thickness` floor so
+**Aquifer floor tied to bedrock (`aquifer_base: from_soil`).** When regolith is tracked, the
+aquifer base can follow the bedrock elevation: `z_bed = lHbed − bedrock_depth` (with `bedrock_depth`
+the permeable weathered/fractured-rock zone below the regolith, and a `min_sat_thickness` floor so
 `T = K_h·max(h − z_bed, b_min) > 0`). This is the physically apt *"permeable regolith over
-impermeable bedrock"* model of cratonic/laterite terrains. Bare-rock / soil-off cells fall back to
-the prescribed `z − aquifer_base`. It closes a genuine (slow, explicit, stable) feedback loop:
+impermeable bedrock"* model of cratonic/laterite terrains. **Under Option-2.5 this is now
+well-defined**: `lHbed` is the base of the *weathering mantle* (not a fill-inflated surface), so the
+depocenter pathology that made `lHbed` unusable under the old lumped-soil model is resolved (that
+was `DESIGN_SOIL_REGOLITH.md` §2 item 4). **In depositional basins the aquifer base comes from the
+stratigraphy** (the porous fill *is* the aquifer), not from `lHbed`; bare-rock / soil-off cells fall
+back to the prescribed `z − aquifer_base`. It closes a genuine (slow, explicit, stable) feedback
+loop:
 
 ```
 soil production → lowers lHbed → deepens aquifer → shifts water-table / fringe depth
@@ -578,6 +611,7 @@ partition-safe; the design adds no new collective-gating hazards.
 
 | Phase | Deliverable | Guard test |
 |---|---|---|
+| −1 | **Prerequisite (soil):** Option-2.5 consistency fixes — subaerial lake/sea gate + submarine coherence (`DESIGN_SOIL_REGOLITH.md` §5). Stands alone; de-risks the duricrust coupling | `test_soil_subaerial_gate` (no soil under ponded/marine cells) |
 | 0 | `_readGroundwater`/`_extraGroundwater` parser + `gwOn` flag + state alloc + `destroy_DMPlex` | `test_groundwater_opt_in` (bitwise off) |
 | 1 | Recharge `R = f·(rain−evap)` from existing forcing; `recharge` output | `test_groundwater_recharge` (arid⇒0, humid⇒f·(P−E)) |
 | 2 | Implicit head solve (`_solveHead`): Picard `T(h)` + seepage clip, cached `gw_` KSP; `wtable`/`wtdepth` outputs | `test_watertable_solve` (analytic Dupuit hillslope; np=1-vs-2) |
@@ -642,6 +676,12 @@ user-facing feature updates the **input-file reference**, the **technical guide*
 
 ## 15. Open decisions (defaults chosen, revisit on validation)
 
+- **Soil-model dependency — DECIDED.** This design targets the **Option-2.5** soil model
+  (`DESIGN_SOIL_REGOLITH.md`): `Lsoil` = weathering-only regolith, deposited sediment in the
+  stratigraphy, subaerial lake/sea gate, lumped profile scalars, `soil_transition` recast as a
+  smooth max-weathering-depth. The duricrust still degrades gracefully when soil/stratigraphy are
+  off (§8). Implementation order: land the Option-2.5 *consistency fixes* (subaerial gate +
+  submarine coherence) first — they de-risk the duricrust coupling and stand alone.
 - **Fringe favourability shape** — Gaussian band vs a top-hat `[d0−w, d0+w]`. Gaussian
   chosen for smooth gradients (better for the KSP-free per-node ODE); revisit if a sharp
   fringe is wanted.
@@ -649,8 +689,10 @@ user-facing feature updates the **input-file reference**, the **technical guide*
   when `aquifer_base: from_soil`** (requires `soilSPL`; §8). The `from_soil` form is the physically
   apt "permeable regolith over impermeable bedrock" model for cratonic/laterite terrains and makes
   deep weathering deepen the aquifer; `bedrock_depth` adds the fractured-rock zone and the
-  `min_sat_thickness` floor keeps `T>0`. Bare-rock / soil-off cells fall back to the prescribed
-  depth. Prescribed stays the default so the feature runs standalone.
+  `min_sat_thickness` floor keeps `T>0`. Under Option-2.5 `lHbed` is the base of the weathering
+  mantle (no depocenter inflation), and **in depositional basins the base comes from the
+  stratigraphy** (the porous fill is the aquifer), not `lHbed`. Bare-rock / soil-off cells fall
+  back to the prescribed depth, which stays the default so the feature runs standalone.
 - **Weathering supply `Ψ`** — three tiers, escalating cost (see §3a for the rate law + YAML):
   - **Proxy (default, shipped)** — climate/temperature stand-in; no new inputs, non-conservative.
   - **Level A (opt-in, this design)** — explicit chemical-weathering *rate* `W(R, T, Lsoil,
@@ -662,6 +704,12 @@ user-facing feature updates the **input-file reference**, the **technical guide*
     kernels), precipitate at the fringe, export via baseflow, with `Σ dissolved − precipitated −
     exported ≈ 0` guards. Comparable in scope to dual-lithology; needs its own design doc. The
     enabling pieces (groundwater flux, FV advection, per-class strata bookkeeping) already exist.
+- **Lake ↔ aquifer volume coupling** — v1 treats lakes/rivers/sea as **fixed-head** boundaries
+  (`h = z`): the table responds to them and exchanges flux (§3), but the lake's own volumetric
+  budget (`_potentialLakeEvap` / `_distributeDownstream` fill/evap/spill) is **not** debited/credited
+  by the across-bed groundwater flux. Fixed-head is the conventional first step; full coupling (lake
+  leakage debits the lake, groundwater discharge fills it — the lake analogue of the river baseflow
+  closure) is deferred. Revisit if lake levels or endorheic-basin water balances prove sensitive.
 - **Armor of diffusion** — off by default (SPL K only); enable `armor_diffusion` if crusts
   should also resist hillslope creep.
 - **Do we need transient `head` at all, or steady each step?** Carried as state with
