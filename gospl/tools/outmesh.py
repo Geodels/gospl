@@ -448,6 +448,15 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["wtdepth"][:, 0] = self.wtDepth.copy()
+                if getattr(self, "gwConserveBaseflow", False):
+                    # Seepage-return (baseflow) discharge (m^3/yr).
+                    f.create_dataset(
+                        "baseflow",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["baseflow"][:, 0] = self.baseflowL.getArray().copy()
                 if getattr(self, "duriOn", False):
                     # Duricrust thickness (m) and induration degree (0..1).
                     f.create_dataset(
@@ -830,6 +839,8 @@ class WriteMesh(object):
 
             if getattr(self, "gwOn", False):
                 _gwnames = ["recharge", "wtable", "wtdepth"]
+                if getattr(self, "gwConserveBaseflow", False):
+                    _gwnames += ["baseflow"]
                 if getattr(self, "duriOn", False):
                     _gwnames += ["duricrust", "induration"]
                 for _gwname in _gwnames:

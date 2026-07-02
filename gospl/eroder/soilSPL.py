@@ -109,6 +109,14 @@ class soilSPL(object):
             self.Gsoil.set(self.cstSoilH)
             self.Lsoil.set(self.cstSoilH)
 
+        # Initialise the bedrock elevation (base of the soil/regolith mantle,
+        # lHbed = z − Lsoil) from the start. It is refreshed each soil step
+        # (diffuseSoil), but the groundwater `aquifer_base: from_soil` coupling
+        # reads it on the first step — before the first soil update — so it must
+        # already hold a valid value here rather than an empty duplicate.
+        self.lHbed.waxpy(-1.0, self.Lsoil, self.hLocal)
+        self.gHbed.waxpy(-1.0, self.Gsoil, self.hGlobal)
+
         # If temperatures dataset is provided then compute the corresponding soil production rate
         if self.tempFile is not None:
             Tref = self.tempRef + 273.15

@@ -212,15 +212,17 @@ class GWMesh(object):
           ``zeroRowsLocal``; after each Picard block, clip ``h = min(h, z)`` and
           add any newly-over-topped cell to the Dirichlet set, up to
           ``gwSeepagePasses`` passes (break on an ``Allreduce``'d new-seepage
-          count — collective-safe). ``aquifer_base`` is prescribed here (the
-          ``from_soil`` / ``lHbed`` tie is Phase 5).
+          count — collective-safe). ``aquifer_base`` is prescribed (scalar/map)
+          OR, with ``aquifer_base: from_soil``, tied to the bedrock elevation
+          ``z_bed = lHbed − bedrock_depth`` (Phase 5 soil coupling; ``_gwZbed``).
+        - **Baseflow closure** (opt-in ``conserve_baseflow``): the seepage-return
+          discharge is accounted into ``self.baseflowL`` (``_baseflowClosure``).
 
         Scratch: uses ``self.tmp`` (global rhs); leaves it defined. Writes
         ``self.headL/headG`` and ``self.wtDepth = z - h``.
         """
         z = self.hLocal.getArray()
-        # z_bed = surface − aquifer_base (scalar or per-vertex map, numpy-safe).
-        zbed = z - self.gwAquiferBase
+        zbed = self._gwZbed(z)                  # scalar/map, or lHbed − d_bedrock
         bmin = float(self.gwMinSatThick)
         gwdt = self.dt / float(self.gwSpecificYield)          # Δt/S
         R = self.rechargeL.getArray()
@@ -302,6 +304,70 @@ class GWMesh(object):
         self.headL.setArray(hloc)
         self.dm.localToGlobal(self.headL, self.headG)
         self.wtDepth = z - hloc
+
+        # Phase 5: account the seepage-return (baseflow) discharge (opt-in).
+        if getattr(self, "gwConserveBaseflow", False):
+            self._baseflowClosure(hold, hloc, seep)
+        return
+
+    def _gwZbed(self, z):
+        r"""
+        Aquifer-base elevation ``z_bed`` (m). Prescribed by ``aquifer_base``
+        (scalar or per-vertex map, ``z_bed = z − aquifer_base``), OR — with
+        ``aquifer_base: from_soil`` (Phase-5 soil coupling) — tied to the bedrock
+        elevation ``z_bed = lHbed − bedrock_depth``, the *"permeable regolith over
+        impermeable bedrock"* model. ``from_soil`` needs ``soilSPL`` (``lHbed``);
+        it falls back to the surface (a self-consistent no-aquifer floor) with a
+        one-time warning if soil is off. Rank-local.
+        """
+        base = self.gwAquiferBase
+        if isinstance(base, str):                       # 'from_soil'
+            lHbed = getattr(self, "lHbed", None)
+            if lHbed is None:
+                if MPIrank == 0 and self.verbose:
+                    print(
+                        "[gw] aquifer_base: from_soil needs soilSPL (lHbed) — "
+                        "falling back to the surface as the aquifer base.",
+                        flush=True,
+                    )
+                return z.copy()
+            return lHbed.getArray() - float(self.gwBedrockDepth)
+        return z - base
+
+    def _baseflowClosure(self, hold, hnew, seep):
+        r"""
+        Baseflow (seepage-return) accounting (DESIGN_WATERTABLE_DURICRUST.md §3
+        step 7), opt-in via ``conserve_baseflow``. Over the quasi-steady step the
+        net recharge that does not go into aquifer storage discharges back to the
+        surface-water network at the seepage nodes:
+
+        .. math:: Q_{seep} = \sum_{owned}(R\,A) - \sum_{owned} S\,(h-h_{old})\,A/\Delta t
+
+        (m³/yr). The global budget is reduced across ranks (``Allreduce``) and
+        distributed over the owned seepage nodes weighted by cell area, so
+        ``Σ_owned baseflowL ≈ Σ_owned recharge`` in the steady limit (``ΔS→0``) —
+        river discharge stays ``≈ rain − evap``. Stored in ``self.baseflowL``
+        (diagnostic/output); re-injection into the surface-flow source (making
+        rivers physically baseflow-fed, which redistributes erosion) is the next
+        increment. Collective (two ``Allreduce``); no rank-local collective gate.
+        """
+        A = self.larea
+        S = float(self.gwSpecificYield)
+        owned = self.inIDs == 1
+        R = self.rechargeL.getArray()
+        # Net discharge rate = recharge volume − storage-change volume (m³/yr).
+        rvol = np.where(owned, R * A, 0.0).sum()
+        svol = np.where(owned, S * (hnew - hold) * A, 0.0).sum() / self.dt
+        Qtot = MPI.COMM_WORLD.allreduce(float(rvol - svol), op=MPI.SUM)
+
+        bf = np.zeros(self.lpoints, dtype=np.float64)
+        seep_owned = seep & owned
+        wsum = MPI.COMM_WORLD.allreduce(
+            float(np.where(seep_owned, A, 0.0).sum()), op=MPI.SUM
+        )
+        if wsum > 0.0:
+            bf[seep_owned] = Qtot * A[seep_owned] / wsum
+        self.baseflowL.setArray(bf)
         return
 
     def _arrhenius(self):
@@ -406,7 +472,10 @@ class GWMesh(object):
           on the water-table depth ``wt = z − h`` centred on the mean fringe depth
           ``d0`` (half-width ``w``); →1 at the fringe, →0 far above/below.
         - **Formation** ``dduriH/dt = k_form·Φ·Ψ·(1 − duriH/duriH_max)``
-          (self-limiting to ``duriH_max``); ``Ψ`` from ``_weatheringSupply``.
+          (self-limiting to ``duriH_max``); ``Ψ`` from ``_weatheringSupply``. When
+          soil is tracked (``cptSoil``) the formation supply is additionally
+          **regolith-limited** — capped by ``_regolithSupplyRate`` (chemical crust
+          growth cannot outpace physical regolith production; §8 soil coupling).
         - **Breakdown**: the per-step surface incision (``z_last − z > 0``) strips
           the crust top (``−k_break·incision``), plus a slow disequilibrium decay
           away from the fringe (``−k_decay·(1−Φ)·duriH``). Clipped to
@@ -423,8 +492,12 @@ class GWMesh(object):
         Phi = np.exp(-(((wt - self.duriFringeDepth) / self.duriFringeWidth) ** 2))
         Psi = self._weatheringSupply()
 
+        supply = self.duriFormRate * Phi * Psi
+        if getattr(self, "cptSoil", False):                      # regolith-limited
+            supply = np.minimum(supply, self._regolithSupplyRate())
+
         duriH = self.duriHL.getArray().copy()
-        duriH += self.dt * self.duriFormRate * Phi * Psi * (1.0 - duriH / Hmax)
+        duriH += self.dt * supply * (1.0 - duriH / Hmax)
         incision = np.maximum(0.0, self.gwZlast - z)             # surface lowered
         duriH -= self.duriBreakRate * incision
         duriH -= self.dt * self.duriDecayRate * (1.0 - Phi) * duriH
@@ -436,3 +509,16 @@ class GWMesh(object):
         self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
         self.gwZlast = z.copy()
         return
+
+    def _regolithSupplyRate(self):
+        r"""
+        Rate (m/yr) at which weathering-produced regolith can feed the duricrust,
+        the cap on chemical crust formation when soil is tracked (§8): the soil
+        production rate ``prodSoil · rain`` (chemical∝physical weathering
+        congruency). Returns ``+inf`` (no cap) when ``prodSoil`` is unavailable,
+        so a soil-off run is unaffected. Rank-local.
+        """
+        prod = getattr(self, "prodSoil", None)
+        if prod is None:
+            return np.inf
+        return prod * self.rainVal

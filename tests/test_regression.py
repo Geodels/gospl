@@ -1173,6 +1173,114 @@ def test_duricrust_armors_K():
         m.destroy()
 
 
+def test_groundwater_baseflow_conserves():
+    """
+    Protects (water-table + duricrust, **Phase 5** — DESIGN_WATERTABLE_DURICRUST.md
+    §3 step 7): the opt-in baseflow closure conserves water — the seepage-return
+    discharge `Σ baseflow` accounts to `Σ(R·A) − ΔS` and, relaxed to the
+    quasi-steady water table (`ΔS→0`), matches the total recharge, so river
+    discharge stays `≈ rain − evap`.
+    """
+    from mpi4py import MPI
+
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert m.gwConserveBaseflow, "fixture must have conserve_baseflow on"
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+        for _ in range(100):                   # relax onto steady state (ΔS→0)
+            m.updateGroundwater()
+
+        own = m.inIDs == 1
+        A = m.larea
+        Vrech = MPI.COMM_WORLD.allreduce(
+            float((m.rechargeL.getArray() * A)[own].sum()), op=MPI.SUM
+        )
+        Vbase = MPI.COMM_WORLD.allreduce(
+            float(m.baseflowL.getArray()[own].sum()), op=MPI.SUM
+        )
+        assert Vrech > 0.0, "no recharge — test not exercised"
+        assert abs(Vbase - Vrech) < 0.02 * Vrech, (
+            f"baseflow not conserving recharge: Σbase={Vbase:.4g} vs "
+            f"Σrech={Vrech:.4g}"
+        )
+    finally:
+        m.destroy()
+
+
+def test_groundwater_from_soil():
+    """
+    Protects (Phase 5, §8 soil coupling): `aquifer_base: from_soil` ties the
+    aquifer floor to the bedrock elevation `z_bed = lHbed − bedrock_depth`
+    (permeable regolith over impermeable bedrock), and the head solve stays
+    bounded between that floor and the surface.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert getattr(m, "cptSoil", False), "fixture must track soil (lHbed)"
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()                       # sets lHbed = z − Lsoil
+
+        z = m.hLocal.getArray()
+        m.gwAquiferBase = "from_soil"
+        m.gwBedrockDepth = 2.0
+        zbed = m._gwZbed(z)
+        assert np.allclose(zbed, m.lHbed.getArray() - 2.0), (
+            "from_soil z_bed != lHbed − bedrock_depth"
+        )
+
+        m.updateGroundwater()                  # solve on the bedrock floor
+        h = m.headL.getArray()
+        assert np.isfinite(h).all()
+        assert (h >= zbed - 1.0e-6).all(), "head below the bedrock aquifer floor"
+        assert (h <= z + 1.0e-6).all(), "head above the surface (seepage failed)"
+    finally:
+        m.destroy()
+
+
+def test_duricrust_regolith_limited():
+    """
+    Protects (Phase 5, §8 soil coupling): when soil is tracked, duricrust
+    formation is **regolith-supply-limited** — capped by `_regolithSupplyRate`
+    (`prodSoil·rain`), so chemical crust growth cannot outpace physical regolith
+    production. Where the cap binds, the crust grows strictly less than the
+    unlimited (soil-off) formation.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert m.cptSoil and m.duriOn
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+
+        z = m.hLocal.getArray()
+        m.wtDepth = np.full(m.lpoints, m.duriFringeDepth)   # Φ=1 everywhere
+        supply_unlim = m.duriFormRate * 1.0 * 1.0           # Φ=Ψ=1 (proxy, rain=1)
+        reg = m._regolithSupplyRate()
+        binds = reg < supply_unlim
+        assert binds.any(), "regolith cap never binds — test not exercised"
+
+        # Regolith-limited formation (cptSoil on).
+        m.duriHL.set(0.0)
+        m.gwZlast = z.copy()
+        m._updateDuricrust()
+        dH_lim = m.duriHL.getArray().copy()
+
+        # Unlimited formation (soil coupling off).
+        saved = m.cptSoil
+        m.cptSoil = False
+        m.duriHL.set(0.0)
+        m.gwZlast = z.copy()
+        m._updateDuricrust()
+        dH_unlim = m.duriHL.getArray().copy()
+        m.cptSoil = saved
+
+        assert np.allclose(dH_lim, m.dt * np.minimum(supply_unlim, reg))
+        assert np.allclose(dH_unlim, m.dt * supply_unlim)
+        assert (dH_lim[binds] < dH_unlim[binds]).all(), "regolith cap not applied"
+    finally:
+        m.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall
