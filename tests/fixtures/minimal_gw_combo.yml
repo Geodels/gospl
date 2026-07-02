@@ -1,0 +1,65 @@
+name: groundwater + duricrust + dual-lithology + provenance combined
+
+# Compatibility fixture: the water-table + generic duricrust feature running with
+# BOTH dual lithology AND in-model provenance on, plus stratigraphy. Confirms the
+# induration archive (stratDuri) coexists with the fine pile (stratHf/phiF) and
+# the provenance partition (stratP) — each an independent per-layer field — and
+# that all conservation invariants still hold. See DESIGN_WATERTABLE_DURICRUST §10.
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 40
+    tout: 20
+    dt: 10.
+    strat: 10.
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 1.0
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+strata:
+    dual: True
+    coarse: {phi0: 0.49, z0: 3700.}
+    fine: {phi0: 0.63, z0: 1960., k_factor: 1.5}
+    bedrock_coarse_frac: 0.6
+    fine_diff_factor: 2.0
+
+provenance:
+    classes: 2
+    uniform: 0
+
+groundwater:
+    Ksat: 3.65e4
+    specific_yield: 0.1
+    aquifer_base: 50.0
+    infiltration: 0.02
+    conserve_baseflow: True
+    duricrust:
+        form_rate: 1.0e-4
+        max_thickness: 5.0
+        fringe_depth: 3.0
+        fringe_width: 2.0
+        armor_max: 0.9
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'gw_combo_out'

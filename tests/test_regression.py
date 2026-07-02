@@ -1328,6 +1328,43 @@ def test_duricrust_strata_exhumation():
         m.destroy()
 
 
+def test_groundwater_dual_provenance_combo():
+    """
+    Protects (water-table + duricrust, **§10 compatibility**): the feature runs
+    with BOTH dual lithology AND in-model provenance on. The induration archive
+    `stratDuri` is one more independent, intensive per-layer field alongside the
+    fine pile (`stratHf`/`phiF`) and the provenance partition (`stratP`); an
+    end-to-end run completes and every conservation invariant still holds —
+    Σ-over-classes == `stratH`, fine ≤ total, induration ∈ [0,1].
+    """
+    m = _gw_model("minimal_gw_combo.yml")
+    try:
+        assert m.gwOn and m.duriOn and m.stratLith and m.provOn and m.stratNb > 0, (
+            "combo fixture must enable gw+duricrust+dual+provenance+strata"
+        )
+        assert m.stratDuri is not None and m.stratHf is not None
+        assert m.stratP is not None
+
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        own = m.inIDs == 1
+        top = m.stratStep + 1
+        # Provenance partition: Σ over classes == layer thickness.
+        psum = m.stratP[:, :top, :].sum(axis=2)
+        assert np.allclose(psum[own], m.stratH[own, :top], atol=1.0e-6, rtol=1.0e-4), (
+            "provenance Σ-over-classes drifted from stratH"
+        )
+        # Dual lithology: fine bulk never exceeds the layer total.
+        assert (m.stratHf[:, :top] <= m.stratH[:, :top] + 1.0e-9).all()
+        # Induration archive: finite, in [0,1], and armor multiplier consistent.
+        assert np.isfinite(m.stratDuri).all()
+        assert (m.stratDuri >= 0.0).all() and (m.stratDuri <= 1.0 + 1.0e-9).all()
+        assert np.allclose(m.duriKarmor, 1.0 - m.duriArmorMax * m.duriF)
+    finally:
+        m.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall
