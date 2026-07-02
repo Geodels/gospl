@@ -6,6 +6,9 @@ from mpi4py import MPI
 
 from gospl.tools.constants import ICE_COVER_MIN
 
+if "READTHEDOCS" not in os.environ:
+    from gospl._fortran import jacobiancoeff
+
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
 
@@ -120,4 +123,118 @@ class GWMesh(object):
         R = np.where(sub, 0.0, R)
 
         self.rechargeL.setArray(R)
+
+        # Phase 2: solve the implicit water-table head from this recharge.
+        self._solveHead()
+        return
+
+    def _makeGWKSP(self):
+        """
+        Cached KSP for the elliptic head solve: fgmres + block-Jacobi (the stiff
+        biharmonic-free elliptic operator wants a Krylov accelerator, not the
+        stationary richardson used for the smoother), with the per-rank ILU
+        pivots shifted so PCSetUp cannot fail on a degenerate partition. Operator
+        prefix ``gw_`` scopes the shift / any override.
+        """
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType("fgmres")
+        ksp.getPC().setType("bjacobi")
+        ksp.setTolerances(rtol=1.0e-8, max_it=1000)
+        ksp.setInitialGuessNonzero(True)
+        ksp.setOptionsPrefix("gw_")
+        petsc4py.PETSc.Options()["gw_sub_pc_factor_shift_type"] = "nonzero"
+        ksp.setFromOptions()
+        return ksp
+
+    def _solveHead(self):
+        r"""
+        Implicit (backward-Euler) Dupuit-Boussinesq water-table head solve
+        (DESIGN_WATERTABLE_DURICRUST.md §2/§3). One elliptic solve per step:
+
+        .. math::
+            (I + \tfrac{\Delta t}{S}\,L(T))\,h = h_{old} + \tfrac{\Delta t}{S}\,R
+
+        with transmissivity :math:`T = K_h\max(h - z_{bed}, b_{min})` (unconfined),
+        :math:`L(T)=-\nabla\cdot(T\nabla)` the FV neg-Laplacian (from
+        ``jacobiancoeff``, area-normalised — the same operator the marine Picard
+        solver uses). Reduces to the steady elliptic limit as :math:`\Delta t/S`
+        grows, so it is quasi-steady at century steps.
+
+        - **Unconfined non-linearity** ``T(h)``: ``gwPicardIts`` Picard sweeps
+          (lag ``T`` on the previous iterate; operator rebuilt per sweep).
+        - **Seepage free boundary** ``h <= z``: Dirichlet ``h = z`` at the base
+          seepage set (marine ``seaID`` + ponded lakes + open ``outletIDs``) via
+          ``zeroRowsLocal``; after each Picard block, clip ``h = min(h, z)`` and
+          add any newly-over-topped cell to the Dirichlet set, up to
+          ``gwSeepagePasses`` passes (break on an ``Allreduce``'d new-seepage
+          count — collective-safe). ``aquifer_base`` is prescribed here (the
+          ``from_soil`` / ``lHbed`` tie is Phase 5).
+
+        Scratch: uses ``self.tmp`` (global rhs); leaves it defined. Writes
+        ``self.headL/headG`` and ``self.wtDepth = z - h``.
+        """
+        z = self.hLocal.getArray()
+        zbed = z - float(self.gwAquiferBase)
+        bmin = float(self.gwMinSatThick)
+        gwdt = self.dt / float(self.gwSpecificYield)          # Δt/S
+        R = self.rechargeL.getArray()
+        inIDs = self.inIDs
+        zeroKp = np.zeros(self.lpoints, dtype=np.float64)
+        IntType = petsc4py.PETSc.IntType
+
+        # Base seepage (Dirichlet h = z): standing water + open outlets.
+        seep = np.zeros(self.lpoints, dtype=bool)
+        seep[self.seaID] = True
+        pitIDs = getattr(self, "pitIDs", None)
+        lFill = getattr(self, "lFill", None)
+        if pitIDs is not None and lFill is not None:
+            seep |= (pitIDs > -1) & (lFill > z)
+        outletIDs = getattr(self, "outletIDs", None)
+        if outletIDs is not None and len(outletIDs) > 0:
+            seep[outletIDs] = True
+
+        if self._ksp_gw is None:
+            self._ksp_gw = self._makeGWKSP()
+        ksp = self._ksp_gw
+
+        self.dm.globalToLocal(self.headG, self.headL)
+        hloc = self.headL.getArray().copy()
+        hold = hloc.copy()
+
+        for _ in range(int(self.gwSeepagePasses)):
+            for _ in range(int(self.gwPicardIts)):
+                T = self.gwKsat * np.maximum(hloc - zbed, bmin)   # transmissivity (m²/yr)
+                coeffs = gwdt * jacobiancoeff(hloc, T, zeroKp)     # (Δt/S)·L(T)
+                coeffs[:, 0] += 1.0                                # I + (Δt/S)·L(T)
+                M = self._assembleDiffMatCSR(coeffs)
+                owned_seep = np.where(seep & (inIDs == 1))[0].astype(IntType)
+                M.zeroRowsLocal(owned_seep, diag=1.0)             # collective; h = rhs there
+
+                rhs = hold + gwdt * R
+                rhs[seep] = z[seep]                               # pin h = z at seepage
+                self.headL.setArray(rhs)
+                self.dm.localToGlobal(self.headL, self.tmp)       # rhs (global)
+                self.headL.setArray(hloc)
+                self.dm.localToGlobal(self.headL, self.headG)     # nonzero guess
+                ksp.setOperators(M, M)
+                ksp.solve(self.tmp, self.headG)
+                M.destroy()
+                self.dm.globalToLocal(self.headG, self.headL)
+                hloc = self.headL.getArray().copy()
+
+            # Free boundaries: seepage (upper, h <= surface — discover new
+            # seepage cells) and the dry-aquifer floor (lower, h >= z_bed — the
+            # head cannot drop below the impermeable base).
+            over = (hloc > z) & (~seep)
+            n_new = MPI.COMM_WORLD.allreduce(
+                int((over & (inIDs == 1)).sum()), op=MPI.SUM
+            )
+            seep |= over
+            hloc = np.clip(hloc, zbed, z)
+            if n_new == 0:
+                break
+
+        self.headL.setArray(hloc)
+        self.dm.localToGlobal(self.headL, self.headG)
+        self.wtDepth = z - hloc
         return

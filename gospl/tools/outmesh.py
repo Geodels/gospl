@@ -432,6 +432,22 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["recharge"][:, 0] = self.rechargeL.getArray().copy()
+                # Water-table head (m, saturated-surface elevation).
+                f.create_dataset(
+                    "wtable",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["wtable"][:, 0] = self.headL.getArray().copy()
+                # Water-table depth below the surface (m) — the duricrust driver.
+                f.create_dataset(
+                    "wtdepth",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["wtdepth"][:, 0] = self.wtDepth.copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -797,14 +813,19 @@ class WriteMesh(object):
                 f.write("         </Attribute>\n")
 
             if getattr(self, "gwOn", False):
-                f.write('         <Attribute Type="Scalar" Center="Node" Name="recharge">\n')
-                f.write(
-                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
-                )
-                f.write(
-                    'Dimensions="%d 1">%s:/recharge</DataItem>\n' % (self.nodes[p], pfile)
-                )
-                f.write("         </Attribute>\n")
+                for _gwname in ("recharge", "wtable", "wtdepth"):
+                    f.write(
+                        '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'
+                        % _gwname
+                    )
+                    f.write(
+                        '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                    )
+                    f.write(
+                        'Dimensions="%d 1">%s:/%s</DataItem>\n'
+                        % (self.nodes[p], pfile, _gwname)
+                    )
+                    f.write("         </Attribute>\n")
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="SL">\n')
             f.write(

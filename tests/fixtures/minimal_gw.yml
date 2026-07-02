@@ -41,10 +41,10 @@ soil:
     tempRef: 15.0
 
 groundwater:
-    Ksat: 365.0
+    Ksat: 3.65e4
     specific_yield: 0.1
     aquifer_base: 50.0
-    infiltration: 0.3
+    infiltration: 0.02
     conserve_baseflow: True
     duricrust:
         form_rate: 1.0e-4

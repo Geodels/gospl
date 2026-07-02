@@ -809,6 +809,194 @@ def test_groundwater_recharge():
         m.destroy()
 
 
+def test_watertable_solve():
+    """
+    Protects (water-table + duricrust, **Phase 2** — DESIGN_WATERTABLE_DURICRUST.md
+    §2/§3): the implicit Dupuit–Boussinesq head solve `(I + (Δt/S)·L(T))h = h_old +
+    (Δt/S)·R` (Picard on `T(h)`, seepage clip). The solved head must sit between
+    the two free boundaries — the impermeable base `z_bed = z − aquifer_base` and
+    the seepage surface `z` — be finite, and (on a permeable aquifer) produce a
+    NON-trivial water table below the surface (so the interior elliptic solve is
+    actually exercised, not fully Dirichlet-pinned).
+
+    Called directly after a step so head / `wtDepth` are consistent with the
+    current surface (erosion later in the step lowers `z`). Analytic Dupuit-profile
+    validation + np=1-vs-2 invariance are a follow-up increment.
+    """
+    import os
+    from gospl.model import Model
+
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, "minimal_gw.yml")):
+        pytest.skip("minimal_gw.yml fixture not present")
+    cwd = os.getcwd()
+    os.chdir(fx)
+    try:
+        m = Model("minimal_gw.yml", verbose=False, showlog=False)
+    finally:
+        os.chdir(cwd)
+
+    try:
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+        m.updateGroundwater()                 # solve on the current surface
+
+        z = m.hLocal.getArray()
+        h = m.headL.getArray()
+        wt = m.wtDepth
+        zbed = z - float(m.gwAquiferBase)
+        own = m.inIDs == 1
+
+        # Bounded head between the two free boundaries.
+        assert np.isfinite(h).all(), "non-finite head"
+        assert (h <= z + 1.0e-6).all(), "head above the surface (seepage clip failed)"
+        assert (h >= zbed - 1.0e-6).all(), "head below the aquifer base"
+        # wtDepth = z − h, within [0, aquifer_base].
+        assert np.allclose(wt, z - h), "wtDepth != z − h"
+        assert (wt >= -1.0e-6).all() and (wt <= m.gwAquiferBase + 1.0e-6).all()
+        # Non-trivial water table (interior solve exercised, not all pinned).
+        assert (wt[own] > 0.01).any(), "water table fully saturated — solve not exercised"
+    finally:
+        m.destroy()
+
+
+def test_watertable_parallel(tmp_path):
+    """
+    Protects (water-table + duricrust, **Phase 2 parallel validation**): the
+    implicit head solve is partition-consistent. Runs `minimal_gw.yml` under
+    `mpirun -n 1` and `-n 2` (subprocesses, like `test_parallel_correctness`),
+    reduces the water-table head / recharge over owned nodes, and checks the two
+    decompositions agree.
+
+    Recharge is deterministic + local (no solver) → the owned-node sum must match
+    to ~FP. The head carries KSP floating-point noise + the clip-discovered
+    seepage set at partition boundaries (the design's flagged unknown), so the
+    area-weighted mean head is checked to a looser tolerance (same rationale as
+    the `rel_sum_fa` platform floor).
+    """
+    import json
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip(
+            "osx-arm64 py310-only petsc4py segfaults on nested mpirun finalize."
+        )
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    needed = ["minimal_gw.yml", "mesh.npz", "soiltemp.npz"]
+    if not all((fixtures_dir / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+
+    dump_py = tmp_path / "_gw_parallel_dump.py"
+    dump_py.write_text(_GW_PARALLEL_DUMP_SCRIPT)
+
+    def run_at_rank(n):
+        out_dir = tmp_path / f"n{n}"
+        out_dir.mkdir()
+        for f in needed:
+            shutil.copy(fixtures_dir / f, out_dir / f)
+        stats_json = out_dir / "stats.json"
+        cmd = ["mpirun", "-n", str(n), sys.executable, str(dump_py),
+               "minimal_gw.yml", str(stats_json)]
+        child_env = {
+            k: v for k, v in os.environ.items()
+            if not k.startswith(("OMPI_", "PMIX_", "PRTE_", "OPAL_"))
+        }
+        if "OPAL_PREFIX" in os.environ:
+            child_env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
+        child_env.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
+        result = subprocess.run(cmd, cwd=out_dir, timeout=600,
+                                capture_output=True, text=True, env=child_env)
+        if result.returncode != 0 or not stats_json.exists():
+            pytest.fail(
+                f"`mpirun -n {n}` gw subprocess failed (rc={result.returncode}).\n"
+                f"stdout:\n{result.stdout[-2000:]}\nstderr:\n{result.stderr[-2000:]}"
+            )
+        with open(stats_json) as f:
+            return json.load(f)
+
+    s1 = run_at_rank(1)
+    s2 = run_at_rank(2)
+    assert s1["size"] == 1 and s2["size"] == 2
+
+    def rel(a, b):
+        return abs(a - b) / max(abs(a), abs(b), 1.0e-30)
+
+    # All three are computed on the EVOLVED state, so they carry the usual ~%
+    # partition drift (the elevation → drainage → seaID/lake mask flips a few
+    # boundary cells; plus KSP FP-noise + the clip-discovered seepage set in the
+    # head). Tolerances are the partition-drift floor (same rationale as the
+    # `rel_sum_fa` 5%); a real partition-dependence bug would blow far past these.
+    assert rel(s1["sum_rech"], s2["sum_rech"]) < 5.0e-2, (
+        f"recharge sum differs np1 vs np2: {s1['sum_rech']} vs {s2['sum_rech']}"
+    )
+    assert rel(s1["wmean_head"], s2["wmean_head"]) < 5.0e-2, (
+        f"mean head differs np1 vs np2: {s1['wmean_head']} vs {s2['wmean_head']}"
+    )
+    assert rel(s1["wmean_wt"], s2["wmean_wt"]) < 1.5e-1, (
+        f"mean water-table depth differs np1 vs np2: "
+        f"{s1['wmean_wt']} vs {s2['wmean_wt']}"
+    )
+
+
+def test_watertable_steady():
+    """
+    Protects (water-table + duricrust, **Phase 2 analytic-ish validation**): with
+    the surface and recharge held fixed, repeated implicit head solves converge to
+    a **steady water table** — the quasi-steady Dupuit fixed point `∇·(T∇h)+R=0`
+    (each `updateGroundwater` uses the previous head as `h_old`, so iterating is
+    an outer relaxation onto steady state). The head change between successive
+    solves must collapse toward zero.
+
+    A full analytic Dupuit-parabola benchmark (flat hillslope fixture + drain,
+    compared to `h² = h_L² + (R/K)·x·(L−x)`) is a `benchmarks/`-suite follow-up.
+    """
+    import os
+    from gospl.model import Model
+
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, "minimal_gw.yml")):
+        pytest.skip("minimal_gw.yml fixture not present")
+    cwd = os.getcwd()
+    os.chdir(fx)
+    try:
+        m = Model("minimal_gw.yml", verbose=False, showlog=False)
+    finally:
+        os.chdir(cwd)
+
+    try:
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()                      # fix a surface / recharge
+
+        deltas = []
+        prev = None
+        for _ in range(20):
+            m.updateGroundwater()             # outer relaxation onto steady state
+            h = m.headL.getArray().copy()
+            if prev is not None:
+                deltas.append(float(np.max(np.abs(h - prev))))
+            prev = h
+
+        deltas = np.array(deltas)
+        assert np.isfinite(deltas).all() and (deltas >= 0).all()
+        # Contracting fixed-point iteration: the head-change per solve collapses
+        # toward zero. (Geometric decay — full mm-level convergence takes ~60
+        # iters on this coarse mesh; here we assert the clear downward trend.)
+        assert deltas[-1] < 0.25 * deltas[0], (
+            f"head not converging to steady state: first Δ={deltas[0]:.3g}, "
+            f"last Δ={deltas[-1]:.3g}"
+        )
+        assert deltas[-5:].mean() < deltas[:5].mean(), "no convergence trend"
+    finally:
+        m.destroy()
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall
@@ -3981,6 +4169,45 @@ try:
 finally:
     model.destroy()
 '''
+
+
+# Groundwater np=1-vs-2 dump: reduce the water-table head / recharge over owned
+# nodes and write a JSON on rank 0 (see test_watertable_parallel). Checks the
+# Phase-2 head solve is partition-consistent (the design's flagged unknown).
+_GW_PARALLEL_DUMP_SCRIPT = '''
+import json
+import sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+comm = MPI.COMM_WORLD
+m = Model(sys.argv[1], verbose=False, showlog=False)
+try:
+    m.runProcesses()
+    owned = m.inIDs == 1
+    wt = m.wtDepth[owned]
+    head = m.headL.getArray()[owned]
+    rech = m.rechargeL.getArray()[owned]
+    area = m.larea[owned]
+    at = comm.allreduce(float(area.sum()), op=MPI.SUM)
+    wmean_head = comm.allreduce(float((head * area).sum()), op=MPI.SUM) / at
+    wmean_wt = comm.allreduce(float((wt * area).sum()), op=MPI.SUM) / at
+    max_wt = comm.allreduce(float(wt.max()) if len(wt) else 0.0, op=MPI.MAX)
+    sum_rech = comm.allreduce(float(rech.sum()), op=MPI.SUM)
+    if comm.Get_rank() == 0:
+        with open(sys.argv[2], "w") as f:
+            json.dump({
+                "size": comm.Get_size(),
+                "wmean_head": wmean_head,
+                "wmean_wt": wmean_wt,
+                "max_wt": max_wt,
+                "sum_rech": sum_rech,
+            }, f)
+finally:
+    m.destroy()
+'''
+
 
 def _petsc4py_abi_mismatch() -> bool:
     """Return True if petsc4py was built against a different Python than runtime."""
