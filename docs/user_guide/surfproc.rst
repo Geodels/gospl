@@ -428,7 +428,7 @@ Soil production, erosion, transport and deposition
         c. ``depthProd`` is the soil production decay depth (m),
         d. ``roughnessL`` is the roughness length scale,
         e. ``decayDepth`` is the soil transport decay depth for non-linear diffusion where the coefficient of diffusion is set to the values of ``hillslopeKa`` and ``hillslopeKm``,
-        f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional).
+        f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional, default ``0.0001``). It also sets the **maximum soil thickness** to ``-ln(bedrockConv) * depthProd`` (the depth at which production has decayed to that fraction; e.g. ~4.6 m for the default with ``depthProd = 0.5``). Setting ``bedrockConv: 0`` means *no* bedrock-conversion depth and therefore **no maximum-soil cap** (soil thickness is unbounded).
         g. ``mode`` selects how ``soil`` (the near-surface layer) is accounted (optional, default ``'lumped'``):
 
            - ``'lumped'`` — the soil layer is a soft surface cover that absorbs **both** weathering-produced regolith **and** deposited sediment (fluvial, lake/pit, marine). This is the historical behaviour (unchanged).

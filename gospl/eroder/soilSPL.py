@@ -82,10 +82,17 @@ class soilSPL(object):
         self._ts_soil_x = None
         self._ts_soil_f = None
 
+        # Maximum soil (regolith) thickness — the depth at which soil production
+        # has decayed to a fraction `Sperc` (= soil.bedrockConv) of its surface
+        # rate, i.e. `-ln(Sperc)*Hs`. Applied as a clip in the two Lsoil
+        # write-backs. When `Sperc == 0` (bedrockConv: 0, meaning "no bedrock-
+        # conversion depth") there is NO maximum: use +inf so the clips
+        # (`nHsoil > soil_transition`) are no-ops — a true no-cap. (Was 100.0 m,
+        # which silently imposed a large-but-finite cap on a `bedrockConv: 0` run.)
         if self.Sperc > 0:
             self.soil_transition = -np.log(self.Sperc) * self.Hs
         else:
-            self.soil_transition = 100.0
+            self.soil_transition = np.inf
         self.Gsoil = self.hGlobal.duplicate()
         self.Lsoil = self.hLocal.duplicate()
         self.lHbed = self.hLocal.duplicate()

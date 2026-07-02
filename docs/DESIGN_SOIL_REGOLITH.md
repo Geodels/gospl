@@ -79,7 +79,8 @@ transport is handled by `seaplex`).
    `Kbr`/`K_soil` are zeroed at `seaID`, but it corrupts any downstream reader of
    soil thickness — e.g. a duricrust/regolith model).
 3. **Hard cap `soil_transition`.** Defined as `−ln(Sperc)·Hs` (`Sperc = soil.bedrockConv`,
-   default `1e-4` ⇒ ≈ `9.2·Hs`; `100 m` when `Sperc=0`) — the depth at which production
+   default `1e-4` ⇒ ≈ `9.2·Hs`; **`+inf` (no cap) when `Sperc=0`** — was `100 m`, a silent
+   large-but-finite cap, now a true no-cap) — the depth at which production
    has decayed to fraction `Sperc` of its surface rate. It is used **only** as a max-soil
    clip in two write-backs (`_solveSoil:363`, `updateSoilThickness:424`) — *not* in the
    erosion split (`h_star`) or bedrock-exposure (`BEDROCK_EXPOSED`). It is **not required**
@@ -98,9 +99,10 @@ transport is handled by `seaplex`).
    bedrock `K`.
 6. **Soil vs stratigraphy overlap.** Both reservoirs track "deposited soft material,"
    with no clear division of responsibility.
-7. **Hillslope coupling unaudited.** Hillslope creep *is* soil transport, yet
-   `diffuseSoil` (soil creep, `soilSPL`) and `getHillslope` (elevation diffusion,
-   `hillslope.py`) coexist without a verified joint soil-conservation contract.
+7. **Hillslope coupling — AUDITED (§5 step 4), sound.** They do **not** coexist: `getHillslope`
+   delegates to `diffuseSoil` and returns when `cptSoil`. `diffuseSoil` is volume-conserving
+   (divergence form), couples soil to elevation (`ΔLsoil = Δh`) and preserves bedrock (`lHbed`).
+   Verified + guarded by `test_soil_hillslope_conservation`.
 
 ---
 
@@ -298,10 +300,35 @@ optional and guarded:
    — one step from an identical state gives **identical elevations** (bookkeeping-only), the
    subaerial gate holds, and fresh deposits carry `stratK = Ksoil/K` in regolith / `1.0` in lumped.
    Docs: `soil: mode:` added to `user_guide/inputfile.rst`.
-3. **Lumped profile scalars (Option 2.5):** weathering-front depth, weathering-degree index,
-   duricrust horizon; recast `soil_transition` as a **smooth** max-weathering-depth (§2, item 3).
-4. **Hillslope coupling audit:** verify/enforce joint soil conservation between
-   `diffuseSoil` and `getHillslope`.
+3. **Lumped profile scalars (Option 2.5) — DEFERRED into the duricrust feature.** On review,
+   this step is not a clean standalone increment:
+   - *weathering-front depth* (`z − lHbed` = regolith thickness) is **already output** as `soilH`
+     (`outmesh.py`) and restart-restored — nothing to add;
+   - the *weathering-degree index* (0–1) is **duricrust-precursor physics** — its only consumer is
+     the duricrust induration model (`DESIGN_WATERTABLE_DURICRUST.md` §3a weathering supply), and
+     building it standalone means inventing an evolution law + parameters with nothing using them;
+   - the *duricrust horizon* is the duricrust feature itself;
+   - recasting `soil_transition` as a **smooth** max-weathering-depth (§2, item 3) is a minor,
+     result-changing refinement (the hard clip rarely binds) — kept as an **opt-in** to be done
+     when it matters (it also overlaps the duricrust max-weathering-depth).
+
+   So the weathering-degree index + smooth max-weathering-depth are built **with the duricrust /
+   water-table feature** (one coherent weathering law, real consumer), not here. Steps 1–2 are the
+   substantive standalone soil-model improvements.
+4. **Hillslope ↔ soil conservation audit — DONE (verified sound, no fix needed).** Findings:
+   - **No double-counting.** `getHillslope` **delegates to `diffuseSoil` and returns** when
+     `cptSoil` (`hillslope.py`), so the plain `_hillSlope`/`_hillSlopeNL` elevation diffusion does
+     **not** also run in a soil run — the two are mutually exclusive, not coexisting.
+   - **Creep conserves volume.** `diffuseSoil` solves the soil-gated non-linear diffusion in
+     **divergence (flux) form**, so on a closed sphere the net elevation change integrates to ~0
+     (measured `|net|/activity ≈ 1.8e-5`, i.e. TS solver tolerance).
+   - **Soil follows the surface, bedrock does not move.** The creep increment `dh` is added to
+     **both** `hGlobal` and `Lsoil` (`updateSoilThickness(deposition=False)`), so `ΔLsoil = Δh`
+     (≈1e-8) and `lHbed = h − Lsoil` is preserved (≈1e-8) — creep moves regolith, not rock.
+   - Minor, documented edge behaviour (not a conservation bug): soil creeping across the coastline
+     into a subaqueous cell is zeroed by the subaerial gate (a physical sink), and the soil-gated
+     diffusivity self-limits creep where the regolith is thin. Guard: `test_soil_hillslope_conservation`
+     (closed sphere — volume conservation + soil↔elevation coupling + bedrock preservation).
 
 Option 3 stays on the horizon only if a much-higher-resolution or dedicated regional
 weathering study ever motivates it.

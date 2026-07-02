@@ -641,6 +641,50 @@ def test_soil_mode_regolith():
         B.destroy()
 
 
+def test_soil_hillslope_conservation(minimal_ice_soil_model):
+    """
+    Protects (soil step 4 — hillslope↔soil coupling audit, DESIGN_SOIL_REGOLITH.md
+    §5): in a soil run the hillslope step delegates to soil creep
+    (`getHillslope` → `diffuseSoil`, so there is no double-count with the plain
+    `_hillSlope`/`_hillSlopeNL` path), and that creep is a well-behaved regolith
+    transport:
+
+      (1) **conserves volume** — divergence-form diffusion, so the net elevation
+          change integrates to ~0 on a closed sphere (no borders);
+      (2) **moves the soil with the surface** — ΔLsoil == Δelevation (the creep
+          increment is added to both `Lsoil` and `hGlobal`);
+      (3) **leaves the bedrock unchanged** — `lHbed = h − Lsoil` is preserved
+          (creep moves soil, not rock).
+
+    Guards against a future regression that decouples soil from elevation, moves
+    bedrock by creep, or reinstates a double hillslope+soil diffusion.
+    """
+    m = minimal_ice_soil_model
+    assert m.cptSoil
+    assert len(m.idBorders) == 0, "expected a closed sphere (no boundary flux)"
+
+    m.tEnd = m.tNow + 0.5 * m.dt
+    m.runProcesses()                          # populate realistic soil / elevation
+
+    area = m.larea
+    L0 = m.Lsoil.getArray().copy()
+    h0 = m.hLocal.getArray().copy()
+    m.diffuseSoil()                           # isolated soil-creep step
+    dh = m.hLocal.getArray() - h0             # elevation change from creep
+    dL = m.Lsoil.getArray() - L0              # soil change
+    dbed = (m.hLocal.getArray() - m.Lsoil.getArray()) - (h0 - L0)  # lHbed change
+
+    activity = float(np.sum(np.abs(dh) * area))
+    assert activity > 0.0, "soil creep did nothing — test not exercised"
+    # (1) volume-conserving creep on the closed sphere (net ≈ 0).
+    net = float(np.sum(dh * area))
+    assert abs(net) / activity < 1.0e-3, "soil creep is not volume-conserving"
+    # (2) soil follows the surface.
+    assert np.max(np.abs(dL - dh)) < 1.0e-6, "soil change != elevation change"
+    # (3) bedrock unchanged by creep.
+    assert np.max(np.abs(dbed)) < 1.0e-6, "soil creep moved the bedrock (lHbed changed)"
+
+
 def test_ice_lateral_erosion(minimal_ice_dual_model):
     """
     Protects: explicit lateral glacial erosion (`ice.abrasion.Kl`) — valley-wall
