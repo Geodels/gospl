@@ -2105,6 +2105,10 @@ class ReadYaml(object):
                 self._gwInfilMap = None
                 self.gwInfiltration = float(infil)
             self.gwConserveBaseflow = bool(gwDict.get("conserve_baseflow", True))
+            # Opt-in lake ↔ aquifer VOLUME coupling (default off — the standard
+            # fixed-head treatment). When on, the across-bed groundwater flux
+            # debits/credits each lake's fill budget (DESIGN §15).
+            self.gwLakeExchange = bool(gwDict.get("lake_exchange", False))
             self.gwPicardIts = int(gwDict.get("picard_its", 3))
             self.gwSeepagePasses = int(gwDict.get("seepage_passes", 4))
 
@@ -2142,6 +2146,7 @@ class ReadYaml(object):
             self.gwInfiltration = 0.3
             self._gwInfilMap = None
             self.gwConserveBaseflow = True
+            self.gwLakeExchange = False
             self.gwPicardIts = 3
             self.gwSeepagePasses = 4
             self.duriFormRate = 0.0

@@ -1250,6 +1250,43 @@ def test_groundwater_baseflow_reinjection():
         m.destroy()
 
 
+def test_groundwater_lake_exchange():
+    """
+    Protects (deferred item #2 — DESIGN_WATERTABLE_DURICRUST.md §15): the opt-in
+    lake ↔ aquifer VOLUME coupling. When `lake_exchange` is on, the signed
+    across-bed groundwater flux (`gwLakeFlux`, `∇·(T∇h)·A = −(L·h)·A`) is computed
+    each head solve — positive where the aquifer discharges into the surface
+    (gaining), negative where it leaks (losing) — and fed into the per-lake fill
+    budget in `_distributeDownstream`. It is a strict **no-op when off** (default):
+    `gwLakeFlux` stays zero and the lake cascade is byte-identical.
+    """
+    # OFF (default): the flux is never computed — stays zero.
+    m0 = _gw_model("minimal_gw.yml")
+    try:
+        assert not m0.gwLakeExchange, "lake_exchange must default off"
+        m0.tEnd = m0.tNow + m0.dt
+        m0.runProcesses()
+        assert (m0.gwLakeFlux == 0.0).all(), "flux computed while lake_exchange off"
+    finally:
+        m0.destroy()
+
+    # ON: signed across-bed flux computed and the cascade coupling runs.
+    m = _gw_model("minimal_gw.yml")
+    try:
+        m.gwLakeExchange = True                # opt-in the volume coupling
+        m.tEnd = m.tNow + 2 * m.dt
+        m.runProcesses()                       # step 1: head solve populates flux
+        m.runProcesses()                       # step 2: cascade consumes it
+        f = m.gwLakeFlux
+        assert np.isfinite(f).all()
+        assert (f != 0.0).any(), "no across-bed groundwater flux computed"
+        # A non-trivial water table both gains (discharge>0) and loses (leak<0).
+        assert (f > 0.0).any() and (f < 0.0).any()
+        assert np.isfinite(m.gwLakeInflow)     # diagnostic accumulated, run stable
+    finally:
+        m.destroy()
+
+
 def test_groundwater_from_soil():
     """
     Protects (Phase 5, §8 soil coupling): `aquifer_base: from_soil` ties the

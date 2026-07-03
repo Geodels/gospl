@@ -118,6 +118,13 @@ class GWMesh(object):
             # Surface at the previous groundwater update — the duricrust breakdown
             # term reads the per-step incision (z_last − z > 0 = surface lowered).
             self.gwZlast = self.hLocal.getArray().copy()
+            # Signed across-bed groundwater flux (m³/yr, >0 = into the surface),
+            # for the opt-in lake ↔ aquifer volume coupling. 0 until the first
+            # head solve, so the cascade's first read is a no-op.
+            self.gwLakeFlux = np.zeros(self.lpoints, dtype=np.float64)
+            # Running total of net groundwater volume exchanged with lakes (m³,
+            # owned nodes) — diagnostic for the lake-exchange budget.
+            self.gwLakeInflow = 0.0
             # Cached local temperature (K) for the optional Arrhenius weathering
             # term (loaded lazily from the soil tempMap when weather_Ea > 0), and
             # a lazily-resolved per-vertex `weatherability` map (rate mode).
@@ -336,6 +343,35 @@ class GWMesh(object):
         # Phase 5: account the seepage-return (baseflow) discharge (opt-in).
         if getattr(self, "gwConserveBaseflow", False):
             self._baseflowClosure(hold, hloc, seep)
+        # Opt-in lake ↔ aquifer volume coupling: the signed across-bed flux.
+        if getattr(self, "gwLakeExchange", False):
+            self._lakeExchangeFlux(hloc, zbed, bmin, zeroKp)
+        return
+
+    def _lakeExchangeFlux(self, hloc, zbed, bmin, zeroKp):
+        r"""
+        Signed groundwater flux exchanged with the surface at every node (m³/yr),
+        stored in ``self.gwLakeFlux`` for the lake volume coupling (§15). It is the
+        FV divergence of the lateral groundwater flow, ``∇·(T∇h)·A = −(L·h)·A``
+        (``L`` = the area-normalised neg-Laplacian from ``jacobiancoeff``, so
+        ``L·h = −∇·(T∇h)``): **positive = the aquifer discharges INTO the surface**
+        (a gaining lake), **negative = the surface leaks INTO the aquifer** (a
+        losing lake). One extra operator assemble + mat-vec, only when
+        ``lake_exchange`` is on. Uses the *un-zeroed* operator (the seepage-Dirichlet
+        rows would otherwise null the flux exactly at the lake nodes we need).
+        """
+        T = self.gwKsat * np.maximum(hloc - zbed, bmin)
+        Lop = self._assembleDiffMatCSR(jacobiancoeff(hloc, T, zeroKp))  # pure L
+        self.headL.setArray(hloc)
+        self.dm.localToGlobal(self.headL, self.headG)
+        Lop.mult(self.headG, self.tmp)                     # tmp = L·h (global)
+        Lop.destroy()
+        self.dm.globalToLocal(self.tmp, self.headL)
+        Lh = self.headL.getArray()
+        self.gwLakeFlux = -Lh * self.larea                 # >0 aquifer→surface
+        # restore headG/headL to the head (tmp/headL were reused as scratch)
+        self.headL.setArray(hloc)
+        self.dm.localToGlobal(self.headL, self.headG)
         return
 
     def _gwZbed(self, z):
