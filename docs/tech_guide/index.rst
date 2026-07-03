@@ -33,7 +33,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     :gutter: 2 3 4 4
 
     .. grid-item-card::
-        :img-top: ../_static/rivers.png
+        :img-top: ../_static/rivers.svg
         :text-align: center
 
         **River flow implementation**
@@ -50,7 +50,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about goSPL flow.
 
     .. grid-item-card::
-        :img-top: ../_static/erosion.png
+        :img-top: ../_static/erosion.svg
         :text-align: center
 
         **Erosion rate and sediment flux**
@@ -67,7 +67,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about the SPL.
 
     .. grid-item-card::
-        :img-top: ../_static/depression.png
+        :img-top: ../_static/depression.svg
         :text-align: center
 
         **Inland depressions & deposition**
@@ -84,7 +84,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about inland depressions.
 
     .. grid-item-card::
-        :img-top: ../_static/deltaDiagram.jpg
+        :img-top: ../_static/deltaDiagram.svg
         :text-align: center
 
         **Hillslope and marine deposition**
@@ -101,7 +101,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about hillslope processes.
 
     .. grid-item-card::
-        :img-top: ../_static/strati.png
+        :img-top: ../_static/strati.svg
         :text-align: center
 
         **Stratigraphy and compaction**
@@ -118,7 +118,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Stratigraphic and compaction implementation.
 
     .. grid-item-card::
-        :img-top: ../_static/tectonic.png
+        :img-top: ../_static/tectonic.svg
         :text-align: center
 
         **Tectonic forcing**
@@ -135,7 +135,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about the tectonics implementation.
 
     .. grid-item-card::
-        :img-top: ../_static/glacier.png
+        :img-top: ../_static/glacier.svg
         :text-align: center
 
         **Ice sheets and glacial erosion**
@@ -152,7 +152,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about the ice implementation.
 
     .. grid-item-card::
-        :img-top: ../_static/provenance.png
+        :img-top: ../_static/provenance.svg
         :text-align: center
 
         **Sediment provenance (source-to-sink)**
@@ -169,6 +169,7 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
             Learn more about provenance attribution.
 
     .. grid-item-card::
+        :img-top: ../_static/duricrust.svg
         :text-align: center
 
         **Water table & duricrust**
