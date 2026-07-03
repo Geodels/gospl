@@ -166,16 +166,27 @@ class GWMesh(object):
         t0 = process_time()
         rain = self.rainVal
         evap = getattr(self, "evapVal", None)
-        net = rain if evap is None else (rain - evap)
-        R = self.gwInfiltration * np.maximum(0.0, net)
+        net = np.maximum(0.0, rain if evap is None else (rain - evap))
+
+        # Effective infiltration fraction, optionally modulated (opt-in) by:
+        #  - surface lithology (coarse infiltrates more than fine) via the exposed
+        #    coarse fraction and `fine_infil_factor` (dual lithology only);
+        #  - terrain slope (steeper ⇒ less infiltration, more runoff) via
+        #    f/(1 + slope/infil_slope_ref). See DESIGN §3.
+        finf = self.gwInfiltration
+        if self.gwFineInfilFactor != 1.0 and getattr(self, "stratLith", False):
+            fc = self._surfaceComposition()                # exposed coarse fraction
+            finf = finf * (fc + (1.0 - fc) * self.gwFineInfilFactor)
+        if self.gwInfilSlopeRef > 0.0 and getattr(self, "rcvID", None) is not None:
+            finf = finf / (1.0 + self._surfaceSlope() / self.gwInfilSlopeRef)
+        R = finf * net
 
         # No rain-recharge where the surface is not subaerial land:
         #  - standing water (marine `seaID`, or a ponded continental lake) — the
         #    head is pinned to the surface there;
         #  - ice-covered land — precipitation falls as snow/ice and does not
         #    infiltrate the ground (parallels the soil ice-freeze gate). Subglacial
-        #    meltwater recharge is a future refinement (the ice model has
-        #    `iceMeltRiverL`). See DESIGN_WATERTABLE_DURICRUST.md §3.
+        #    meltwater recharge is added back below (opt-in).
         sub = np.zeros(self.lpoints, dtype=bool)
         sub[self.seaID] = True
         pitIDs = getattr(self, "pitIDs", None)
@@ -187,6 +198,18 @@ class GWMesh(object):
             if iceHL is not None:
                 sub |= iceHL.getArray() > ICE_COVER_MIN
         R = np.where(sub, 0.0, R)
+
+        # Subglacial-meltwater recharge (opt-in): a fraction of the glacial
+        # meltwater (`iceMeltRiverL`, m³/yr) infiltrates the aquifer where it melts
+        # out — the one recharge path allowed under ice (the ice gate above zeroes
+        # the rain path). Converted to a rate (m/yr) by the cell area; never on the
+        # sea. See DESIGN_WATERTABLE_DURICRUST.md §3.
+        if self.gwSubglacial > 0.0 and getattr(self, "iceOn", False):
+            imr = getattr(self, "iceMeltRiverL", None)
+            if imr is not None:
+                Rsub = self.gwSubglacial * imr.getArray() / self.larea
+                Rsub[self.seaID] = 0.0
+                R = R + Rsub
 
         self.rechargeL.setArray(R)
 
@@ -603,6 +626,22 @@ class GWMesh(object):
         if prod is None:
             return np.inf
         return prod * self.rainVal
+
+    def _surfaceSlope(self):
+        r"""
+        Per-node steepest-descent slope (m/m, ≥ 0) from the flow-direction
+        receivers built by ``flowAccumulation`` — ``(z − z_rcv)/dist`` to the
+        primary receiver ``rcvID[:,0]``. Flats / sinks / outlets (``dist=0`` or a
+        self-receiver) return 0. A cheap proxy for the optional slope-dependent
+        infiltration (goSPL stores no explicit slope). Rank-local.
+        """
+        hl = self.hLocal.getArray()
+        rcv0 = self.rcvID[:, 0]
+        d = self.distRcv[:, 0]
+        valid = (rcv0 >= 0) & (d > 0.0)
+        idx = np.where(valid, rcv0, np.arange(self.lpoints))
+        slope = np.where(valid, (hl - hl[idx]) / np.where(d > 0.0, d, 1.0), 0.0)
+        return np.maximum(slope, 0.0)
 
     def _recordInduration(self):
         r"""

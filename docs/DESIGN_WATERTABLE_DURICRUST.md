@@ -112,10 +112,12 @@ groundwater sets the armoring state that erosion then reads.
    existing forcing arrays. `R = 0` where the surface is **not subaerial land**: `seaID` and
    ponded continental lakes (head pinned; see step 3) **and ice-covered land** (`iceHL >
    ICE_COVER_MIN` — rain falls as snow/ice and does not infiltrate the ground; parallels the
-   soil ice-freeze gate. Subglacial-meltwater recharge, via the ice model's `iceMeltRiverL`, is
-   a future refinement). `f_infil` may be a **scalar or a per-vertex map** `[file, key]`
-   (loaded in `_GWMesh`; physically varies with lithology / regolith / slope) — per-lithology
-   coupling (to dual-lithology `fc`/`ff` or slope) is a later opt-in.
+   soil ice-freeze gate. **As built:** an opt-in `subglacial_recharge` fraction lets the ice
+   model's `iceMeltRiverL` infiltrate under ice — the one recharge path allowed there). `f_infil`
+   may be a **scalar or a per-vertex map** `[file, key]` (loaded in `_GWMesh`) and is optionally
+   modulated (opt-in, both default off) by **surface lithology** (`fine_infil_factor` on the exposed
+   coarse fraction, dual lithology) and by **slope** (`f/(1+slope/infil_slope_ref)`, the
+   steepest-descent gradient) — DESIGN §3 recharge refinements.
 2. **Seepage set.** Nodes where the table is pinned to the surface: rivers/lakes
    (drainage-connected, from the flow graph) + coast/sea (`seaID`) + open boundary
    outlets (`outletIDs`). Dirichlet `h = z` there (partition-invariant — derived from
@@ -305,6 +307,9 @@ groundwater:
     infiltration: 0.3    # f_infil: fraction of (rain − evap) that recharges
     conserve_baseflow: True   # return seepage to rivers (re-injected into bL)
     lake_exchange: False # opt-in lake ↔ aquifer volume coupling (§15)
+    subglacial_recharge: 0.0  # fraction of glacial meltwater infiltrating under ice
+    fine_infil_factor: 1.0    # f_infil multiplier for the fine end-member (dual litho)
+    infil_slope_ref: 0.0      # slope reference for f/(1+slope/ref) (0 = off)
     picard_its: 3
     seepage_passes: 4
 

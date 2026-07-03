@@ -813,6 +813,87 @@ def test_groundwater_recharge():
         m.destroy()
 
 
+def test_groundwater_recharge_refinements():
+    """
+    Protects the opt-in recharge refinements (DESIGN_WATERTABLE_DURICRUST.md §3;
+    all default off ⇒ unchanged): **slope-modulated** infiltration
+    (`f/(1+slope/infil_slope_ref)` — less on steep terrain), **subglacial-meltwater
+    recharge** (a fraction of `iceMeltRiverL` infiltrates under ice, the one
+    recharge path the ice gate allows), and **lithology-modulated** infiltration
+    (`fine_infil_factor` — coarse infiltrates more than fine, dual lithology).
+    """
+    from gospl.tools.constants import ICE_COVER_MIN
+
+    m = _gw_model("minimal_gw.yml")
+    try:
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()                       # builds rcvID / rainVal
+        own = m.inIDs == 1
+
+        m.updateGroundwater()
+        R0 = m.rechargeL.getArray().copy()
+
+        # (slope) infiltration falls on slopes — never increases, strictly less
+        # where the terrain is steep and there was recharge.
+        m.gwInfilSlopeRef = 0.01
+        m.updateGroundwater()
+        Rs = m.rechargeL.getArray().copy()
+        m.gwInfilSlopeRef = 0.0
+        slope = m._surfaceSlope()
+        steep = own & (slope > 0.0) & (R0 > 0.0)
+        assert steep.any(), "no sloped recharge cells — test not exercised"
+        assert (Rs[steep] < R0[steep]).all(), "slope did not reduce infiltration"
+        assert (Rs <= R0 + 1.0e-12).all()
+
+        # (subglacial) synthesise ice + meltwater on a few subaerial land cells:
+        # the rain path is gated off under ice, subglacial adds frac·imr/area.
+        sub = np.zeros(m.lpoints, dtype=bool)
+        sub[m.seaID] = True
+        if getattr(m, "pitIDs", None) is not None:
+            sub |= (m.pitIDs > -1) & (m.lFill > m.hLocal.getArray())
+        land = np.where(~sub & own)[0][:5]
+        assert len(land) >= 3
+        m.iceOn = True
+        m.iceHL = m.hLocal.duplicate()
+        ice = np.zeros(m.lpoints)
+        ice[land] = 10.0 * ICE_COVER_MIN
+        m.iceHL.setArray(ice)
+        m.iceMeltRiverL = m.hLocal.duplicate()
+        imr = np.zeros(m.lpoints)
+        imr[land] = 1.0e6                       # m³/yr glacial meltwater
+        m.iceMeltRiverL.setArray(imr)
+        m.gwSubglacial = 0.5
+        try:
+            m.updateGroundwater()
+            Rg = m.rechargeL.getArray()
+            assert (Rg[land] > 0.0).all(), "no subglacial recharge under ice"
+            assert np.allclose(Rg[land], 0.5 * imr[land] / m.larea[land])
+        finally:
+            m.iceHL.destroy()
+            m.iceMeltRiverL.destroy()
+            m.iceOn = False
+            m.gwSubglacial = 0.0
+    finally:
+        m.destroy()
+
+    # (lithology) coarse infiltrates more than fine — needs dual lithology.
+    mc = _gw_model("minimal_gw_combo.yml")
+    try:
+        mc.tEnd = mc.tNow + 0.5 * mc.dt
+        mc.runProcesses()
+        mc.updateGroundwater()
+        Rc0 = mc.rechargeL.getArray().copy()
+        mc.gwFineInfilFactor = 0.2
+        mc.updateGroundwater()
+        Rcf = mc.rechargeL.getArray().copy()
+        own = mc.inIDs == 1
+        fine = own & (mc._surfaceComposition() < 1.0) & (Rc0 > 0.0)
+        assert fine.any(), "no fine-bearing recharge cells — test not exercised"
+        assert (Rcf[fine] < Rc0[fine]).all(), "fine did not reduce infiltration"
+    finally:
+        mc.destroy()
+
+
 def test_watertable_solve():
     """
     Protects (water-table + duricrust, **Phase 2** — DESIGN_WATERTABLE_DURICRUST.md

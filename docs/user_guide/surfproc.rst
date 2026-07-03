@@ -725,7 +725,10 @@ Groundwater & duricrust
     f. ``infiltration`` — fraction ``f_infil`` of ``max(0, rain − evap)`` that recharges the aquifer; a scalar or a per-vertex map ``[file, key]`` (default ``0.3``).
     g. ``conserve_baseflow`` — return the seepage discharge to the river network so total river discharge stays ``≈ rain − evap`` (default ``True``). The infiltrated recharge leaves surface runoff and is **re-injected as baseflow** at the seepage nodes (rivers become baseflow-fed); also writes the ``baseflow`` output.
     h. ``lake_exchange`` — opt-in lake ↔ aquifer **volume** coupling (default ``False``). When on, the signed across-bed groundwater flux debits/credits each lake's fill budget — a lake ringed by a higher water table gains groundwater, one ringed by a lower table leaks. Off ⇒ lakes are fixed-head only (unchanged).
-    i. ``picard_its`` / ``seepage_passes`` — inner iteration counts for the unconfined non-linearity ``T(h)`` and the seepage free-boundary discovery (defaults ``3`` / ``4``).
+    i. ``subglacial_recharge`` — fraction of the glacial meltwater (``iceMeltRiverL``) that infiltrates the aquifer where the ice melts out (default ``0`` — under ice the rain path is gated off; this is the one recharge path allowed there).
+    j. ``fine_infil_factor`` — multiplier on ``f_infil`` for the fine end-member (dual lithology); ``< 1`` makes clay/fine surfaces infiltrate less than coarse/sand (default ``1`` — no lithology dependence).
+    k. ``infil_slope_ref`` — reference slope for a ``f/(1 + slope/infil_slope_ref)`` reduction of infiltration on steep terrain (default ``0`` — off; slope is the steepest-descent gradient).
+    l. ``picard_its`` / ``seepage_passes`` — inner iteration counts for the unconfined non-linearity ``T(h)`` and the seepage free-boundary discovery (defaults ``3`` / ``4``).
 
     .. important::
 

@@ -2109,6 +2109,16 @@ class ReadYaml(object):
             # fixed-head treatment). When on, the across-bed groundwater flux
             # debits/credits each lake's fill budget (DESIGN §15).
             self.gwLakeExchange = bool(gwDict.get("lake_exchange", False))
+            # Recharge refinements (all opt-in, defaults = current behaviour):
+            #   subglacial_recharge — fraction of glacial meltwater (iceMeltRiverL)
+            #     that infiltrates under ice (0 = the ice gate zeroes recharge);
+            #   fine_infil_factor — multiplier on f_infil for the fine end-member
+            #     (dual lithology; 1 = no lithology dependence);
+            #   infil_slope_ref — reference slope for f/(1+slope/ref) reduction on
+            #     steep terrain (0 = off, no slope dependence).
+            self.gwSubglacial = float(gwDict.get("subglacial_recharge", 0.0))
+            self.gwFineInfilFactor = float(gwDict.get("fine_infil_factor", 1.0))
+            self.gwInfilSlopeRef = float(gwDict.get("infil_slope_ref", 0.0))
             self.gwPicardIts = int(gwDict.get("picard_its", 3))
             self.gwSeepagePasses = int(gwDict.get("seepage_passes", 4))
 
@@ -2147,6 +2157,9 @@ class ReadYaml(object):
             self._gwInfilMap = None
             self.gwConserveBaseflow = True
             self.gwLakeExchange = False
+            self.gwSubglacial = 0.0
+            self.gwFineInfilFactor = 1.0
+            self.gwInfilSlopeRef = 0.0
             self.gwPicardIts = 3
             self.gwSeepagePasses = 4
             self.duriFormRate = 0.0
