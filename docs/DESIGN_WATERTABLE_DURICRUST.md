@@ -19,10 +19,13 @@ KSP/SNES lifecycle, scratch-vector contract, `destroy_DMPlex` registration).
 > `head`/`duriH`, and the full user/tech/API docs. Guarded by the
 > `test_groundwater_*` / `test_duricrust_*` suite (serial + np=2). Since then the
 > **baseflow re-injection** into the surface flow (§3 step 7), the **`from_soil`
-> basin base** from the stratigraphy (§15), and the opt-in **lake ↔ aquifer volume
-> coupling** (§15) have also landed. **Remaining deferred increments:** the
-> multi-layer formation **depth range** (§9) and the geochemical **Level-B** solute
-> transport (§3a/§15). The sections below are the original design narrative,
+> basin base** from the stratigraphy (§15), the opt-in **lake ↔ aquifer volume
+> coupling** (§15), and the smaller **recharge refinements** — subglacial-meltwater
+> recharge, and lithology-/slope-modulated `f_infil` (§3) — have also landed (all
+> opt-in, default off). **Remaining deferred increments:** the multi-layer
+> formation **depth range** (§9) and the geochemical **Level-B** solute transport
+> (§3a/§15) — the latter also being the prerequisite for duricrust **solute-source
+> provenance** (§11). The sections below are the original design narrative,
 > annotated with "as built" notes where the implementation refined a choice.
 
 ---
