@@ -20,14 +20,15 @@ partition-exact, MPI-safe, no new hard dependency.
 
 > **STATUS: DONE** — all three forms built: **(a)** direct per-vertex maps,
 > **(b)** a standalone `lithology: [file, key]` map + per-(class, species) table,
-> and **(c)** the same table gathered by the provenance `source_class`. Parser
-> keeps `gwGeoWeather` raw + adds `gwGeoWeatherByClass` / `gwWeatherFrom` /
-> `_gwLithoMap`; `gwplex._resolveGeoWeather` resolves lazily to
-> scalar-or-`(lpoints,)` per species (label = the `lithology:` map if given, else
-> `source_class`); the use-site is one line. Guards
-> `test_geochem_spatial_weatherability` (c) + `test_geochem_lithology_map` (b);
-> full `tests/` 153 passed. Static-surface-lithology (§1.8) remains the one noted
-> refinement.
+> and **(c)** the same table gathered by the provenance class — static
+> `source_class` **or** dynamic `surface_class` (top stratigraphic layer,
+> re-resolved each step; §1.8). Parser keeps `gwGeoWeather` raw + adds
+> `gwGeoWeatherByClass` / `gwWeatherFrom` / `_gwLithoMap`;
+> `gwplex._resolveGeoWeather` resolves to scalar-or-`(lpoints,)` per species
+> (label = the `lithology:` map if given, else the provenance class); the
+> use-site is one line. Guards `test_geochem_spatial_weatherability` (c) +
+> `test_geochem_lithology_map` (b) + `test_geochem_surface_lithology` (dynamic);
+> full `tests/` 154 passed. **No open refinements.**
 
 ### 1.1 Motivation & the current gap
 Today the solute species are defined by **global scalars** — one
@@ -150,13 +151,17 @@ the correct behaviour.
   weatherability is the lithology→chemistry primary; keep the others scalar in
   v1 to limit surface area.
 
-### 1.8 Known limitation — static surface lithology
-The map is the **present-day surface** lithology and is **static**: as erosion
-exhumes deeper stratigraphy the real surface rock type changes, but v1 keeps the
-weatherability field fixed. A faithful refinement would derive the per-node
-surface lithology each step from the **top non-empty stratigraphic layer's**
-`source_class` (the same top-layer scan `_recordInduration`/`_surfaceComposition`
-already do) — deferred, noted here as the natural next step.
+### 1.8 Dynamic surface lithology — DONE
+The prescribed forms (a)/(b) and `source_class` (c-static) fix the weatherability
+to the **present-day bedrock**; but as erosion exhumes deeper stratigraphy — or
+deposition buries the surface under transported sediment of a different
+provenance — the real surface rock type changes. `weatherability_from:
+surface_class` closes this: `_surfaceSourceClass` derives the per-node label each
+step from the **dominant provenance class of the top non-empty stratigraphic
+layer** (`stratP`), using the same top-layer scan as `_recordInduration`; the
+dynamic form is re-resolved every step (not cached). Needs provenance (the
+per-layer class record `stratP`); falls back to the bedrock `source_class` where
+a column has no sediment. Guard `test_geochem_surface_lithology`.
 
 ### 1.9 Testing
 - Fixture: 2 species + a lithology split (region A weatherability `[1, 0]`,

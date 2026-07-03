@@ -34,6 +34,7 @@ Class GWMesh
       ~GWMesh._updateDuricrust
       ~GWMesh._regolithSupplyRate
       ~GWMesh._recordInduration
+      ~GWMesh._surfaceSourceClass
       ~GWMesh._resolveGeoWeather
       ~GWMesh._makeSoluteKSP
       ~GWMesh._soluteAdvecCoeffs
@@ -63,6 +64,7 @@ Private functions
 .. automethod:: flow.gwplex.GWMesh._updateDuricrust
 .. automethod:: flow.gwplex.GWMesh._regolithSupplyRate
 .. automethod:: flow.gwplex.GWMesh._recordInduration
+.. automethod:: flow.gwplex.GWMesh._surfaceSourceClass
 .. automethod:: flow.gwplex.GWMesh._resolveGeoWeather
 .. automethod:: flow.gwplex.GWMesh._makeSoluteKSP
 .. automethod:: flow.gwplex.GWMesh._soluteAdvecCoeffs

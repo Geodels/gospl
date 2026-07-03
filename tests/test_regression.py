@@ -1101,6 +1101,63 @@ def test_geochem_lithology_map():
         m.destroy()
 
 
+def test_geochem_surface_lithology():
+    """
+    Protects (Level-B geochemistry, extension 1 refinement §1.8 —
+    DESIGN_GEOCHEM_EXTENSIONS.md): ``weatherability_from: surface_class`` derives
+    the lithology label each step from the **top non-empty stratigraphic layer's
+    provenance** (``stratP``), not the static bedrock ``source_class`` — so as
+    exhumation/burial changes the exposed rock the weatherability follows.
+    Verified: ``_surfaceSourceClass`` returns the top-layer dominant class (not
+    the bedrock), it is re-resolved each step (dynamic), and the resolved
+    weatherability tracks it.
+    """
+    m = _gw_model("minimal_gw_geochem_surface.yml")
+    try:
+        assert m.gwGeochemOn and m.provOn and m.gwWeatherFrom == "surface_class"
+        m.tEnd = m.tNow + 3 * m.dt
+        m.runProcesses()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        # Force a class-1 (silica) sediment cover on top of a class-0 bedrock:
+        # set the top non-empty layer of every sedimented column to pure class 1,
+        # and the static bedrock label to class 0 everywhere.
+        top = m.stratStep + 1
+        H = m.stratH[:, :top]
+        rev = (H > 0)[:, ::-1]
+        valid = rev.any(axis=1)
+        assert valid.any(), "no stratigraphy accumulated to test with"
+        top_idx = top - 1 - np.argmax(rev, axis=1)
+        rows = np.arange(H.shape[0])
+        vr, vt = rows[valid], top_idx[valid]
+        m.stratP[vr, vt, :] = 0.0
+        m.stratP[vr, vt, 1] = m.stratH[vr, vt]        # top layer is pure class 1
+        m.source_class[:] = 0                          # bedrock is class 0
+
+        # Dynamic surface class follows the TOP LAYER (1), not the bedrock (0);
+        # bedrock fallback only where a column has no sediment.
+        lbl = m._surfaceSourceClass()
+        assert (lbl[valid] == 1).all(), "surface class did not follow the top layer"
+        assert (lbl[~valid] == 0).all(), "bedrock fallback broken where no strata"
+
+        # Re-resolved weatherability tracks it: silica (species 1) is weathered on
+        # the class-1 surface, carbonate (species 0) is not.
+        m._gwGeoWeatherArr = None
+        arr = m._resolveGeoWeather()
+        assert np.allclose(arr[1][valid], 1.0) and np.allclose(arr[0][valid], 0.0)
+        # And it is DYNAMIC: _updateSolute re-resolves every step (not cached).
+        pool0 = 1.0e6 * m.larea
+        m.gwSourcePool[:] = pool0[:, None]
+        m.tEnd = m.tNow + m.dt
+        m.runProcesses()
+        # On the class-1 surface, only silica dissolves (carbonate pool untouched).
+        assert np.allclose(m.gwSourcePool[valid, 0], pool0[valid]), "carbonate dissolved on silica surface"
+        assert (m.gwSourcePool[valid, 1] < pool0[valid]).any(), "silica not dissolved on silica surface"
+    finally:
+        m.destroy()
+
+
 def test_geochem_river_load():
     """
     Protects (Level-B geochemistry, extension 2 — DESIGN_GEOCHEM_EXTENSIONS.md

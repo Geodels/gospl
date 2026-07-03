@@ -801,8 +801,12 @@ carbonate). Three forms, on top of the scalar default:
   ``provenance:`` on; no extra input), keeping ``crust_source`` and the species
   mix mutually consistent.
 
-The label for (b)/(c) is the ``lithology:`` map when given, otherwise
-``source_class``.
+The label for (b)/(c) is the ``lithology:`` map when given, otherwise the
+provenance class. For (c) the class may be **static** (``source_class`` — the
+bedrock) or **dynamic** (``weatherability_from: surface_class`` — the dominant
+provenance of the **top stratigraphic layer**, re-derived each step, so the
+weatherability tracks the rock actually exposed as erosion exhumes deeper layers
+or deposition buries the surface under sediment of a different provenance).
 
 The map is the present-day surface lithology and is static (it does not follow
 exhumation of deeper layers — a documented refinement).

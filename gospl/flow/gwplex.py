@@ -573,6 +573,36 @@ class GWMesh(object):
         Tref = getattr(self, "tempRef", 15.0) + 273.15
         return np.exp(self.duriWeatherEa * (1.0 / Tref - 1.0 / self._gwTempK) / 8.314)
 
+    def _surfaceSourceClass(self):
+        r"""
+        Per-node **current surface lithology** class — the dominant provenance
+        class of the **top non-empty stratigraphic layer** (from ``stratP``),
+        falling back to the static bedrock ``source_class`` where a column has no
+        sediment. As erosion exhumes deeper layers (or deposition buries the
+        surface under transported sediment of a different provenance), the top
+        layer — and hence this label — changes, so a ``surface_class``-driven
+        weatherability tracks the rock actually exposed each step.
+
+        Uses the same top-non-empty-layer scan as ``_recordInduration`` /
+        ``_surfaceComposition``. Needs provenance (``stratP``); returns the plain
+        ``source_class`` (or ``None``) when the per-layer class record is absent.
+        Rank-local; no collective.
+        """
+        base = getattr(self, "source_class", None)
+        stratP = getattr(self, "stratP", None)
+        if base is None or stratP is None or self.stratNb == 0:
+            return base
+        top = self.stratStep + 1
+        H = self.stratH[:, :top]
+        rev = (H > 0)[:, ::-1]
+        valid = rev.any(axis=1)                       # columns with any sediment
+        label = base.copy()
+        if valid.any():
+            top_idx = (H.shape[1] - 1 - np.argmax(rev, axis=1))[valid]
+            rows = np.arange(H.shape[0])[valid]
+            label[rows] = stratP[rows, top_idx, :].argmax(axis=1)
+        return label
+
     def _resolveGeoWeather(self):
         r"""
         Resolve the per-species weatherability to a list of **scalar or
@@ -586,22 +616,36 @@ class GWMesh(object):
           ``weatherability_by_class: [...]`` is gathered by a per-vertex integer
           ``lithology: [file, key]`` map (independent of provenance).
         - **(c) table by the provenance label** — the same
-          ``weatherability_by_class`` gathered by ``source_class`` when
-          ``weatherability_from: source_class`` (no new input), so
-          ``crust_source`` and the species mix stay mutually consistent.
+          ``weatherability_by_class`` gathered by a per-vertex class label:
+          ``weatherability_from: source_class`` uses the **static bedrock**
+          class, while ``weatherability_from: surface_class`` uses the
+          **dynamic current surface** class (the top stratigraphic layer,
+          recomputed each step, so weatherability tracks exhumation/burial). Both
+          need no new input beyond provenance.
         - otherwise the scalar (the default; byte-identical to the old path).
 
         The lithology label for (b)/(c) is the ``lithology:`` map when given,
-        else the provenance ``source_class``. Resolved lazily (first
-        ``_updateSolute``) so it runs after provenance seeds ``source_class``;
-        rank-local, partition-exact, no collective.
+        else the provenance class (static ``source_class`` or dynamic
+        ``surface_class``). Resolved lazily (first ``_updateSolute``) so it runs
+        after provenance seeds ``source_class``; the dynamic ``surface_class``
+        form is re-resolved every step. Rank-local, partition-exact, no
+        collective.
         """
         label = None
         lithomap = getattr(self, "_gwLithoMap", None)
+        wfrom = getattr(self, "gwWeatherFrom", None)
         if lithomap is not None:                          # (b) standalone map
             d = np.load(lithomap[0] + ".npz")
             label = d[lithomap[1]][self.locIDs].astype(np.int64)
-        elif getattr(self, "gwWeatherFrom", None) == "source_class":  # (c) provenance
+        elif wfrom == "surface_class":                    # (c) dynamic top layer
+            label = self._surfaceSourceClass()
+            if label is None and MPIrank == 0 and self.verbose:
+                print(
+                    "[gw] geochem weatherability_from='surface_class' needs "
+                    "provenance on — falling back to scalar weatherability.",
+                    flush=True,
+                )
+        elif wfrom == "source_class":                     # (c) static bedrock
             label = getattr(self, "source_class", None)
             if label is None and MPIrank == 0 and self.verbose:
                 print(
@@ -1004,7 +1048,10 @@ class GWMesh(object):
         self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
         prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None
         W = self._weatheringSupply()               # base weathering rate (Level A)
-        if self._gwGeoWeatherArr is None:          # ext 1: per-species weatherability
+        # ext 1: per-species weatherability. Resolved once and cached, EXCEPT the
+        # dynamic surface-lithology form, which is re-resolved every step so the
+        # weatherability follows the top stratigraphic layer (exhumation/burial).
+        if self._gwGeoWeatherArr is None or getattr(self, "gwWeatherFrom", None) == "surface_class":
             self._gwGeoWeatherArr = self._resolveGeoWeather()
         # Subaerial land only (no dissolution under sea / ponded lake).
         sub = np.zeros(self.lpoints, dtype=bool)
