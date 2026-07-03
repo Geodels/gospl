@@ -124,7 +124,7 @@ Iterative methods allow for an initial guess to be provided. When this initial g
 
   The approach presented here is run iteratively during a single time step based on identified depressions until all water *either flows to the ocean or is block within a pit* (*e.g.*, a lake). 
   
-  Water is able to spill-over a depression based on depression's volume and the incoming upstream water volume. **It is worth mentioning that no infiltration or evaporation is considered in goSPL**. 
+  Water is able to spill-over a depression based on depression's volume and the incoming upstream water volume. By default **no infiltration or evaporation is considered** in the routing — unless the optional evaporation forcing (see :ref:`surfproc`) or the :ref:`groundwater module <groundwater>` is enabled, in which case part of the runoff infiltrates and returns downstream as baseflow (see *Coupling with the water table* below).
   
 .. note::
 
@@ -138,5 +138,26 @@ When the ice module is enabled, the source term :math:`\mathrm{b_i}` is *not* si
 .. math::
 
   \mathrm{b_i} \rightarrow \mathrm{b_i \cdot (1 - r_i^{ice}/P_i) + m_i}
+
+Coupling with the water table (baseflow)
+----------------------------------------
+
+When the optional :ref:`groundwater module <groundwater>` is enabled, part of the
+runoff **infiltrates** instead of flowing overland and re-emerges downstream as
+**baseflow**. With ``conserve_baseflow`` on, before solving for **q** goSPL
+replaces the runoff source with
+
+.. math::
+
+  \mathrm{b_i} \rightarrow \mathrm{b_i} - \mathrm{R_i A_i} + \mathrm{Q_i^{seep}}
+
+where :math:`\mathrm{R_i}` is the net groundwater recharge (m/yr), :math:`\mathrm{A_i}`
+the cell area, and :math:`\mathrm{Q_i^{seep}}` the seepage discharge returned by the
+water-table solve at the seepage nodes. The exchange is **net-neutral globally**
+(:math:`\sum \mathrm{Q^{seep}} \approx \sum \mathrm{R\,A}`), so total river discharge
+stays :math:`\approx` rain − evap, but it is spatially redistributed — discharge
+moves from the recharge uplands to the springs and valleys where the water table
+meets the surface, making rivers **baseflow-fed**. See :ref:`groundwater` for the
+Dupuit–Boussinesq head solve that produces :math:`\mathrm{Q^{seep}}`.
 
 where :math:`\mathrm{r_i^{ice}}` is the ice-accumulation rate and :math:`\mathrm{m_i}` is the meltwater rate produced where ice exists below the ELA. This keeps glacier-fed rivers from under-predicting discharge downstream of melt zones.
