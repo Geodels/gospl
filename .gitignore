@@ -42,6 +42,7 @@ tests/fixtures/soiltemp_out*/
 tests/fixtures/gw_out*/
 tests/fixtures/gw_nosoil_out*/
 tests/fixtures/gw_combo_out*/
+tests/fixtures/gw_geochem_out*/
 tests/fixtures/prov_src.npz
 *.so
 .eggs

@@ -2144,6 +2144,27 @@ class ReadYaml(object):
             self.duriWeatherL = float(weath.get("path_length", 20.0))
             self.duriWeatherability = weath.get("weatherability", 1.0)
 
+            # Level-B conservative geochemistry (opt-in; DESIGN_WATERTABLE_GEOCHEM.md).
+            # The solute is an `n_species` array (default 1): single-tracer ships
+            # first, multi-tracer (calcrete/silcrete/ferricrete typing) is just a
+            # longer `species:` list. Coupled multi-species aqueous equilibrium is
+            # OUT of scope. Per-species params kept as lists here; gwplex builds the
+            # numpy arrays + state. State alloc only in G0 (nothing solved yet).
+            geo = gwDict.get("geochem", {}) or {}
+            self.gwGeochemOn = bool(geo)
+            species = geo.get("species", []) or []
+            if self.gwGeochemOn and not species:
+                species = [{}]                          # default single tracer
+            self.gwNspecies = max(1, len(species))
+            self.gwGeoName = [
+                str(s.get("name", "solute%d" % i)) for i, s in enumerate(species)
+            ] or ["solute0"]
+            self.gwGeoWeather = [float(s.get("weatherability", 1.0)) for s in species] or [1.0]
+            self.gwGeoCsat = [float(s.get("c_sat", 1.0)) for s in species] or [1.0]
+            self.gwGeoPrecip = [float(s.get("precip_rate", 1.0)) for s in species] or [1.0]
+            self.gwGeoVsolid = [float(s.get("solid_volume", 1.0)) for s in species] or [1.0]
+            self.gwGeochemConserve = bool(geo.get("conserve", True))
+
         except KeyError:
             self.gwOn = False
             self.duriOn = False
@@ -2177,6 +2198,14 @@ class ReadYaml(object):
             self.duriWeatherDw = 1.0
             self.duriWeatherL = 20.0
             self.duriWeatherability = 1.0
+            self.gwGeochemOn = False
+            self.gwNspecies = 1
+            self.gwGeoName = ["solute0"]
+            self.gwGeoWeather = [1.0]
+            self.gwGeoCsat = [1.0]
+            self.gwGeoPrecip = [1.0]
+            self.gwGeoVsolid = [1.0]
+            self.gwGeochemConserve = True
 
         return
 

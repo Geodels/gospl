@@ -730,6 +730,45 @@ def test_groundwater_opt_in(minimal_model):
         B.destroy()
 
 
+def test_geochem_opt_in(minimal_model):
+    """
+    Protects (Level-B geochemistry, **G0** — DESIGN_WATERTABLE_GEOCHEM.md): the
+    conservative solute-transport feature is OPT-IN and inert when off. Without a
+    `groundwater: geochem:` block `gwGeochemOn` is False and no solute state is
+    allocated; with it, `gwGeochemOn` is True, the per-species state is allocated
+    as an `(lpoints, n_species)` array, and a run completes — G0 allocates state
+    but solves nothing, so it stays byte-identical.
+    """
+    # (a) no groundwater at all ⇒ geochem inert, nothing allocated.
+    m = minimal_model
+    assert getattr(m, "gwGeochemOn", False) is False
+    assert not hasattr(m, "gwSolute")
+
+    # (b) groundwater ON but no `geochem:` block ⇒ still off, no solute state.
+    mg = _gw_model("minimal_gw.yml")
+    try:
+        assert mg.gwOn and not mg.gwGeochemOn
+        assert not hasattr(mg, "gwSolute")
+    finally:
+        mg.destroy()
+
+    # (c) geochem ON with two tracers ⇒ n_species state allocated; inert run.
+    mc = _gw_model("minimal_gw_geochem.yml")
+    try:
+        assert mc.gwGeochemOn and mc.gwNspecies == 2
+        assert mc.gwSolute.shape == (mc.lpoints, 2)
+        assert mc.gwSourcePool.shape == (mc.lpoints, 2)
+        assert mc.gwOceanFlux.shape == (2,)
+        assert hasattr(mc, "soluteL") and hasattr(mc, "soluteG")
+        for arr in (mc.gwGeoWeather, mc.gwGeoCsat, mc.gwGeoPrecip, mc.gwGeoVsolid):
+            assert arr.shape == (2,)
+        mc.tEnd = mc.tNow + 0.5 * mc.dt
+        mc.runProcesses()             # G0: state allocated but unused ⇒ completes
+        assert (mc.gwSolute == 0.0).all(), "G0 must not solve any transport yet"
+    finally:
+        mc.destroy()
+
+
 def test_groundwater_recharge():
     """
     Protects (water-table + duricrust, **Phase 1** — DESIGN_WATERTABLE_DURICRUST.md

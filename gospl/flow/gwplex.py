@@ -66,6 +66,9 @@ class GWMesh(object):
         # Set unconditionally so destroy_DMPlex / guards never hit a missing attr.
         self._gwMat = None
         self._ksp_gw = None
+        # Cached Level-B solute-transport solver + operator (built lazily; G1+).
+        self._soluteMat = None
+        self._ksp_solute = None
 
         if getattr(self, "gwOn", False):
             # --- PETSc state (persistent, halo-synced; in destroy_DMPlex) ---
@@ -140,6 +143,28 @@ class GWMesh(object):
                 self.gwInfiltration = data[infilmap[1]][self.locIDs].astype(
                     np.float64
                 )
+
+            # --- Level-B geochemistry state (opt-in; DESIGN_WATERTABLE_GEOCHEM.md
+            # G0). Allocated only when `gwGeochemOn`; nothing is solved yet (G1+).
+            # The solute is an (lpoints, n_species) array — single-tracer when
+            # n_species=1, multi-tracer otherwise — sharing one transport template.
+            if getattr(self, "gwGeochemOn", False):
+                nsp = int(self.gwNspecies)
+                # Per-species parameters (parser lists -> numpy, len n_species).
+                self.gwGeoWeather = np.asarray(self.gwGeoWeather, dtype=np.float64)
+                self.gwGeoCsat = np.asarray(self.gwGeoCsat, dtype=np.float64)
+                self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
+                self.gwGeoVsolid = np.asarray(self.gwGeoVsolid, dtype=np.float64)
+                # Groundwater solute concentration and the dissolvable source pool
+                # (rank-local, per tracer); running dissolved ocean-export flux.
+                self.gwSolute = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                self.gwSourcePool = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                self.gwOceanFlux = np.zeros(nsp, dtype=np.float64)
+                # Scratch Vec pair for the per-species transport solve (G1+).
+                self.soluteL = self.hLocal.duplicate()
+                self.soluteG = self.hGlobal.duplicate()
+                self.soluteL.set(0.0)
+                self.soluteG.set(0.0)
 
         return
 

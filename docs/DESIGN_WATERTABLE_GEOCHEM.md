@@ -205,7 +205,7 @@ No change to the conservation invariants the other modules are guarded by.
 
 | Phase | Deliverable | Guard test |
 |---|---|---|
-| G0 | `geochem:` parser + `gwGeochemOn` flag + state alloc (`n_species=1`), `destroy_DMPlex`. Inert. | `test_geochem_opt_in` |
+| G0 | **DONE.** `geochem:` parser + `gwGeochemOn` flag + per-species param lists; `_GWMesh` state alloc (`gwSolute`/`gwSourcePool` `(lpoints, n_species)`, `gwOceanFlux`, scratch `soluteL`/`soluteG`, cached `_ksp_solute`/`_soluteMat`), registered in `destroy_DMPlex`. Inert — nothing solved. | `test_geochem_opt_in` (off ⇒ inert; on ⇒ n_species state; inert run byte-identical) |
 | G1 | Steady solute transport `∇·(q c)=0` (no reactions yet): assemble the advection operator from `q=−T∇h`, cached `gw_solute_` KSP; seepage outflow BC. | bounded/finite; np-invariant |
 | G2 | Dissolution source `D` (from the Level-A driver, debiting `gwSourcePool`) + precipitation sink `P` at the fringe; feed `duriH`; domain mass-balance guard. | `test_geochem_conserves`, `test_geochem_transport` |
 | G3 | Baseflow export → per-tracer `ocean_solute_flux` output. | export ≈ dissolved − precipitated at steady state |

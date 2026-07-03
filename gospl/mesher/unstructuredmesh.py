@@ -1170,6 +1170,9 @@ class UnstMesh(object):
             self.duriHG.destroy()
             self.rechargeL.destroy()
             self.baseflowL.destroy()
+            if getattr(self, "gwGeochemOn", False):
+                self.soluteL.destroy()
+                self.soluteG.destroy()
 
         self.iMat.destroy()
         self.lgmap_col.destroy()
@@ -1196,6 +1199,7 @@ class UnstMesh(object):
             "_advMatLeft", "_advMatRight", "_advKSP",
             "_oroAc", "_oroAf", "_oroKSP", "_oroQc", "_oroQs",
             "_gwMat", "_ksp_gw",
+            "_soluteMat", "_ksp_solute",
         ):
             obj = getattr(self, name, None)
             if obj is not None:
