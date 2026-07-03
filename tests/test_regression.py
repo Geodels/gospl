@@ -1507,6 +1507,45 @@ def test_duricrust_strata_exhumation():
         m.destroy()
 
 
+def test_duricrust_multilayer_record():
+    """
+    Protects (§9 formation depth range): a crust of thickness `duriH` is recorded
+    into **every stratigraphic layer within `duriH` below the surface**, not just
+    the top layer — so a thick crust spanning several thin layers is preserved
+    over its full thickness (and re-arms the surface across that whole span on
+    exhumation). Layers deeper than `duriH` are untouched.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert m.gwOn and m.stratNb > 0
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+        assert m.stratDuri is not None
+
+        n = m.lpoints
+        # 4-layer column; depth-to-top from the surface: L3=0, L2=1, L1=2, L0=3.
+        m.stratStep = 3
+        m.stratH[:] = 0.0
+        m.stratH[:, 0] = 2.0
+        m.stratH[:, 1] = 1.0
+        m.stratH[:, 2] = 1.0
+        m.stratH[:, 3] = 1.0            # surface layer
+        m.stratDuri[:] = 0.0
+        m.duriHL.setArray(np.full(n, 2.5))     # crust 2.5 m thick from the surface
+        m.duriF = np.full(n, 0.7)
+
+        m._recordInduration()
+        d = m.stratDuri
+        # Within 2.5 m of the surface: L3 (0), L2 (1), L1 (2) — all recorded.
+        assert np.allclose(d[:, 3], 0.7)
+        assert np.allclose(d[:, 2], 0.7)
+        assert np.allclose(d[:, 1], 0.7), "crust not recorded across its full depth"
+        # L0 top is 3 m down (> 2.5) — below the crust, untouched.
+        assert np.allclose(d[:, 0], 0.0), "induration written below the crust depth"
+    finally:
+        m.destroy()
+
+
 def test_groundwater_dual_provenance_combo():
     """
     Protects (water-table + duricrust, **§10 compatibility**): the feature runs

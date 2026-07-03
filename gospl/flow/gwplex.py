@@ -646,19 +646,24 @@ class GWMesh(object):
     def _recordInduration(self):
         r"""
         Sync the live per-node induration ``duriF`` with the per-layer
-        stratigraphic archive ``stratDuri`` (DESIGN_WATERTABLE_DURICRUST.md §9),
-        at the **top non-empty layer** of each column (found as in
-        ``_surfaceComposition``). Two directions:
+        stratigraphic archive ``stratDuri`` (DESIGN_WATERTABLE_DURICRUST.md §9).
+        Two directions:
 
         - **Exhumation (read-up)** — a previously buried, indurated layer now at
           the surface (its overburden eroded through last step) re-arms the live
-          crust: ``duriF = max(duriF, stratDuri[top])`` (and ``duriKarmor`` is
-          refreshed). This is the stacked-duricrust / relief-inversion behaviour
-          of cratonic laterite terrains.
-        - **Formation (write-down)** — the live crust is recorded into that top
-          layer: ``stratDuri[top] = max(stratDuri[top], duriF)``, so a stable
-          surface's near-surface layer indurates over time and is **preserved**
-          when later buried by ``deposeStrat`` (fresh layers start at 0).
+          crust: ``duriF = max(duriF, stratDuri[top])`` at the **top non-empty
+          layer** (found as in ``_surfaceComposition``), refreshing ``duriKarmor``.
+          The stacked-duricrust / relief-inversion behaviour of cratonic laterites.
+        - **Formation (write-down)** — the live crust has a real thickness
+          ``duriH`` that spans a **depth range**, not just the surface layer, so
+          the induration is written into **every layer whose top lies within
+          ``duriH`` below the surface**: ``stratDuri[k] = max(stratDuri[k], duriF)``
+          for all ``k`` with ``depth_above(k) < duriH`` (``depth_above`` = the
+          summed thickness of the layers above ``k``). A thick crust therefore
+          indurates several thin layers; each is **preserved** when later buried
+          (``deposeStrat`` fresh layers start at 0) and re-arms the surface when
+          re-exhumed — so an exhumed crust resists incision over its full
+          thickness, not one layer's worth.
 
         No-op (surface-only ``duriF``, no archive) when ``stratDuri`` is
         unallocated (``stratNb == 0``). Composition-only — no geometry change.
@@ -672,13 +677,22 @@ class GWMesh(object):
         valid = rev.any(axis=1)                      # columns with any sediment
         if not valid.any():
             return
+
+        # Read-up: the exposed (top non-empty) layer re-arms the live crust.
         top_idx = (H.shape[1] - 1 - np.argmax(rev, axis=1))[valid]
         rows = np.arange(H.shape[0])[valid]
-        arch = self.stratDuri[rows, top_idx]
-
-        # Read-up: exhumed crust re-arms the surface.
-        self.duriF[valid] = np.maximum(self.duriF[valid], arch)
+        self.duriF[valid] = np.maximum(self.duriF[valid], self.stratDuri[rows, top_idx])
         self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
-        # Write-down: record the live crust into the exposed top layer.
-        self.stratDuri[rows, top_idx] = np.maximum(arch, self.duriF[valid])
+
+        # Write-down: record duriF into every layer within `duriH` of the surface.
+        # depth_above(k) = Σ_{j>k} H[j] (thickness overlying layer k, so the top
+        # non-empty layer has depth_above 0 and is included whenever duriH > 0).
+        duriH = self.duriHL.getArray()
+        depth_above = np.cumsum(H[:, ::-1], axis=1)[:, ::-1] - H
+        within = (H > 0) & (depth_above < duriH[:, None])
+        self.stratDuri[:, :top] = np.where(
+            within,
+            np.maximum(self.stratDuri[:, :top], self.duriF[:, None]),
+            self.stratDuri[:, :top],
+        )
         return

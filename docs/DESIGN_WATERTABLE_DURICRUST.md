@@ -22,10 +22,11 @@ KSP/SNES lifecycle, scratch-vector contract, `destroy_DMPlex` registration).
 > basin base** from the stratigraphy (§15), the opt-in **lake ↔ aquifer volume
 > coupling** (§15), and the smaller **recharge refinements** — subglacial-meltwater
 > recharge, and lithology-/slope-modulated `f_infil` (§3) — have also landed (all
-> opt-in, default off). **Remaining deferred increments:** the multi-layer
-> formation **depth range** (§9) and the geochemical **Level-B** solute transport
-> (§3a/§15) — the latter also being the prerequisite for duricrust **solute-source
-> provenance** (§11). The sections below are the original design narrative,
+> opt-in, default off), and the multi-layer **formation depth range** (§9) — a
+> thick crust is now recorded across all the layers it spans. **Remaining deferred
+> increment:** the geochemical **Level-B** solute transport (§3a/§15) — also the
+> prerequisite for duricrust **solute-source provenance** (§11). The sections
+> below are the original design narrative,
 > annotated with "as built" notes where the implementation refined a choice.
 
 ---
@@ -475,12 +476,13 @@ considered and rejected for exactly these reasons.)
 Per step, gated on `gwOn and stratNb>0`:
 
 - **Formation (varies with time).** After `_updateDuricrust`, the induration is written down into
-  the near-surface stratigraphy: `stratDuri[node, top]` is raised toward the live `duriF`
-  (`_recordInduration`). On a stable, non-eroding surface the crust thickens over 10⁴–10⁶ yr → the
-  near-surface layer's `stratDuri` **grows with time**. **As built:** the write-down targets the
-  **top non-empty layer** of each column (found as in `_surfaceComposition`); distributing it over a
-  multi-layer crust/fringe *depth range* is a possible refinement, unnecessary for the exhumation
-  behaviour below (which reads the top non-empty layer).
+  the near-surface stratigraphy: `stratDuri` is raised toward the live `duriF` (`_recordInduration`).
+  On a stable, non-eroding surface the crust thickens over 10⁴–10⁶ yr → those layers' `stratDuri`
+  **grows with time**. **As built:** the write-down spans the crust's **depth range** — every layer
+  whose top lies within the crust thickness `duriH` below the surface is raised to `max(stratDuri,
+  duriF)` (`depth_above(k) = Σ_{j>k} H[j] < duriH`), so a thick crust indurates several thin layers
+  and re-arms the surface over its full thickness on exhumation (not one layer's worth). The read-up
+  still uses the top non-empty layer (the exposed surface).
 - **Deposition (burial → preservation).** `deposeStrat` adds a new top layer with `stratDuri = 0`
   (fresh, uncemented sediment). The previously indurated layer keeps its `stratDuri` and is now
   **buried and preserved** — a relict crust locked into the record.
@@ -664,7 +666,7 @@ full `tests/` 139 passed, serial + np=2). The status/notes are inline per row.
 | 3 | **DONE.** Duricrust ODE (`_updateDuricrust`, rank-local): fringe favourability `Φ = exp(−((wt−d0)/w)²)`, weathering supply `Ψ` (`_weatheringSupply`: **proxy** default `max(0,P−E)^p·arrhenius`; opt-in Level-A **rate** Maher–Chamberlain `W=R·C_eq·(1−exp(−Dw/(R·L)))·…`; **prodsoil** reuse of `soilSPL.prodSoil` — both fall back to proxy when soil is off), self-limiting formation `+k_form·Φ·Ψ·(1−duriH/duriH_max)`, breakdown (per-step incision `z_last−z` strips the top; slow `k_decay·(1−Φ)` decay); optional Arrhenius (`_arrhenius`, reuses the soil tempMap, off when `weather_Ea=0`); writes `duriH`, `duriF=duriH/duriH_max`, `duriKarmor=1−armor_max·duriF`; `duricrust`/`induration` outputs (HDF5+XDMF). Soil-independent by default. | `test_duricrust_forms_at_fringe` (forms at `wt≈d0`, not away); `test_duricrust_soilfree` (forms with no `soil:` block); `test_duricrust_weathering_rate` (Level-A rate ↗ with `R`, 0 at `R=0`). |
 | 4 | **DONE.** Armor hook `_surfaceArmoringK` (`sed/stratplex.py`) composed multiplicatively into `_surfaceLithoK` → reaches **all three eroders** (SPL/nlSPL/soilSPL, no branching) as `1 − armor_max·duriF`; scalar `1.0` no-op when off (byte-identical). Optional creep armoring in `_surfaceLithoD` behind `armor_diffusion`. Rate-only (no geometry change → routing untouched). | `test_duricrust_armors_K` (indurated cell K reduced by `armor_max`, erodes ≪ bare; scalar-1.0 no-op when off). |
 | 5 | **DONE.** Baseflow conservation (opt-in `conserve_baseflow`, `_baseflowClosure`): seepage-return discharge `Q_seep = Σ(R·A) − ΔS/Δt` (`Allreduce`'d), distributed over owned seepage nodes by cell area into `self.baseflowL`, so `Σ baseflow ≈ Σ recharge` in the steady limit (`baseflow` output); re-injection into the surface-flow source is the next increment. Soil coupling: **regolith supply limiter** (`_regolithSupplyRate = prodSoil·rain` caps formation when `cptSoil`) and **`aquifer_base: from_soil`** (`_gwZbed`: `z_bed = lHbed − bedrock_depth`, `lHbed` now init'd in `soilSPL.__init__`). | `test_groundwater_baseflow_conserves` (Σ baseflow ≈ Σ recharge to 2 %); `test_groundwater_from_soil` (`z_bed = lHbed − d_bedrock`, head bounded); `test_duricrust_regolith_limited` (formation capped by `prodSoil·rain`). |
-| 6 | **DONE.** Stratigraphic induration record `stratDuri` (`(lpoints, stratNb)`, §9), allocated when `gwOn and stratNb>0`. `_recordInduration` (after `_updateDuricrust`): **write-down** (record live `duriF` into the top non-empty layer) + **read-up** (an exhumed buried crust re-arms `duriF`/`duriKarmor`). Burial preserves it (`deposeStrat` fresh layers = 0); `erodeStrat` zeroes emptied layers (**no forward-fill** — 0 is a valid uncemented value); advected as an INTENSIVE field (extra `strataonesed`, like `phiS`), compaction-neutral; written/restored in the stratal HDF5; `induration` per-layer field in `gospl-strata-volume` (`stratamesh`). | `test_duricrust_strata_exhumation` (buried crust re-armors on re-exposure; full suite incl. dual-lithology/provenance/restart green — `getattr` guards for bare-`STRAMesh` unit tests). |
+| 6 | **DONE.** Stratigraphic induration record `stratDuri` (`(lpoints, stratNb)`, §9), allocated when `gwOn and stratNb>0`. `_recordInduration` (after `_updateDuricrust`): **write-down** (record live `duriF` into every layer within the crust thickness `duriH` below the surface — the §9 depth range) + **read-up** (an exhumed buried crust re-arms `duriF`/`duriKarmor` at the top non-empty layer). Burial preserves it (`deposeStrat` fresh layers = 0); `erodeStrat` zeroes emptied layers (**no forward-fill** — 0 is a valid uncemented value); advected as an INTENSIVE field (extra `strataonesed`, like `phiS`), compaction-neutral; written/restored in the stratal HDF5; `induration` per-layer field in `gospl-strata-volume` (`stratamesh`). | `test_duricrust_strata_exhumation` (buried crust re-armors on re-exposure; full suite incl. dual-lithology/provenance/restart green — `getattr` guards for bare-`STRAMesh` unit tests). |
 | 7 | **DONE.** Restart of `head`/`duriH` (model memory — written to the per-step HDF5, restored in `readData` like `cumED`/`soilH`; `wtDepth`/`duriF`/`duriKarmor` rebuilt); new `Karmor` output. **Documentation (§14):** `groundwater:` block + all keys in `surfproc.rst` (the convention home for process blocks — `climate:`/`ice:` live there too, not `inputfile.rst`); `outputs.rst` fields; `running.rst` (`--field induration`); new `tech_guide/groundwater.rst` (Dupuit–Boussinesq, implicit solve + why, seepage/Picard, fringe formation, `stratDuri`, compatibility) wired into `tech_guide/index.rst`; new `api_ref/gw_ref.rst` (autosummary + automethod) wired into `api_ref/index.rst`; `_readGroundwater` on `in_ref.rst`, `_surfaceArmoringK` on `stra_ref.rst`; `gwplex` module/class docstrings de-staled. `petsc4py`/`gospl._fortran` already mocked → autodoc imports cleanly. | `test_groundwater_restart` (head/duriH survive restart); RST underline/label lint clean; full `tests/` 139 passed. |
 
 ---
@@ -774,9 +776,9 @@ user-facing feature updates the **input-file reference**, the **technical guide*
   backward-Euler (robust in both `τ_gw` regimes; analytic-Dupuit validated). If validation ever
   shows the equilibrium limit everywhere, a pure steady solve is a trivial simplification — still
   open, low priority.
-- **Multi-layer formation depth range** (§9) — `_recordInduration` currently writes the crust into
-  the **top non-empty layer** only. Distributing it over the crust/fringe *depth range* is the
-  remaining formation refinement (unnecessary for the exhumation behaviour, which reads the top
-  layer). Still open, low priority.
+- **Multi-layer formation depth range** (§9) — **DONE:** `_recordInduration` writes the crust into
+  every layer whose top lies within `duriH` below the surface (`depth_above(k) < duriH`), so a thick
+  crust is recorded across all the thin layers it spans and re-arms over its full thickness on
+  exhumation. The read-up still uses the top non-empty layer.
 - **Solute-source provenance** (§11) — blocked on **Level B**: attributing the crust's chemical
   source needs the solute-transport tracer. Deferred with Level B.
