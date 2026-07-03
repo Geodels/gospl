@@ -151,7 +151,10 @@ class GWMesh(object):
             if getattr(self, "gwGeochemOn", False):
                 nsp = int(self.gwNspecies)
                 # Per-species parameters (parser lists -> numpy, len n_species).
-                self.gwGeoWeather = np.asarray(self.gwGeoWeather, dtype=np.float64)
+                # `gwGeoWeather` stays a RAW list (each entry a scalar, a
+                # per-vertex `[file, key]` map, or a table used with a lithology
+                # label) — resolved lazily into `_gwGeoWeatherArr` on first use.
+                self._gwGeoWeatherArr = None
                 self.gwGeoCsat = np.asarray(self.gwGeoCsat, dtype=np.float64)
                 self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
                 self.gwGeoVsolid = np.asarray(self.gwGeoVsolid, dtype=np.float64)
@@ -558,6 +561,49 @@ class GWMesh(object):
         Tref = getattr(self, "tempRef", 15.0) + 273.15
         return np.exp(self.duriWeatherEa * (1.0 / Tref - 1.0 / self._gwTempK) / 8.314)
 
+    def _resolveGeoWeather(self):
+        r"""
+        Resolve the per-species weatherability to a list of **scalar or
+        ``(lpoints,)`` array** entries (Level-B extension 1 — lithology →
+        chemistry). Lets lithology control *which* species each region yields:
+
+        - **(a) per-vertex map** — a species' ``weatherability: [file, key]`` is
+          loaded and subset to the local partition (``self.locIDs``), exactly
+          like ``duriWeatherability`` / ``gwInfiltration``.
+        - **(c) table by lithology label** — a species'
+          ``weatherability_by_class: [...]`` is gathered by a per-vertex integer
+          label; ``weatherability_from: source_class`` reuses the provenance
+          regions (no new input), so ``crust_source`` and the species mix stay
+          mutually consistent.
+        - otherwise the scalar (the default; byte-identical to the old path).
+
+        Resolved lazily (first ``_updateSolute``) so it runs after provenance
+        seeds ``source_class``; rank-local, partition-exact, no collective.
+        """
+        label = None
+        if getattr(self, "gwWeatherFrom", None) == "source_class":
+            label = getattr(self, "source_class", None)
+            if label is None and MPIrank == 0 and self.verbose:
+                print(
+                    "[gw] geochem weatherability_from='source_class' needs "
+                    "provenance on — falling back to scalar weatherability.",
+                    flush=True,
+                )
+        byclass = getattr(self, "gwGeoWeatherByClass", None)
+        out = []
+        for k in range(int(self.gwNspecies)):
+            wab = self.gwGeoWeather[k]
+            tbl = byclass[k] if byclass is not None else None
+            if isinstance(wab, (list, tuple)):            # (a) per-vertex map
+                d = np.load(wab[0] + ".npz")
+                out.append(d[wab[1]][self.locIDs].astype(np.float64))
+            elif tbl is not None and label is not None:   # (c) table by label
+                tblA = np.asarray(tbl, dtype=np.float64)
+                out.append(tblA[np.clip(label, 0, len(tblA) - 1)])
+            else:                                          # scalar (unchanged)
+                out.append(float(wab))
+        return out
+
     def _weatheringSupply(self):
         r"""
         Solute-supply rate ``Ψ`` feeding in-situ fringe precipitation
@@ -938,6 +984,8 @@ class GWMesh(object):
         self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
         prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None
         W = self._weatheringSupply()               # base weathering rate (Level A)
+        if self._gwGeoWeatherArr is None:          # ext 1: per-species weatherability
+            self._gwGeoWeatherArr = self._resolveGeoWeather()
         # Subaerial land only (no dissolution under sea / ponded lake).
         sub = np.zeros(self.lpoints, dtype=bool)
         sub[self.seaID] = True
@@ -958,7 +1006,8 @@ class GWMesh(object):
         Hmax = float(self.duriMaxThick)
         for k in range(int(self.gwNspecies)):
             # 1. Dissolution — debit the source pool.
-            Drate = np.where(subaerial, self.gwGeoWeather[k] * W, 0.0)
+            # weatherability: scalar OR a per-vertex array (ext 1) — broadcasts.
+            Drate = np.where(subaerial, self._gwGeoWeatherArr[k] * W, 0.0)
             diss = np.minimum(Drate * A * dt, self.gwSourcePool[:, k])
             self.gwSourcePool[:, k] -= diss
             Deff = diss / (A * dt)

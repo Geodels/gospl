@@ -760,8 +760,10 @@ def test_geochem_opt_in(minimal_model):
         assert mc.gwSourcePool.shape == (mc.lpoints, 2)
         assert mc.gwOceanFlux.shape == (2,)
         assert hasattr(mc, "soluteL") and hasattr(mc, "soluteG")
-        for arr in (mc.gwGeoWeather, mc.gwGeoCsat, mc.gwGeoPrecip, mc.gwGeoVsolid):
+        for arr in (mc.gwGeoCsat, mc.gwGeoPrecip, mc.gwGeoVsolid):
             assert arr.shape == (2,)
+        # weatherability is a RAW list (scalar/map/table per species; ext 1).
+        assert isinstance(mc.gwGeoWeather, list) and len(mc.gwGeoWeather) == 2
         mc.tEnd = mc.tNow + 0.5 * mc.dt
         mc.runProcesses()             # opt-in run completes; solute state is active
         assert np.isfinite(mc.gwSolute).all() and (mc.gwSolute >= 0.0).all()
@@ -1005,6 +1007,51 @@ def test_geochem_strat_archive():
         # A layer with a crust species also has a crust source (both written
         # together in the same depth range) and vice versa — no orphan codes.
         assert np.array_equal(ct >= 0, cs >= 0)
+    finally:
+        m.destroy()
+
+
+def test_geochem_spatial_weatherability():
+    """
+    Protects (Level-B geochemistry, extension 1 — DESIGN_GEOCHEM_EXTENSIONS.md
+    §1): the per-species ``weatherability`` may vary in space, so **lithology
+    controls which species each region yields**. Here it is driven by the
+    per-vertex lithology label (``weatherability_from: source_class``) with a
+    per-(class, species) table: class 0 weathers only carbonate (species 0),
+    class 1 only silica (species 1). Verified on **dissolution** (not on where the
+    crust ends up — solute is transported down-gradient before it precipitates, so
+    the crust can sit in a different lithology): the resolved weatherability is a
+    per-vertex array matching the class split, and the *off* species' source pool
+    is **undebited** in each region (no dissolution) while the *on* species is
+    consumed.
+    """
+    m = _gw_model("minimal_gw_geochem_litho.yml")
+    try:
+        assert m.gwGeochemOn and m.gwWeatherFrom == "source_class"
+        # Two lithologies split by longitude.
+        x = m.lcoords[:, 0]
+        m.source_class = np.where(x < np.median(x), 0, 1).astype(np.int64)
+        pool0 = 1.0e6 * m.larea                       # initial per-node pool
+        m.tEnd = m.tNow + 3 * m.dt
+        m.runProcesses()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        # Weatherability resolved to a per-vertex array per species (not scalar),
+        # matching the class split (class 0 -> carbonate only, class 1 -> silica).
+        assert m._gwGeoWeatherArr is not None
+        for k in range(m.gwNspecies):
+            wab = m._gwGeoWeatherArr[k]
+            assert np.ndim(wab) == 1 and wab.shape[0] == m.lpoints
+        assert np.allclose(m._gwGeoWeatherArr[0], (m.source_class == 0))
+        assert np.allclose(m._gwGeoWeatherArr[1], (m.source_class == 1))
+        # The OFF species' source pool is untouched in each region (no
+        # dissolution there); the ON species is consumed somewhere in its region.
+        c0, c1 = m.source_class == 0, m.source_class == 1
+        assert np.allclose(m.gwSourcePool[c0, 1], pool0[c0]), "silica dissolved in class 0"
+        assert np.allclose(m.gwSourcePool[c1, 0], pool0[c1]), "carbonate dissolved in class 1"
+        assert (m.gwSourcePool[c0, 0] < pool0[c0]).any(), "no carbonate dissolved in class 0"
+        assert (m.gwSourcePool[c1, 1] < pool0[c1]).any(), "no silica dissolved in class 1"
     finally:
         m.destroy()
 

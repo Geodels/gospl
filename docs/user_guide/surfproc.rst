@@ -778,6 +778,28 @@ refinement). When ``geochem:`` is on, the transported precipitation **replaces**
 the proxy/rate supply as the crust source. Coupled multi-species aqueous
 equilibrium (speciation, pH) is out of scope.
 
+The ``weatherability`` may vary **in space**, so *lithology* controls which
+species each region yields (e.g. mafic rock → Fe/silica, a carbonate platform →
+carbonate). Two forms, on top of the scalar default:
+
+.. code:: yaml
+
+        geochem:
+            weatherability_from: source_class      # reuse provenance regions as lithology
+            species:
+              - {name: carbonate, weatherability_by_class: [1.0, 0.0]}   # per rock class
+              - {name: silica,    weatherability: [litho, sil_wab]}      # per-vertex [file, key] map
+
+* ``weatherability: [file, key]`` — a **per-vertex map** for that species
+  (loaded like ``infiltration`` / the rate-mode ``weatherability``).
+* ``weatherability_by_class: [...]`` with ``weatherability_from: source_class``
+  — a **per-(class, species) table** gathered by the per-vertex provenance label
+  (needs ``provenance:`` on; no extra input), keeping ``crust_source`` and the
+  species mix mutually consistent.
+
+The map is the present-day surface lithology and is static (it does not follow
+exhumation of deeper layers — a documented refinement).
+
 .. note::
 
     New outputs: ``recharge``, ``wtable``, ``wtdepth`` (water table), ``baseflow``

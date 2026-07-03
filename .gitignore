@@ -50,3 +50,4 @@ tests/fixtures/prov_src.npz
 MANIFEST
 .ipynb_checkpoints
 fortran/meshparams.mod
+gw_geochemlitho_out

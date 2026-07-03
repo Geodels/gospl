@@ -2159,7 +2159,16 @@ class ReadYaml(object):
             self.gwGeoName = [
                 str(s.get("name", "solute%d" % i)) for i, s in enumerate(species)
             ] or ["solute0"]
-            self.gwGeoWeather = [float(s.get("weatherability", 1.0)) for s in species] or [1.0]
+            # weatherability: scalar OR a per-vertex `[file, key]` map (a), so
+            # lithology can control which species a region yields; kept RAW here
+            # (gwplex resolves it). `weatherability_by_class` + `weatherability_from`
+            # give the table form (c): a per-(class, species) value gathered by a
+            # per-vertex lithology label (currently `source_class`, i.e. provenance).
+            self.gwGeoWeather = [s.get("weatherability", 1.0) for s in species] or [1.0]
+            self.gwGeoWeatherByClass = [
+                s.get("weatherability_by_class", None) for s in species
+            ] or [None]
+            self.gwWeatherFrom = geo.get("weatherability_from", None)
             self.gwGeoCsat = [float(s.get("c_sat", 1.0)) for s in species] or [1.0]
             self.gwGeoPrecip = [float(s.get("precip_rate", 1.0)) for s in species] or [1.0]
             self.gwGeoVsolid = [float(s.get("solid_volume", 1.0)) for s in species] or [1.0]
@@ -2202,6 +2211,8 @@ class ReadYaml(object):
             self.gwNspecies = 1
             self.gwGeoName = ["solute0"]
             self.gwGeoWeather = [1.0]
+            self.gwGeoWeatherByClass = [None]
+            self.gwWeatherFrom = None
             self.gwGeoCsat = [1.0]
             self.gwGeoPrecip = [1.0]
             self.gwGeoVsolid = [1.0]
