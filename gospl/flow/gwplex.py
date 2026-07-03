@@ -721,3 +721,92 @@ class GWMesh(object):
             self.stratDuri[:, :top],
         )
         return
+
+    # ------------------------------------------------------------------ #
+    #  Level-B geochemistry — solute transport (G1: operator + solver).   #
+    #  Steady advection ∇·(q c) of a lumped conservative tracer along the #
+    #  groundwater flux q = −T∇h, reusing the head operator's face        #
+    #  conductances. NOT wired into updateGroundwater yet (inert); the    #
+    #  dissolution source, fringe precipitation and export land in G2/G3. #
+    # ------------------------------------------------------------------ #
+
+    def _makeSoluteKSP(self):
+        """
+        Cached KSP for the solute-transport solve: ``fgmres`` + block-Jacobi
+        (``gw_solute_`` prefix, pivot shift). The upwind advection operator is
+        non-symmetric but diagonally dominant (an M-matrix, anchored by the
+        seepage Dirichlet sink), so — unlike the stiff elliptic *head* operator
+        — a Krylov + ILU solve converges quickly (same class as the orographic
+        advection solver). Env-overridable via the ``gw_solute_`` prefix.
+        """
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType("fgmres")
+        ksp.getPC().setType("bjacobi")
+        ksp.setTolerances(rtol=1.0e-10, max_it=500)
+        ksp.setInitialGuessNonzero(True)
+        ksp.setOptionsPrefix("gw_solute_")
+        petsc4py.PETSc.Options()["gw_solute_sub_pc_factor_shift_type"] = "nonzero"
+        ksp.setFromOptions()
+        return ksp
+
+    def _soluteAdvecCoeffs(self, h, T):
+        r"""
+        Upwind finite-volume coefficients for the steady solute advection
+        ``∇·(q c)`` by the groundwater flux ``q = −T∇h`` (area-normalised, per
+        cell). Reuses ``jacobiancoeff`` — its off-diagonals are the
+        area-normalised face conductances ``C_ik/A_i`` (correct for **flat and
+        global** meshes alike), so the signed face flux ``i→k`` is
+        ``f_ik = (C_ik/A_i)·(h_i − h_k)``. First-order upwinding puts the
+        outflow (``f>0``) on the diagonal (carries ``c_i``) and the inflow
+        (``f<0``) on the neighbour column (carries ``c_k``). Returns a
+        ``(lpoints, 1+maxnb)`` array for ``_assembleDiffMatCSR`` (col 0 = diagonal).
+        """
+        zeroKp = np.zeros(self.lpoints, dtype=np.float64)
+        lap = jacobiancoeff(h, T, zeroKp)                 # area-norm neg-Laplacian
+        ncol = lap.shape[1] - 1
+        cond = -lap[:, 1:]                                # C_ik/A_i ≥ 0 (off-diag)
+        flux = np.zeros((self.lpoints, ncol), dtype=np.float64)
+        for k in range(ncol):
+            flux[:, k] = cond[:, k] * (h - h[self.FVmesh_ngbID[:, k]])
+        adv = np.zeros((self.lpoints, 1 + ncol), dtype=np.float64)
+        adv[:, 0] = np.maximum(flux, 0.0).sum(axis=1)     # outflow → c_i (diagonal)
+        adv[:, 1:] = np.minimum(flux, 0.0)                # inflow  → c_k (neighbour)
+        # Vertical exchange closes the balance: the lateral divergence
+        # div q = Σ_k f_ik equals recharge (source, >0) minus seepage (sink, <0).
+        # At a DISCHARGE node (net lateral inflow, div q < 0) the solute leaves the
+        # aquifer to the surface — a diagonal sink `−div q` that makes the operator
+        # a well-posed, diagonally-dominant M-matrix (pure lateral advection has no
+        # sink there and blows up). Recharge nodes carry their source in the RHS.
+        adv[:, 0] += np.maximum(-flux.sum(axis=1), 0.0)
+        return adv
+
+    def _solveSoluteTransport(self, source, dmask, dval):
+        r"""
+        Solve one steady tracer transport ``M c = source`` with Dirichlet nodes
+        ``dmask`` pinned to ``dval`` (``M`` = upwind advection of §``_soluteAdvecCoeffs``
+        at the current head). The seepage set is pinned (``c`` leaves the aquifer
+        there — the export sink), which anchors the M-matrix. G1 machinery: the
+        physical dissolution source / fringe precipitation / baseflow export are
+        added in G2/G3. Collective (KSP); returns the local concentration array.
+        """
+        z = self.hLocal.getArray()
+        h = self.headL.getArray()
+        T = self.gwKsat * np.maximum(h - self._gwZbed(z), float(self.gwMinSatThick))
+        M = self._assembleDiffMatCSR(self._soluteAdvecCoeffs(h, T))
+        IntType = petsc4py.PETSc.IntType
+        owned_d = np.where(dmask & (self.inIDs == 1))[0].astype(IntType)
+        M.zeroRowsLocal(owned_d, diag=1.0)                # c = dval on Dirichlet rows
+
+        rhs = np.asarray(source, dtype=np.float64).copy()
+        rhs[dmask] = dval[dmask]
+        if self._ksp_solute is None:
+            self._ksp_solute = self._makeSoluteKSP()
+        ksp = self._ksp_solute
+        self.soluteL.setArray(rhs)
+        self.dm.localToGlobal(self.soluteL, self.tmp)     # rhs (global)
+        self.dm.localToGlobal(self.soluteL, self.soluteG)  # nonzero guess = rhs
+        ksp.setOperators(M, M)
+        ksp.solve(self.tmp, self.soluteG)
+        M.destroy()
+        self.dm.globalToLocal(self.soluteG, self.soluteL)
+        return self.soluteL.getArray().copy()

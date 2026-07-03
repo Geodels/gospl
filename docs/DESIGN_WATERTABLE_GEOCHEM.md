@@ -62,10 +62,19 @@ water volume), the steady reactive-transport balance is
 ∇·(q c) = D(x) − P(x, c)                         q = −T ∇h   (Darcy flux)
 ```
 
-- **Transport** `∇·(q c)` — FV upwind advection of `c` by the groundwater flux
-  `q` (from the head `h`). Assembled with the existing `getfacevelocity` +
-  `advecupwind` kernels (the operator orography/marine already use); solved with a
-  cached `gw_solute_` KSP (fgmres + hypre, like the head).
+- **Transport** `∇·(q c)` — first-order **upwind** FV advection of `c` by the
+  groundwater flux `q = −T∇h`. **As built (G1):** rather than reconstructing a
+  per-node velocity for `getfacevelocity`/`advecupwind` (a head-gradient vector
+  that is singular on the sphere), the operator is built directly from the head
+  operator's **face conductances** (`jacobiancoeff`, already geometry-correct for
+  flat and global meshes): the signed face flux is `f_ik = (C_ik/A_i)(h_i − h_k)`,
+  upwinded (outflow → diagonal, inflow → neighbour). The lateral divergence
+  `div q = Σ_k f_ik` is closed by the **vertical exchange** — a recharge source
+  (`div q > 0`, in the RHS) and a **seepage sink** `max(0, −div q)` added to the
+  diagonal (`div q < 0`, solute leaving to the surface). Without the sink the pure
+  `∇·(qc)=0` is ill-posed and blows up at discharge nodes. Solved with a cached
+  `gw_solute_` KSP (fgmres + block-Jacobi — the operator is a well-conditioned
+  M-matrix, not the stiff elliptic head, so no multigrid needed).
 - **Dissolution `D`** — the solute source (mass/vol/yr): the chemical-weathering
   rate driving material into solution, from the Level-A driver
   (`_weatheringSupply` / `prodSoil` / recharge `R`), scaled per tracer by a
@@ -206,7 +215,7 @@ No change to the conservation invariants the other modules are guarded by.
 | Phase | Deliverable | Guard test |
 |---|---|---|
 | G0 | **DONE.** `geochem:` parser + `gwGeochemOn` flag + per-species param lists; `_GWMesh` state alloc (`gwSolute`/`gwSourcePool` `(lpoints, n_species)`, `gwOceanFlux`, scratch `soluteL`/`soluteG`, cached `_ksp_solute`/`_soluteMat`), registered in `destroy_DMPlex`. Inert — nothing solved. | `test_geochem_opt_in` (off ⇒ inert; on ⇒ n_species state; inert run byte-identical) |
-| G1 | Steady solute transport `∇·(q c)=0` (no reactions yet): assemble the advection operator from `q=−T∇h`, cached `gw_solute_` KSP; seepage outflow BC. | bounded/finite; np-invariant |
+| G1 | **DONE.** Steady upwind solute transport `∇·(q c)` by `q=−T∇h` (`_soluteAdvecCoeffs` builds the operator from the head operator's **face conductances** via `jacobiancoeff` — geometry-correct for flat AND global meshes, cleaner than the `getfacevelocity` node-velocity route which is singular on the sphere) + the **vertical seepage sink** `max(0,−div q)` that closes the balance and makes it a well-posed M-matrix (pure lateral `∇·(qc)=0` blows up at discharge nodes); cached `gw_solute_` KSP (fgmres+bjacobi); Dirichlet at the seepage set. NOT wired into `updateGroundwater` yet (inert). | `test_geochem_transport` (converges, monotone-bounded `[0,1]`, advects downstream; np=2 converges/finite) |
 | G2 | Dissolution source `D` (from the Level-A driver, debiting `gwSourcePool`) + precipitation sink `P` at the fringe; feed `duriH`; domain mass-balance guard. | `test_geochem_conserves`, `test_geochem_transport` |
 | G3 | Baseflow export → per-tracer `ocean_solute_flux` output. | export ≈ dissolved − precipitated at steady state |
 | G4 | **Multi-tracer** (`n_species>1`): per-species params, `crust_type` dominant field, per-species ocean flux. | `test_geochem_multitracer` |

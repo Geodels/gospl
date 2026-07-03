@@ -769,6 +769,56 @@ def test_geochem_opt_in(minimal_model):
         mc.destroy()
 
 
+def test_geochem_transport():
+    """
+    Protects (Level-B geochemistry, **G1** — DESIGN_WATERTABLE_GEOCHEM.md): the
+    steady solute-transport operator ``∇·(q c)`` (upwind advection by the
+    groundwater flux ``q = −T∇h``, from the head operator's face conductances,
+    plus the vertical seepage sink that makes it a well-posed M-matrix). A tracer
+    imposed at high-head inflow nodes and pinned to 0 at the seepage set advects
+    **downstream, bounded in [0, 1]** (first-order upwind is monotone — no
+    over/undershoot) and reaches the interior. G1 is the operator + solver only;
+    the physical source / precipitation / export land in G2/G3.
+    """
+    m = _gw_model("minimal_gw_geochem.yml")
+    try:
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()                       # solves the head (updateGroundwater)
+
+        own = m.inIDs == 1
+        h = m.headL.getArray()
+        z = m.hLocal.getArray()
+        # Seepage sink set (c pinned to 0 — solute exits): sea + ponded lakes +
+        # open outlets, as in the head solve.
+        seep = np.zeros(m.lpoints, dtype=bool)
+        seep[m.seaID] = True
+        pit = getattr(m, "pitIDs", None)
+        lf = getattr(m, "lFill", None)
+        if pit is not None and lf is not None:
+            seep |= (pit > -1) & (lf > z)
+        oid = getattr(m, "outletIDs", None)
+        if oid is not None and len(oid) > 0:
+            seep[oid] = True
+        # Synthetic inflow: the highest-head interior nodes carry c = 1.
+        interior = own & ~seep
+        assert interior.any()
+        inflow = interior & (h >= np.percentile(h[interior], 85))
+        dmask = seep | inflow
+        dval = np.where(inflow, 1.0, 0.0)
+
+        c = m._solveSoluteTransport(np.zeros(m.lpoints), dmask, dval)
+
+        assert int(m._ksp_solute.getConvergedReason()) > 0, "transport KSP diverged"
+        assert np.isfinite(c).all()
+        assert (c >= -1.0e-6).all() and (c <= 1.0 + 1.0e-6).all(), (
+            "upwind transport not monotone (over/undershoot)"
+        )
+        transported = own & ~dmask
+        assert (c[transported] > 0.01).any(), "solute not advected downstream"
+    finally:
+        m.destroy()
+
+
 def test_groundwater_recharge():
     """
     Protects (water-table + duricrust, **Phase 1** — DESIGN_WATERTABLE_DURICRUST.md
