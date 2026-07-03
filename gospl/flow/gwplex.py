@@ -346,7 +346,17 @@ class GWMesh(object):
         elevation ``z_bed = lHbed − bedrock_depth``, the *"permeable regolith over
         impermeable bedrock"* model. ``from_soil`` needs ``soilSPL`` (``lHbed``);
         it falls back to the surface (a self-consistent no-aquifer floor) with a
-        one-time warning if soil is off. Rank-local.
+        one-time warning if soil is off.
+
+        **Depositional basins (`from_soil` + stratigraphy).** Under Option-2.5
+        ``lHbed = z − Lsoil`` is only the base of the thin weathering regolith;
+        deposited sediment lives in the stratigraphy, not ``Lsoil``. So in a
+        filled basin the porous sediment column *is* the aquifer and its base is
+        the bottom of the (non-sentinel) stratigraphic pile, deeper than
+        ``lHbed``. The base is therefore taken as the **deeper** (lower) of
+        ``lHbed − bedrock_depth`` and ``z − Σ sediment thickness`` — so uplands
+        (thin pile) keep the regolith base while basins deepen to the fill base.
+        Rank-local.
         """
         base = self.gwAquiferBase
         if isinstance(base, str):                       # 'from_soil'
@@ -359,7 +369,14 @@ class GWMesh(object):
                         flush=True,
                     )
                 return z.copy()
-            return lHbed.getArray() - float(self.gwBedrockDepth)
+            zbed = lHbed.getArray() - float(self.gwBedrockDepth)
+            if self.stratNb > 0 and self.stratH is not None:
+                lo = int(getattr(self, "bedrockLay", 0))    # skip bedrock sentinel
+                top = self.stratStep + 1
+                if top > lo:
+                    sed = self.stratH[:, lo:top].sum(axis=1)  # porous fill thickness
+                    zbed = np.minimum(zbed, z - sed)          # basin fill = aquifer
+            return zbed
         return z - base
 
     def _baseflowClosure(self, hold, hnew, seep):

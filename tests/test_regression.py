@@ -1212,8 +1212,11 @@ def test_groundwater_from_soil():
     """
     Protects (Phase 5, §8 soil coupling): `aquifer_base: from_soil` ties the
     aquifer floor to the bedrock elevation `z_bed = lHbed − bedrock_depth`
-    (permeable regolith over impermeable bedrock), and the head solve stays
-    bounded between that floor and the surface.
+    (permeable regolith over impermeable bedrock). In a **depositional basin**
+    the porous sediment fill IS the aquifer, so the base deepens to the bottom of
+    the (non-sentinel) stratigraphic pile — the base is the deeper of
+    `lHbed − bedrock_depth` and `z − Σ sediment`. The head stays bounded between
+    that floor and the surface.
     """
     m = _gw_model("minimal_gw.yml")
     try:
@@ -1224,15 +1227,31 @@ def test_groundwater_from_soil():
         z = m.hLocal.getArray()
         m.gwAquiferBase = "from_soil"
         m.gwBedrockDepth = 2.0
+        lo = int(getattr(m, "bedrockLay", 0))
+        top = m.stratStep + 1
+
+        # Base = deeper of (lHbed − bedrock_depth) and the sediment-pile bottom.
         zbed = m._gwZbed(z)
-        assert np.allclose(zbed, m.lHbed.getArray() - 2.0), (
-            "from_soil z_bed != lHbed − bedrock_depth"
+        exp = m.lHbed.getArray() - 2.0
+        if top > lo:
+            exp = np.minimum(exp, z - m.stratH[:, lo:top].sum(axis=1))
+        assert np.allclose(zbed, exp), "from_soil z_bed formula mismatch"
+
+        # Depositional basin: a thick porous fill drives the base to the pile
+        # bottom (well below the thin-regolith lHbed).
+        m.stratH[:, lo] = 40.0
+        zbed_b = m._gwZbed(z)
+        sed = m.stratH[:, lo : m.stratStep + 1].sum(axis=1)
+        deep = (z - sed) < (m.lHbed.getArray() - 2.0)
+        assert deep.any(), "basin fill did not deepen the base — test not exercised"
+        assert np.allclose(zbed_b[deep], (z - sed)[deep]), (
+            "basin aquifer base != bottom of the sediment pile"
         )
 
         m.updateGroundwater()                  # solve on the bedrock floor
         h = m.headL.getArray()
         assert np.isfinite(h).all()
-        assert (h >= zbed - 1.0e-6).all(), "head below the bedrock aquifer floor"
+        assert (h >= m._gwZbed(z) - 1.0e-6).all(), "head below the aquifer floor"
         assert (h <= z + 1.0e-6).all(), "head above the surface (seepage failed)"
     finally:
         m.destroy()
