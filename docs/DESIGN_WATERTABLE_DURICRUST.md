@@ -17,12 +17,13 @@ KSP/SNES lifecycle, scratch-vector contract, `destroy_DMPlex` registration).
 > recharge, seepage/baseflow, the duricrust ODE + K-armoring hook, the `stratDuri`
 > stratigraphic record, soil coupling (`from_soil`, regolith limiter), restart of
 > `head`/`duriH`, and the full user/tech/API docs. Guarded by the
-> `test_groundwater_*` / `test_duricrust_*` suite (serial + np=2). **Deferred
-> increments** are called out inline: baseflow **re-injection** into the surface
-> flow (§3 step 7 — currently a conserved diagnostic), the multi-layer formation
-> **depth range** (§9), and the geochemical **Level-B** solute transport (§3a/§15).
-> The sections below are the original design narrative, annotated with "as built"
-> notes where the implementation refined a choice.
+> `test_groundwater_*` / `test_duricrust_*` suite (serial + np=2). Since then the
+> **baseflow re-injection** into the surface flow (§3 step 7), the **`from_soil`
+> basin base** from the stratigraphy (§15), and the opt-in **lake ↔ aquifer volume
+> coupling** (§15) have also landed. **Remaining deferred increments:** the
+> multi-layer formation **depth range** (§9) and the geochemical **Level-B** solute
+> transport (§3a/§15). The sections below are the original design narrative,
+> annotated with "as built" notes where the implementation refined a choice.
 
 ---
 
@@ -158,14 +159,15 @@ groundwater sets the armoring state that erosion then reads.
    (like dual-lithology deposition being composition-only).
 7. **Baseflow closure (opt-in).** Seepage discharge `Q_seep = Σ_owned (R − ΔS)`
    accounted at the seepage nodes so total river discharge stays `≈ rain − evap`
-   over the quasi-steady step (`Allreduce`d budget). **As built (Phase 5):** the
-   discharge is computed and stored in `self.baseflowL` as a **conserved
-   diagnostic** (distributed over owned seepage nodes by cell area, `Σ baseflow ≈
-   Σ recharge` at steady state) and written as the `baseflow` output. **Actually
-   re-injecting** it into the surface-flow source `bL` (making rivers physically
-   baseflow-fed, which redistributes discharge → erosion, mirroring ice
-   `iceMeltRiverL`) is a **deferred increment** — the plumbing is in place but the
-   flow source is not yet modified, so erosion is unchanged by enabling it.
+   over the quasi-steady step (`Allreduce`d budget). **As built:** the discharge
+   is stored in `self.baseflowL` (conserved diagnostic, distributed over owned
+   seepage nodes by cell area, `Σ baseflow ≈ Σ recharge` at steady state, written
+   as the `baseflow` output) **and re-injected into the surface-flow source** —
+   `applyForces` builds `bL = rain·A − recharge·A + baseflow`, so the infiltrated
+   recharge leaves surface runoff and returns at the seepage nodes (net-neutral
+   globally, rivers physically baseflow-fed, mirroring ice `iceMeltRiverL`).
+   Applied at the single per-step `bL` reset so the two per-step
+   `flowAccumulation` calls do not double-count the (non-idempotent) subtraction.
 8. **Sync.** `localToGlobal` on `head`, `duriH` before the next collective (erosion).
 
 **Water sources — rainfall and lakes (complementary roles).** The table is fed by *both*, but
@@ -301,7 +303,8 @@ groundwater:
                          #   (m), only used when aquifer_base: from_soil
     min_sat_thickness: 1.0    # b_min floor so transmissivity T > 0 near the base (m)
     infiltration: 0.3    # f_infil: fraction of (rain − evap) that recharges
-    conserve_baseflow: True   # return seepage to rivers (river-discharge neutral)
+    conserve_baseflow: True   # return seepage to rivers (re-injected into bL)
+    lake_exchange: False # opt-in lake ↔ aquifer volume coupling (§15)
     picard_its: 3
     seepage_passes: 4
 
@@ -739,12 +742,15 @@ user-facing feature updates the **input-file reference**, the **technical guide*
     kernels), precipitate at the fringe, export via baseflow, with `Σ dissolved − precipitated −
     exported ≈ 0` guards. Comparable in scope to dual-lithology; needs its own design doc. The
     enabling pieces (groundwater flux, FV advection, per-class strata bookkeeping) already exist.
-- **Lake ↔ aquifer volume coupling** — v1 treats lakes/rivers/sea as **fixed-head** boundaries
-  (`h = z`): the table responds to them and exchanges flux (§3), but the lake's own volumetric
-  budget (`_potentialLakeEvap` / `_distributeDownstream` fill/evap/spill) is **not** debited/credited
-  by the across-bed groundwater flux. Fixed-head is the conventional first step; full coupling (lake
-  leakage debits the lake, groundwater discharge fills it — the lake analogue of the river baseflow
-  closure) is deferred. Revisit if lake levels or endorheic-basin water balances prove sensitive.
+- **Lake ↔ aquifer volume coupling** — lakes/rivers/sea are **fixed-head** boundaries (`h = z`) in
+  the head solve. **As built (opt-in `lake_exchange`, default off):** the lake's volumetric budget
+  is now also debited/credited by the across-bed groundwater flux. `_lakeExchangeFlux` computes the
+  signed per-node flux `∇·(T∇h)·A = −(L·h)·A` (>0 = aquifer discharges into the lake, <0 = lake
+  leaks into the aquifer) after the head solve; `_distributeDownstream` aggregates it per lake
+  (partition-invariant `group_by` + `Allreduce`) and feeds it into the fill budget `inV` at step 0 —
+  gains added, leakage debited and clamped at the available water (mirrors the evaporation debit).
+  Default off ⇒ the conventional fixed-head behaviour, byte-identical. (Lake **level** feedback onto
+  the head boundary within the same step remains one-step-lagged, like all the explicit couplings.)
 - **Armor of diffusion** — off by default (SPL K only); enable `armor_diffusion` if crusts
   should also resist hillslope creep.
 - **Do we need transient `head` at all, or steady each step?** Carried as state with

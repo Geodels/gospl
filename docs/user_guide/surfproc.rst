@@ -719,12 +719,13 @@ Groundwater & duricrust
 
     a. ``Ksat`` — saturated hydraulic conductivity ``K_h`` (m/yr); a scalar, a per-vertex map ``[file, key]``, or per-lithology.
     b. ``specific_yield`` — drainable porosity ``S`` (the storage coefficient linking recharge to head change), default ``0.1``.
-    c. ``aquifer_base`` — depth of the impermeable base ``z_bed`` below the surface (m): a **scalar**, a per-vertex **map** ``[file, key]``, or the string ``from_soil`` (tie the base to the bedrock elevation ``z_bed = lHbed − bedrock_depth`` — requires soil tracking). Default ``50.0``.
+    c. ``aquifer_base`` — depth of the impermeable base ``z_bed`` below the surface (m): a **scalar**, a per-vertex **map** ``[file, key]``, or the string ``from_soil`` (tie the base to the bedrock elevation ``z_bed = lHbed − bedrock_depth`` — requires soil tracking; in a depositional basin the base deepens to the bottom of the porous sediment fill). Default ``50.0``.
     d. ``bedrock_depth`` — permeable weathered/fractured-rock thickness below ``lHbed`` (m), used **only** with ``aquifer_base: from_soil`` (default ``0``).
     e. ``min_sat_thickness`` — floor ``b_min`` on the saturated thickness so the transmissivity stays positive near the base (m, default ``1.0``).
     f. ``infiltration`` — fraction ``f_infil`` of ``max(0, rain − evap)`` that recharges the aquifer; a scalar or a per-vertex map ``[file, key]`` (default ``0.3``).
-    g. ``conserve_baseflow`` — return the seepage discharge to the river network so total river discharge stays ``≈ rain − evap`` (default ``True``); writes the ``baseflow`` output.
-    h. ``picard_its`` / ``seepage_passes`` — inner iteration counts for the unconfined non-linearity ``T(h)`` and the seepage free-boundary discovery (defaults ``3`` / ``4``).
+    g. ``conserve_baseflow`` — return the seepage discharge to the river network so total river discharge stays ``≈ rain − evap`` (default ``True``). The infiltrated recharge leaves surface runoff and is **re-injected as baseflow** at the seepage nodes (rivers become baseflow-fed); also writes the ``baseflow`` output.
+    h. ``lake_exchange`` — opt-in lake ↔ aquifer **volume** coupling (default ``False``). When on, the signed across-bed groundwater flux debits/credits each lake's fill budget — a lake ringed by a higher water table gains groundwater, one ringed by a lower table leaks. Off ⇒ lakes are fixed-head only (unchanged).
+    i. ``picard_its`` / ``seepage_passes`` — inner iteration counts for the unconfined non-linearity ``T(h)`` and the seepage free-boundary discovery (defaults ``3`` / ``4``).
 
     .. important::
 
