@@ -68,6 +68,16 @@ class STRAMesh(object):
         # producer) and stratigraphy is recorded (stratNb>0).
         self.stratDuri = None
 
+        # Per-layer duricrust chemistry archive (Level-B geochemistry). Compact
+        # categorical records — the DOMINANT solute species (`stratCrustType`)
+        # and the DOMINANT source-rock region (`stratCrustSource`) of the crust
+        # written into each layer — stored as float64 integer codes (-1 = no
+        # crust). Frozen on burial, nearest-neighbour advected, compaction-
+        # neutral. Allocated only with the geochemistry on (type) and in-model
+        # provenance on (source). Consistent with `stratDuri` (the degree).
+        self.stratCrustType = None
+        self.stratCrustSource = None
+
         return
 
     def readStratLayers(self):
@@ -222,6 +232,20 @@ class STRAMesh(object):
         # crust; the record is grown by _recordInduration and restored on restart.
         if getattr(self, "gwOn", False):
             self.stratDuri = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
+
+        # Per-layer crust chemistry archive (Level-B geochemistry). Integer
+        # codes stored as float64, -1 = no crust in that layer. `stratCrustType`
+        # (dominant solute species) is grown whenever geochemistry is on;
+        # `stratCrustSource` (dominant source region) additionally needs in-model
+        # provenance. Written by _recordInduration, restored on restart.
+        if getattr(self, "gwGeochemOn", False):
+            self.stratCrustType = np.full(
+                (self.lpoints, self.stratNb), -1.0, dtype=np.float64
+            )
+            if getattr(self, "provOn", False):
+                self.stratCrustSource = np.full(
+                    (self.lpoints, self.stratNb), -1.0, dtype=np.float64
+                )
 
         return
 
@@ -850,6 +874,11 @@ class STRAMesh(object):
         # top NON-EMPTY layer directly, so no fill is needed.
         if getattr(self, "stratDuri", None) is not None:
             self.stratDuri[neg] = 0.0
+        # Emptied layers also lose their crust chemistry code (-1 = no crust).
+        if getattr(self, "stratCrustType", None) is not None:
+            self.stratCrustType[neg] = -1.0
+        if getattr(self, "stratCrustSource", None) is not None:
+            self.stratCrustSource[neg] = -1.0
         self.phiS[:, : self.stratStep + 1] = self._fillZeroPorosity(
             self.phiS[:, : self.stratStep + 1]
         )
@@ -1194,6 +1223,16 @@ class STRAMesh(object):
                     nP[onIDs, :] = loc_P[indices[onIDs, 0], :]
                 nstratP[:, :, c] = nP
 
+        # Categorical crust chemistry codes advect by NEAREST neighbour — an
+        # integer species/source label cannot be linearly interpolated, so each
+        # column takes the record of its primary (highest-weight) source node.
+        crustType = getattr(self, "stratCrustType", None) is not None
+        if crustType:
+            nCrustType = self.stratCrustType[indices[:, 0], : self.stratStep]
+        crustSource = getattr(self, "stratCrustSource", None) is not None
+        if crustSource:
+            nCrustSource = self.stratCrustSource[indices[:, 0], : self.stratStep]
+
         # Updates stratigraphic records after mesh advection on the edges of each partition
         # to ensure that all stratigraphic information on the adjacent nodes of the neighbouring
         # partition are equals on all processors sharing a common number of nodes.
@@ -1221,6 +1260,15 @@ class STRAMesh(object):
                 self.tmp.setArray(nDuri[:, k])
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 self.stratDuri[:, k] = self.tmpL.getArray().copy()
+
+            if crustType:
+                self.tmp.setArray(nCrustType[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratCrustType[:, k] = np.rint(self.tmpL.getArray())
+            if crustSource:
+                self.tmp.setArray(nCrustSource[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratCrustSource[:, k] = np.rint(self.tmpL.getArray())
 
             if provOn:
                 for c in range(self.provNb):

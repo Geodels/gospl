@@ -967,6 +967,48 @@ def test_geochem_provenance():
         m.destroy()
 
 
+def test_geochem_strat_archive():
+    """
+    Protects (Level-B geochemistry, per-layer crust archive —
+    DESIGN_WATERTABLE_GEOCHEM.md): the crust's **dominant solute species**
+    (``stratCrustType``) and **dominant source region** (``stratCrustSource``)
+    are recorded PER STRATIGRAPHIC LAYER — the categorical companions to the
+    ``stratDuri`` degree — so a section preserves *what* each crust layer is and
+    *where* its chemistry came from. Codes are integer labels stored as float64,
+    -1 = no crust in that layer. Verified: both arrays are allocated at the
+    stratigraphic shape, some layers carry a crust code, and every code is a
+    valid species / source index (or -1).
+    """
+    m = _gw_model("minimal_gw_geochem_prov.yml")
+    try:
+        assert m.gwGeochemOn and m.provOn and m.stratNb > 0
+        assert m.stratCrustType is not None and m.stratCrustSource is not None
+        assert m.stratCrustType.shape == (m.lpoints, m.stratNb)
+        assert m.stratCrustSource.shape == (m.lpoints, m.stratNb)
+        x = m.lcoords[:, 0]
+        m.source_class = np.where(x < np.median(x), 0, 1).astype(np.int64)
+        m.tEnd = m.tNow + 4 * m.dt
+        m.runProcesses()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        top = m.stratStep + 1
+        ct = m.stratCrustType[:, :top]
+        cs = m.stratCrustSource[:, :top]
+        # Some layers carry a recorded crust (code >= 0), not just the -1 init.
+        assert (ct >= 0).any(), "no crust type archived in any layer"
+        # Every archived code is a valid species / source index (or -1).
+        codes = np.unique(ct)
+        assert np.isin(codes, np.arange(-1, m.gwNspecies)).all()
+        scodes = np.unique(cs)
+        assert np.isin(scodes, np.arange(-1, m.provNb)).all()
+        # A layer with a crust species also has a crust source (both written
+        # together in the same depth range) and vice versa — no orphan codes.
+        assert np.array_equal(ct >= 0, cs >= 0)
+    finally:
+        m.destroy()
+
+
 def test_groundwater_recharge():
     """
     Protects (water-table + duricrust, **Phase 1** — DESIGN_WATERTABLE_DURICRUST.md

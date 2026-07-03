@@ -185,6 +185,18 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
             np.asarray(f["stratDuri"], dtype=np.float64)
             if "stratDuri" in avail else None
         )
+        # Per-layer Level-B crust chemistry codes (integer species / source
+        # region, -1 = no crust), present only for a geochemistry run. Attached
+        # for every mode so a section shows what each crust layer is / where its
+        # chemistry came from. Absent -> skipped.
+        stratCrustType = (
+            np.asarray(f["stratCrustType"], dtype=np.float64)
+            if "stratCrustType" in avail else None
+        )
+        stratCrustSource = (
+            np.asarray(f["stratCrustSource"], dtype=np.float64)
+            if "stratCrustSource" in avail else None
+        )
         if litho:
             if "stratHf" not in avail or "phiF" not in avail:
                 raise ValueError(
@@ -276,6 +288,14 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
     # provenance.
     if stratDuri is not None:
         out["cells"]["induration"] = _cell(stratDuri[:, lay])
+
+    # Level-B crust chemistry (dominant species / source region per layer),
+    # attached for every mode when the run recorded them — a provenance overlay
+    # for the crust in a cross-section. Integer codes (-1 = no crust in layer).
+    if stratCrustType is not None:
+        out["cells"]["crust_type"] = _cell(stratCrustType[:, lay])
+    if stratCrustSource is not None:
+        out["cells"]["crust_source"] = _cell(stratCrustSource[:, lay])
 
     # Basic mode: no lithology / provenance — just attach the recorded porosity
     # (the surface + thickness + layer cells above are written for every mode).

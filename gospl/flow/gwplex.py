@@ -727,6 +727,14 @@ class GWMesh(object):
           re-exhumed — so an exhumed crust resists incision over its full
           thickness, not one layer's worth.
 
+        With Level-B geochemistry on, the same write-down also stamps the
+        crust's **dominant solute species** into ``stratCrustType`` (and, with
+        in-model provenance, its **dominant source region** into
+        ``stratCrustSource``) across the crust's depth range, so a stratigraphic
+        section preserves *what* each crust layer is and *where* its chemistry
+        came from — the categorical companions to the ``stratDuri`` degree.
+        These are archive-only (no exhumation read-up).
+
         No-op (surface-only ``duriF``, no archive) when ``stratDuri`` is
         unallocated (``stratNb == 0``). Composition-only — no geometry change.
         Rank-local (per-node); no collective.
@@ -757,6 +765,26 @@ class GWMesh(object):
             np.maximum(self.stratDuri[:, :top], self.duriF[:, None]),
             self.stratDuri[:, :top],
         )
+
+        # Level-B chemistry archive: stamp the crust's DOMINANT solute species
+        # (and, with provenance, its dominant source region) into every layer
+        # of the crust's depth range, wherever crust has actually precipitated
+        # (gwCrustType >= 0). Categorical, so a later step overwrites rather than
+        # accumulates — the layer carries the current dominant while it is within
+        # the live crust, then freezes when buried below duriH. Archive-only (no
+        # read-up); the live gwCrustType/gwCrustSource are recomputed each step.
+        if getattr(self, "stratCrustType", None) is not None:
+            paint = within & (self.gwCrustType[:, None] >= 0)
+            self.stratCrustType[:, :top] = np.where(
+                paint, self.gwCrustType[:, None].astype(np.float64),
+                self.stratCrustType[:, :top],
+            )
+        if getattr(self, "stratCrustSource", None) is not None:
+            paint = within & (self.gwCrustSource[:, None] >= 0)
+            self.stratCrustSource[:, :top] = np.where(
+                paint, self.gwCrustSource[:, None].astype(np.float64),
+                self.stratCrustSource[:, :top],
+            )
         return
 
     # ------------------------------------------------------------------ #

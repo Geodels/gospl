@@ -127,7 +127,12 @@ with the nested ``duricrust:`` block.
 
 The per-layer diagenetic induration is additionally archived in the
 stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by
-``gospl-strata-volume`` (see :ref:`running`).
+``gospl-strata-volume`` (see :ref:`running`). With the geochemistry on, each
+layer additionally records its crust's **dominant solute species**
+(``stratCrustType``) and — with in-model provenance — its **dominant source
+region** (``stratCrustSource``), exposed per layer as ``crust_type`` /
+``crust_source`` cell fields so a stratigraphic section shows *what* each buried
+crust is and *where* its chemistry came from.
 
 Soil, tectonics & flexure
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -589,7 +589,9 @@ armoring composes.
 - **Solute provenance** — attribute the duricrust's chemical source. **DONE** via the Level-B
   solute transport (`DESIGN_WATERTABLE_GEOCHEM.md` G5): with in-model provenance on, the crust is
   attributed per source-rock class to the upgradient region where its solute dissolved
-  (`crust_source` output).
+  (`crust_source` output), and recorded **per stratigraphic layer** alongside its dominant
+  species (`stratCrustSource` / `stratCrustType`, G5b) — the categorical companions to the
+  `stratDuri` degree, so a section shows what each crust layer is and where its chemistry came from.
 
 ---
 

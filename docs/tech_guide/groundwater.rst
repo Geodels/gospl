@@ -228,7 +228,12 @@ With several tracers, the dominant crust former per node is written as the
 :ref:`provenance <surfproc>` on, the solute is additionally transported **per
 source-rock class** (by linearity of the transport operator), so the downstream
 crust is **attributed to the upgradient region where its solute dissolved** — the
-dominant source is the ``crust_source`` field (solute-source provenance). Outputs:
+dominant source is the ``crust_source`` field (solute-source provenance). The
+crust's dominant species and dominant source region are additionally archived
+**per stratigraphic layer** (``stratCrustType`` / ``stratCrustSource``, the
+categorical companions to the ``stratDuri`` induration degree) — frozen on
+burial and exposed by ``gospl-strata-volume`` — so a cross-section shows *what*
+each buried crust is and *where* its chemistry came from. Outputs:
 ``solute`` (concentration), ``soluteflux`` (export), ``crust_type``,
 ``crust_source``. Coupled
 multi-species aqueous equilibrium (speciation, pH) is out of scope by design —

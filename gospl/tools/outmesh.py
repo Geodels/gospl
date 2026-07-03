@@ -242,6 +242,31 @@ class WriteMesh(object):
                     :, : self.stratStep + 1
                 ]
 
+            # Level-B crust chemistry archive: per-layer dominant solute species
+            # (stratCrustType) and, with provenance, dominant source region
+            # (stratCrustSource). Integer codes stored as float64 (-1 = no
+            # crust). Only written when geochemistry is on; restored on restart.
+            if getattr(self, "stratCrustType", None) is not None:
+                f.create_dataset(
+                    "stratCrustType",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    **self._h5opts,
+                )
+                f["stratCrustType"][:, : self.stratStep + 1] = self.stratCrustType[
+                    :, : self.stratStep + 1
+                ]
+            if getattr(self, "stratCrustSource", None) is not None:
+                f.create_dataset(
+                    "stratCrustSource",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    **self._h5opts,
+                )
+                f["stratCrustSource"][:, : self.stratStep + 1] = self.stratCrustSource[
+                    :, : self.stratStep + 1
+                ]
+
             # In-model provenance: per-layer per-class thickness (lpoints,
             # layers, classes). Only written when provenance tracers are on.
             if getattr(self, "provOn", False):
@@ -745,6 +770,19 @@ class WriteMesh(object):
                 if self.stratDuri is not None and "/stratDuri" in hf:
                     self.stratDuri.fill(0.0)
                     self.stratDuri[:, : self.stratStep] = np.array(hf["/stratDuri"])
+                # Level-B crust chemistry archive. Falls back to the empty
+                # (-1 = no crust) init from readStratLayers when the output
+                # predates the field, so the restore stays robust.
+                if self.stratCrustType is not None and "/stratCrustType" in hf:
+                    self.stratCrustType.fill(-1.0)
+                    self.stratCrustType[:, : self.stratStep] = np.array(
+                        hf["/stratCrustType"]
+                    )
+                if self.stratCrustSource is not None and "/stratCrustSource" in hf:
+                    self.stratCrustSource.fill(-1.0)
+                    self.stratCrustSource[:, : self.stratStep] = np.array(
+                        hf["/stratCrustSource"]
+                    )
                 # In-model provenance: restore per-layer per-class thickness.
                 # Restarting a provenance run from an output without /stratP
                 # falls back to the bedrock-seeded stratP (set in
