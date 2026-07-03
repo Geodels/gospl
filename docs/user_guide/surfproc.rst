@@ -662,99 +662,104 @@ Sediment provenance tracers
 Groundwater & duricrust
 -----------------------
 
-    Adding an optional ``groundwater`` section turns on a **water table** and a
-    generic **duricrust** — near-surface hydrology plus chemical armoring of the
-    erodibility. It is fully **opt-in**: with no ``groundwater`` block the model
-    is byte-identical to a run without it.
+Adding an optional ``groundwater`` section turns on a **water table** and a
+generic **duricrust** — near-surface hydrology plus chemical armoring of the
+erodibility. It is fully **opt-in**: with no ``groundwater`` block the model is
+byte-identical to a run without it.
 
-    The physical picture: rainfall that does not run off **infiltrates** and
-    feeds a water table, solved each step as an implicit Dupuit–Boussinesq head
-    on the mesh (draining to the sea, lakes and rivers). Where the water-table
-    depth sits in a shallow **capillary fringe**, an indurated crust (calcrete /
-    silcrete / ferricrete, treated generically) precipitates and **hardens the
-    surface**, so crusted cells erode more slowly — producing relief inversion
-    and, when stratigraphy is on, stacked duricrusts that are buried and later
-    re-exposed. The duricrust runs **soil-independent** by default and **couples
-    to** :ref:`soil <surfproc>` production when soil is tracked.
+The physical picture: rainfall that does not run off **infiltrates** and feeds a
+water table, solved each step as an implicit Dupuit–Boussinesq head on the mesh
+(draining to the sea, lakes and rivers). Where the water-table depth sits in a
+shallow **capillary fringe**, an indurated crust (calcrete / silcrete / ferricrete,
+treated generically) precipitates and **hardens the surface**, so crusted cells
+erode more slowly — producing relief inversion and, when stratigraphy is on,
+stacked duricrusts that are buried and later re-exposed. The duricrust runs
+**soil-independent** by default and **couples to** :ref:`soil <surfproc>`
+production when soil is tracked.
 
-    .. grid:: 1
-        :padding: 3
+.. grid:: 1
+    :padding: 3
 
-        .. grid-item-card::
+    .. grid-item-card::
 
-            **Declaration example**:
+        **Declaration example**:
 
-            .. code:: yaml
+        .. code:: yaml
 
-                groundwater:
-                    Ksat: 3.65e4          # hydraulic conductivity K_h (m/yr)
-                    specific_yield: 0.1   # S (drainable porosity)
-                    aquifer_base: 50.0    # z_bed depth below surface (m)
-                    bedrock_depth: 0.0    # permeable rock below lHbed (from_soil only)
-                    min_sat_thickness: 1.0
-                    infiltration: 0.3     # fraction of (rain − evap) recharging
-                    conserve_baseflow: True
-                    picard_its: 3
-                    seepage_passes: 4
-                    duricrust:
-                        form_rate: 1.0e-4     # k_form (m/yr at Φ=Ψ=1)
-                        max_thickness: 5.0    # duriH_max (m)
-                        fringe_depth: 3.0     # d0 — fringe centre below surface (m)
-                        fringe_width: 2.0     # w — Gaussian half-width (m)
-                        supply_exp: 1.0       # p on (rain − evap) in the proxy
-                        weather_Ea: 0.0       # Arrhenius activation energy (0 ⇒ off)
-                        armor_max: 0.9        # max fractional K reduction (0..1)
-                        armor_diffusion: False  # also armor hillslope Cd
-                        break_rate: 1.0       # k_break per unit incision
-                        decay_rate: 1.0e-6    # k_decay disequilibrium (1/yr)
-                        weathering:
-                            mode: proxy       # proxy | rate | prodsoil
-                            C_eq: 1.0
-                            Dw: 1.0
-                            path_length: 20.0
-                            weather_Ea: 0.0
-                            weatherability: 1.0
+            groundwater:
+                Ksat: 3.65e4          # hydraulic conductivity K_h (m/yr)
+                specific_yield: 0.1   # S (drainable porosity)
+                aquifer_base: 50.0    # z_bed depth below surface (m)
+                bedrock_depth: 0.0    # permeable rock below lHbed (from_soil only)
+                min_sat_thickness: 1.0
+                infiltration: 0.3     # fraction of (rain − evap) recharging
+                conserve_baseflow: True
+                picard_its: 3
+                seepage_passes: 4
+                duricrust:
+                    form_rate: 1.0e-4     # k_form (m/yr at Φ=Ψ=1)
+                    max_thickness: 5.0    # duriH_max (m)
+                    fringe_depth: 3.0     # d0 — fringe centre below surface (m)
+                    fringe_width: 2.0     # w — Gaussian half-width (m)
+                    supply_exp: 1.0       # p on (rain − evap) in the proxy
+                    weather_Ea: 0.0       # Arrhenius activation energy (0 ⇒ off)
+                    armor_max: 0.9        # max fractional K reduction (0..1)
+                    armor_diffusion: False  # also armor hillslope Cd
+                    break_rate: 1.0       # k_break per unit incision
+                    decay_rate: 1.0e-6    # k_decay disequilibrium (1/yr)
+                    weathering:
+                        mode: proxy       # proxy | rate | prodsoil
+                        C_eq: 1.0
+                        Dw: 1.0
+                        path_length: 20.0
+                        weather_Ea: 0.0
+                        weatherability: 1.0
 
-    **Water-table (hydrology) keys:**
+The **water-table (hydrology) keys** are:
 
-    a. ``Ksat`` — saturated hydraulic conductivity ``K_h`` (m/yr); a scalar, a per-vertex map ``[file, key]``, or per-lithology.
-    b. ``specific_yield`` — drainable porosity ``S`` (the storage coefficient linking recharge to head change), default ``0.1``.
-    c. ``aquifer_base`` — depth of the impermeable base ``z_bed`` below the surface (m): a **scalar**, a per-vertex **map** ``[file, key]``, or the string ``from_soil`` (tie the base to the bedrock elevation ``z_bed = lHbed − bedrock_depth`` — requires soil tracking; in a depositional basin the base deepens to the bottom of the porous sediment fill). Default ``50.0``.
-    d. ``bedrock_depth`` — permeable weathered/fractured-rock thickness below ``lHbed`` (m), used **only** with ``aquifer_base: from_soil`` (default ``0``).
-    e. ``min_sat_thickness`` — floor ``b_min`` on the saturated thickness so the transmissivity stays positive near the base (m, default ``1.0``).
-    f. ``infiltration`` — fraction ``f_infil`` of ``max(0, rain − evap)`` that recharges the aquifer; a scalar or a per-vertex map ``[file, key]`` (default ``0.3``).
-    g. ``conserve_baseflow`` — return the seepage discharge to the river network so total river discharge stays ``≈ rain − evap`` (default ``True``). The infiltrated recharge leaves surface runoff and is **re-injected as baseflow** at the seepage nodes (rivers become baseflow-fed); also writes the ``baseflow`` output.
-    h. ``lake_exchange`` — opt-in lake ↔ aquifer **volume** coupling (default ``False``). When on, the signed across-bed groundwater flux debits/credits each lake's fill budget — a lake ringed by a higher water table gains groundwater, one ringed by a lower table leaks. Off ⇒ lakes are fixed-head only (unchanged).
-    i. ``subglacial_recharge`` — fraction of the glacial meltwater (``iceMeltRiverL``) that infiltrates the aquifer where the ice melts out (default ``0`` — under ice the rain path is gated off; this is the one recharge path allowed there).
-    j. ``fine_infil_factor`` — multiplier on ``f_infil`` for the fine end-member (dual lithology); ``< 1`` makes clay/fine surfaces infiltrate less than coarse/sand (default ``1`` — no lithology dependence).
-    k. ``infil_slope_ref`` — reference slope for a ``f/(1 + slope/infil_slope_ref)`` reduction of infiltration on steep terrain (default ``0`` — off; slope is the steepest-descent gradient).
-    l. ``picard_its`` / ``seepage_passes`` — inner iteration counts for the unconfined non-linearity ``T(h)`` and the seepage free-boundary discovery (defaults ``3`` / ``4``).
+a. ``Ksat`` — saturated hydraulic conductivity ``K_h`` (m/yr); a scalar, a per-vertex map ``[file, key]``, or per-lithology.
+b. ``specific_yield`` — drainable porosity ``S`` (the storage coefficient linking recharge to head change), default ``0.1``.
+c. ``aquifer_base`` — depth of the impermeable base ``z_bed`` below the surface (m): a **scalar**, a per-vertex **map** ``[file, key]``, or the string ``from_soil`` (tie the base to the bedrock elevation ``z_bed = lHbed − bedrock_depth`` — requires soil tracking; in a depositional basin the base deepens to the bottom of the porous sediment fill). Default ``50.0``.
+d. ``bedrock_depth`` — permeable weathered/fractured-rock thickness below ``lHbed`` (m), used **only** with ``aquifer_base: from_soil`` (default ``0``).
+e. ``min_sat_thickness`` — floor ``b_min`` on the saturated thickness so the transmissivity stays positive near the base (m, default ``1.0``).
+f. ``infiltration`` — fraction ``f_infil`` of ``max(0, rain − evap)`` that recharges the aquifer; a scalar or a per-vertex map ``[file, key]`` (default ``0.3``).
+g. ``conserve_baseflow`` — return the seepage discharge to the river network so total river discharge stays ``≈ rain − evap`` (default ``True``). The infiltrated recharge leaves surface runoff and is **re-injected as baseflow** at the seepage nodes (rivers become baseflow-fed); also writes the ``baseflow`` output.
+h. ``lake_exchange`` — opt-in lake ↔ aquifer **volume** coupling (default ``False``). When on, the signed across-bed groundwater flux debits/credits each lake's fill budget — a lake ringed by a higher water table gains groundwater, one ringed by a lower table leaks. Off ⇒ lakes are fixed-head only (unchanged).
+i. ``subglacial_recharge`` — fraction of the glacial meltwater (``iceMeltRiverL``) that infiltrates the aquifer where the ice melts out (default ``0`` — under ice the rain path is gated off; this is the one recharge path allowed there).
+j. ``fine_infil_factor`` — multiplier on ``f_infil`` for the fine end-member (dual lithology); ``< 1`` makes clay/fine surfaces infiltrate less than coarse/sand (default ``1`` — no lithology dependence).
+k. ``infil_slope_ref`` — reference slope for a ``f/(1 + slope/infil_slope_ref)`` reduction of infiltration on steep terrain (default ``0`` — off; slope is the steepest-descent gradient).
+l. ``picard_its`` / ``seepage_passes`` — inner iteration counts for the unconfined non-linearity ``T(h)`` and the seepage free-boundary discovery (defaults ``3`` / ``4``).
 
-    .. important::
+.. important::
 
-        ``aquifer_base: from_soil`` needs :ref:`soil production <surfproc>`
-        tracked (it reads the bedrock elevation ``lHbed``). Without soil it falls
-        back to the surface as the base with a warning.
+    ``aquifer_base: from_soil`` needs :ref:`soil production <surfproc>` tracked (it
+    reads the bedrock elevation ``lHbed``). Without soil it falls back to the
+    surface as the base with a warning.
 
-    **Duricrust keys** (nested ``duricrust:`` block — omit it for a water table with no crust):
+The nested **duricrust keys** (omit the ``duricrust:`` block for a water table with no crust) are:
 
-    i. ``form_rate`` — crust formation rate ``k_form`` (m/yr at full favourability and supply).
-    j. ``max_thickness`` — maximum crust thickness ``duriH_max`` (m); the induration degree is ``duriF = duriH/max_thickness``.
-    k. ``fringe_depth`` / ``fringe_width`` — centre ``d0`` and Gaussian half-width ``w`` (m) of the capillary-fringe favourability band ``Φ`` on the water-table depth.
-    l. ``supply_exp`` — exponent ``p`` on ``(rain − evap)`` in the default climate proxy supply.
-    m. ``weather_Ea`` — Arrhenius activation energy (J/mol) for an optional temperature scaling of the supply (``0`` ⇒ off; reuses the soil ``tempMap`` when present).
-    n. ``armor_max`` — maximum fractional erodibility reduction (0–1); a fully indurated cell (``duriF = 1``) has its ``K`` multiplied by ``1 − armor_max`` (e.g. ``0.9`` ⇒ 10× more resistant).
-    o. ``armor_diffusion`` — also armor the hillslope diffusivity ``Cd`` by the same factor (default ``False``).
-    p. ``break_rate`` / ``decay_rate`` — breakdown per unit surface incision ``k_break`` and the slow disequilibrium decay ``k_decay`` (1/yr) away from the fringe.
+a. ``form_rate`` — crust formation rate ``k_form`` (m/yr at full favourability and supply).
+b. ``max_thickness`` — maximum crust thickness ``duriH_max`` (m); the induration degree is ``duriF = duriH/max_thickness``.
+c. ``fringe_depth`` / ``fringe_width`` — centre ``d0`` and Gaussian half-width ``w`` (m) of the capillary-fringe favourability band ``Φ`` on the water-table depth.
+d. ``supply_exp`` — exponent ``p`` on ``(rain − evap)`` in the default climate proxy supply.
+e. ``weather_Ea`` — Arrhenius activation energy (J/mol) for an optional temperature scaling of the supply (``0`` ⇒ off; reuses the soil ``tempMap`` when present).
+f. ``armor_max`` — maximum fractional erodibility reduction (0–1); a fully indurated cell (``duriF = 1``) has its ``K`` multiplied by ``1 − armor_max`` (e.g. ``0.9`` ⇒ 10× more resistant).
+g. ``armor_diffusion`` — also armor the hillslope diffusivity ``Cd`` by the same factor (default ``False``).
+h. ``break_rate`` / ``decay_rate`` — breakdown per unit surface incision ``k_break`` and the slow disequilibrium decay ``k_decay`` (1/yr) away from the fringe.
 
-    The optional ``weathering:`` sub-block selects the **solute supply** ``Ψ`` feeding formation: ``mode: proxy`` (default, climate/temperature stand-in), ``rate`` (an explicit Maher–Chamberlain chemical-weathering rate driven by the recharge, keys ``C_eq``/``Dw``/``path_length``/``weatherability``), or ``prodsoil`` (reuse the soil production rate). ``rate`` and ``prodsoil`` fall back to the proxy when soil is off.
+The optional ``weathering:`` sub-block selects the **solute supply** ``Ψ`` feeding
+formation: ``mode: proxy`` (default, climate/temperature stand-in), ``rate`` (an
+explicit Maher–Chamberlain chemical-weathering rate driven by the recharge, keys
+``C_eq``/``Dw``/``path_length``/``weatherability``), or ``prodsoil`` (reuse the
+soil production rate). ``rate`` and ``prodsoil`` fall back to the proxy when soil
+is off.
 
-    .. note::
+.. note::
 
-        New outputs: ``recharge``, ``wtable``, ``wtdepth`` (water table),
-        ``baseflow`` (with ``conserve_baseflow``), and ``duricrust``,
-        ``induration``, ``Karmor`` (with ``duricrust:``). When stratigraphy is on
-        the per-layer induration is archived (``stratDuri``) and shown by
-        ``gospl-strata-volume --field induration``. See the technical
-        `groundwater documentation <https://gospl.readthedocs.io/en/latest/tech_guide/groundwater.html>`_
-        for the formulation.
+    New outputs: ``recharge``, ``wtable``, ``wtdepth`` (water table), ``baseflow``
+    (with ``conserve_baseflow``), and ``duricrust``, ``induration``, ``Karmor``
+    (with ``duricrust:``). When stratigraphy is on the per-layer induration is
+    archived (``stratDuri``) and shown by ``gospl-strata-volume --field
+    induration``. See the technical
+    `groundwater documentation <https://gospl.readthedocs.io/en/latest/tech_guide/groundwater.html>`_
+    for the formulation.
