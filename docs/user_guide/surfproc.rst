@@ -754,12 +754,38 @@ explicit Maher–Chamberlain chemical-weathering rate driven by the recharge, ke
 soil production rate). ``rate`` and ``prodsoil`` fall back to the proxy when soil
 is off.
 
+A further optional ``geochem:`` sub-block turns on **conservative solute
+geochemistry** (Level B): one or more lumped tracers are dissolved, transported
+along the groundwater flux, precipitated at the fringe (feeding the crust) and
+exported to the rivers, with a closed mass budget and a dissolved flux to the
+ocean. The solute is an ``n_species`` list (a single tracer by default; several
+for calcrete / silcrete / ferricrete typing):
+
+.. code:: yaml
+
+    groundwater:
+        # ... hydrology + duricrust keys ...
+        geochem:
+            conserve: True
+            species:
+              - {name: carbonate, weatherability: 1.0, c_sat: 1.0, precip_rate: 1.0, solid_volume: 1.0}
+              - {name: silica,    weatherability: 0.5, c_sat: 2.0, precip_rate: 0.8, solid_volume: 1.0}
+
+Per-species keys: ``weatherability`` (dissolution scaling), ``precip_rate`` (the
+fringe precipitation rate), ``solid_volume`` (crust volume per unit precipitated
+solute), and ``c_sat`` (a saturation threshold, reserved for a future nonlinear
+refinement). When ``geochem:`` is on, the transported precipitation **replaces**
+the proxy/rate supply as the crust source. Coupled multi-species aqueous
+equilibrium (speciation, pH) is out of scope.
+
 .. note::
 
     New outputs: ``recharge``, ``wtable``, ``wtdepth`` (water table), ``baseflow``
     (with ``conserve_baseflow``), and ``duricrust``, ``induration``, ``Karmor``
     (with ``duricrust:``). When stratigraphy is on the per-layer induration is
     archived (``stratDuri``) and shown by ``gospl-strata-volume --field
-    induration``. See the technical
+    induration``. With ``geochem:`` on: ``solute`` (concentration), ``soluteflux``
+    (dissolved export) and — for several tracers — ``crust_type`` (dominant crust
+    former). See the technical
     `groundwater documentation <https://gospl.readthedocs.io/en/latest/tech_guide/groundwater.html>`_
     for the formulation.

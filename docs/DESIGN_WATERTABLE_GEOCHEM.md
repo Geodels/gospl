@@ -229,7 +229,7 @@ No change to the conservation invariants the other modules are guarded by.
 | G3 | **DONE.** Per-tracer dissolved **ocean/baseflow export** `gwOceanFlux` (= `Σ seep·c·A`) + the per-node `gwSoluteFlux` field, output as `solute` (Σ-tracer concentration) and `soluteflux` (HDF5+XDMF); verbose per-step total. | `test_geochem_ocean_flux` (export == dissolved − precipitated; export field finite/≥0/non-zero) |
 | G4 | **DONE.** Multi-tracer (`n_species>1`): the species loop already carries per-species params; adds the per-node dominant-crust-former field `gwCrustType` (from per-tracer `gwCrustBySpecies` accumulation, −1 = no crust) output as `crust_type`, and per-tracer cumulative ocean flux (verbose). Distinct tracers (different `weatherability`/`k_p`) give distinct precip-sink operators → **distinct crust typing** (e.g. carbonate vs silica dominant in different cells). | `test_geochem_multitracer` (both tracers active + distinct budgets; `crust_type` = argmax, resolves to both types) |
 | G5 | Solute-source provenance (attribute crust to source area, riding `stratDuri`); unblocks `DESIGN_WATERTABLE_DURICRUST.md` §11. | provenance sums close |
-| G6 | Docs: `tech_guide/groundwater.rst` geochem section, `surfproc.rst` block, `api_ref` page; AGENTS milestone. | docs build green |
+| G6 | **DONE.** Docs: `tech_guide/groundwater.rst` "Conservative geochemistry (Level B)" section; `surfproc.rst` `geochem:` block + per-species keys; `outputs.rst` `solute`/`soluteflux`/`crust_type`; `api_ref/gw_ref.rst` solute methods; AGENTS milestones. | RST underline/autodoc lint clean |
 
 ---
 

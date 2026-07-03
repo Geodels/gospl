@@ -112,6 +112,15 @@ with the nested ``duricrust:`` block.
    * - ``Karmor``
      - Erodibility **armoring multiplier** ``1 − armor_max·duriF`` (≤ 1) applied to ``K``.
      - ``duricrust:`` on
+   * - ``solute``
+     - Dissolved **solute concentration** in the groundwater (summed over tracers).
+     - ``geochem:`` on
+   * - ``soluteflux``
+     - **Dissolved export** discharged to the surface (baseflow-carried, m³/yr).
+     - ``geochem:`` on
+   * - ``crust_type``
+     - Dominant **crust-forming tracer** per node (−1 = no crust).
+     - ``geochem:`` multi-tracer
 
 The per-layer diagenetic induration is additionally archived in the
 stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by

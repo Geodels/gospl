@@ -187,6 +187,48 @@ is the multi-cycle, stacked-duricrust / relief-inversion behaviour of cratonic
 compaction-neutral, and is written to / restored from the stratal output; it is
 exposed per layer as the ``induration`` field of ``gospl-strata-volume``.
 
+Conservative geochemistry (Level B, opt-in)
+-------------------------------------------
+
+By default the duricrust supply is a *local, non-conservative* rate (§ above).
+Adding a ``groundwater: geochem:`` block turns on a **conservative solute cycle**:
+one or more lumped tracers are **dissolved**, **transported** with the groundwater
+flux, **precipitated** at the fringe (feeding the crust) and **exported** to the
+rivers, with a closed mass budget. See ``docs/DESIGN_WATERTABLE_GEOCHEM.md``.
+
+Each tracer ``c`` (an ``n_species`` array — a single tracer by default, several
+for calcrete / silcrete / ferricrete typing) obeys a **steady advection–reaction**
+balance, solved once per step (the transport equilibrates within a century step,
+just like the head):
+
+.. math::
+
+   \nabla\!\cdot\!(q\,c) = D - P, \qquad q = -T\nabla h,
+
+- **Dissolution** :math:`D` — a chemical-weathering source on subaerial land
+  (the climate/temperature supply scaled per tracer by ``weatherability``),
+  drawing from a conserved per-node source pool.
+- **Transport** — first-order upwind advection by the groundwater flux ``q``,
+  built from the head operator's face conductances (geometry-correct on flat and
+  global meshes); a diagonal **seepage sink** where the aquifer discharges makes
+  the operator a well-posed M-matrix.
+- **Precipitation** :math:`P = k_p\,\Phi\,c` — a linear sink at the capillary
+  fringe ``Φ`` that **feeds the crust** ``duriH`` (replacing the local proxy
+  supply when geochem is on). The saturation threshold ``c_sat`` is a future
+  refinement.
+- **Export** — the seepage sink removes the solute discharging to the surface;
+  because the upwind operator is exactly conservative, **each step
+  ``dissolved = precipitated + exported``** (machine precision). The dissolved
+  export is the ``soluteflux`` output and a per-tracer flux to the ocean — the
+  weathering-derived alkalinity/solute delivery relevant to long-term carbonate
+  and climate budgets.
+
+With several tracers, the dominant crust former per node is written as the
+``crust_type`` field (different tracers win in different settings). Outputs:
+``solute`` (concentration), ``soluteflux`` (export), ``crust_type``. Coupled
+multi-species aqueous equilibrium (speciation, pH) is out of scope by design —
+the lumped multi-tracer model is the scale-appropriate choice at km / My.
+
 Compatibility
 -------------
 
