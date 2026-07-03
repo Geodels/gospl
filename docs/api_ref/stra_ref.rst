@@ -31,6 +31,7 @@ Class StraMesh
       ~STRAMesh._fillZeroPorosity
       ~STRAMesh._surfaceK
       ~STRAMesh._surfaceComposition
+      ~STRAMesh._surfaceArmoringK
       ~STRAMesh._surfaceLithoK
       ~STRAMesh._surfaceLithoD
       ~STRAMesh._depthPorosity
@@ -54,6 +55,7 @@ Private functions
 .. automethod:: sed.stratplex.STRAMesh._fillZeroPorosity
 .. automethod:: sed.stratplex.STRAMesh._surfaceK
 .. automethod:: sed.stratplex.STRAMesh._surfaceComposition
+.. automethod:: sed.stratplex.STRAMesh._surfaceArmoringK
 .. automethod:: sed.stratplex.STRAMesh._surfaceLithoK
 .. automethod:: sed.stratplex.STRAMesh._surfaceLithoD
 .. automethod:: sed.stratplex.STRAMesh._depthPorosity

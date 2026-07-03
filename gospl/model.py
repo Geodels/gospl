@@ -7,6 +7,7 @@ from time import process_time
 if "READTHEDOCS" not in os.environ:
     from .flow import FAMesh as _FAMesh
     from .flow import IceMesh as _IceMesh
+    from .flow import GWMesh as _GWMesh
     from .flow import PITFill as _PITFill
     from .eroder import SPL as _SPL
     from .eroder import nlSPL as _nlSPL
@@ -50,6 +51,10 @@ else:
             pass
 
     class _IceMesh(object):
+        def __init__(self):
+            pass
+
+    class _GWMesh(object):
         def __init__(self):
             pass
 
@@ -185,6 +190,7 @@ class Model(
     _Tectonics,
     _FAMesh,
     _IceMesh,
+    _GWMesh,
     _SPL,
     _nlSPL,
     _soilSPL,
@@ -255,6 +261,11 @@ class Model(
 
         # Ice flow initialisation
         _IceMesh.__init__(self, *args, **kwargs)
+
+        # Groundwater (water table) + duricrust initialisation (opt-in; state
+        # allocation only in Phase 0). After FAMesh (needs the DMPlex + flow
+        # machinery) and before the eroders (which will read the K-armoring).
+        _GWMesh.__init__(self, *args, **kwargs)
 
         # SPL initialisation
         _SPL.__init__(self, *args, **kwargs)
@@ -387,6 +398,13 @@ class Model(
                 # Compute flow accumulation
                 with self.profiler.phase("flow"), self._phase("flow"):
                     _FAMesh.flowAccumulation(self)
+
+                # Groundwater (water table) + duricrust (opt-in). After
+                # flowAccumulation (needs seaID / drainage) and before erosion
+                # (which will read the duricrust K-armoring). No-op when gwOn off.
+                if self.gwOn:
+                    with self.profiler.phase("groundwater"), self._phase("groundwater"):
+                        _GWMesh.updateGroundwater(self)
 
                 # Perform River Incision/Deposition based on Stream Power Law (different flavors)
                 with self.profiler.phase("erosion"), self._phase("erosion"):

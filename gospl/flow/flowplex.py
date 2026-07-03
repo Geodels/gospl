@@ -618,6 +618,30 @@ class FAMesh(object):
             inV = inV - lakeLoss
             self.evapLoss += lakeLoss.sum()
 
+        # Lake ↔ aquifer volume coupling (opt-in `lake_exchange`; DESIGN §15).
+        # The signed across-bed groundwater flux (self.gwLakeFlux, m³/yr, from the
+        # previous step's water-table solve) is aggregated per lake once per outer
+        # step (step==0), MPI-reduced with the same partition-invariant group_by
+        # pattern as the surface inflow above. Positive = the aquifer DISCHARGES
+        # into the lake (added to inflow, a gaining lake); negative = the lake
+        # LEAKS into the aquifer (debited and clamped at the available water, like
+        # evaporation, so a losing lake cannot go negative).
+        if getattr(self, "gwLakeExchange", False) and step == 0:
+            gwFlux = self.gwLakeFlux * self.dt               # m³ over the step
+            isPit = (self.pitIDs >= 0) & (self.inIDs == 1)
+            gwV = np.zeros(len(self.pitParams), dtype=np.float64)
+            if isPit.any():
+                g = npi.group_by(self.pitIDs[isPit])
+                gu = g.unique
+                _, gv = g.sum(gwFlux[isPit])
+                gids = gu > -1
+                gwV[gu[gids]] = gv[gids]
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gwV, op=MPI.SUM)
+            gain = np.maximum(gwV, 0.0)
+            loss = np.minimum(inV + gain, np.maximum(-gwV, 0.0))
+            inV = inV + gain - loss
+            self.gwLakeInflow += float((gain - loss).sum())
+
         # Get excess volume to distribute downstream
         eV = inV - pitVol
         if (eV > 0.0).any():

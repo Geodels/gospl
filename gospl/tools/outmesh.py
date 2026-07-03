@@ -228,6 +228,20 @@ class WriteMesh(object):
                 )
                 f["phiF"][:, : self.stratStep + 1] = self.phiF[:, : self.stratStep + 1]
 
+            # Diagenetic induration archive (0..1 per layer). Only written when
+            # the groundwater/duricrust feature is on (self.stratDuri allocated);
+            # restored on restart. Model memory — the crust integrates over My.
+            if getattr(self, "stratDuri", None) is not None:
+                f.create_dataset(
+                    "stratDuri",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    **self._h5opts,
+                )
+                f["stratDuri"][:, : self.stratStep + 1] = self.stratDuri[
+                    :, : self.stratStep + 1
+                ]
+
             # In-model provenance: per-layer per-class thickness (lpoints,
             # layers, classes). Only written when provenance tracers are on.
             if getattr(self, "provOn", False):
@@ -423,6 +437,64 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["soilH"][:, 0] = self.Lsoil.getArray().copy()
+            if getattr(self, "gwOn", False):
+                # Net groundwater recharge (m/yr) — the water-table source term.
+                f.create_dataset(
+                    "recharge",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["recharge"][:, 0] = self.rechargeL.getArray().copy()
+                # Water-table head (m, saturated-surface elevation).
+                f.create_dataset(
+                    "wtable",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["wtable"][:, 0] = self.headL.getArray().copy()
+                # Water-table depth below the surface (m) — the duricrust driver.
+                f.create_dataset(
+                    "wtdepth",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["wtdepth"][:, 0] = self.wtDepth.copy()
+                if getattr(self, "gwConserveBaseflow", False):
+                    # Seepage-return (baseflow) discharge (m^3/yr).
+                    f.create_dataset(
+                        "baseflow",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["baseflow"][:, 0] = self.baseflowL.getArray().copy()
+                if getattr(self, "duriOn", False):
+                    # Duricrust thickness (m), induration degree (0..1) and the
+                    # erodibility armoring multiplier Karmor = 1 - armor_max*duriF.
+                    f.create_dataset(
+                        "duricrust",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["duricrust"][:, 0] = self.duriHL.getArray().copy()
+                    f.create_dataset(
+                        "induration",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["induration"][:, 0] = self.duriF.copy()
+                    f.create_dataset(
+                        "Karmor",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["Karmor"][:, 0] = self.duriKarmor.copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -579,6 +651,22 @@ class WriteMesh(object):
                     self.Lsoil.set(0.)
                 self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
+            # Groundwater / duricrust state is model memory (the water table and
+            # the crust integrate over My), so restore it like cumED/soilH. A run
+            # restarted from an output without these datasets falls back to the
+            # dry-start / uncemented init, so the restore stays robust.
+            if getattr(self, "gwOn", False):
+                if "/wtable" in hf:
+                    self.headL.setArray(np.array(hf["/wtable"])[:, 0])
+                    self.dm.localToGlobal(self.headL, self.headG)
+                    self.wtDepth = self.hLocal.getArray() - self.headL.getArray()
+                if getattr(self, "duriOn", False) and "/duricrust" in hf:
+                    self.duriHL.setArray(np.array(hf["/duricrust"])[:, 0])
+                    self.dm.localToGlobal(self.duriHL, self.duriHG)
+                    # Rebuild the induration / armor multiplier from duriH.
+                    self.duriF = self.duriHL.getArray() / float(self.duriMaxThick)
+                    self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
+
         if self.stratNb > 0 and self.stratStep > 0:
             h5file = (
                 self.outputDir
@@ -614,6 +702,12 @@ class WriteMesh(object):
                     self.phiF.fill(0.0)
                     if "/phiF" in hf:
                         self.phiF[:, : self.stratStep] = np.array(hf["/phiF"])
+                # Diagenetic induration archive. Restarting a groundwater run
+                # from an output without /stratDuri falls back to uncemented
+                # zeros (the readStratLayers init), so the restore stays robust.
+                if self.stratDuri is not None and "/stratDuri" in hf:
+                    self.stratDuri.fill(0.0)
+                    self.stratDuri[:, : self.stratStep] = np.array(hf["/stratDuri"])
                 # In-model provenance: restore per-layer per-class thickness.
                 # Restarting a provenance run from an output without /stratP
                 # falls back to the bedrock-seeded stratP (set in
@@ -786,6 +880,26 @@ class WriteMesh(object):
                     'Dimensions="%d 1">%s:/soilH</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
+
+            if getattr(self, "gwOn", False):
+                _gwnames = ["recharge", "wtable", "wtdepth"]
+                if getattr(self, "gwConserveBaseflow", False):
+                    _gwnames += ["baseflow"]
+                if getattr(self, "duriOn", False):
+                    _gwnames += ["duricrust", "induration", "Karmor"]
+                for _gwname in _gwnames:
+                    f.write(
+                        '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'
+                        % _gwname
+                    )
+                    f.write(
+                        '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                    )
+                    f.write(
+                        'Dimensions="%d 1">%s:/%s</DataItem>\n'
+                        % (self.nodes[p], pfile, _gwname)
+                    )
+                    f.write("         </Attribute>\n")
 
             f.write('         <Attribute Type="Scalar" Center="Node" Name="SL">\n')
             f.write(

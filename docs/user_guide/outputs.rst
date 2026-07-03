@@ -76,6 +76,47 @@ Water & drainage
      - Evaporation rate (m/yr).
      - when evaporation is set
 
+Groundwater & duricrust
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Written only when the opt-in ``groundwater:`` block is set (see
+:ref:`surfproc`). ``recharge``/``wtable``/``wtdepth`` come with the water table;
+``baseflow`` with ``conserve_baseflow``; ``duricrust``/``induration``/``Karmor``
+with the nested ``duricrust:`` block.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 52 30
+
+   * - Field
+     - Meaning
+     - When written
+   * - ``recharge``
+     - Net groundwater **recharge** ``f_infil·max(0, rain − evap)`` (m/yr) — the water-table source, zeroed under standing water and ice.
+     - groundwater on
+   * - ``wtable``
+     - Water-table **head** ``h`` (elevation of the saturated surface, m).
+     - groundwater on
+   * - ``wtdepth``
+     - Water-table **depth below the surface** ``z − h`` (m) — the driver of duricrust formation.
+     - groundwater on
+   * - ``baseflow``
+     - Seepage-return **baseflow** discharge to the rivers (m³/yr); ``Σ ≈ Σ recharge`` at steady state.
+     - ``conserve_baseflow``
+   * - ``duricrust``
+     - Duricrust **thickness** ``duriH`` (m).
+     - ``duricrust:`` on
+   * - ``induration``
+     - Duricrust **induration degree** ``duriF = duriH/max_thickness`` (0–1).
+     - ``duricrust:`` on
+   * - ``Karmor``
+     - Erodibility **armoring multiplier** ``1 − armor_max·duriF`` (≤ 1) applied to ``K``.
+     - ``duricrust:`` on
+
+The per-layer diagenetic induration is additionally archived in the
+stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by
+``gospl-strata-volume`` (see :ref:`running`).
+
 Soil, tectonics & flexure
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

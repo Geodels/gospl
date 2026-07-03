@@ -82,6 +82,22 @@ API reference
     .. grid-item-card::
         :text-align: center
 
+        **Class Groundwater**
+        ^^^
+
+        Water table (Dupuit–Boussinesq) and generic duricrust armoring.
+
+        +++
+
+        .. button-ref:: gw_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
+    .. grid-item-card::
+        :text-align: center
+
         **Class SPL**
         ^^^
 
@@ -314,6 +330,7 @@ API reference
     voro_ref
     pit_ref
     flow_ref
+    gw_ref
     spl_ref
     nlspl_ref
     soilspl_ref

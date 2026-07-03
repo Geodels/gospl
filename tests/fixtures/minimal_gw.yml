@@ -1,0 +1,64 @@
+name: minimal water-table + duricrust (groundwater) test
+
+# Opt-in groundwater (water table) + generic duricrust on a soil + stratigraphy
+# run. Stratigraphy via `time: strat:` (regolith-mode ready). Phase 0 only
+# allocates the groundwater/duricrust state — nothing is solved yet, so this is
+# byte-identical to the same run without the `groundwater:` block. Reuses the
+# shared mesh + soiltemp fixtures.
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 40
+    tout: 20
+    dt: 10.
+    strat: 10.
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 1.0
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+soil:
+    mode: 'regolith'
+    soilK: 8.0e-6
+    maxProd: 50.e-6
+    depthProd: 0.5
+    uniform: 1.0
+    tempMap: ['soiltemp', 't']
+    activation: 40.e3
+    tempRef: 15.0
+
+groundwater:
+    Ksat: 3.65e4
+    specific_yield: 0.1
+    aquifer_base: 50.0
+    infiltration: 0.02
+    conserve_baseflow: True
+    duricrust:
+        form_rate: 1.0e-4
+        max_thickness: 5.0
+        fringe_depth: 3.0
+        fringe_width: 2.0
+        armor_max: 0.9
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'gw_out'

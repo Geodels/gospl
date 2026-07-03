@@ -11,6 +11,25 @@ Companion to `DESIGN_DUAL_LITHOLOGY.md`, `DESIGN_ICE_SHEET.md`,
 `DESIGN_PROVENANCE.md`. Honors the invariants in `AGENTS.md` (MPI contract,
 KSP/SNES lifecycle, scratch-vector contract, `destroy_DMPlex` registration).
 
+> **Status: IMPLEMENTED (branch `feat/watertable-duricrust`).** All phases −1…7
+> of the plan in §13 are done and merged behind the opt-in `groundwater:` block:
+> the implicit water-table solve (fgmres + hypre AMG, analytic-Dupuit validated),
+> recharge, seepage/baseflow, the duricrust ODE + K-armoring hook, the `stratDuri`
+> stratigraphic record, soil coupling (`from_soil`, regolith limiter), restart of
+> `head`/`duriH`, and the full user/tech/API docs. Guarded by the
+> `test_groundwater_*` / `test_duricrust_*` suite (serial + np=2). Since then the
+> **baseflow re-injection** into the surface flow (§3 step 7), the **`from_soil`
+> basin base** from the stratigraphy (§15), the opt-in **lake ↔ aquifer volume
+> coupling** (§15), and the smaller **recharge refinements** — subglacial-meltwater
+> recharge, and lithology-/slope-modulated `f_infil` (§3) — have also landed (all
+> opt-in, default off), and the multi-layer **formation depth range** (§9) — a
+> thick crust is now recorded across all the layers it spans. **Remaining deferred
+> increment:** the geochemical **Level-B** solute transport (§3a/§15; designed in
+> **`DESIGN_WATERTABLE_GEOCHEM.md`**) — also the prerequisite for duricrust
+> **solute-source provenance** (§11). The sections
+> below are the original design narrative,
+> annotated with "as built" notes where the implementation refined a choice.
+
 ---
 
 ## 1. Scope & decisions (locked)
@@ -95,8 +114,15 @@ groundwater sets the armoring state that erosion then reads.
 `updateGroundwater()`:
 
 1. **Recharge.** `R = f_infil · max(0, rainVal − evapVal)` (m/yr), per node, from the
-   existing forcing arrays. `seaID` and closed-lake interiors get `R = 0` (their head
-   is pinned; see step 3). `f_infil` may be a scalar, per-lithology, or a map.
+   existing forcing arrays. `R = 0` where the surface is **not subaerial land**: `seaID` and
+   ponded continental lakes (head pinned; see step 3) **and ice-covered land** (`iceHL >
+   ICE_COVER_MIN` — rain falls as snow/ice and does not infiltrate the ground; parallels the
+   soil ice-freeze gate. **As built:** an opt-in `subglacial_recharge` fraction lets the ice
+   model's `iceMeltRiverL` infiltrate under ice — the one recharge path allowed there). `f_infil`
+   may be a **scalar or a per-vertex map** `[file, key]` (loaded in `_GWMesh`) and is optionally
+   modulated (opt-in, both default off) by **surface lithology** (`fine_infil_factor` on the exposed
+   coarse fraction, dual lithology) and by **slope** (`f/(1+slope/infil_slope_ref)`, the
+   steepest-descent gradient) — DESIGN §3 recharge refinements.
 2. **Seepage set.** Nodes where the table is pinned to the surface: rivers/lakes
    (drainage-connected, from the flow graph) + coast/sea (`seaID`) + open boundary
    outlets (`outletIDs`). Dirichlet `h = z` there (partition-invariant — derived from
@@ -111,8 +137,11 @@ groundwater sets the armoring state that erosion then reads.
      mild, well-posed fixed point (2–4 outer passes typical). The "re-solve?" decision
      is **reduced across ranks** (`allreduce(any_new_seep, MPI.LOR)`) before it gates
      the collective re-solve (`AGENTS.md` #1 deadlock rule).
-   - Cached `gw_`-prefixed KSP (`_makeDiffusionKSP`); operator rebuilt per step (T varies),
-     KSP object reused, PC not reused.
+   - Cached `gw_`-prefixed KSP (`_makeGWKSP`: **fgmres + hypre BoomerAMG**); operator
+     rebuilt per step (T varies), KSP object reused. AMG is **required**: block-Jacobi/ILU
+     stalls (`DIVERGED_ITS`) on this stiff 2-D elliptic operator and returns a garbage
+     iterate that drifts the water table up to the surface (same reason the flexure
+     biharmonic wants a strong solver).
 4. **Water-table depth** `wtL = z − h` (≥ 0 by the clip), the field the duricrust reads.
 5. **Duricrust update** (`_updateDuricrust`, per-node, rank-local ODE over Δt):
    - **Fringe favourability** `Φ = exp(−((wt − d0)/w)²)` — a Gaussian band centred on the
@@ -135,9 +164,17 @@ groundwater sets the armoring state that erosion then reads.
 6. **Armor K.** `duriF` feeds the erodibility hook (§5). No elevation change here —
    duricrust modifies *rate*, not geometry, so flow/routing are unchanged this step
    (like dual-lithology deposition being composition-only).
-7. **Baseflow closure (opt-in).** Seepage discharge `Q_seep = Σ_owned (R − ΔS)` returned
-   to the river network at seepage nodes so total river discharge stays `≈ rain − evap`
-   over the quasi-steady step (mirrors ice `melt_conserve`; `Allreduce`d budget).
+7. **Baseflow closure (opt-in).** Seepage discharge `Q_seep = Σ_owned (R − ΔS)`
+   accounted at the seepage nodes so total river discharge stays `≈ rain − evap`
+   over the quasi-steady step (`Allreduce`d budget). **As built:** the discharge
+   is stored in `self.baseflowL` (conserved diagnostic, distributed over owned
+   seepage nodes by cell area, `Σ baseflow ≈ Σ recharge` at steady state, written
+   as the `baseflow` output) **and re-injected into the surface-flow source** —
+   `applyForces` builds `bL = rain·A − recharge·A + baseflow`, so the infiltrated
+   recharge leaves surface runoff and returns at the seepage nodes (net-neutral
+   globally, rivers physically baseflow-fed, mirroring ice `iceMeltRiverL`).
+   Applied at the single per-step `bL` reset so the two per-step
+   `flowAccumulation` calls do not double-count the (non-idempotent) subtraction.
 8. **Sync.** `localToGlobal` on `head`, `duriH` before the next collective (erosion).
 
 **Water sources — rainfall and lakes (complementary roles).** The table is fed by *both*, but
@@ -206,7 +243,8 @@ source pool. Making the crust mass a closed geochemical budget (dissolve → tra
 `q = −T∇h` → precipitate at the fringe → export via baseflow, with conservation guards) is **Level
 B**, a separate geochemical solute-transport module scoped in §15 — the ingredients exist
 (groundwater flux, FV advection kernels, per-class strata bookkeeping) but it is a major, distinct
-feature with its own design doc.
+feature with its own design doc: **`DESIGN_WATERTABLE_GEOCHEM.md`** (single-tracer → multi-tracer;
+coupled multi-species equilibrium explicitly out of scope).
 
 ---
 
@@ -273,7 +311,11 @@ groundwater:
                          #   (m), only used when aquifer_base: from_soil
     min_sat_thickness: 1.0    # b_min floor so transmissivity T > 0 near the base (m)
     infiltration: 0.3    # f_infil: fraction of (rain − evap) that recharges
-    conserve_baseflow: True   # return seepage to rivers (river-discharge neutral)
+    conserve_baseflow: True   # return seepage to rivers (re-injected into bL)
+    lake_exchange: False # opt-in lake ↔ aquifer volume coupling (§15)
+    subglacial_recharge: 0.0  # fraction of glacial meltwater infiltrating under ice
+    fine_infil_factor: 1.0    # f_infil multiplier for the fine end-member (dual litho)
+    infil_slope_ref: 0.0      # slope reference for f/(1+slope/ref) (0 = off)
     picard_its: 3
     seepage_passes: 4
 
@@ -436,9 +478,13 @@ considered and rejected for exactly these reasons.)
 Per step, gated on `gwOn and stratNb>0`:
 
 - **Formation (varies with time).** After `_updateDuricrust`, the induration is written down into
-  the stratigraphic layers lying within the crust/fringe depth: `stratDuri[node, top layers]` is
-  raised toward the live `duriF`. On a stable, non-eroding surface the crust thickens over
-  10⁴–10⁶ yr → those near-surface layers' `stratDuri` **grows with time**.
+  the near-surface stratigraphy: `stratDuri` is raised toward the live `duriF` (`_recordInduration`).
+  On a stable, non-eroding surface the crust thickens over 10⁴–10⁶ yr → those layers' `stratDuri`
+  **grows with time**. **As built:** the write-down spans the crust's **depth range** — every layer
+  whose top lies within the crust thickness `duriH` below the surface is raised to `max(stratDuri,
+  duriF)` (`depth_above(k) = Σ_{j>k} H[j] < duriH`), so a thick crust indurates several thin layers
+  and re-arms the surface over its full thickness on exhumation (not one layer's worth). The read-up
+  still uses the top non-empty layer (the exposed surface).
 - **Deposition (burial → preservation).** `deposeStrat` adds a new top layer with `stratDuri = 0`
   (fresh, uncemented sediment). The previously indurated layer keeps its `stratDuri` and is now
   **buried and preserved** — a relict crust locked into the record.
@@ -553,8 +599,9 @@ partition-safe; the design adds no new collective-gating hazards.
   exchange, `lgmap`, and owned-rows-only assembly (`self.glIDs`) as the hillslope/marine
   diffusion operators — one of the three *safe* assembly patterns in `AGENTS.md` §"#2
   partition-dependence" (additive FV-Laplacian, `ADD_VALUES`). Partition-exact head to
-  KSP tolerance; the cached `gw_` KSP uses `fgmres`/`bjacobi` or CG (env-overridable),
-  the same class as the flow-accumulation solver.
+  KSP tolerance; the cached `gw_` KSP uses **fgmres + hypre BoomerAMG** (algebraic
+  multigrid — the stiff elliptic operator needs it; block-Jacobi/ILU does not converge),
+  env-overridable via the `gw_` prefix.
 - **Seepage Dirichlet set is partition-invariant.** It is derived from the drainage
   network (rivers/lakes) + `seaID` + `outletIDs`, all built from the partition-invariant
   `locIDs`-keyed drainage arrays (the mechanism-#2 fixes). Applied by `zeroRows`
@@ -609,17 +656,20 @@ partition-safe; the design adds no new collective-gating hazards.
 
 ## 13. Phased implementation plan (branch per phase, PR into `dev`)
 
+**All phases below are DONE** on `feat/watertable-duricrust` (7 feature commits;
+full `tests/` 139 passed, serial + np=2). The status/notes are inline per row.
+
 | Phase | Deliverable | Guard test |
 |---|---|---|
-| −1 | **Prerequisite (soil):** Option-2.5 consistency fixes — subaerial lake/sea gate + submarine coherence (`DESIGN_SOIL_REGOLITH.md` §5). Stands alone; de-risks the duricrust coupling | `test_soil_subaerial_gate` (no soil under ponded/marine cells) |
-| 0 | `_readGroundwater`/`_extraGroundwater` parser + `gwOn` flag + state alloc + `destroy_DMPlex` | `test_groundwater_opt_in` (bitwise off) |
-| 1 | Recharge `R = f·(rain−evap)` from existing forcing; `recharge` output | `test_groundwater_recharge` (arid⇒0, humid⇒f·(P−E)) |
-| 2 | Implicit head solve (`_solveHead`): Picard `T(h)` + seepage clip, cached `gw_` KSP; `wtable`/`wtdepth` outputs | `test_watertable_solve` (analytic Dupuit hillslope; np=1-vs-2) |
-| 3 | Duricrust ODE (`_updateDuricrust`): fringe Φ, supply Ψ (proxy default; opt-in Level-A explicit-rate `W` via `weathering:`, §3a), formation + breakdown; `duricrust`/`induration` outputs | `test_duricrust_forms_at_fringe`; `test_duricrust_soilfree` (forms with `cptSoil=False`); `test_duricrust_weathering_rate` (Level-A rate responds to `R`) |
-| 4 | Armor hook `_surfaceArmoringK` into `_surfaceLithoK`; relief-inversion behaviour | `test_duricrust_armors_K` (indurated cell erodes ≪ bare) |
-| 5 | Baseflow conservation (opt-in); soil coupling (regolith supply limiter + `aquifer_base=lHbed`) | `test_groundwater_baseflow_conserves` (Σ baseflow ≈ Σ recharge) |
-| 6 | stratigraphic induration record (`stratDuri`, §9): write-on-formation, burial via `deposeStrat` (new layer = 0), exhumation re-armor via `erodeStrat`, advect like `stratHf`, compaction-neutral; `induration` field in `gospl-strata-volume` | `test_duricrust_strata_exhumation` (buried crust re-armors on re-exposure) |
-| 7 | **Documentation (§14)**: `groundwater:` block in `inputfile.rst`, `surfproc.rst` + `outputs.rst` updates; new `tech_guide/groundwater.rst`; new `api_ref/gw_ref.rst` (+ `stratplex`/`inputparser` API pages); AGENTS.md milestone | docs build green (autodoc imports cleanly) |
+| −1 | **DONE (soil PR #482).** Option-2.5 consistency fixes — subaerial lake/sea gate + submarine coherence + ice freeze-inert (`DESIGN_SOIL_REGOLITH.md` §5). | `test_soil_subaerial_gate` |
+| 0 | **DONE.** `_readGroundwater` parser + `gwOn`/`duriOn` flags + `_GWMesh` state alloc (head/duriH/recharge/baseflow Vecs, per-node state, cached `_gwMat`/`_ksp_gw`) + `destroy_DMPlex`; init after `_FAMesh`. | `test_groundwater_opt_in` (off ⇒ inert; on ⇒ state + head seeded) |
+| 1 | **DONE.** Recharge `R = f·max(0, rain−evap)` from existing forcing, zeroed under **water AND ice** (§3); `f_infil` scalar **or** per-vertex map; `recharge` output. | `test_groundwater_recharge` (humid⇒f·(P−E); arid⇒0; under-water/ice⇒0; per-vertex f honoured) |
+| 2 | **DONE + analytically validated.** Implicit head solve `_solveHead`: `(I + (Δt/S)·L(T))h = h_old + (Δt/S)·R` via `jacobiancoeff`/`_assembleDiffMatCSR` (like the marine Picard), Picard on `T=Kh·max(h−z_bed, b_min)`, **two free boundaries** — seepage `h≤z` (Dirichlet `zeroRowsLocal` at `seaID`∪ponded-lake∪`outletIDs`, + clip-and-discover, `Allreduce`'d new-seepage break) and dry-aquifer floor `h≥z_bed`; cached **fgmres + hypre BoomerAMG** `gw_` KSP (block-Jacobi/ILU does **not** converge on this stiff 2-D elliptic operator — it stalls at `DIVERGED_ITS` and the garbage iterate drifts to the surface; AMG is required, cf. the flexure biharmonic); `aquifer_base` prescribed — scalar **or per-vertex map** (`from_soil` = Phase 5); `wtable`/`wtdepth` outputs. | `test_watertable_solve` (bounded `z_bed≤h≤z`, finite, non-trivial); `test_watertable_steady` (repeated solves contract onto the quasi-steady Dupuit fixed point); `test_watertable_parallel` (np=1-vs-2 agree within the partition-drift floor). **`benchmarks/test_dupuit.py`: full analytic Dupuit-parabola benchmark** — west-draining ramp, flat base via an `aquifer_base` map, `bc='wwwf'`; steady head matches `s²=s_d²+(R/K)(2Wx−x²)` to **RMSE 0.00 %, R²=1.0**. |
+| 3 | **DONE.** Duricrust ODE (`_updateDuricrust`, rank-local): fringe favourability `Φ = exp(−((wt−d0)/w)²)`, weathering supply `Ψ` (`_weatheringSupply`: **proxy** default `max(0,P−E)^p·arrhenius`; opt-in Level-A **rate** Maher–Chamberlain `W=R·C_eq·(1−exp(−Dw/(R·L)))·…`; **prodsoil** reuse of `soilSPL.prodSoil` — both fall back to proxy when soil is off), self-limiting formation `+k_form·Φ·Ψ·(1−duriH/duriH_max)`, breakdown (per-step incision `z_last−z` strips the top; slow `k_decay·(1−Φ)` decay); optional Arrhenius (`_arrhenius`, reuses the soil tempMap, off when `weather_Ea=0`); writes `duriH`, `duriF=duriH/duriH_max`, `duriKarmor=1−armor_max·duriF`; `duricrust`/`induration` outputs (HDF5+XDMF). Soil-independent by default. | `test_duricrust_forms_at_fringe` (forms at `wt≈d0`, not away); `test_duricrust_soilfree` (forms with no `soil:` block); `test_duricrust_weathering_rate` (Level-A rate ↗ with `R`, 0 at `R=0`). |
+| 4 | **DONE.** Armor hook `_surfaceArmoringK` (`sed/stratplex.py`) composed multiplicatively into `_surfaceLithoK` → reaches **all three eroders** (SPL/nlSPL/soilSPL, no branching) as `1 − armor_max·duriF`; scalar `1.0` no-op when off (byte-identical). Optional creep armoring in `_surfaceLithoD` behind `armor_diffusion`. Rate-only (no geometry change → routing untouched). | `test_duricrust_armors_K` (indurated cell K reduced by `armor_max`, erodes ≪ bare; scalar-1.0 no-op when off). |
+| 5 | **DONE.** Baseflow conservation (opt-in `conserve_baseflow`, `_baseflowClosure`): seepage-return discharge `Q_seep = Σ(R·A) − ΔS/Δt` (`Allreduce`'d), distributed over owned seepage nodes by cell area into `self.baseflowL`, so `Σ baseflow ≈ Σ recharge` in the steady limit (`baseflow` output); re-injection into the surface-flow source is the next increment. Soil coupling: **regolith supply limiter** (`_regolithSupplyRate = prodSoil·rain` caps formation when `cptSoil`) and **`aquifer_base: from_soil`** (`_gwZbed`: `z_bed = lHbed − bedrock_depth`, `lHbed` now init'd in `soilSPL.__init__`). | `test_groundwater_baseflow_conserves` (Σ baseflow ≈ Σ recharge to 2 %); `test_groundwater_from_soil` (`z_bed = lHbed − d_bedrock`, head bounded); `test_duricrust_regolith_limited` (formation capped by `prodSoil·rain`). |
+| 6 | **DONE.** Stratigraphic induration record `stratDuri` (`(lpoints, stratNb)`, §9), allocated when `gwOn and stratNb>0`. `_recordInduration` (after `_updateDuricrust`): **write-down** (record live `duriF` into every layer within the crust thickness `duriH` below the surface — the §9 depth range) + **read-up** (an exhumed buried crust re-arms `duriF`/`duriKarmor` at the top non-empty layer). Burial preserves it (`deposeStrat` fresh layers = 0); `erodeStrat` zeroes emptied layers (**no forward-fill** — 0 is a valid uncemented value); advected as an INTENSIVE field (extra `strataonesed`, like `phiS`), compaction-neutral; written/restored in the stratal HDF5; `induration` per-layer field in `gospl-strata-volume` (`stratamesh`). | `test_duricrust_strata_exhumation` (buried crust re-armors on re-exposure; full suite incl. dual-lithology/provenance/restart green — `getattr` guards for bare-`STRAMesh` unit tests). |
+| 7 | **DONE.** Restart of `head`/`duriH` (model memory — written to the per-step HDF5, restored in `readData` like `cumED`/`soilH`; `wtDepth`/`duriF`/`duriKarmor` rebuilt); new `Karmor` output. **Documentation (§14):** `groundwater:` block + all keys in `surfproc.rst` (the convention home for process blocks — `climate:`/`ice:` live there too, not `inputfile.rst`); `outputs.rst` fields; `running.rst` (`--field induration`); new `tech_guide/groundwater.rst` (Dupuit–Boussinesq, implicit solve + why, seepage/Picard, fringe formation, `stratDuri`, compatibility) wired into `tech_guide/index.rst`; new `api_ref/gw_ref.rst` (autosummary + automethod) wired into `api_ref/index.rst`; `_readGroundwater` on `in_ref.rst`, `_surfaceArmoringK` on `stra_ref.rst`; `gwplex` module/class docstrings de-staled. `petsc4py`/`gospl._fortran` already mocked → autodoc imports cleanly. | `test_groundwater_restart` (head/duriH survive restart); RST underline/label lint clean; full `tests/` 139 passed. |
 
 ---
 
@@ -674,7 +724,15 @@ user-facing feature updates the **input-file reference**, the **technical guide*
 
 ---
 
-## 15. Open decisions (defaults chosen, revisit on validation)
+## 15. Design decisions — status
+
+**Status summary.** Every decision below is **resolved and implemented** except one.
+The single genuinely **open / deferred** item is the **Level-B** conservative
+geochemistry (a separate solute-transport module, designed in
+**`DESIGN_WATERTABLE_GEOCHEM.md`** — it also gates duricrust **solute-source
+provenance**, §11). One **low-priority** simplification remains
+optional (a pure steady head solve if validation ever shows the equilibrium limit
+everywhere). All other bullets are marked **DONE / as built** with the code path.
 
 - **Soil-model dependency — DECIDED.** This design targets the **Option-2.5** soil model
   (`DESIGN_SOIL_REGOLITH.md`): `Lsoil` = weathering-only regolith, deposited sediment in the
@@ -682,9 +740,9 @@ user-facing feature updates the **input-file reference**, the **technical guide*
   smooth max-weathering-depth. The duricrust still degrades gracefully when soil/stratigraphy are
   off (§8). Implementation order: land the Option-2.5 *consistency fixes* (subaerial gate +
   submarine coherence) first — they de-risk the duricrust coupling and stand alone.
-- **Fringe favourability shape** — Gaussian band vs a top-hat `[d0−w, d0+w]`. Gaussian
-  chosen for smooth gradients (better for the KSP-free per-node ODE); revisit if a sharp
-  fringe is wanted.
+- **Fringe favourability shape** — Gaussian band vs a top-hat `[d0−w, d0+w]`. **As built:**
+  Gaussian `exp(−((wt−d0)/w)²)` (smooth gradients, better for the per-node ODE); revisit only if a
+  sharp fringe is wanted.
 - **Aquifer base `z_bed`** — **prescribed `z − aquifer_base` (default)** OR **`lHbed − bedrock_depth`
   when `aquifer_base: from_soil`** (requires `soilSPL`; §8). The `from_soil` form is the physically
   apt "permeable regolith over impermeable bedrock" model for cratonic/laterite terrains and makes
@@ -692,26 +750,47 @@ user-facing feature updates the **input-file reference**, the **technical guide*
   `min_sat_thickness` floor keeps `T>0`. Under Option-2.5 `lHbed` is the base of the weathering
   mantle (no depocenter inflation), and **in depositional basins the base comes from the
   stratigraphy** (the porous fill is the aquifer), not `lHbed`. Bare-rock / soil-off cells fall
-  back to the prescribed depth, which stays the default so the feature runs standalone.
+  back to the prescribed depth, which stays the default so the feature runs standalone. **As built
+  (DONE):** `_gwZbed` implements all three — scalar/map, `from_soil = lHbed − bedrock_depth`, and
+  the basin case as the *deeper* of `lHbed − bedrock_depth` and `z − Σ(non-sentinel sediment)`.
+- **Recharge refinements (DONE, opt-in, default off)** — `R = f_infil·max(0, rain − evap)` with
+  three optional modulations (§3 step 1): **subglacial-meltwater recharge** (`subglacial_recharge`
+  fraction of the ice model's `iceMeltRiverL` infiltrates under ice — the one recharge path the ice
+  gate allows), **lithology** (`fine_infil_factor` scales `f_infil` by the exposed coarse fraction,
+  dual lithology), and **slope** (`f/(1+slope/infil_slope_ref)` from a steepest-descent proxy). Each
+  defaults to a no-op, so the baseline `f_infil` (scalar or per-vertex map) is unchanged.
 - **Weathering supply `Ψ`** — three tiers, escalating cost (see §3a for the rate law + YAML):
   - **Proxy (default, shipped)** — climate/temperature stand-in; no new inputs, non-conservative.
-  - **Level A (opt-in, this design)** — explicit chemical-weathering *rate* `W(R, T, Lsoil,
+  - **Level A (opt-in, DONE)** — explicit chemical-weathering *rate* `W(R, T, Lsoil,
     lithology)` driven by the groundwater recharge `R` (± the `prodsoil` congruency shortcut when
-    `soilSPL` is on). Supply-only, still non-conservative. Recommended pairing; cheap because all
-    inputs already exist.
-  - **Level B (future, separate module)** — conservative geochemistry: debit dissolved solid,
+    `soilSPL` is on). Supply-only, still non-conservative. Shipped (`_weatheringSupply`,
+    `weathering: mode: rate|prodsoil`); cheap because all inputs already exist.
+  - **Level B (future, separate module — the main remaining item)** — conservative geochemistry:
+    debit dissolved solid,
     transport solute along `q = −T∇h` (advection-reaction on the DMPlex, reusing the FV advection
     kernels), precipitate at the fringe, export via baseflow, with `Σ dissolved − precipitated −
-    exported ≈ 0` guards. Comparable in scope to dual-lithology; needs its own design doc. The
-    enabling pieces (groundwater flux, FV advection, per-class strata bookkeeping) already exist.
-- **Lake ↔ aquifer volume coupling** — v1 treats lakes/rivers/sea as **fixed-head** boundaries
-  (`h = z`): the table responds to them and exchanges flux (§3), but the lake's own volumetric
-  budget (`_potentialLakeEvap` / `_distributeDownstream` fill/evap/spill) is **not** debited/credited
-  by the across-bed groundwater flux. Fixed-head is the conventional first step; full coupling (lake
-  leakage debits the lake, groundwater discharge fills it — the lake analogue of the river baseflow
-  closure) is deferred. Revisit if lake levels or endorheic-basin water balances prove sensitive.
-- **Armor of diffusion** — off by default (SPL K only); enable `armor_diffusion` if crusts
-  should also resist hillslope creep.
-- **Do we need transient `head` at all, or steady each step?** Carried as state with
-  backward-Euler (robust in both `τ_gw` regimes). If validation shows the equilibrium limit
-  everywhere, a pure steady solve (`a=0`) is a trivial simplification.
+    exported ≈ 0` guards. Comparable in scope to dual-lithology; **designed in
+    `DESIGN_WATERTABLE_GEOCHEM.md`** (single-tracer → multi-tracer via an `n_species` array;
+    coupled multi-species equilibrium out of scope). The enabling pieces (groundwater flux, FV
+    advection, per-class strata bookkeeping) already exist.
+- **Lake ↔ aquifer volume coupling** — lakes/rivers/sea are **fixed-head** boundaries (`h = z`) in
+  the head solve. **As built (opt-in `lake_exchange`, default off):** the lake's volumetric budget
+  is now also debited/credited by the across-bed groundwater flux. `_lakeExchangeFlux` computes the
+  signed per-node flux `∇·(T∇h)·A = −(L·h)·A` (>0 = aquifer discharges into the lake, <0 = lake
+  leaks into the aquifer) after the head solve; `_distributeDownstream` aggregates it per lake
+  (partition-invariant `group_by` + `Allreduce`) and feeds it into the fill budget `inV` at step 0 —
+  gains added, leakage debited and clamped at the available water (mirrors the evaporation debit).
+  Default off ⇒ the conventional fixed-head behaviour, byte-identical. (Lake **level** feedback onto
+  the head boundary within the same step remains one-step-lagged, like all the explicit couplings.)
+- **Armor of diffusion** — **As built (DONE):** off by default (SPL K only); `armor_diffusion`
+  also scales the hillslope diffusivity `Cd` by `1 − armor_max·duriF` (`_surfaceLithoD`).
+- **Do we need transient `head` at all, or steady each step?** **As built:** carried as state with
+  backward-Euler (robust in both `τ_gw` regimes; analytic-Dupuit validated). If validation ever
+  shows the equilibrium limit everywhere, a pure steady solve is a trivial simplification — still
+  open, low priority.
+- **Multi-layer formation depth range** (§9) — **DONE:** `_recordInduration` writes the crust into
+  every layer whose top lies within `duriH` below the surface (`depth_above(k) < duriH`), so a thick
+  crust is recorded across all the thin layers it spans and re-arms over its full thickness on
+  exhumation. The read-up still uses the top non-empty layer.
+- **Solute-source provenance** (§11) — blocked on **Level B**: attributing the crust's chemical
+  source needs the solute-transport tracer. Deferred with Level B.

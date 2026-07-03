@@ -413,6 +413,7 @@ Soil production, erosion, transport and deposition
         .. code:: yaml
 
             soil:
+                mode: 'lumped'
                 soilK: 4.e-6
                 maxProd: 50.e-6
                 depthProd: 0.5
@@ -420,34 +421,58 @@ Soil production, erosion, transport and deposition
                 decayDepth: 0.7
                 bedrockConv: 0.0001
                 uniform: 0.5
-                map: ['test_mesh8/hsoil', 'soil']
+                soilMap: ['test_mesh8/hsoil', 'soil']
+                tempMap: ['test_mesh8/temperature', 'temp']
+                activation: 40.e3
+                tempRef: 15.0
 
         a. ``soilK`` is the erodibility coefficient for soil,
         b. ``maxProd`` is the soil production maximum rate (m/yr),
         c. ``depthProd`` is the soil production decay depth (m),
         d. ``roughnessL`` is the roughness length scale,
         e. ``decayDepth`` is the soil transport decay depth for non-linear diffusion where the coefficient of diffusion is set to the values of ``hillslopeKa`` and ``hillslopeKm``,
-        f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional). 
+        f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional, default ``0.0001``). It also sets the **maximum soil thickness** to ``-ln(bedrockConv) * depthProd`` (the depth at which production has decayed to that fraction; e.g. ~4.6 m for the default with ``depthProd = 0.5``). Setting ``bedrockConv: 0`` means *no* bedrock-conversion depth and therefore **no maximum-soil cap** (soil thickness is unbounded).
+        g. ``mode`` selects how ``soil`` (the near-surface layer) is accounted (optional, default ``'lumped'``):
 
-        Then the user can specify the initial soil thickness if any by setting **either**:
-
-        g. ``uniform`` a uniform soil thickness on the entire surface (m),
-
-        **or**:
-
-        h. ``map`` a soil thickness map. 
+           - ``'lumped'`` — the soil layer is a soft surface cover that absorbs **both** weathering-produced regolith **and** deposited sediment (fluvial, lake/pit, marine). This is the historical behaviour (unchanged).
+           - ``'regolith'`` — the soil layer is the **weathering-produced regolith only**; deposited sediment is instead kept in the stratigraphy, where freshly deposited layers are given a soft erodibility (``stratK = soilK/K``, i.e. fresh sediment erodes like soil). Underwater (marine or ponded lake) there is no soil, and under ice the regolith is frozen (preserved).
 
         .. important::
 
-            When defining a soil thickness grid, one needs to use the **npz** format and needs to specify the key corresponding to the soil thickness value in the file. In the above example this key is ``'soil'``. The soil grid needs to define values for all vertices in the mesh in metres.
+            ``mode: 'regolith'`` needs **stratigraphic recording turned on** so the deposited
+            sediment has somewhere to live — i.e. a stratal time step ``strat`` in the
+            ``time`` block (which sets the number of stratigraphic layers). No ``strata:``
+            block is required (that is only for *initial* layers). Without a ``strat`` time
+            step goSPL prints a warning and freshly deposited sediment erodes at bedrock
+            erodibility.
+
+        Then the user can specify the initial soil thickness if any by setting **either**:
+
+        h. ``uniform`` a uniform soil thickness on the entire surface (m),
+
+        **or**:
+
+        i. ``soilMap`` a soil thickness map given as ``[file, key]``.
+
+        .. important::
+
+            When defining a soil thickness grid, one needs to use the **npz** format and needs to specify the key corresponding to the soil thickness value in the file. In the ``soilMap`` example above the file is ``test_mesh8/hsoil.npz`` and this key is ``'soil'``. The soil grid needs to define values for all vertices in the mesh in metres.
+
+        Soil production can optionally be made **temperature-dependent** via an
+        Arrhenius scaling of ``maxProd`` (warmer ⇒ faster weathering). This is
+        activated by supplying an annual-mean surface-temperature map:
+
+        j. ``tempMap`` a temperature map given as ``[file, key]`` — an **npz** file whose ``key`` holds the annual-mean surface temperature (in **degrees Celsius**) at every mesh vertex. When present, the production rate becomes ``maxProd * exp( Ea/Rg * (1/T_ref - 1/T) )`` (temperatures internally converted to Kelvin; ``Rg = 8.314`` J/mol/K). When omitted, production uses the constant ``maxProd`` everywhere.
+        k. ``activation`` the Arrhenius activation energy ``Ea`` (J/mol, optional, default ``40.e3``); only used when ``tempMap`` is set.
+        l. ``tempRef`` the reference temperature (degrees Celsius, optional, default ``15.0``) at which the production rate equals ``maxProd``; only used when ``tempMap`` is set.
 
         The soil-aware non-linear SPL is solved with a PETSc ``SNES``. Its
         behaviour can be tuned (all optional) with:
 
-        i. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
-        j. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
-        k. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
-        l. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+        m. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
+        n. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
+        o. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
+        p. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
 
         .. tip::
 
@@ -632,3 +657,104 @@ Sediment provenance tracers
         .. note::
 
             See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/provenance.html>`_ (provenance section) for the algorithm, the standalone post-processing tool, and the copper-prospectivity scope.
+
+
+Groundwater & duricrust
+-----------------------
+
+    Adding an optional ``groundwater`` section turns on a **water table** and a
+    generic **duricrust** — near-surface hydrology plus chemical armoring of the
+    erodibility. It is fully **opt-in**: with no ``groundwater`` block the model
+    is byte-identical to a run without it.
+
+    The physical picture: rainfall that does not run off **infiltrates** and
+    feeds a water table, solved each step as an implicit Dupuit–Boussinesq head
+    on the mesh (draining to the sea, lakes and rivers). Where the water-table
+    depth sits in a shallow **capillary fringe**, an indurated crust (calcrete /
+    silcrete / ferricrete, treated generically) precipitates and **hardens the
+    surface**, so crusted cells erode more slowly — producing relief inversion
+    and, when stratigraphy is on, stacked duricrusts that are buried and later
+    re-exposed. The duricrust runs **soil-independent** by default and **couples
+    to** :ref:`soil <surfproc>` production when soil is tracked.
+
+    .. grid:: 1
+        :padding: 3
+
+        .. grid-item-card::
+
+            **Declaration example**:
+
+            .. code:: yaml
+
+                groundwater:
+                    Ksat: 3.65e4          # hydraulic conductivity K_h (m/yr)
+                    specific_yield: 0.1   # S (drainable porosity)
+                    aquifer_base: 50.0    # z_bed depth below surface (m)
+                    bedrock_depth: 0.0    # permeable rock below lHbed (from_soil only)
+                    min_sat_thickness: 1.0
+                    infiltration: 0.3     # fraction of (rain − evap) recharging
+                    conserve_baseflow: True
+                    picard_its: 3
+                    seepage_passes: 4
+                    duricrust:
+                        form_rate: 1.0e-4     # k_form (m/yr at Φ=Ψ=1)
+                        max_thickness: 5.0    # duriH_max (m)
+                        fringe_depth: 3.0     # d0 — fringe centre below surface (m)
+                        fringe_width: 2.0     # w — Gaussian half-width (m)
+                        supply_exp: 1.0       # p on (rain − evap) in the proxy
+                        weather_Ea: 0.0       # Arrhenius activation energy (0 ⇒ off)
+                        armor_max: 0.9        # max fractional K reduction (0..1)
+                        armor_diffusion: False  # also armor hillslope Cd
+                        break_rate: 1.0       # k_break per unit incision
+                        decay_rate: 1.0e-6    # k_decay disequilibrium (1/yr)
+                        weathering:
+                            mode: proxy       # proxy | rate | prodsoil
+                            C_eq: 1.0
+                            Dw: 1.0
+                            path_length: 20.0
+                            weather_Ea: 0.0
+                            weatherability: 1.0
+
+    **Water-table (hydrology) keys:**
+
+    a. ``Ksat`` — saturated hydraulic conductivity ``K_h`` (m/yr); a scalar, a per-vertex map ``[file, key]``, or per-lithology.
+    b. ``specific_yield`` — drainable porosity ``S`` (the storage coefficient linking recharge to head change), default ``0.1``.
+    c. ``aquifer_base`` — depth of the impermeable base ``z_bed`` below the surface (m): a **scalar**, a per-vertex **map** ``[file, key]``, or the string ``from_soil`` (tie the base to the bedrock elevation ``z_bed = lHbed − bedrock_depth`` — requires soil tracking; in a depositional basin the base deepens to the bottom of the porous sediment fill). Default ``50.0``.
+    d. ``bedrock_depth`` — permeable weathered/fractured-rock thickness below ``lHbed`` (m), used **only** with ``aquifer_base: from_soil`` (default ``0``).
+    e. ``min_sat_thickness`` — floor ``b_min`` on the saturated thickness so the transmissivity stays positive near the base (m, default ``1.0``).
+    f. ``infiltration`` — fraction ``f_infil`` of ``max(0, rain − evap)`` that recharges the aquifer; a scalar or a per-vertex map ``[file, key]`` (default ``0.3``).
+    g. ``conserve_baseflow`` — return the seepage discharge to the river network so total river discharge stays ``≈ rain − evap`` (default ``True``). The infiltrated recharge leaves surface runoff and is **re-injected as baseflow** at the seepage nodes (rivers become baseflow-fed); also writes the ``baseflow`` output.
+    h. ``lake_exchange`` — opt-in lake ↔ aquifer **volume** coupling (default ``False``). When on, the signed across-bed groundwater flux debits/credits each lake's fill budget — a lake ringed by a higher water table gains groundwater, one ringed by a lower table leaks. Off ⇒ lakes are fixed-head only (unchanged).
+    i. ``subglacial_recharge`` — fraction of the glacial meltwater (``iceMeltRiverL``) that infiltrates the aquifer where the ice melts out (default ``0`` — under ice the rain path is gated off; this is the one recharge path allowed there).
+    j. ``fine_infil_factor`` — multiplier on ``f_infil`` for the fine end-member (dual lithology); ``< 1`` makes clay/fine surfaces infiltrate less than coarse/sand (default ``1`` — no lithology dependence).
+    k. ``infil_slope_ref`` — reference slope for a ``f/(1 + slope/infil_slope_ref)`` reduction of infiltration on steep terrain (default ``0`` — off; slope is the steepest-descent gradient).
+    l. ``picard_its`` / ``seepage_passes`` — inner iteration counts for the unconfined non-linearity ``T(h)`` and the seepage free-boundary discovery (defaults ``3`` / ``4``).
+
+    .. important::
+
+        ``aquifer_base: from_soil`` needs :ref:`soil production <surfproc>`
+        tracked (it reads the bedrock elevation ``lHbed``). Without soil it falls
+        back to the surface as the base with a warning.
+
+    **Duricrust keys** (nested ``duricrust:`` block — omit it for a water table with no crust):
+
+    i. ``form_rate`` — crust formation rate ``k_form`` (m/yr at full favourability and supply).
+    j. ``max_thickness`` — maximum crust thickness ``duriH_max`` (m); the induration degree is ``duriF = duriH/max_thickness``.
+    k. ``fringe_depth`` / ``fringe_width`` — centre ``d0`` and Gaussian half-width ``w`` (m) of the capillary-fringe favourability band ``Φ`` on the water-table depth.
+    l. ``supply_exp`` — exponent ``p`` on ``(rain − evap)`` in the default climate proxy supply.
+    m. ``weather_Ea`` — Arrhenius activation energy (J/mol) for an optional temperature scaling of the supply (``0`` ⇒ off; reuses the soil ``tempMap`` when present).
+    n. ``armor_max`` — maximum fractional erodibility reduction (0–1); a fully indurated cell (``duriF = 1``) has its ``K`` multiplied by ``1 − armor_max`` (e.g. ``0.9`` ⇒ 10× more resistant).
+    o. ``armor_diffusion`` — also armor the hillslope diffusivity ``Cd`` by the same factor (default ``False``).
+    p. ``break_rate`` / ``decay_rate`` — breakdown per unit surface incision ``k_break`` and the slow disequilibrium decay ``k_decay`` (1/yr) away from the fringe.
+
+    The optional ``weathering:`` sub-block selects the **solute supply** ``Ψ`` feeding formation: ``mode: proxy`` (default, climate/temperature stand-in), ``rate`` (an explicit Maher–Chamberlain chemical-weathering rate driven by the recharge, keys ``C_eq``/``Dw``/``path_length``/``weatherability``), or ``prodsoil`` (reuse the soil production rate). ``rate`` and ``prodsoil`` fall back to the proxy when soil is off.
+
+    .. note::
+
+        New outputs: ``recharge``, ``wtable``, ``wtdepth`` (water table),
+        ``baseflow`` (with ``conserve_baseflow``), and ``duricrust``,
+        ``induration``, ``Karmor`` (with ``duricrust:``). When stratigraphy is on
+        the per-layer induration is archived (``stratDuri``) and shown by
+        ``gospl-strata-volume --field induration``. See the technical
+        `groundwater documentation <https://gospl.readthedocs.io/en/latest/tech_guide/groundwater.html>`_
+        for the formulation.

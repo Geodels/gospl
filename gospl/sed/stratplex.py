@@ -60,6 +60,13 @@ class STRAMesh(object):
         # source_class = per-vertex bedrock class. Allocated only when provOn.
         self.stratP = None
         self.source_class = None
+        # Per-layer diagenetic induration degree ∈ [0,1] (the archived duricrust
+        # armoring record; DESIGN_WATERTABLE_DURICRUST.md §9). An INTENSIVE
+        # property (like phiS): advects with the pile, compaction-neutral, and —
+        # unlike stratK — 0 is a legitimate value (uncemented), so it is NEVER
+        # forward-filled. Allocated only when the water table is on (its
+        # producer) and stratigraphy is recorded (stratNb>0).
+        self.stratDuri = None
 
         return
 
@@ -209,6 +216,12 @@ class STRAMesh(object):
 
         if getattr(self, "provOn", False):
             self._initProvenance()
+
+        # Diagenetic induration archive (§9) — allocated uncemented (0) only when
+        # the groundwater/duricrust feature is on. Initial layers start with no
+        # crust; the record is grown by _recordInduration and restored on restart.
+        if getattr(self, "gwOn", False):
+            self.stratDuri = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
 
         return
 
@@ -541,20 +554,41 @@ class STRAMesh(object):
         np.clip(fc, 0.0, 1.0, out=fc)
         return fc
 
+    def _surfaceArmoringK(self):
+        """
+        Duricrust erodibility-armoring multiplier (≤ 1) — the **single hook**
+        (DESIGN_WATERTABLE_DURICRUST.md §5) through which the generic duricrust
+        modulates ALL three eroders (SPL / nlSPL / soilSPL) with **no branching**
+        in them: it composes multiplicatively inside ``_surfaceLithoK``.
+
+        Returns the scalar ``1.0`` (a byte-identical no-op) when the duricrust is
+        off. When on, ``1 − armor_max · duriF``: a fully indurated cell
+        (``duriF = 1``) cuts erodibility by ``armor_max`` (e.g. 0.9 ⇒ 10× more
+        resistant, producing relief inversion); ``duriF = 0`` leaves ``K``
+        unchanged. Rate-only — no elevation change, so flow/routing are untouched
+        this step (like dual-lithology deposition being composition-only).
+        """
+        if not getattr(self, "duriOn", False):
+            return 1.0
+        return 1.0 - self.duriArmorMax * self.duriF
+
     def _surfaceLithoK(self):
         """
         Per-node erodibility multiplier from the exposed surface
-        composition: ``fc + (1 - fc) * fine_k_factor``.
+        composition — ``(fc + (1 - fc) * fine_k_factor)`` — times the duricrust
+        armoring factor (``_surfaceArmoringK``).
 
-        Equals 1.0 everywhere when dual lithology is off (or
-        ``fine_k_factor == 1``, i.e. no lithology contrast), so it composes
-        multiplicatively with ``_surfaceK`` in the SPL flavours without
-        altering single-fraction behaviour.
+        Equals 1.0 everywhere when dual lithology **and** the duricrust are off
+        (or ``fine_k_factor == 1`` with no crust), so it composes multiplicatively
+        with ``_surfaceK`` in the SPL flavours without altering single-fraction
+        behaviour.
         """
-        if not self.stratLith:
-            return np.ones(self.lpoints, dtype=np.float64)
-        fc = self._surfaceComposition()
-        return fc + (1.0 - fc) * self.fine_k_factor
+        if self.stratLith:
+            fc = self._surfaceComposition()
+            litho = fc + (1.0 - fc) * self.fine_k_factor
+        else:
+            litho = np.ones(self.lpoints, dtype=np.float64)
+        return litho * self._surfaceArmoringK()
 
     def _surfaceLithoD(self):
         """
@@ -566,11 +600,17 @@ class STRAMesh(object):
         multiplicatively with the base hillslope coefficients (``Cda``/``Cdm``)
         without altering single-fraction behaviour. Fines diffuse faster when
         ``fine_diff_factor > 1`` (see DESIGN_DUAL_LITHOLOGY.md Section 7).
+        A cemented duricrust also resists creep when ``armor_diffusion`` is on
+        (off by default), scaling ``Cd`` by the same ``1 − armor_max · duriF``.
         """
-        if not self.stratLith:
-            return np.ones(self.lpoints, dtype=np.float64)
-        fc = self._surfaceComposition()
-        return fc + (1.0 - fc) * self.fine_diff_factor
+        if self.stratLith:
+            fc = self._surfaceComposition()
+            litho = fc + (1.0 - fc) * self.fine_diff_factor
+        else:
+            litho = np.ones(self.lpoints, dtype=np.float64)
+        if getattr(self, "duriOn", False) and self.duriArmorDiffusion:
+            litho = litho * (1.0 - self.duriArmorMax * self.duriF)
+        return litho
 
     def deposeStrat(self):
         """
@@ -633,10 +673,18 @@ class STRAMesh(object):
             self._provDeposited += np.sum(
                 (provDepo * self.larea[:, None])[self.inIDs == 1], axis=0
             )
-        # Freshly deposited sediment carries the default erodibility (no
-        # multiplier). If you want re-deposited sediment to keep its
-        # source-layer K, this is the line to revisit.
-        self.stratK[ids, self.stratStep] = 1.0
+        # Freshly deposited sediment erodibility multiplier (top layer).
+        # - lumped mode: 1.0 (no multiplier) — the deposit becomes soil and gets
+        #   its soft erodibility (Ksoil) via updateSoilThickness.
+        # - regolith mode: the deposit stays in the stratigraphy, so it must
+        #   carry its own SOFT erodibility here. Set stratK = Ksoil/K so the SPL
+        #   bedrock term Kbr*stratK = Ksoil — fresh unconsolidated sediment erodes
+        #   like soil, reusing the already-defined soilK (regolith mode implies
+        #   cptSoil, so Ksoil is defined). See DESIGN_SOIL_REGOLITH.md §5.
+        if getattr(self, "regolithSoil", False) and self.K > 0.0:
+            self.stratK[ids, self.stratStep] = self.Ksoil / self.K
+        else:
+            self.stratK[ids, self.stratStep] = 1.0
 
         # Cleaning arrays
         if self.memclear:
@@ -796,6 +844,12 @@ class STRAMesh(object):
         self.stratH[neg] = 0.0
         self.phiS[neg] = 0.0
         self.stratK[neg] = 0.0
+        # Induration archive: emptied layers lose their crust record. NOT
+        # forward-filled (unlike stratK/phiS) — stratDuri=0 is a valid value
+        # (uncemented), and the exhumation re-arm (_recordInduration) reads the
+        # top NON-EMPTY layer directly, so no fill is needed.
+        if getattr(self, "stratDuri", None) is not None:
+            self.stratDuri[neg] = 0.0
         self.phiS[:, : self.stratStep + 1] = self._fillZeroPorosity(
             self.phiS[:, : self.stratStep + 1]
         )
@@ -1106,6 +1160,24 @@ class STRAMesh(object):
                 nstratHf[onIDs, :] = loc_stratHf[indices[onIDs, 0], :]
                 nphiF[onIDs, :] = loc_phiF[indices[onIDs, 0], :]
 
+        gwStrat = getattr(self, "stratDuri", None) is not None
+        if gwStrat:
+            # Advect the induration archive as an INTENSIVE per-layer property
+            # (thickness-weighted, exactly like phiS): pass stratDuri in the
+            # porosity slot; the re-interpolated H/Z are identical and discarded.
+            loc_duri = self.stratDuri[:, : self.stratStep]
+            _, _, nDuri = strataonesed(
+                self.lpoints,
+                self.stratStep,
+                indices,
+                weights,
+                loc_stratH,
+                loc_stratZ,
+                loc_duri,
+            )
+            if len(onIDs) > 0:
+                nDuri[onIDs, :] = loc_duri[indices[onIDs, 0], :]
+
         provOn = getattr(self, "provOn", False)
         if provOn:
             # Advect each provenance class's per-layer thickness with the same
@@ -1144,6 +1216,11 @@ class STRAMesh(object):
                 self.tmp.setArray(nphiF[:, k])
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 self.phiF[:, k] = self.tmpL.getArray().copy()
+
+            if gwStrat:
+                self.tmp.setArray(nDuri[:, k])
+                self.dm.globalToLocal(self.tmp, self.tmpL)
+                self.stratDuri[:, k] = self.tmpL.getArray().copy()
 
             if provOn:
                 for c in range(self.provNb):

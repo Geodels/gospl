@@ -79,7 +79,8 @@ transport is handled by `seaplex`).
    `Kbr`/`K_soil` are zeroed at `seaID`, but it corrupts any downstream reader of
    soil thickness — e.g. a duricrust/regolith model).
 3. **Hard cap `soil_transition`.** Defined as `−ln(Sperc)·Hs` (`Sperc = soil.bedrockConv`,
-   default `1e-4` ⇒ ≈ `9.2·Hs`; `100 m` when `Sperc=0`) — the depth at which production
+   default `1e-4` ⇒ ≈ `9.2·Hs`; **`+inf` (no cap) when `Sperc=0`** — was `100 m`, a silent
+   large-but-finite cap, now a true no-cap) — the depth at which production
    has decayed to fraction `Sperc` of its surface rate. It is used **only** as a max-soil
    clip in two write-backs (`_solveSoil:363`, `updateSoilThickness:424`) — *not* in the
    erosion split (`h_star`) or bedrock-exposure (`BEDROCK_EXPOSED`). It is **not required**
@@ -98,9 +99,10 @@ transport is handled by `seaplex`).
    bedrock `K`.
 6. **Soil vs stratigraphy overlap.** Both reservoirs track "deposited soft material,"
    with no clear division of responsibility.
-7. **Hillslope coupling unaudited.** Hillslope creep *is* soil transport, yet
-   `diffuseSoil` (soil creep, `soilSPL`) and `getHillslope` (elevation diffusion,
-   `hillslope.py`) coexist without a verified joint soil-conservation contract.
+7. **Hillslope coupling — AUDITED (§5 step 4), sound.** They do **not** coexist: `getHillslope`
+   delegates to `diffuseSoil` and returns when `cptSoil`. `diffuseSoil` is volume-conserving
+   (divergence form), couples soil to elevation (`ΔLsoil = Δh`) and preserves bedrock (`lHbed`).
+   Verified + guarded by `test_soil_hillslope_conservation`.
 
 ---
 
@@ -119,6 +121,11 @@ transport is handled by `seaplex`).
 - **Hillslope?** This is where soil coupling should be **strengthened**: creep is soil
   transport, so diffusivity should be soil-dependent, the flux soil-conserving, and
   creep should shut off / go bedrock-limited where soil is stripped.
+- **Soil under ice?** No subaerial *production* under ice (frozen, insulated, no biota /
+  rain infiltration), but — unlike underwater — the existing regolith is **preserved
+  (frozen inert)**, not zeroed: cold-based ice can keep a buried regolith for Myr, so
+  glaciation freezes the column rather than removing it. Glacial erosion / till are handled
+  by the ice model (abrasion → `Eb`; till → stratigraphy). See "Under ice" below.
 
 ### The subaerial gate — when a sink is land (goSPL already provides it)
 goSPL represents a sink as a depression with **`lFill > hl`** (bed `hl` below the spill/
@@ -140,6 +147,28 @@ is gated **only** on `seaID`, so continental lakes are wrongly treated as subaer
 their fill dumped into `Lsoil`) — that is the gap Option 2 closes. (The water table in
 `DESIGN_WATERTABLE_DURICRUST.md` generalizes this to `h ≥ z` seepage — wetlands, near-surface
 table — but the first-order lake mask exists now.)
+
+### Under ice — frozen inert (DECIDED)
+Ice-covered land is neither subaerial nor subaqueous — it is a third state. Pedogenic soil
+production must be suppressed there (no subaerial weathering under ice), but the pre-existing
+regolith is **preserved, not zeroed** — the "**freeze inert**" rule (chosen over the
+subaqueous *zero* because cold-based ice can preserve a buried regolith for Myr). Glacial
+erosion and till are the ice model's job (`_glacialAbrasion` → `Eb`; `glacialTill` →
+`deposeStrat`/stratigraphy), so "what erodes/deposits under ice" is already handled — the only
+gap was pedogenic soil growing under ice.
+
+Implementation (shipped in step 1): `soilSPL._iceFrozenMask` = `iceOn` and
+`iceHL > ICE_COVER_MIN` (`1e-2 m`, `constants.py`), restricted to LAND (subaqueous wins on
+overlap — an ice shelf over sea/lake stays a soil-free subaqueous cell). Both `Lsoil`
+write-backs (`_solveSoil`, `updateSoilThickness`) hold the ice column at its prior value
+(no production, no deposition-into-soil increment). Deglaciation (mask clears) resumes normal
+evolution from the preserved column. Duricrust formation (a subaerial weathering process) will
+reuse the same exposed-land gate — no induration under ice.
+
+**Refinement (open):** the freeze is a blanket rule; warm-based (fast, erosive) ice actually
+strips regolith while cold-based (slow) ice preserves it. The diagnostic ice model carries
+basal velocity (`iceUbL`), so a future refinement could strip under fast ice and freeze under
+slow ice. Deferred — the blanket freeze is the conservative first choice.
 
 ---
 
@@ -237,17 +266,69 @@ goSPL's 500 m–km / My scales. **Option 3 is explicitly out of scope** at these
 its scale verdict: temporally apt, spatially unjustified). Staged so the disruptive part is
 optional and guarded:
 
-1. **Consistency fixes first (safe, ≈ Option 1):** make the submarine case coherent, gate
-   soil/duricrust on the subaerial mask (**not `seaID` and not ponded `pitIDs>=0`/`lFill>hl`**,
-   §3), and document `Lsoil`. Low risk, independent of the duricrust work.
-2. **Separation (opt-in behind a flag, default = current):** a `soil: mode: regolith`
-   switch that stops routing deposition into `Lsoil` and drives deposited-sediment
-   erodibility from `stratK`. Default preserves current behaviour byte-for-byte; the new
-   mode is validated against a soil+stratigraphy run.
-3. **Lumped profile scalars (Option 2.5):** weathering-front depth, weathering-degree index,
-   duricrust horizon; recast `soil_transition` as a **smooth** max-weathering-depth (§2, item 3).
-4. **Hillslope coupling audit:** verify/enforce joint soil conservation between
-   `diffuseSoil` and `getHillslope`.
+1. **Consistency fixes first (safe, ≈ Option 1) — DONE.** Subaerial gate + submarine
+   coherence + ice freeze-inert. `soilSPL._subaqueousMask` (marine + ponded lake → soil 0)
+   and `_iceFrozenMask` (ice-covered land → soil preserved, production off). §3.
+2. **Separation (opt-in behind a flag, default = current) — DONE.** `soil: mode: regolith`
+   (`self.regolithSoil`, default `lumped` → byte-identical). In regolith mode `Lsoil` is the
+   **weathering-produced regolith only**; deposited sediment stays in the stratigraphy and
+   carries its own soft erodibility there. Mechanism:
+   - **Deposition is not routed into `Lsoil`.** `updateSoilThickness(deposition=True/False)`:
+     the lake/pit (`sedplex`) and marine (`seaplex`) callers use `deposition=True` → the
+     increment is **skipped in regolith mode** (added in lumped); **the subaqueous/ice gates
+     still run in both modes** (so a cell newly ponded by this step's deposition is re-zeroed
+     consistently). Soil **creep** (`diffuseSoil`) uses `deposition=False` → always applied
+     (creep transports the regolith itself, both modes).
+   - **Fluvial transport-limited deposition growth** is removed at the `_solveSoil` write-back
+     (`nHsoil −= max(0, Δh)`) — **post-solve, so the SNES residual and its smoothness are
+     untouched**; erosion still strips soil.
+   - **Fresh deposits erode like soil (option C).** A freshly deposited layer is given a soft
+     `stratK = Ksoil/K` (`stratplex.deposeStrat`, regolith mode) so the SPL bedrock term
+     `Kbr·stratK = Ksoil` — reusing the already-defined `soilK` (regolith mode ⇒ `cptSoil`,
+     so `Ksoil` exists; **no new parameter**). Lumped mode keeps `stratK = 1.0` (there the
+     deposit becomes soil and gets `Ksoil` via `updateSoilThickness`). Unified erodibility:
+     bare bedrock `K`; weathering regolith `Ksoil`; fresh deposit `Ksoil`.
+
+   **Stratigraphy is required — and it is triggered by `time: strat:`, NOT a `strata:` block.**
+   `stratNb > 0` ⇔ a stratal time step is set (`inputparser`: `stratNb = (tEnd−tStart)/strat + 1`);
+   the `strata:` block is only for *initial* layers / dual-lithology / bedrock sentinel. Regolith
+   mode needs `stratNb > 0` so the excluded deposits are recorded with their soft `stratK`;
+   without it `_surfaceK`=1.0 and a fresh deposit erodes at raw bedrock `K`. Handled with a
+   **rank-0 warning** (`soilSPL.__init__`) pointing at `time: strat:`, not a hard failure
+   (erosional / low-deposition runs can still use regolith mode). Guard: `test_soil_mode_regolith`
+   on the **soil+stratigraphy** fixture `minimal_soil_strata.yml` (stratigraphy via `time: strat: 10`)
+   — one step from an identical state gives **identical elevations** (bookkeeping-only), the
+   subaerial gate holds, and fresh deposits carry `stratK = Ksoil/K` in regolith / `1.0` in lumped.
+   Docs: `soil: mode:` added to `user_guide/inputfile.rst`.
+3. **Lumped profile scalars (Option 2.5) — DEFERRED into the duricrust feature.** On review,
+   this step is not a clean standalone increment:
+   - *weathering-front depth* (`z − lHbed` = regolith thickness) is **already output** as `soilH`
+     (`outmesh.py`) and restart-restored — nothing to add;
+   - the *weathering-degree index* (0–1) is **duricrust-precursor physics** — its only consumer is
+     the duricrust induration model (`DESIGN_WATERTABLE_DURICRUST.md` §3a weathering supply), and
+     building it standalone means inventing an evolution law + parameters with nothing using them;
+   - the *duricrust horizon* is the duricrust feature itself;
+   - recasting `soil_transition` as a **smooth** max-weathering-depth (§2, item 3) is a minor,
+     result-changing refinement (the hard clip rarely binds) — kept as an **opt-in** to be done
+     when it matters (it also overlaps the duricrust max-weathering-depth).
+
+   So the weathering-degree index + smooth max-weathering-depth are built **with the duricrust /
+   water-table feature** (one coherent weathering law, real consumer), not here. Steps 1–2 are the
+   substantive standalone soil-model improvements.
+4. **Hillslope ↔ soil conservation audit — DONE (verified sound, no fix needed).** Findings:
+   - **No double-counting.** `getHillslope` **delegates to `diffuseSoil` and returns** when
+     `cptSoil` (`hillslope.py`), so the plain `_hillSlope`/`_hillSlopeNL` elevation diffusion does
+     **not** also run in a soil run — the two are mutually exclusive, not coexisting.
+   - **Creep conserves volume.** `diffuseSoil` solves the soil-gated non-linear diffusion in
+     **divergence (flux) form**, so on a closed sphere the net elevation change integrates to ~0
+     (measured `|net|/activity ≈ 1.8e-5`, i.e. TS solver tolerance).
+   - **Soil follows the surface, bedrock does not move.** The creep increment `dh` is added to
+     **both** `hGlobal` and `Lsoil` (`updateSoilThickness(deposition=False)`), so `ΔLsoil = Δh`
+     (≈1e-8) and `lHbed = h − Lsoil` is preserved (≈1e-8) — creep moves regolith, not rock.
+   - Minor, documented edge behaviour (not a conservation bug): soil creeping across the coastline
+     into a subaqueous cell is zeroed by the subaerial gate (a physical sink), and the soil-gated
+     diffusivity self-limits creep where the regolith is thin. Guard: `test_soil_hillslope_conservation`
+     (closed sphere — volume conservation + soil↔elevation coupling + bedrock preservation).
 
 Option 3 stays on the horizon only if a much-higher-resolution or dedicated regional
 weathering study ever motivates it.
@@ -288,16 +369,28 @@ degrades in depocenters).
 
 ---
 
-## 8. Open questions
+## 8. Open questions — resolved by steps 1–4
 
-- **Emergent-fill weathering:** how fast should soil (re)establish on a newly subaerial
-  lake bed / marine terrace? Straight `prodSoil` from zero, or a head-start?
-- **Deposited-sediment softness without stratigraphy:** if `stratNb==0`, deposits erode as
-  bedrock. Acceptable, or should a minimal "fresh-deposit soft cover" exist independent of
-  stratigraphy?
-- **Smooth vs hard cap:** replace the `soil_transition` clip with a smooth saturation, or
-  keep it (post-solve, so harmless to convergence)?
-- **Hillslope/soil conservation:** is soil currently conserved across `diffuseSoil` +
-  `getHillslope`, or is there double-counting to fix?
-- **Scope commitment:** Option 2 now, or hold for Option 3 (full regolith profile) if the
-  duricrust is going to motivate that investment anyway?
+All five original open questions are now settled:
+
+- **Emergent-fill weathering — RESOLVED (no head-start).** When a lake bed / marine terrace
+  emerges (fills to spill, or sea regresses), the pedogenic mantle `Lsoil` is 0 there
+  (subaqueous-zeroed while submerged) and grows from 0 via `prodSoil` — correct for a fresh
+  surface. Its *erodibility* needs no head-start: the fresh deposit is already soft (regolith
+  mode: `stratK = Ksoil/K`; lumped mode: it *is* "soil"), so there is no bedrock→soil jump on
+  emergence — both the fresh-deposit and mantled branches are `Ksoil`-scaled (they differ only
+  by the minor climate `rainVal^coeffd` / litho factors on the bedrock term).
+- **Deposited-sediment softness without stratigraphy — RESOLVED (by decision, step 2).**
+  `mode: regolith` without `stratNb>0` erodes fresh deposits at bedrock `K` and emits a rank-0
+  warning; the remedy is `time: strat:` (soft `stratK`) or `mode: lumped` (the deposit becomes
+  soil). No strata-independent "soft cover" is added — that *is* lumped mode.
+- **Smooth vs hard cap — RESOLVED (keep clip now; recast with duricrust).** The hard clip is
+  post-solve (harmless to convergence); the `Sperc==0` fallback is now **`+inf`** (a true
+  no-cap). The smooth max-weathering-depth is **deferred into the water-table + duricrust
+  feature** (it shares that feature's max-weathering-depth), as an opt-in — see step 3.
+- **Hillslope/soil conservation — RESOLVED (audited sound, step 4).** `getHillslope` delegates
+  to `diffuseSoil` (no double-count); `diffuseSoil` is volume-conserving (divergence form),
+  couples `ΔLsoil = Δh`, and preserves `lHbed`. Guard `test_soil_hillslope_conservation`.
+- **Scope commitment — RESOLVED.** Option 2.5 implemented (steps 1–4). Option 3 (full regolith
+  profile) is out of scope at 500 m–km / My (spatial verdict, §4); the step-3 lumped profile
+  scalars are deferred into the duricrust feature (their consumer).

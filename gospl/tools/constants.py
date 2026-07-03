@@ -125,3 +125,11 @@ GRAPH_OUTLIER_CAP = 1.0e7
 # AGENTS.md > Magic numbers.
 MARINE_SMOOTH_N_LAND = 1.0
 MARINE_SMOOTH_N_SEA = 5.0
+
+# Ice thickness (m) above which a land cell is treated as ice-covered for the
+# subaerial soil gate: pedogenic soil production is suppressed and the existing
+# regolith is held FROZEN INERT (preserved, not zeroed — unlike the subaqueous
+# marine/lake case) under ice. Matches the ice-presence threshold used inline in
+# flow/iceplex.py (_glacialMeltwater / _routeTill), which carries a distinct role
+# there. Used by eroder/soilSPL.py::_iceFrozenMask. See AGENTS.md > Magic numbers.
+ICE_COVER_MIN = 1.0e-2
