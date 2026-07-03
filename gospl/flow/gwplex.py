@@ -177,6 +177,14 @@ class GWMesh(object):
                 # dominant crust-forming tracer (G4 typing: -1 = no crust).
                 self.gwCrustBySpecies = np.zeros((self.lpoints, nsp), dtype=np.float64)
                 self.gwCrustType = np.full(self.lpoints, -1, dtype=np.int32)
+                # Solute-source provenance (G5, only with in-model provenance on):
+                # cumulative crust attributed to each source-rock class (where the
+                # solute dissolved), and the dominant source class per node.
+                if getattr(self, "provOn", False):
+                    self.gwCrustProv = np.zeros(
+                        (self.lpoints, int(self.provNb)), dtype=np.float64
+                    )
+                    self.gwCrustSource = np.full(self.lpoints, -1, dtype=np.int32)
                 # Scratch Vec pair for the per-species transport solve (G1+).
                 self.soluteL = self.hLocal.duplicate()
                 self.soluteG = self.hGlobal.duplicate()
@@ -844,6 +852,26 @@ class GWMesh(object):
         self.dm.globalToLocal(self.soluteG, self.soluteL)
         return self.soluteL.getArray().copy()
 
+    def _soluteSolveRHS(self, M, rhs, guess):
+        r"""
+        Solve ``M c = rhs`` for the (pre-assembled) transport operator ``M`` with
+        a warm-start ``guess``, returning the local concentration (clipped ≥ 0).
+        A thin wrapper so ``_updateSolute`` can reuse one assembled operator for
+        several right-hand sides (the per-source-class provenance solves, G5).
+        Collective (KSP).
+        """
+        if self._ksp_solute is None:
+            self._ksp_solute = self._makeSoluteKSP()
+        ksp = self._ksp_solute
+        self.soluteL.setArray(rhs)
+        self.dm.localToGlobal(self.soluteL, self.tmp)          # rhs (global)
+        self.soluteL.setArray(guess)
+        self.dm.localToGlobal(self.soluteL, self.soluteG)      # nonzero guess
+        ksp.setOperators(M, M)
+        ksp.solve(self.tmp, self.soluteG)
+        self.dm.globalToLocal(self.soluteG, self.soluteL)
+        return np.maximum(self.soluteL.getArray().copy(), 0.0)
+
     def _updateSolute(self):
         r"""
         Level-B per-step solute update (G2), per tracer: **dissolve → transport →
@@ -880,6 +908,7 @@ class GWMesh(object):
         adv, divq = self._soluteAdvecCoeffs(h, T)  # advection + seepage sink (G1)
         seep_sink = np.maximum(-divq, 0.0)         # discharge-to-surface coefficient
         self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
+        prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None
         W = self._weatheringSupply()               # base weathering rate (Level A)
         # Subaerial land only (no dissolution under sea / ponded lake).
         sub = np.zeros(self.lpoints, dtype=bool)
@@ -918,18 +947,21 @@ class GWMesh(object):
             coeffs = adv.copy()
             coeffs[:, 0] += p
             M = self._assembleDiffMatCSR(coeffs)
-            if self._ksp_solute is None:
-                self._ksp_solute = self._makeSoluteKSP()
-            ksp = self._ksp_solute
-            self.soluteL.setArray(Deff)
-            self.dm.localToGlobal(self.soluteL, self.tmp)
-            self.soluteL.setArray(self.gwSolute[:, k])          # warm start
-            self.dm.localToGlobal(self.soluteL, self.soluteG)
-            ksp.setOperators(M, M)
-            ksp.solve(self.tmp, self.soluteG)
+            if prov:
+                # G5 solute-source provenance: by linearity of the (fixed)
+                # operator, transport the solute dissolved in each source-rock
+                # class separately (same M, class-restricted RHS), sum to the
+                # total, and attribute the precipitated crust to each source.
+                c = np.zeros(self.lpoints, dtype=np.float64)
+                for r in range(int(self.provNb)):
+                    Deff_r = np.where(self.source_class == r, Deff, 0.0)
+                    c_r = self._soluteSolveRHS(M, Deff_r, self.gwSolute[:, k])
+                    c += c_r
+                    self.gwCrustProv[:, r] += p * c_r * dt * self.gwGeoVsolid[k]
+            else:
+                c = self._soluteSolveRHS(M, Deff, self.gwSolute[:, k])
             M.destroy()
-            self.dm.globalToLocal(self.soluteG, self.soluteL)
-            c = np.maximum(self.soluteL.getArray().copy(), 0.0)  # guard tiny negatives
+            c = np.maximum(c, 0.0)                               # guard tiny negatives
             self.gwSolute[:, k] = c
 
             # 4. Sinks: precipitation feeds the crust; seepage exports to the
@@ -961,6 +993,12 @@ class GWMesh(object):
         self.gwCrustType = np.where(
             tot > 0.0, self.gwCrustBySpecies.argmax(axis=1), -1
         ).astype(np.int32)
+        # G5 provenance: the dominant SOURCE-ROCK class of the crust per node.
+        if prov:
+            ptot = self.gwCrustProv.sum(axis=1)
+            self.gwCrustSource = np.where(
+                ptot > 0.0, self.gwCrustProv.argmax(axis=1), -1
+            ).astype(np.int32)
 
         if self.verbose:
             tot = MPI.COMM_WORLD.allreduce(

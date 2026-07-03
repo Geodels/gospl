@@ -121,6 +121,9 @@ with the nested ``duricrust:`` block.
    * - ``crust_type``
      - Dominant **crust-forming tracer** per node (−1 = no crust).
      - ``geochem:`` multi-tracer
+   * - ``crust_source``
+     - Dominant **source-rock class** of the crust (solute-source provenance; −1 = no crust).
+     - ``geochem:`` + ``provenance:``
 
 The per-layer diagenetic induration is additionally archived in the
 stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by

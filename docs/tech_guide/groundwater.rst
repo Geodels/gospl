@@ -224,8 +224,13 @@ just like the head):
   and climate budgets.
 
 With several tracers, the dominant crust former per node is written as the
-``crust_type`` field (different tracers win in different settings). Outputs:
-``solute`` (concentration), ``soluteflux`` (export), ``crust_type``. Coupled
+``crust_type`` field (different tracers win in different settings). With in-model
+:ref:`provenance <surfproc>` on, the solute is additionally transported **per
+source-rock class** (by linearity of the transport operator), so the downstream
+crust is **attributed to the upgradient region where its solute dissolved** — the
+dominant source is the ``crust_source`` field (solute-source provenance). Outputs:
+``solute`` (concentration), ``soluteflux`` (export), ``crust_type``,
+``crust_source``. Coupled
 multi-species aqueous equilibrium (speciation, pH) is out of scope by design —
 the lumped multi-tracer model is the scale-appropriate choice at km / My.
 

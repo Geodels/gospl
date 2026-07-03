@@ -927,6 +927,46 @@ def test_geochem_multitracer():
         m.destroy()
 
 
+def test_geochem_provenance():
+    """
+    Protects (Level-B geochemistry, **G5** — DESIGN_WATERTABLE_GEOCHEM.md): with
+    in-model provenance on, the precipitated crust is **attributed to the
+    source-rock region where its solute dissolved**. By linearity the solute is
+    transported per source class (same operator, class-restricted source), so the
+    downstream crust carries the provenance of its upgradient recharge area. The
+    per-class crust sums to the total (conservation), the dominant-source field
+    ``crust_source`` is a valid argmax, and both source regions appear.
+    """
+    m = _gw_model("minimal_gw_geochem_prov.yml")
+    try:
+        assert m.gwGeochemOn and m.provOn and m.provNb == 2
+        # Two source-rock regions split by longitude.
+        x = m.lcoords[:, 0]
+        m.source_class = np.where(x < np.median(x), 0, 1).astype(np.int64)
+        m.tEnd = m.tNow + 3 * m.dt
+        m.runProcesses()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        own = m.inIDs == 1
+        cs = m.gwCrustSource
+        crusted = m.gwCrustProv.sum(axis=1) > 0.0
+        # Both source regions contribute to the crust chemistry.
+        for r in range(m.provNb):
+            assert float(m.gwCrustProv[own, r].sum()) > 0.0, "source %d absent" % r
+        # crust_source is a valid dominant-source index consistent with argmax.
+        assert ((cs >= -1) & (cs < m.provNb)).all()
+        assert np.array_equal(cs[crusted], m.gwCrustProv[crusted].argmax(axis=1))
+        assert (cs[~crusted] == -1).all()
+        assert (cs[own] == 0).any() and (cs[own] == 1).any(), "provenance not resolved"
+        # Provenance conserves: per-class crust sums to the total crust.
+        assert np.allclose(
+            m.gwCrustProv.sum(axis=1), m.gwCrustBySpecies.sum(axis=1), rtol=1.0e-6
+        )
+    finally:
+        m.destroy()
+
+
 def test_groundwater_recharge():
     """
     Protects (water-table + duricrust, **Phase 1** — DESIGN_WATERTABLE_DURICRUST.md

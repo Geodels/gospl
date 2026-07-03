@@ -586,7 +586,10 @@ armoring composes.
   (clay-rich hosts cement differently). One extra multiplier inside `Ψ`; default 1.0 (no-op).
 - **Crust preserves fines** — already automatic: a cemented cap armors whatever it caps, including a
   fine-rich layer, through the shared K hook. No code.
-- **Solute provenance** — attribute the duricrust's chemical source (future; needs solute routing).
+- **Solute provenance** — attribute the duricrust's chemical source. **DONE** via the Level-B
+  solute transport (`DESIGN_WATERTABLE_GEOCHEM.md` G5): with in-model provenance on, the crust is
+  attributed per source-rock class to the upgradient region where its solute dissolved
+  (`crust_source` output).
 
 ---
 

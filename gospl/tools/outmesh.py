@@ -522,6 +522,16 @@ class WriteMesh(object):
                             **self._h5opts,
                         )
                         f["crust_type"][:, 0] = self.gwCrustType.astype("float32")
+                    if getattr(self, "provOn", False):
+                        # Dominant source-rock class of the crust (solute-source
+                        # provenance, −1 = no crust).
+                        f.create_dataset(
+                            "crust_source",
+                            shape=(self.lpoints, 1),
+                            dtype="float32",
+                            **self._h5opts,
+                        )
+                        f["crust_source"][:, 0] = self.gwCrustSource.astype("float32")
 
             f.create_dataset(
                 "sedLoad",
@@ -918,6 +928,8 @@ class WriteMesh(object):
                     _gwnames += ["solute", "soluteflux"]
                     if self.gwNspecies > 1:
                         _gwnames += ["crust_type"]
+                    if getattr(self, "provOn", False):
+                        _gwnames += ["crust_source"]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

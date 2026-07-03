@@ -37,6 +37,7 @@ Class GWMesh
       ~GWMesh._makeSoluteKSP
       ~GWMesh._soluteAdvecCoeffs
       ~GWMesh._solveSoluteTransport
+      ~GWMesh._soluteSolveRHS
       ~GWMesh._updateSolute
 
 
@@ -63,4 +64,5 @@ Private functions
 .. automethod:: flow.gwplex.GWMesh._makeSoluteKSP
 .. automethod:: flow.gwplex.GWMesh._soluteAdvecCoeffs
 .. automethod:: flow.gwplex.GWMesh._solveSoluteTransport
+.. automethod:: flow.gwplex.GWMesh._soluteSolveRHS
 .. automethod:: flow.gwplex.GWMesh._updateSolute
