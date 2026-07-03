@@ -728,9 +728,9 @@ user-facing feature updates the **input-file reference**, the **technical guide*
   smooth max-weathering-depth. The duricrust still degrades gracefully when soil/stratigraphy are
   off (§8). Implementation order: land the Option-2.5 *consistency fixes* (subaerial gate +
   submarine coherence) first — they de-risk the duricrust coupling and stand alone.
-- **Fringe favourability shape** — Gaussian band vs a top-hat `[d0−w, d0+w]`. Gaussian
-  chosen for smooth gradients (better for the KSP-free per-node ODE); revisit if a sharp
-  fringe is wanted.
+- **Fringe favourability shape** — Gaussian band vs a top-hat `[d0−w, d0+w]`. **As built:**
+  Gaussian `exp(−((wt−d0)/w)²)` (smooth gradients, better for the per-node ODE); revisit only if a
+  sharp fringe is wanted.
 - **Aquifer base `z_bed`** — **prescribed `z − aquifer_base` (default)** OR **`lHbed − bedrock_depth`
   when `aquifer_base: from_soil`** (requires `soilSPL`; §8). The `from_soil` form is the physically
   apt "permeable regolith over impermeable bedrock" model for cratonic/laterite terrains and makes
@@ -738,14 +738,23 @@ user-facing feature updates the **input-file reference**, the **technical guide*
   `min_sat_thickness` floor keeps `T>0`. Under Option-2.5 `lHbed` is the base of the weathering
   mantle (no depocenter inflation), and **in depositional basins the base comes from the
   stratigraphy** (the porous fill is the aquifer), not `lHbed`. Bare-rock / soil-off cells fall
-  back to the prescribed depth, which stays the default so the feature runs standalone.
+  back to the prescribed depth, which stays the default so the feature runs standalone. **As built
+  (DONE):** `_gwZbed` implements all three — scalar/map, `from_soil = lHbed − bedrock_depth`, and
+  the basin case as the *deeper* of `lHbed − bedrock_depth` and `z − Σ(non-sentinel sediment)`.
+- **Recharge refinements (DONE, opt-in, default off)** — `R = f_infil·max(0, rain − evap)` with
+  three optional modulations (§3 step 1): **subglacial-meltwater recharge** (`subglacial_recharge`
+  fraction of the ice model's `iceMeltRiverL` infiltrates under ice — the one recharge path the ice
+  gate allows), **lithology** (`fine_infil_factor` scales `f_infil` by the exposed coarse fraction,
+  dual lithology), and **slope** (`f/(1+slope/infil_slope_ref)` from a steepest-descent proxy). Each
+  defaults to a no-op, so the baseline `f_infil` (scalar or per-vertex map) is unchanged.
 - **Weathering supply `Ψ`** — three tiers, escalating cost (see §3a for the rate law + YAML):
   - **Proxy (default, shipped)** — climate/temperature stand-in; no new inputs, non-conservative.
-  - **Level A (opt-in, this design)** — explicit chemical-weathering *rate* `W(R, T, Lsoil,
+  - **Level A (opt-in, DONE)** — explicit chemical-weathering *rate* `W(R, T, Lsoil,
     lithology)` driven by the groundwater recharge `R` (± the `prodsoil` congruency shortcut when
-    `soilSPL` is on). Supply-only, still non-conservative. Recommended pairing; cheap because all
-    inputs already exist.
-  - **Level B (future, separate module)** — conservative geochemistry: debit dissolved solid,
+    `soilSPL` is on). Supply-only, still non-conservative. Shipped (`_weatheringSupply`,
+    `weathering: mode: rate|prodsoil`); cheap because all inputs already exist.
+  - **Level B (future, separate module — the main remaining item)** — conservative geochemistry:
+    debit dissolved solid,
     transport solute along `q = −T∇h` (advection-reaction on the DMPlex, reusing the FV advection
     kernels), precipitate at the fringe, export via baseflow, with `Σ dissolved − precipitated −
     exported ≈ 0` guards. Comparable in scope to dual-lithology; needs its own design doc. The
@@ -759,8 +768,15 @@ user-facing feature updates the **input-file reference**, the **technical guide*
   gains added, leakage debited and clamped at the available water (mirrors the evaporation debit).
   Default off ⇒ the conventional fixed-head behaviour, byte-identical. (Lake **level** feedback onto
   the head boundary within the same step remains one-step-lagged, like all the explicit couplings.)
-- **Armor of diffusion** — off by default (SPL K only); enable `armor_diffusion` if crusts
-  should also resist hillslope creep.
-- **Do we need transient `head` at all, or steady each step?** Carried as state with
-  backward-Euler (robust in both `τ_gw` regimes). If validation shows the equilibrium limit
-  everywhere, a pure steady solve (`a=0`) is a trivial simplification.
+- **Armor of diffusion** — **As built (DONE):** off by default (SPL K only); `armor_diffusion`
+  also scales the hillslope diffusivity `Cd` by `1 − armor_max·duriF` (`_surfaceLithoD`).
+- **Do we need transient `head` at all, or steady each step?** **As built:** carried as state with
+  backward-Euler (robust in both `τ_gw` regimes; analytic-Dupuit validated). If validation ever
+  shows the equilibrium limit everywhere, a pure steady solve is a trivial simplification — still
+  open, low priority.
+- **Multi-layer formation depth range** (§9) — `_recordInduration` currently writes the crust into
+  the **top non-empty layer** only. Distributing it over the crust/fringe *depth range* is the
+  remaining formation refinement (unnecessary for the exhumation behaviour, which reads the top
+  layer). Still open, low priority.
+- **Solute-source provenance** (§11) — blocked on **Level B**: attributing the crust's chemical
+  source needs the solute-transport tracer. Deferred with Level B.
