@@ -18,13 +18,15 @@ partition-exact, MPI-safe, no new hard dependency.
 
 ## Extension 1 — spatial per-species weatherability (lithology → chemistry)
 
-> **STATUS: DONE** (built as designed — forms **(a)** direct per-vertex maps +
-> **(c)** provenance-driven table; **(b)** the standalone lithology-class map is
-> not wired, since **(c)** covers the same need by reusing `source_class`).
-> Parser keeps `gwGeoWeather` raw + adds `gwGeoWeatherByClass` / `gwWeatherFrom`;
-> `gwplex._resolveGeoWeather` resolves lazily to scalar-or-`(lpoints,)` per
-> species; the use-site is one line. Guard `test_geochem_spatial_weatherability`;
-> full `tests/` 151 passed. Static-surface-lithology (§1.8) remains the one noted
+> **STATUS: DONE** — all three forms built: **(a)** direct per-vertex maps,
+> **(b)** a standalone `lithology: [file, key]` map + per-(class, species) table,
+> and **(c)** the same table gathered by the provenance `source_class`. Parser
+> keeps `gwGeoWeather` raw + adds `gwGeoWeatherByClass` / `gwWeatherFrom` /
+> `_gwLithoMap`; `gwplex._resolveGeoWeather` resolves lazily to
+> scalar-or-`(lpoints,)` per species (label = the `lithology:` map if given, else
+> `source_class`); the use-site is one line. Guards
+> `test_geochem_spatial_weatherability` (c) + `test_geochem_lithology_map` (b);
+> full `tests/` 153 passed. Static-surface-lithology (§1.8) remains the one noted
 > refinement.
 
 ### 1.1 Motivation & the current gap
@@ -99,10 +101,11 @@ geochem:
 supplied by provenance — the tightest tie to "where the rock is," and it makes
 provenance's `crust_source` and the species mix mutually consistent.
 
-**Recommendation:** implement **(a)** as the primitive (a per-species per-vertex
-array), and expose **(c)** as the ergonomic default for provenance runs (it
-needs no extra file). **(b)** is (c) generalised to a standalone lithology map;
-add it if a lithology map exists independent of provenance.
+**Recommendation:** **(a)** is the primitive (a per-species per-vertex array),
+**(c)** the ergonomic default for provenance runs (no extra file), and **(b)**
+the same table gathered by a standalone `lithology:` map for runs without
+provenance. All three are implemented; the label for (b)/(c) is the `lithology:`
+map when given, else `source_class`.
 
 ### 1.4 Parsing (`inputparser._readGroundwater`)
 `gwGeoWeather` stays a per-species **list**, but each entry becomes **scalar or

@@ -208,9 +208,10 @@ just like the head):
 - **Dissolution** :math:`D` — a chemical-weathering source on subaerial land
   (the climate/temperature supply scaled per tracer by ``weatherability``),
   drawing from a conserved per-node source pool. The ``weatherability`` may vary
-  **in space** (a per-vertex map, or a per-(class, species) table gathered by the
-  provenance ``source_class``), so *lithology* sets which species each region
-  yields — mafic rock → Fe/silica, a carbonate platform → carbonate.
+  **in space** (a per-vertex map, or a per-(class, species) table gathered by a
+  standalone lithology map or the provenance ``source_class``), so *lithology*
+  sets which species each region yields — mafic rock → Fe/silica, a carbonate
+  platform → carbonate.
 - **Transport** — first-order upwind advection by the groundwater flux ``q``,
   built from the head operator's face conductances (geometry-correct on flat and
   global meshes); a diagonal **seepage sink** where the aquifer discharges makes

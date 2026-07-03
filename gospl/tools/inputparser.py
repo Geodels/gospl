@@ -2169,6 +2169,9 @@ class ReadYaml(object):
                 s.get("weatherability_by_class", None) for s in species
             ] or [None]
             self.gwWeatherFrom = geo.get("weatherability_from", None)
+            # (b) a standalone per-vertex integer lithology map `[file, key]`
+            # (independent of provenance) — the label for `weatherability_by_class`.
+            self._gwLithoMap = geo.get("lithology", None)
             self.gwGeoCsat = [float(s.get("c_sat", 1.0)) for s in species] or [1.0]
             self.gwGeoPrecip = [float(s.get("precip_rate", 1.0)) for s in species] or [1.0]
             self.gwGeoVsolid = [float(s.get("solid_volume", 1.0)) for s in species] or [1.0]
@@ -2217,6 +2220,7 @@ class ReadYaml(object):
             self.gwGeoWeather = [1.0]
             self.gwGeoWeatherByClass = [None]
             self.gwWeatherFrom = None
+            self._gwLithoMap = None
             self.gwGeoCsat = [1.0]
             self.gwGeoPrecip = [1.0]
             self.gwGeoVsolid = [1.0]

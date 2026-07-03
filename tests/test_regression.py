@@ -1056,6 +1056,51 @@ def test_geochem_spatial_weatherability():
         m.destroy()
 
 
+def test_geochem_lithology_map():
+    """
+    Protects (Level-B geochemistry, extension 1 form **(b)** —
+    DESIGN_GEOCHEM_EXTENSIONS.md §1.3): the per-species weatherability is gathered
+    from a per-(class, species) table by a **standalone per-vertex lithology map**
+    (``lithology: [file, key]``), independent of provenance. Here the shared
+    ``prov_src.npz`` ``rock`` field (2 classes) is the lithology map: class 0
+    weathers only carbonate, class 1 only silica. Verified on **dissolution**
+    (source-pool debit): the resolved weatherability matches the map, and the
+    *off* species' pool is undebited in each lithology (no provenance needed).
+    """
+    import os
+
+    m = _gw_model("minimal_gw_geochem_litho2.yml")
+    # The lithology map loads lazily (first step) via a relative path, so run in
+    # the fixtures dir (cwd is otherwise restored after construction).
+    cwd = os.getcwd()
+    os.chdir(os.path.join(os.path.dirname(__file__), "fixtures"))
+    try:
+        assert m.gwGeochemOn and not getattr(m, "provOn", False)
+        assert m._gwLithoMap == ["prov_src", "rock"]
+        rock = np.load("prov_src.npz")["rock"][m.locIDs].astype(np.int64)
+        pool0 = 1.0e6 * m.larea
+        m.tEnd = m.tNow + 3 * m.dt
+        m.runProcesses()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        # Weatherability resolved per-vertex from the lithology map (not scalar).
+        assert m._gwGeoWeatherArr is not None
+        for k in range(m.gwNspecies):
+            assert np.ndim(m._gwGeoWeatherArr[k]) == 1
+        assert np.allclose(m._gwGeoWeatherArr[0], (rock == 0))
+        assert np.allclose(m._gwGeoWeatherArr[1], (rock == 1))
+        # The OFF species' source pool is untouched in each lithology region.
+        c0, c1 = rock == 0, rock == 1
+        assert np.allclose(m.gwSourcePool[c0, 1], pool0[c0]), "silica dissolved in class 0"
+        assert np.allclose(m.gwSourcePool[c1, 0], pool0[c1]), "carbonate dissolved in class 1"
+        assert (m.gwSourcePool[c0, 0] < pool0[c0]).any(), "no carbonate dissolved in class 0"
+        assert (m.gwSourcePool[c1, 1] < pool0[c1]).any(), "no silica dissolved in class 1"
+    finally:
+        os.chdir(cwd)
+        m.destroy()
+
+
 def test_geochem_river_load():
     """
     Protects (Level-B geochemistry, extension 2 — DESIGN_GEOCHEM_EXTENSIONS.md

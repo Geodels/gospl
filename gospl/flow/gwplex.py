@@ -582,18 +582,26 @@ class GWMesh(object):
         - **(a) per-vertex map** — a species' ``weatherability: [file, key]`` is
           loaded and subset to the local partition (``self.locIDs``), exactly
           like ``duriWeatherability`` / ``gwInfiltration``.
-        - **(c) table by lithology label** — a species'
+        - **(b) table by a standalone lithology map** — a species'
           ``weatherability_by_class: [...]`` is gathered by a per-vertex integer
-          label; ``weatherability_from: source_class`` reuses the provenance
-          regions (no new input), so ``crust_source`` and the species mix stay
-          mutually consistent.
+          ``lithology: [file, key]`` map (independent of provenance).
+        - **(c) table by the provenance label** — the same
+          ``weatherability_by_class`` gathered by ``source_class`` when
+          ``weatherability_from: source_class`` (no new input), so
+          ``crust_source`` and the species mix stay mutually consistent.
         - otherwise the scalar (the default; byte-identical to the old path).
 
-        Resolved lazily (first ``_updateSolute``) so it runs after provenance
-        seeds ``source_class``; rank-local, partition-exact, no collective.
+        The lithology label for (b)/(c) is the ``lithology:`` map when given,
+        else the provenance ``source_class``. Resolved lazily (first
+        ``_updateSolute``) so it runs after provenance seeds ``source_class``;
+        rank-local, partition-exact, no collective.
         """
         label = None
-        if getattr(self, "gwWeatherFrom", None) == "source_class":
+        lithomap = getattr(self, "_gwLithoMap", None)
+        if lithomap is not None:                          # (b) standalone map
+            d = np.load(lithomap[0] + ".npz")
+            label = d[lithomap[1]][self.locIDs].astype(np.int64)
+        elif getattr(self, "gwWeatherFrom", None) == "source_class":  # (c) provenance
             label = getattr(self, "source_class", None)
             if label is None and MPIrank == 0 and self.verbose:
                 print(

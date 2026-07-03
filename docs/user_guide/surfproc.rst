@@ -780,22 +780,29 @@ equilibrium (speciation, pH) is out of scope.
 
 The ``weatherability`` may vary **in space**, so *lithology* controls which
 species each region yields (e.g. mafic rock → Fe/silica, a carbonate platform →
-carbonate). Two forms, on top of the scalar default:
+carbonate). Three forms, on top of the scalar default:
 
 .. code:: yaml
 
         geochem:
-            weatherability_from: source_class      # reuse provenance regions as lithology
+            lithology: [litho, rock_class]         # (b) per-vertex integer lithology map
+            # weatherability_from: source_class    # (c) OR reuse the provenance regions
             species:
               - {name: carbonate, weatherability_by_class: [1.0, 0.0]}   # per rock class
-              - {name: silica,    weatherability: [litho, sil_wab]}      # per-vertex [file, key] map
+              - {name: silica,    weatherability: [litho, sil_wab]}      # (a) per-vertex map
 
-* ``weatherability: [file, key]`` — a **per-vertex map** for that species
+* **(a)** ``weatherability: [file, key]`` — a **per-vertex map** for that species
   (loaded like ``infiltration`` / the rate-mode ``weatherability``).
-* ``weatherability_by_class: [...]`` with ``weatherability_from: source_class``
-  — a **per-(class, species) table** gathered by the per-vertex provenance label
-  (needs ``provenance:`` on; no extra input), keeping ``crust_source`` and the
-  species mix mutually consistent.
+* **(b)** ``weatherability_by_class: [...]`` with a standalone ``lithology:
+  [file, key]`` integer map — a **per-(class, species) table** gathered by that
+  per-vertex lithology label (independent of provenance).
+* **(c)** the same ``weatherability_by_class`` with ``weatherability_from:
+  source_class`` — gathered by the provenance label instead (needs
+  ``provenance:`` on; no extra input), keeping ``crust_source`` and the species
+  mix mutually consistent.
+
+The label for (b)/(c) is the ``lithology:`` map when given, otherwise
+``source_class``.
 
 The map is the present-day surface lithology and is static (it does not follow
 exhumation of deeper layers — a documented refinement).
