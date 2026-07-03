@@ -156,17 +156,23 @@ class GWMesh(object):
                 self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
                 self.gwGeoVsolid = np.asarray(self.gwGeoVsolid, dtype=np.float64)
                 # Groundwater solute concentration and the dissolvable source pool
-                # (rank-local, per tracer); the pool is an ample reservoir so
-                # dissolution is source-limited only in very long runs (a
-                # `source_pool` YAML refinement can tie it to the actual rock).
+                # (rank-local, per tracer). The pool is seeded as an ample per-area
+                # reservoir (`1e6 · cell area`), so dissolution is rate-limited
+                # (not exhausted) over normal runs; a `source_pool` YAML refinement
+                # can later tie it to the actual weatherable rock mass.
                 self.gwSolute = np.zeros((self.lpoints, nsp), dtype=np.float64)
-                self.gwSourcePool = np.full((self.lpoints, nsp), 1.0e9, dtype=np.float64)
+                self.gwSourcePool = 1.0e6 * self.larea[:, None] * np.ones(
+                    (self.lpoints, nsp), dtype=np.float64
+                )
                 # Cumulative mass budget per tracer (m³-equiv, owned nodes) for the
                 # conservation guard / diagnostics: dissolved = precipitated +
                 # exported (ocean) + currently in solution.
                 self.gwDissolved = np.zeros(nsp, dtype=np.float64)
                 self.gwPrecip = np.zeros(nsp, dtype=np.float64)
                 self.gwOceanFlux = np.zeros(nsp, dtype=np.float64)
+                # Per-node baseflow-carried solute export (m³/yr, summed over
+                # tracers) — the spatial output field (G3).
+                self.gwSoluteFlux = np.zeros(self.lpoints, dtype=np.float64)
                 # Scratch Vec pair for the per-species transport solve (G1+).
                 self.soluteL = self.hLocal.duplicate()
                 self.soluteG = self.hGlobal.duplicate()
@@ -777,8 +783,10 @@ class GWMesh(object):
         global** meshes alike), so the signed face flux ``i→k`` is
         ``f_ik = (C_ik/A_i)·(h_i − h_k)``. First-order upwinding puts the
         outflow (``f>0``) on the diagonal (carries ``c_i``) and the inflow
-        (``f<0``) on the neighbour column (carries ``c_k``). Returns a
-        ``(lpoints, 1+maxnb)`` array for ``_assembleDiffMatCSR`` (col 0 = diagonal).
+        (``f<0``) on the neighbour column (carries ``c_k``). Returns
+        ``(adv, divq)``: ``adv`` is the ``(lpoints, 1+maxnb)`` array for
+        ``_assembleDiffMatCSR`` (col 0 = diagonal), and ``divq = Σ_k f_ik`` is the
+        lateral divergence (used for the seepage sink / export).
         """
         zeroKp = np.zeros(self.lpoints, dtype=np.float64)
         lap = jacobiancoeff(h, T, zeroKp)                 # area-norm neg-Laplacian
@@ -796,8 +804,9 @@ class GWMesh(object):
         # aquifer to the surface — a diagonal sink `−div q` that makes the operator
         # a well-posed, diagonally-dominant M-matrix (pure lateral advection has no
         # sink there and blows up). Recharge nodes carry their source in the RHS.
-        adv[:, 0] += np.maximum(-flux.sum(axis=1), 0.0)
-        return adv
+        divq = flux.sum(axis=1)
+        adv[:, 0] += np.maximum(-divq, 0.0)
+        return adv, divq
 
     def _solveSoluteTransport(self, source, dmask, dval):
         r"""
@@ -811,7 +820,8 @@ class GWMesh(object):
         z = self.hLocal.getArray()
         h = self.headL.getArray()
         T = self.gwKsat * np.maximum(h - self._gwZbed(z), float(self.gwMinSatThick))
-        M = self._assembleDiffMatCSR(self._soluteAdvecCoeffs(h, T))
+        adv, _ = self._soluteAdvecCoeffs(h, T)
+        M = self._assembleDiffMatCSR(adv)
         IntType = petsc4py.PETSc.IntType
         owned_d = np.where(dmask & (self.inIDs == 1))[0].astype(IntType)
         M.zeroRowsLocal(owned_d, diag=1.0)                # c = dval on Dirichlet rows
@@ -863,7 +873,9 @@ class GWMesh(object):
         dt = self.dt
         owned = self.inIDs == 1
 
-        adv = self._soluteAdvecCoeffs(h, T)        # advection + seepage sink (G1)
+        adv, divq = self._soluteAdvecCoeffs(h, T)  # advection + seepage sink (G1)
+        seep_sink = np.maximum(-divq, 0.0)         # discharge-to-surface coefficient
+        self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
         W = self._weatheringSupply()               # base weathering rate (Level A)
         # Subaerial land only (no dissolution under sea / ponded lake).
         sub = np.zeros(self.lpoints, dtype=bool)
@@ -890,10 +902,13 @@ class GWMesh(object):
             self.gwSourcePool[:, k] -= diss
             Deff = diss / (A * dt)
 
-            # 2. Precipitation sink at the fringe (lagged c_sat threshold).
-            p = self.gwGeoPrecip[k] * Phi * (self.gwSolute[:, k] > self.gwGeoCsat[k])
-
-            stored_prev = float((self.gwSolute[:, k] * A)[owned].sum())
+            # 2. Precipitation sink at the fringe — a LINEAR removal `k_p·Φ`
+            # (proportional to the local concentration). Kept linear so the
+            # operator is constant under constant forcing → the solute reaches a
+            # true per-step steady state (a hard `c > c_sat` on/off gate instead
+            # oscillates). The `c_sat` saturation threshold is a documented
+            # refinement needing a nonlinear/Picard treatment (see DESIGN §3).
+            p = self.gwGeoPrecip[k] * Phi
 
             # 3. Transport: (advection + seepage sink + precip sink) c = Deff.
             coeffs = adv.copy()
@@ -913,15 +928,20 @@ class GWMesh(object):
             c = np.maximum(self.soluteL.getArray().copy(), 0.0)  # guard tiny negatives
             self.gwSolute[:, k] = c
 
-            # 4. Precipitated mass feeds the crust; export closes the budget.
-            precip_mass = p * c * A * dt
+            # 4. Sinks: precipitation feeds the crust; seepage exports to the
+            # surface (baseflow). The steady operator is exactly conservative
+            # (upwind internal faces cancel), so per step
+            # dissolved = precipitated + exported to the solver tolerance — no
+            # storage term (a steady solve maintains, not accumulates, the
+            # standing concentration).
+            precip_mass = p * c * A * dt                     # → crust
+            export_mass = seep_sink * c * A * dt             # → surface / ocean
             duriH += precip_mass / A * self.gwGeoVsolid[k]
-            diss_o = float(diss[owned].sum())
-            precip_o = float(precip_mass[owned].sum())
-            stored_now = float((c * A)[owned].sum())
-            self.gwDissolved[k] += diss_o
-            self.gwPrecip[k] += precip_o
-            self.gwOceanFlux[k] += diss_o - precip_o - (stored_now - stored_prev)
+            self.gwDissolved[k] += float(diss[owned].sum())
+            self.gwPrecip[k] += float(precip_mass[owned].sum())
+            self.gwOceanFlux[k] += float(export_mass[owned].sum())
+            # Per-node baseflow export rate (m³/yr), summed over tracers, for output.
+            self.gwSoluteFlux += seep_sink * c * A
 
         duriH = np.clip(duriH, 0.0, Hmax)
         self.duriHL.setArray(duriH)
@@ -929,4 +949,14 @@ class GWMesh(object):
         if getattr(self, "duriOn", False):
             self.duriF = duriH / Hmax
             self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
+
+        if self.verbose:
+            tot = MPI.COMM_WORLD.allreduce(
+                float(self.gwSoluteFlux[owned].sum()), op=MPI.SUM
+            )
+            if MPIrank == 0:
+                print(
+                    "[gw] dissolved solute flux to surface: %0.4g m3/yr" % tot,
+                    flush=True,
+                )
         return

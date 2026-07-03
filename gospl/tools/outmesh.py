@@ -495,6 +495,23 @@ class WriteMesh(object):
                         **self._h5opts,
                     )
                     f["Karmor"][:, 0] = self.duriKarmor.copy()
+                if getattr(self, "gwGeochemOn", False):
+                    # Level-B geochemistry: total dissolved solute concentration
+                    # (summed over tracers) and the baseflow-carried export flux.
+                    f.create_dataset(
+                        "solute",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["solute"][:, 0] = self.gwSolute.sum(axis=1)
+                    f.create_dataset(
+                        "soluteflux",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["soluteflux"][:, 0] = self.gwSoluteFlux.copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -887,6 +904,8 @@ class WriteMesh(object):
                     _gwnames += ["baseflow"]
                 if getattr(self, "duriOn", False):
                     _gwnames += ["duricrust", "induration", "Karmor"]
+                if getattr(self, "gwGeochemOn", False):
+                    _gwnames += ["solute", "soluteflux"]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

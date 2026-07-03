@@ -841,20 +841,51 @@ def test_geochem_conserves():
             diss = m.gwDissolved[k]
             prec = m.gwPrecip[k]
             exp = m.gwOceanFlux[k]
-            stored = float((m.gwSolute[:, k] * m.larea)[own].sum())
             pooldrop = float((pool0[:, k] - m.gwSourcePool[:, k])[own].sum())
             assert diss > 0.0, "no dissolution — test not exercised"
             # (a) source-pool debit == dissolved mass (independent accounting).
             assert np.isclose(diss, pooldrop, rtol=1.0e-9), "pool debit != dissolved"
-            # (b) closed budget: dissolved = precipitated + exported + in solution.
-            assert abs(diss - (prec + exp + stored)) < 1.0e-6 * diss, (
+            # (b) closed budget: the steady transport is exactly conservative, so
+            # every step dissolved = precipitated + exported (no storage term).
+            assert abs(diss - (prec + exp)) < 1.0e-6 * diss, (
                 "geochem mass budget does not close"
             )
             # (c) physical: nothing created, precipitate bounded by dissolved.
-            assert prec >= 0.0 and exp >= -1.0e-6 * diss
-            assert prec <= diss + 1.0e-6 * diss
+            assert prec >= 0.0 and exp >= 0.0 and prec <= diss + 1.0e-6 * diss
         # The transported+precipitated solute grew the crust.
         assert m.duriHL.getArray().max() > 0.0, "no duricrust precipitated from solute"
+    finally:
+        m.destroy()
+
+
+def test_geochem_ocean_flux():
+    """
+    Protects (Level-B geochemistry, **G3** — DESIGN_WATERTABLE_GEOCHEM.md): the
+    dissolved solute discharged to the surface (the baseflow-carried export) is
+    tracked per tracer (``gwOceanFlux``) and exposed as the per-node
+    ``soluteflux`` field. Because the steady transport is exactly conservative,
+    the export equals ``dissolved − precipitated`` each step, and the per-node
+    export field is finite, non-negative and non-zero (solute reaches the
+    seepage/discharge zones).
+    """
+    m = _gw_model("minimal_gw_geochem.yml")
+    try:
+        m.tEnd = m.tNow + 3 * m.dt
+        m.runProcesses()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        for k in range(m.gwNspecies):
+            export = m.gwOceanFlux[k]
+            diss_minus_prec = m.gwDissolved[k] - m.gwPrecip[k]
+            assert diss_minus_prec > 0.0, "no net dissolution — test not exercised"
+            assert abs(export - diss_minus_prec) < 1.0e-6 * diss_minus_prec, (
+                "export != dissolved − precipitated"
+            )
+        own = m.inIDs == 1
+        sf = m.gwSoluteFlux
+        assert np.isfinite(sf).all() and (sf >= -1.0e-9).all()
+        assert float(sf[own].sum()) > 0.0, "no baseflow-carried solute export"
     finally:
         m.destroy()
 

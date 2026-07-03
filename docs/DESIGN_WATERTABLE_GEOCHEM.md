@@ -80,12 +80,21 @@ water volume), the steady reactive-transport balance is
   (`_weatheringSupply` / `prodSoil` / recharge `R`), scaled per tracer by a
   `weatherability`. Debits a conserved source pool (regolith/rock) so mass is
   tracked.
-- **Precipitation `P`** — the sink at the fringe: `P = k_p · Φ · max(0, c − c_sat)`
-  (precipitates the super-saturated fraction where the water table sits in the
-  capillary fringe `Φ`). This is the crust source term — it feeds `duriH` (below).
-- **Export** — at the seepage nodes the outflow carries `c` out of the aquifer;
-  summed with the `baseflowL` discharge it is the **dissolved flux to the surface
-  network / ocean**.
+- **Precipitation `P`** — the sink at the fringe, added as a **second diagonal
+  sink** to the transport operator. **As built (G2):** a *linear* fringe removal
+  `P = k_p · Φ · c` (proportional to the local concentration where the water table
+  sits in the capillary fringe `Φ`). Kept linear so the operator is constant under
+  constant forcing and the solute reaches a true steady state — a hard
+  `max(0, c − c_sat)` saturation gate instead oscillates between steps; the
+  `c_sat` threshold is a documented refinement needing a nonlinear/Picard
+  treatment. This is the crust source term — it feeds `duriH` (below).
+- **Export** — the **vertical seepage sink** `max(0,−div q)` already in the
+  operator removes the solute discharging to the surface at the seepage/discharge
+  nodes; that removal `Σ seep·c·A` is the **dissolved baseflow flux to the surface
+  network / ocean**. Because the upwind advection is exactly conservative
+  (internal faces cancel), **each step `dissolved = precipitated + exported`** to
+  the solver tolerance — no storage term (the steady solve maintains, not
+  accumulates, the standing concentration).
 
 The precipitated mass converts to a crust-thickness increment (a per-tracer solid
 molar volume), so Level B's `P` **replaces** Level A's supply `Ψ` as the
@@ -216,8 +225,8 @@ No change to the conservation invariants the other modules are guarded by.
 |---|---|---|
 | G0 | **DONE.** `geochem:` parser + `gwGeochemOn` flag + per-species param lists; `_GWMesh` state alloc (`gwSolute`/`gwSourcePool` `(lpoints, n_species)`, `gwOceanFlux`, scratch `soluteL`/`soluteG`, cached `_ksp_solute`/`_soluteMat`), registered in `destroy_DMPlex`. Inert — nothing solved. | `test_geochem_opt_in` (off ⇒ inert; on ⇒ n_species state; inert run byte-identical) |
 | G1 | **DONE.** Steady upwind solute transport `∇·(q c)` by `q=−T∇h` (`_soluteAdvecCoeffs` builds the operator from the head operator's **face conductances** via `jacobiancoeff` — geometry-correct for flat AND global meshes, cleaner than the `getfacevelocity` node-velocity route which is singular on the sphere) + the **vertical seepage sink** `max(0,−div q)` that closes the balance and makes it a well-posed M-matrix (pure lateral `∇·(qc)=0` blows up at discharge nodes); cached `gw_solute_` KSP (fgmres+bjacobi); Dirichlet at the seepage set. NOT wired into `updateGroundwater` yet (inert). | `test_geochem_transport` (converges, monotone-bounded `[0,1]`, advects downstream; np=2 converges/finite) |
-| G2 | **DONE.** `_updateSolute` wired into `updateGroundwater` (dissolve → transport → precipitate → export, per tracer): dissolution from the Level-A driver on subaerial land **debiting `gwSourcePool`**; the fringe precipitation `k_p·Φ` added as a **second diagonal sink** to the G1 operator (lagged `c > c_sat` gate) — no Dirichlet needed; precipitated mass **feeds `duriH`** (and the Level-A formation supply is gated **off** when geochem is on, so no double-count); export closes by domain mass balance into `gwOceanFlux`. Conservative to machine precision (`dissolved = precipitated + exported + in-solution`; pool debit == dissolved). | `test_geochem_conserves` (budget closes, pool debit matches, crust grows; np=2), `test_geochem_transport` |
-| G3 | Baseflow export → per-tracer `ocean_solute_flux` output. | export ≈ dissolved − precipitated at steady state |
+| G2 | **DONE.** `_updateSolute` wired into `updateGroundwater` (dissolve → transport → precipitate → export, per tracer): dissolution from the Level-A driver on subaerial land **debiting `gwSourcePool`**; the fringe precipitation `k_p·Φ` added as a **second diagonal sink** to the G1 operator (lagged `c > c_sat` gate) — no Dirichlet needed; precipitated mass **feeds `duriH`** (and the Level-A formation supply is gated **off** when geochem is on, so no double-count). **Precipitation is a linear fringe sink** `k_p·Φ·c` (a hard `c_sat` gate oscillates — deferred as a nonlinear refinement); the `gwSourcePool` is seeded per-area (`1e6·A`) so dissolution is rate-limited not exhausted. Export = the seepage-sink removal. **Exactly conservative** per step: `dissolved = precipitated + exported` (machine precision; pool debit == dissolved, no storage term — the upwind operator's internal faces cancel). | `test_geochem_conserves` (budget closes, pool debit matches, crust grows; np=2), `test_geochem_transport` |
+| G3 | **DONE.** Per-tracer dissolved **ocean/baseflow export** `gwOceanFlux` (= `Σ seep·c·A`) + the per-node `gwSoluteFlux` field, output as `solute` (Σ-tracer concentration) and `soluteflux` (HDF5+XDMF); verbose per-step total. | `test_geochem_ocean_flux` (export == dissolved − precipitated; export field finite/≥0/non-zero) |
 | G4 | **Multi-tracer** (`n_species>1`): per-species params, `crust_type` dominant field, per-species ocean flux. | `test_geochem_multitracer` |
 | G5 | Solute-source provenance (attribute crust to source area, riding `stratDuri`); unblocks `DESIGN_WATERTABLE_DURICRUST.md` §11. | provenance sums close |
 | G6 | Docs: `tech_guide/groundwater.rst` geochem section, `surfproc.rst` block, `api_ref` page; AGENTS milestone. | docs build green |
