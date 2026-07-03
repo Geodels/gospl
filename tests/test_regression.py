@@ -1208,6 +1208,48 @@ def test_groundwater_baseflow_conserves():
         m.destroy()
 
 
+def test_groundwater_baseflow_reinjection():
+    """
+    Protects (deferred item #4 — DESIGN_WATERTABLE_DURICRUST.md §3 step 7): with
+    `conserve_baseflow`, the baseflow is **re-injected into the surface-flow
+    source** (`applyForces` builds `bL = rain·A − recharge·A + baseflow`). The
+    infiltrated recharge leaves surface runoff and returns at the seepage nodes,
+    so the source is redistributed but **globally near-neutral** (Σ recharge ≈ Σ
+    baseflow). Applied once per step (the single `bL` reset), so it does not
+    double-count across the two per-step `flowAccumulation` calls.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        assert m.gwConserveBaseflow, "fixture must have conserve_baseflow on"
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+        for _ in range(40):                    # populate a steady recharge/baseflow
+            m.updateGroundwater()
+
+        own = m.inIDs == 1
+        A = m.larea
+        # Re-injection ON vs OFF via the single per-step bL reset.
+        m.gwConserveBaseflow = True
+        m.applyForces()
+        bl_on = m.bL.getArray().copy()
+        m.gwConserveBaseflow = False
+        m.applyForces()
+        bl_off = m.bL.getArray().copy()
+        m.gwConserveBaseflow = True
+
+        assert np.allclose(bl_off, m.rainVal * A), "off path != raw runoff source"
+        assert np.isfinite(bl_on).all() and (bl_on >= 0.0).all()
+        assert not np.allclose(bl_on[own], bl_off[own]), "re-injection not applied"
+        # Globally near-neutral (recharge removed ≈ baseflow added at steady state).
+        tot_on = float(bl_on[own].sum())
+        tot_off = float(bl_off[own].sum())
+        assert abs(tot_on - tot_off) < 0.05 * tot_off, (
+            f"re-injection not water-neutral: on={tot_on:.4g} off={tot_off:.4g}"
+        )
+    finally:
+        m.destroy()
+
+
 def test_groundwater_from_soil():
     """
     Protects (Phase 5, §8 soil coupling): `aquifer_base: from_soil` ties the

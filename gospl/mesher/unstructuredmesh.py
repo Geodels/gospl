@@ -966,7 +966,23 @@ class UnstMesh(object):
             tmp = self.hLocal.getArray().copy()
             self.rainVal = tmp  * self.rainA + self.rainB
             self.rainVal[self.rainVal < 0] = 0.0
-        self.bL.setArray(self.rainVal * self.larea)
+
+        src = self.rainVal * self.larea                         # runoff source (m³/yr)
+        if getattr(self, "gwOn", False) and getattr(self, "gwConserveBaseflow", False):
+            # Groundwater baseflow re-injection (DESIGN_WATERTABLE_DURICRUST.md §3
+            # step 7): the recharge that infiltrated LEAVES surface runoff and
+            # returns to the drainage network as seepage discharge at the seepage
+            # nodes (`baseflowL`) — both from the previous step's water-table solve
+            # (updateGroundwater runs after flowAccumulation). Net-neutral globally
+            # (Σ baseflow ≈ Σ recharge) but it moves discharge from the recharge
+            # uplands to the springs/rivers where the table meets the surface, so
+            # rivers are physically baseflow-fed (mirrors the ice `iceMeltRiverL`
+            # re-injection). Applied HERE — the single per-step `bL` reset — so the
+            # two per-step `flowAccumulation` calls both see it exactly once (the
+            # recharge subtraction is not idempotent, unlike the seaID zeroing).
+            src = np.maximum(src - self.rechargeL.getArray() * self.larea, 0.0)
+            src = src + self.baseflowL.getArray()
+        self.bL.setArray(src)
         self.dm.localToGlobal(self.bL, self.bG)
 
         return
