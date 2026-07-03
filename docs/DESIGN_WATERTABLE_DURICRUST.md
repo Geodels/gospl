@@ -24,8 +24,9 @@ KSP/SNES lifecycle, scratch-vector contract, `destroy_DMPlex` registration).
 > recharge, and lithology-/slope-modulated `f_infil` (§3) — have also landed (all
 > opt-in, default off), and the multi-layer **formation depth range** (§9) — a
 > thick crust is now recorded across all the layers it spans. **Remaining deferred
-> increment:** the geochemical **Level-B** solute transport (§3a/§15) — also the
-> prerequisite for duricrust **solute-source provenance** (§11). The sections
+> increment:** the geochemical **Level-B** solute transport (§3a/§15; designed in
+> **`DESIGN_WATERTABLE_GEOCHEM.md`**) — also the prerequisite for duricrust
+> **solute-source provenance** (§11). The sections
 > below are the original design narrative,
 > annotated with "as built" notes where the implementation refined a choice.
 
@@ -242,7 +243,8 @@ source pool. Making the crust mass a closed geochemical budget (dissolve → tra
 `q = −T∇h` → precipitate at the fringe → export via baseflow, with conservation guards) is **Level
 B**, a separate geochemical solute-transport module scoped in §15 — the ingredients exist
 (groundwater flux, FV advection kernels, per-class strata bookkeeping) but it is a major, distinct
-feature with its own design doc.
+feature with its own design doc: **`DESIGN_WATERTABLE_GEOCHEM.md`** (single-tracer → multi-tracer;
+coupled multi-species equilibrium explicitly out of scope).
 
 ---
 
@@ -726,8 +728,9 @@ user-facing feature updates the **input-file reference**, the **technical guide*
 
 **Status summary.** Every decision below is **resolved and implemented** except one.
 The single genuinely **open / deferred** item is the **Level-B** conservative
-geochemistry (a separate solute-transport module — it also gates duricrust
-**solute-source provenance**, §11). One **low-priority** simplification remains
+geochemistry (a separate solute-transport module, designed in
+**`DESIGN_WATERTABLE_GEOCHEM.md`** — it also gates duricrust **solute-source
+provenance**, §11). One **low-priority** simplification remains
 optional (a pure steady head solve if validation ever shows the equilibrium limit
 everywhere). All other bullets are marked **DONE / as built** with the code path.
 
@@ -766,8 +769,10 @@ everywhere). All other bullets are marked **DONE / as built** with the code path
     debit dissolved solid,
     transport solute along `q = −T∇h` (advection-reaction on the DMPlex, reusing the FV advection
     kernels), precipitate at the fringe, export via baseflow, with `Σ dissolved − precipitated −
-    exported ≈ 0` guards. Comparable in scope to dual-lithology; needs its own design doc. The
-    enabling pieces (groundwater flux, FV advection, per-class strata bookkeeping) already exist.
+    exported ≈ 0` guards. Comparable in scope to dual-lithology; **designed in
+    `DESIGN_WATERTABLE_GEOCHEM.md`** (single-tracer → multi-tracer via an `n_species` array;
+    coupled multi-species equilibrium out of scope). The enabling pieces (groundwater flux, FV
+    advection, per-class strata bookkeeping) already exist.
 - **Lake ↔ aquifer volume coupling** — lakes/rivers/sea are **fixed-head** boundaries (`h = z`) in
   the head solve. **As built (opt-in `lake_exchange`, default off):** the lake's volumetric budget
   is now also debited/credited by the across-bed groundwater flux. `_lakeExchangeFlux` computes the
