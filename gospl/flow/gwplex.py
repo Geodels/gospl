@@ -156,9 +156,16 @@ class GWMesh(object):
                 self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
                 self.gwGeoVsolid = np.asarray(self.gwGeoVsolid, dtype=np.float64)
                 # Groundwater solute concentration and the dissolvable source pool
-                # (rank-local, per tracer); running dissolved ocean-export flux.
+                # (rank-local, per tracer); the pool is an ample reservoir so
+                # dissolution is source-limited only in very long runs (a
+                # `source_pool` YAML refinement can tie it to the actual rock).
                 self.gwSolute = np.zeros((self.lpoints, nsp), dtype=np.float64)
-                self.gwSourcePool = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                self.gwSourcePool = np.full((self.lpoints, nsp), 1.0e9, dtype=np.float64)
+                # Cumulative mass budget per tracer (m³-equiv, owned nodes) for the
+                # conservation guard / diagnostics: dissolved = precipitated +
+                # exported (ocean) + currently in solution.
+                self.gwDissolved = np.zeros(nsp, dtype=np.float64)
+                self.gwPrecip = np.zeros(nsp, dtype=np.float64)
                 self.gwOceanFlux = np.zeros(nsp, dtype=np.float64)
                 # Scratch Vec pair for the per-species transport solve (G1+).
                 self.soluteL = self.hLocal.duplicate()
@@ -241,11 +248,17 @@ class GWMesh(object):
         # Phase 2: solve the implicit water-table head from this recharge.
         self._solveHead()
 
-        # Phase 3: evolve the capillary-fringe duricrust from the new water table.
+        # Phase 3: evolve the capillary-fringe duricrust from the new water table
+        # (breakdown/decay; the Level-A formation supply is off when geochem is on).
         if getattr(self, "duriOn", False):
             self._updateDuricrust()
-            # Phase 6: sync the live crust with the per-layer stratigraphic
-            # induration archive (exhumation re-arm + formation write-down).
+        # Level-B (G2): dissolve → transport → precipitate the solute; the
+        # precipitation feeds the crust `duriH` (replacing the Level-A supply).
+        if getattr(self, "gwGeochemOn", False):
+            self._updateSolute()
+        # Phase 6: sync the live crust with the per-layer stratigraphic induration
+        # archive (exhumation re-arm + formation write-down) after both sources.
+        if getattr(self, "duriOn", False):
             self._recordInduration()
 
         if MPIrank == 0 and self.verbose:
@@ -621,9 +634,15 @@ class GWMesh(object):
         Phi = np.exp(-(((wt - self.duriFringeDepth) / self.duriFringeWidth) ** 2))
         Psi = self._weatheringSupply()
 
-        supply = self.duriFormRate * Phi * Psi
-        if getattr(self, "cptSoil", False):                      # regolith-limited
-            supply = np.minimum(supply, self._regolithSupplyRate())
+        if getattr(self, "gwGeochemOn", False):
+            # Level-B conservative geochemistry provides the crust source (the
+            # transported, precipitated solute in `_updateSolute`), so the Level-A
+            # proxy/rate supply is switched off here to avoid double-counting.
+            supply = np.zeros(self.lpoints, dtype=np.float64)
+        else:
+            supply = self.duriFormRate * Phi * Psi
+            if getattr(self, "cptSoil", False):                  # regolith-limited
+                supply = np.minimum(supply, self._regolithSupplyRate())
 
         duriH = self.duriHL.getArray().copy()
         duriH += self.dt * supply * (1.0 - duriH / Hmax)
@@ -810,3 +829,104 @@ class GWMesh(object):
         M.destroy()
         self.dm.globalToLocal(self.soluteG, self.soluteL)
         return self.soluteL.getArray().copy()
+
+    def _updateSolute(self):
+        r"""
+        Level-B per-step solute update (G2), per tracer: **dissolve → transport →
+        precipitate → export**, conservatively accounted.
+
+        1. **Dissolution** — a chemical-weathering source (the Level-A
+           ``_weatheringSupply`` scaled per tracer by ``weatherability``), on
+           subaerial land only, **debiting the conserved source pool**.
+        2. **Transport** — the steady ``M c = D`` solve of ``_soluteAdvecCoeffs``
+           (upwind advection by ``q = −T∇h`` + the vertical seepage sink), plus a
+           **precipitation sink** at the capillary fringe added to the diagonal
+           (``k_p·Φ`` where the tracer is super-saturated — a one-step-lagged
+           ``c > c_sat`` gate).
+        3. **Precipitation** — the sink mass ``k_p·Φ·c`` feeds the duricrust
+           ``duriH`` (Level-B thus **replaces** the Level-A proxy supply as the
+           crust source; the induration/armoring then follow unchanged).
+        4. **Export** — by domain mass balance, the solute that is neither
+           precipitated nor left in solution has discharged to the surface network
+           (→ ocean; the flux is formalised in G3).
+
+        Budget per tracer (owned nodes): ``dissolved = precipitated + exported +
+        Δ(in solution)`` — accumulated in ``gwDissolved``/``gwPrecip``/``gwOceanFlux``
+        for the conservation guard. Rank-local accounting (KSP solve collective).
+        """
+        if not getattr(self, "gwGeochemOn", False):
+            return
+        z = self.hLocal.getArray()
+        h = self.headL.getArray()
+        T = self.gwKsat * np.maximum(h - self._gwZbed(z), float(self.gwMinSatThick))
+        A = self.larea
+        dt = self.dt
+        owned = self.inIDs == 1
+
+        adv = self._soluteAdvecCoeffs(h, T)        # advection + seepage sink (G1)
+        W = self._weatheringSupply()               # base weathering rate (Level A)
+        # Subaerial land only (no dissolution under sea / ponded lake).
+        sub = np.zeros(self.lpoints, dtype=bool)
+        sub[self.seaID] = True
+        pitIDs = getattr(self, "pitIDs", None)
+        lFill = getattr(self, "lFill", None)
+        if pitIDs is not None and lFill is not None:
+            sub |= (pitIDs > -1) & (lFill > z)
+        subaerial = ~sub
+        # Precipitation favourability = the capillary fringe (needs the duricrust).
+        if getattr(self, "duriOn", False):
+            Phi = np.exp(
+                -(((self.wtDepth - self.duriFringeDepth) / self.duriFringeWidth) ** 2)
+            )
+        else:
+            Phi = np.zeros(self.lpoints, dtype=np.float64)
+
+        duriH = self.duriHL.getArray().copy()
+        Hmax = float(self.duriMaxThick)
+        for k in range(int(self.gwNspecies)):
+            # 1. Dissolution — debit the source pool.
+            Drate = np.where(subaerial, self.gwGeoWeather[k] * W, 0.0)
+            diss = np.minimum(Drate * A * dt, self.gwSourcePool[:, k])
+            self.gwSourcePool[:, k] -= diss
+            Deff = diss / (A * dt)
+
+            # 2. Precipitation sink at the fringe (lagged c_sat threshold).
+            p = self.gwGeoPrecip[k] * Phi * (self.gwSolute[:, k] > self.gwGeoCsat[k])
+
+            stored_prev = float((self.gwSolute[:, k] * A)[owned].sum())
+
+            # 3. Transport: (advection + seepage sink + precip sink) c = Deff.
+            coeffs = adv.copy()
+            coeffs[:, 0] += p
+            M = self._assembleDiffMatCSR(coeffs)
+            if self._ksp_solute is None:
+                self._ksp_solute = self._makeSoluteKSP()
+            ksp = self._ksp_solute
+            self.soluteL.setArray(Deff)
+            self.dm.localToGlobal(self.soluteL, self.tmp)
+            self.soluteL.setArray(self.gwSolute[:, k])          # warm start
+            self.dm.localToGlobal(self.soluteL, self.soluteG)
+            ksp.setOperators(M, M)
+            ksp.solve(self.tmp, self.soluteG)
+            M.destroy()
+            self.dm.globalToLocal(self.soluteG, self.soluteL)
+            c = np.maximum(self.soluteL.getArray().copy(), 0.0)  # guard tiny negatives
+            self.gwSolute[:, k] = c
+
+            # 4. Precipitated mass feeds the crust; export closes the budget.
+            precip_mass = p * c * A * dt
+            duriH += precip_mass / A * self.gwGeoVsolid[k]
+            diss_o = float(diss[owned].sum())
+            precip_o = float(precip_mass[owned].sum())
+            stored_now = float((c * A)[owned].sum())
+            self.gwDissolved[k] += diss_o
+            self.gwPrecip[k] += precip_o
+            self.gwOceanFlux[k] += diss_o - precip_o - (stored_now - stored_prev)
+
+        duriH = np.clip(duriH, 0.0, Hmax)
+        self.duriHL.setArray(duriH)
+        self.dm.localToGlobal(self.duriHL, self.duriHG)
+        if getattr(self, "duriOn", False):
+            self.duriF = duriH / Hmax
+            self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
+        return

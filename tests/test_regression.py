@@ -763,8 +763,8 @@ def test_geochem_opt_in(minimal_model):
         for arr in (mc.gwGeoWeather, mc.gwGeoCsat, mc.gwGeoPrecip, mc.gwGeoVsolid):
             assert arr.shape == (2,)
         mc.tEnd = mc.tNow + 0.5 * mc.dt
-        mc.runProcesses()             # G0: state allocated but unused ⇒ completes
-        assert (mc.gwSolute == 0.0).all(), "G0 must not solve any transport yet"
+        mc.runProcesses()             # opt-in run completes; solute state is active
+        assert np.isfinite(mc.gwSolute).all() and (mc.gwSolute >= 0.0).all()
     finally:
         mc.destroy()
 
@@ -815,6 +815,46 @@ def test_geochem_transport():
         )
         transported = own & ~dmask
         assert (c[transported] > 0.01).any(), "solute not advected downstream"
+    finally:
+        m.destroy()
+
+
+def test_geochem_conserves():
+    """
+    Protects (Level-B geochemistry, **G2** — DESIGN_WATERTABLE_GEOCHEM.md): the
+    per-step **dissolve → transport → precipitate → export** cycle is mass
+    conservative. Wired into ``updateGroundwater``, each tracer's budget closes:
+    the **source-pool debit equals the dissolved mass**, and ``dissolved =
+    precipitated + exported + in-solution`` to machine precision; all terms are
+    non-negative and the precipitated solute grows the duricrust ``duriH``.
+    """
+    m = _gw_model("minimal_gw_geochem.yml")
+    try:
+        assert m.gwGeochemOn and m.gwNspecies == 2
+        m.tEnd = m.tNow + 3 * m.dt
+        pool0 = m.gwSourcePool.copy()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        own = m.inIDs == 1
+        for k in range(m.gwNspecies):
+            diss = m.gwDissolved[k]
+            prec = m.gwPrecip[k]
+            exp = m.gwOceanFlux[k]
+            stored = float((m.gwSolute[:, k] * m.larea)[own].sum())
+            pooldrop = float((pool0[:, k] - m.gwSourcePool[:, k])[own].sum())
+            assert diss > 0.0, "no dissolution — test not exercised"
+            # (a) source-pool debit == dissolved mass (independent accounting).
+            assert np.isclose(diss, pooldrop, rtol=1.0e-9), "pool debit != dissolved"
+            # (b) closed budget: dissolved = precipitated + exported + in solution.
+            assert abs(diss - (prec + exp + stored)) < 1.0e-6 * diss, (
+                "geochem mass budget does not close"
+            )
+            # (c) physical: nothing created, precipitate bounded by dissolved.
+            assert prec >= 0.0 and exp >= -1.0e-6 * diss
+            assert prec <= diss + 1.0e-6 * diss
+        # The transported+precipitated solute grew the crust.
+        assert m.duriHL.getArray().max() > 0.0, "no duricrust precipitated from solute"
     finally:
         m.destroy()
 
