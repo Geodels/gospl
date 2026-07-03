@@ -134,8 +134,11 @@ BibTeX::
         DOI={10.21105/joss.02804}
     }
 
-Research using goSPL
--------------------------
+Examples of research using goSPL
+----------------------------------------
+
+Husson et al. (2022) **Javanese Homo erectus on the move in SE Asia circa 1.8 Ma**, Scientific Reports, 12:19012, `doi: 10.1038/s41598-022-23206-9 <https://www.nature.com/articles/s41598-022-23206-9>`_.
+
 
 Salles et al. (2023) **Hundred million years of landscape dynamics from catchment to global scale**, Science, 379:6635, `doi: 10.1126/science.add2541 <https://www.science.org/doi/full/10.1126/science.add2541>`_.
 
@@ -144,6 +147,21 @@ Salles et al. (2023) **Landscape dynamics and the Phanerozoic diversification of
 
 
 Salles et al. (2024) **Physiography, foraging mobility, and the first peopling of Sahul**, Nature Communications, 15:3430, `doi: 10.1038/s41467-024-47662-1 <https://doi.org/10.1038/s41467-024-47662-1>`_.
+
+
+Hadler Boggiani et al. (2025) **The roles of surface processes in porphyry copper deposit preservation**, Earth Surface Dynamics, 13:683-704, `doi: 10.5194/esurf-13-683-2025 <https://esurf.copernicus.org/articles/13/683/2025/>`_.
+
+
+Lorcery et al. (2025) **Deep time evolution of the Latitudinal Diversity Gradient: insights from mechanistic models**, PLOS ONE, 20:e0332766, `doi: 10.1371/journal.pone.0332766 <https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0332766>`_.
+
+
+Salles et al. (2025) **Carbonate burial regimes, the Meso-Cenozoic climate, and nannoplankton expansion**, Proceedings of the National Academy of Sciences, 122:e2516468122, `doi: 10.1073/pnas.2516468122 <https://www.pnas.org/doi/10.1073/pnas.2516468122>`_.
+
+
+Hadler Boggiani et al. (2026) **Evolution and Provenance of the Polish Rotliegend in the Southern Permian Basin**, Journal of Geophysical Research: Earth Surface, 131:e2025JF008473, `doi: 10.1029/2025JF008473 <https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/2025JF008473>`_.
+
+
+Shyu et al. (2026) **DynEarthSol v2.0: an efficient explicit Lagrangian solver for geodynamics, surface processes, and earthquake-cycle dynamics**, EGUsphere [preprint], `doi: 10.5194/egusphere-2026-2922 <https://egusphere.copernicus.org/preprints/2026/egusphere-2026-2922/>`_.
 
 
 Contributing to goSPL

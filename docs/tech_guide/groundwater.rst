@@ -45,6 +45,13 @@ effective rainfall that infiltrates,
 held at zero under standing water (sea, ponded lakes) and under ice, where the
 head is pinned to the surface or precipitation does not infiltrate.
 
+The infiltration fraction :math:`f_{infil}` is a scalar or a per-vertex map, and
+three optional (default-off) modulations refine it: **subglacial recharge** lets
+a fraction of the glacial meltwater (the ice model's ``iceMeltRiverL``) infiltrate
+under ice — the one recharge path allowed there; **lithology** scales it by the
+exposed coarse fraction so coarse infiltrates more than fine (dual lithology); and
+**slope** reduces it on steeper terrain as :math:`f/(1+\mathrm{slope}/\mathrm{slope}_{ref})`.
+
 Implicit discretisation (and why)
 ---------------------------------
 
@@ -87,20 +94,41 @@ The aquifer base :math:`z_{bed}` is prescribed (``aquifer_base`` scalar or
 per-vertex map), or — with ``aquifer_base: from_soil`` — tied to the bedrock
 elevation :math:`z_{bed} = l_{Hbed} - d_{bedrock}` (the *permeable regolith over
 impermeable bedrock* model of laterite terrains), which requires soil tracking.
+In a **depositional basin** the porous sediment fill is itself the aquifer, so the
+base is taken as the deeper of :math:`l_{Hbed} - d_{bedrock}` and the bottom of the
+stratigraphic pile :math:`z - \sum H` — uplands keep the thin-regolith base, basins
+deepen to the fill bottom.
 
 Baseflow closure
 ----------------
 
 With ``conserve_baseflow`` on, the recharge that does not go into aquifer storage
-is returned to the surface-water network as **baseflow** at the seepage nodes,
+returns to the surface-water network as **baseflow** at the seepage nodes,
 
 .. math::
 
    Q_{seep} = \sum_{owned}\!\big(R\,A\big) - \sum_{owned} S\,\frac{h - h_{old}}{\Delta t}\,A ,
 
-so that total river discharge stays :math:`\approx \mathrm{rain} - \mathrm{evap}`
-over the quasi-steady step (in the steady limit :math:`\sum \mathrm{baseflow}
-\approx \sum \mathrm{recharge}`). It is written as the ``baseflow`` output.
+(written as the ``baseflow`` output). It is also **re-injected into the surface-flow
+source**: the runoff becomes :math:`b = \mathrm{rain}\,A - R\,A + Q_{seep}`, so the
+infiltrated recharge leaves surface runoff and re-emerges at the seepage nodes —
+rivers are physically baseflow-fed and total discharge stays
+:math:`\approx \mathrm{rain} - \mathrm{evap}` (net-neutral globally; in the steady
+limit :math:`\sum \mathrm{baseflow} \approx \sum \mathrm{recharge}`). It is applied
+once per step (the single runoff-source reset) so the two per-step flow-accumulation
+solves do not double-count it.
+
+Lake ↔ aquifer volume coupling
+------------------------------
+
+Lakes, rivers and the sea are fixed-head boundaries (:math:`h = z`) for the head
+solve. With the opt-in ``lake_exchange`` the **lake volume budget** is additionally
+debited/credited by the across-bed groundwater flux. After the head solve the signed
+per-node exchange :math:`\nabla\!\cdot\!(T\nabla h)\,A = -(L h)\,A` is formed
+(positive = the aquifer discharges *into* the lake, negative = the lake *leaks* into
+the aquifer), aggregated per lake, and fed into the lake's inflow — gains added,
+leakage debited and clamped at the available water (mirroring the lake-surface
+evaporation). Off by default (the conventional fixed-head treatment).
 
 Duricrust formation and armoring
 --------------------------------
@@ -147,12 +175,15 @@ Stratigraphic induration record
 When stratigraphy is recorded (a positive ``strat`` interval), the induration is
 archived per layer as ``stratDuri`` — an intensive property in :math:`[0,1]`,
 distinct from the depositional erodibility ``stratK`` (they multiply at the
-exposed surface). Each step the live crust is written down into the top layer
-(**formation**); a fresh deposit buries it with an uncemented (0) layer
-(**preservation**); and when erosion exhumes a previously buried indurated layer
-its preserved value re-arms the surface (**exhumation**). This is the multi-cycle,
-stacked-duricrust / relief-inversion behaviour of cratonic (e.g. Australian
-laterite) landscapes. ``stratDuri`` advects with the pile like the porosity, is
+exposed surface). Each step the live crust is written down across its **depth
+range** — every layer whose top lies within the crust thickness :math:`duriH`
+below the surface is raised toward the live induration, so a thick crust indurates
+the several thin layers it physically spans (**formation**); a fresh deposit buries
+it with an uncemented (0) layer (**preservation**); and when erosion exhumes a
+previously buried indurated layer its preserved value re-arms the surface, which
+therefore resists incision over the crust's full thickness (**exhumation**). This
+is the multi-cycle, stacked-duricrust / relief-inversion behaviour of cratonic
+(e.g. Australian laterite) landscapes. ``stratDuri`` advects with the pile like the porosity, is
 compaction-neutral, and is written to / restored from the stratal output; it is
 exposed per layer as the ``induration`` field of ``gospl-strata-volume``.
 

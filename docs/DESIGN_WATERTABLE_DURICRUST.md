@@ -722,7 +722,14 @@ user-facing feature updates the **input-file reference**, the **technical guide*
 
 ---
 
-## 15. Open decisions (defaults chosen, revisit on validation)
+## 15. Design decisions — status
+
+**Status summary.** Every decision below is **resolved and implemented** except one.
+The single genuinely **open / deferred** item is the **Level-B** conservative
+geochemistry (a separate solute-transport module — it also gates duricrust
+**solute-source provenance**, §11). One **low-priority** simplification remains
+optional (a pure steady head solve if validation ever shows the equilibrium limit
+everywhere). All other bullets are marked **DONE / as built** with the code path.
 
 - **Soil-model dependency — DECIDED.** This design targets the **Option-2.5** soil model
   (`DESIGN_SOIL_REGOLITH.md`): `Lsoil` = weathering-only regolith, deposited sediment in the

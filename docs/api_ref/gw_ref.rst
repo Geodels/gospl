@@ -26,7 +26,9 @@ Class GWMesh
       ~GWMesh._makeGWKSP
       ~GWMesh._solveHead
       ~GWMesh._gwZbed
+      ~GWMesh._surfaceSlope
       ~GWMesh._baseflowClosure
+      ~GWMesh._lakeExchangeFlux
       ~GWMesh._arrhenius
       ~GWMesh._weatheringSupply
       ~GWMesh._updateDuricrust
@@ -46,7 +48,9 @@ Private functions
 .. automethod:: flow.gwplex.GWMesh._makeGWKSP
 .. automethod:: flow.gwplex.GWMesh._solveHead
 .. automethod:: flow.gwplex.GWMesh._gwZbed
+.. automethod:: flow.gwplex.GWMesh._surfaceSlope
 .. automethod:: flow.gwplex.GWMesh._baseflowClosure
+.. automethod:: flow.gwplex.GWMesh._lakeExchangeFlux
 .. automethod:: flow.gwplex.GWMesh._arrhenius
 .. automethod:: flow.gwplex.GWMesh._weatheringSupply
 .. automethod:: flow.gwplex.GWMesh._updateDuricrust
