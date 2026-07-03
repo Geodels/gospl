@@ -512,6 +512,16 @@ class WriteMesh(object):
                         **self._h5opts,
                     )
                     f["soluteflux"][:, 0] = self.gwSoluteFlux.copy()
+                    if self.gwNspecies > 1:
+                        # Dominant crust-forming tracer per node (−1 = no crust);
+                        # small ints stored as float32 for the generic XDMF path.
+                        f.create_dataset(
+                            "crust_type",
+                            shape=(self.lpoints, 1),
+                            dtype="float32",
+                            **self._h5opts,
+                        )
+                        f["crust_type"][:, 0] = self.gwCrustType.astype("float32")
 
             f.create_dataset(
                 "sedLoad",
@@ -906,6 +916,8 @@ class WriteMesh(object):
                     _gwnames += ["duricrust", "induration", "Karmor"]
                 if getattr(self, "gwGeochemOn", False):
                     _gwnames += ["solute", "soluteflux"]
+                    if self.gwNspecies > 1:
+                        _gwnames += ["crust_type"]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

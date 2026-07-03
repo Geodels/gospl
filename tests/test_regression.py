@@ -890,6 +890,43 @@ def test_geochem_ocean_flux():
         m.destroy()
 
 
+def test_geochem_multitracer():
+    """
+    Protects (Level-B geochemistry, **G4** — DESIGN_WATERTABLE_GEOCHEM.md): the
+    `n_species` array runs multiple independent tracers that give **distinct
+    duricrust typing**. With two tracers (carbonate, silica) of different
+    weatherability / precipitation rate, both are active with distinct per-tracer
+    budgets, and the per-node dominant-crust field `gwCrustType` (output
+    `crust_type`) is a valid argmax index that resolves to *both* tracers in
+    different places.
+    """
+    m = _gw_model("minimal_gw_geochem.yml")
+    try:
+        assert m.gwNspecies == 2
+        m.tEnd = m.tNow + 3 * m.dt
+        m.runProcesses()
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+
+        own = m.inIDs == 1
+        ct = m.gwCrustType
+        # Both tracers active, with distinct behaviour (different params).
+        assert m.gwDissolved[0] > 0.0 and m.gwDissolved[1] > 0.0
+        assert m.gwPrecip[0] != m.gwPrecip[1]
+        assert m.gwOceanFlux[0] != m.gwOceanFlux[1]
+        # crust_type is a valid dominant index, consistent with the argmax.
+        assert ((ct >= -1) & (ct < m.gwNspecies)).all()
+        crusted = m.gwCrustBySpecies.sum(axis=1) > 0.0
+        assert np.array_equal(
+            ct[crusted], m.gwCrustBySpecies[crusted].argmax(axis=1)
+        )
+        assert (ct[~crusted] == -1).all()
+        # Distinct typing: each tracer is the dominant crust former somewhere.
+        assert (ct[own] == 0).any() and (ct[own] == 1).any(), "no distinct crust types"
+    finally:
+        m.destroy()
+
+
 def test_groundwater_recharge():
     """
     Protects (water-table + duricrust, **Phase 1** — DESIGN_WATERTABLE_DURICRUST.md

@@ -173,6 +173,10 @@ class GWMesh(object):
                 # Per-node baseflow-carried solute export (m³/yr, summed over
                 # tracers) — the spatial output field (G3).
                 self.gwSoluteFlux = np.zeros(self.lpoints, dtype=np.float64)
+                # Per-node cumulative crust precipitated by each tracer, and the
+                # dominant crust-forming tracer (G4 typing: -1 = no crust).
+                self.gwCrustBySpecies = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                self.gwCrustType = np.full(self.lpoints, -1, dtype=np.int32)
                 # Scratch Vec pair for the per-species transport solve (G1+).
                 self.soluteL = self.hLocal.duplicate()
                 self.soluteG = self.hGlobal.duplicate()
@@ -942,6 +946,8 @@ class GWMesh(object):
             self.gwOceanFlux[k] += float(export_mass[owned].sum())
             # Per-node baseflow export rate (m³/yr), summed over tracers, for output.
             self.gwSoluteFlux += seep_sink * c * A
+            # Per-node crust contributed by this tracer (G4 typing).
+            self.gwCrustBySpecies[:, k] += precip_mass / A * self.gwGeoVsolid[k]
 
         duriH = np.clip(duriH, 0.0, Hmax)
         self.duriHL.setArray(duriH)
@@ -950,13 +956,24 @@ class GWMesh(object):
             self.duriF = duriH / Hmax
             self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
 
+        # G4 typing: the dominant crust-forming tracer per node (−1 = no crust).
+        tot = self.gwCrustBySpecies.sum(axis=1)
+        self.gwCrustType = np.where(
+            tot > 0.0, self.gwCrustBySpecies.argmax(axis=1), -1
+        ).astype(np.int32)
+
         if self.verbose:
             tot = MPI.COMM_WORLD.allreduce(
                 float(self.gwSoluteFlux[owned].sum()), op=MPI.SUM
             )
             if MPIrank == 0:
+                per = ", ".join(
+                    "%s=%0.3g" % (self.gwGeoName[k], self.gwOceanFlux[k])
+                    for k in range(int(self.gwNspecies))
+                )
                 print(
-                    "[gw] dissolved solute flux to surface: %0.4g m3/yr" % tot,
+                    "[gw] dissolved solute flux to surface: %0.4g m3/yr "
+                    "(cumulative per tracer: %s)" % (tot, per),
                     flush=True,
                 )
         return
