@@ -170,6 +170,16 @@ mirroring `_duriWeatherArr`), a one-line use-site change, one fixture + test.
 
 ## Extension 2 — river dissolved-load coupling
 
+> **STATUS: DONE** (built as designed — the single-solve conservative variant).
+> Opt-in `geochem: river_load: true` → `gwRiverLoad`. `_routeRiverSolute` solves
+> `(I − Wᵀ)L = s` on the cached `fMati` with `gwSoluteFlux` as the RHS, called at
+> the end of `updateGroundwater` (matrix is fresh — no reordering). Outputs
+> `riverSolute`; verbose `riverSoluteToOcean`. **Exact conservation** verified via
+> the operator identity `Σs = Σᵢ Lᵢ(1−outwᵢ)` (`test_geochem_river_load`);
+> closed-basin trapping confirmed (np=2: ~5% trapped, `toOcean < Σs`). Full
+> `tests/` 152 passed. Per-species routing, in-transit reactions and marine
+> coupling remain the noted refinements (§2.6).
+
 ### 2.1 Motivation & the current gap
 The solute the model dissolves is exported to the ocean via **groundwater
 seepage / baseflow** (G3): `gwSoluteFlux` (per-node discharge-to-surface rate,

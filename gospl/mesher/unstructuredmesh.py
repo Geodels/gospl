@@ -1173,6 +1173,9 @@ class UnstMesh(object):
             if getattr(self, "gwGeochemOn", False):
                 self.soluteL.destroy()
                 self.soluteG.destroy()
+                if getattr(self, "gwRiverLoad", False):
+                    self.riverSoluteL.destroy()
+                    self.riverSoluteG.destroy()
 
         self.iMat.destroy()
         self.lgmap_col.destroy()

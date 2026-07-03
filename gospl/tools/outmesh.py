@@ -557,6 +557,16 @@ class WriteMesh(object):
                             **self._h5opts,
                         )
                         f["crust_source"][:, 0] = self.gwCrustSource.astype("float32")
+                    if getattr(self, "gwRiverLoad", False):
+                        # River dissolved load: solute routed down the surface
+                        # network (m³/yr), accumulating downstream to the coast.
+                        f.create_dataset(
+                            "riverSolute",
+                            shape=(self.lpoints, 1),
+                            dtype="float32",
+                            **self._h5opts,
+                        )
+                        f["riverSolute"][:, 0] = self.riverSolute.copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -968,6 +978,8 @@ class WriteMesh(object):
                         _gwnames += ["crust_type"]
                     if getattr(self, "provOn", False):
                         _gwnames += ["crust_source"]
+                    if getattr(self, "gwRiverLoad", False):
+                        _gwnames += ["riverSolute"]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

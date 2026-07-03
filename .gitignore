@@ -51,3 +51,4 @@ MANIFEST
 .ipynb_checkpoints
 fortran/meshparams.mod
 gw_geochemlitho_out
+gw_river_out

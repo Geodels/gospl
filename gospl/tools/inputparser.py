@@ -2173,6 +2173,10 @@ class ReadYaml(object):
             self.gwGeoPrecip = [float(s.get("precip_rate", 1.0)) for s in species] or [1.0]
             self.gwGeoVsolid = [float(s.get("solid_volume", 1.0)) for s in species] or [1.0]
             self.gwGeochemConserve = bool(geo.get("conserve", True))
+            # ext 2: route the groundwater-exported (seepage/baseflow) solute
+            # DOWN the surface drainage network to the shoreline (river dissolved
+            # load), reusing the flow-accumulation matrix. Opt-in.
+            self.gwRiverLoad = bool(geo.get("river_load", False))
 
         except KeyError:
             self.gwOn = False
@@ -2217,6 +2221,7 @@ class ReadYaml(object):
             self.gwGeoPrecip = [1.0]
             self.gwGeoVsolid = [1.0]
             self.gwGeochemConserve = True
+            self.gwRiverLoad = False
 
         return
 

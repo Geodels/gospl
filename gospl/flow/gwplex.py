@@ -193,6 +193,15 @@ class GWMesh(object):
                 self.soluteG = self.hGlobal.duplicate()
                 self.soluteL.set(0.0)
                 self.soluteG.set(0.0)
+                # ext 2: river dissolved-load routing — accumulated solute flux
+                # (m³/yr) down the surface network + its ocean-delivered total.
+                if getattr(self, "gwRiverLoad", False):
+                    self.riverSoluteG = self.hGlobal.duplicate()
+                    self.riverSoluteL = self.hLocal.duplicate()
+                    self.riverSoluteG.set(0.0)
+                    self.riverSoluteL.set(0.0)
+                    self.riverSolute = np.zeros(self.lpoints, dtype=np.float64)
+                    self.riverSoluteToOcean = 0.0
 
         return
 
@@ -277,6 +286,9 @@ class GWMesh(object):
         # precipitation feeds the crust `duriH` (replacing the Level-A supply).
         if getattr(self, "gwGeochemOn", False):
             self._updateSolute()
+            # ext 2: route the exported solute down the rivers to the shoreline
+            # (river dissolved load). Uses the flow matrix built earlier this step.
+            self._routeRiverSolute()
         # Phase 6: sync the live crust with the per-layer stratigraphic induration
         # archive (exhumation re-arm + formation write-down) after both sources.
         if getattr(self, "duriOn", False):
@@ -1091,4 +1103,56 @@ class GWMesh(object):
                     "(cumulative per tracer: %s)" % (tot, per),
                     flush=True,
                 )
+        return
+
+    def _routeRiverSolute(self):
+        r"""
+        Route the groundwater-exported (seepage/baseflow) solute **down the
+        surface drainage network** to the shoreline — the river dissolved load
+        (Level-B extension 2, DESIGN_GEOCHEM_EXTENSIONS.md §2).
+
+        A conservative passive tracer on the flow graph: no deposition, no
+        coarse/fine, no pit-overspill cascade. One implicit accumulation solve
+        ``(I − Wᵀ) L = s`` reusing the **cached flow-accumulation matrix**
+        ``fMati`` (the ``_getSedFlux`` pattern), with the per-node seepage export
+        ``gwSoluteFlux`` (already an extensive m³/yr flux — no area weighting) as
+        the source. ``L`` (``riverSolute``) is the accumulated dissolved load at
+        every node, increasing downstream; solute reaching a coastal/outlet exit
+        leaves the continent (summed into ``riverSoluteToOcean``), while solute
+        routed into a truly closed basin terminates there (evaporite trapping) —
+        both fall out of the filled-topo matrix with no special handling.
+
+        Called at the end of ``updateGroundwater`` — ``flowAccumulation`` (which
+        caches ``fMati``) runs earlier in the step, so the matrix is fresh and
+        no reordering is needed. No-op unless ``river_load`` is on; the flow
+        matrix must exist (guarded for the very first call). Collective (KSP).
+        """
+        if not getattr(self, "gwRiverLoad", False):
+            return
+        if getattr(self, "fMati", None) is None:
+            return                                    # no flow matrix yet
+        # RHS = per-node seepage export (m³/yr), already extensive.
+        self.soluteL.setArray(self.gwSoluteFlux)
+        self.dm.localToGlobal(self.soluteL, self.tmp)
+        # (I − Wᵀ) L = s — upstream accumulation on the flow matrix.
+        self._solve_KSP(False, self.fMati, self.tmp, self.riverSoluteG)
+        self.dm.globalToLocal(self.riverSoluteG, self.riverSoluteL)
+        self.riverSolute = np.maximum(self.riverSoluteL.getArray().copy(), 0.0)
+        # Delivered to the ocean = routed load reaching a coast / outlet exit
+        # (closed continental basins are interior terminals — trapped, excluded).
+        owned = self.inIDs == 1
+        exitm = np.zeros(self.lpoints, dtype=bool)
+        exitm[self.seaID] = True
+        outl = getattr(self, "outletIDs", None)
+        if outl is not None:
+            exitm[outl] = True
+        self.riverSoluteToOcean = MPI.COMM_WORLD.allreduce(
+            float(self.riverSolute[owned & exitm].sum()), op=MPI.SUM
+        )
+        if MPIrank == 0 and self.verbose:
+            print(
+                "[gw] river dissolved load delivered to ocean: %0.4g m3/yr"
+                % self.riverSoluteToOcean,
+                flush=True,
+            )
         return

@@ -40,6 +40,7 @@ Class GWMesh
       ~GWMesh._solveSoluteTransport
       ~GWMesh._soluteSolveRHS
       ~GWMesh._updateSolute
+      ~GWMesh._routeRiverSolute
 
 
 Public functions
@@ -68,3 +69,4 @@ Private functions
 .. automethod:: flow.gwplex.GWMesh._solveSoluteTransport
 .. automethod:: flow.gwplex.GWMesh._soluteSolveRHS
 .. automethod:: flow.gwplex.GWMesh._updateSolute
+.. automethod:: flow.gwplex.GWMesh._routeRiverSolute

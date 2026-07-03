@@ -242,6 +242,18 @@ each buried crust is and *where* its chemistry came from. Outputs:
 multi-species aqueous equilibrium (speciation, pH) is out of scope by design —
 the lumped multi-tracer model is the scale-appropriate choice at km / My.
 
+With ``geochem: river_load`` on, the exported solute does not simply vanish to
+the ocean: it is **routed down the surface drainage network** as a conservative
+passive tracer (the river dissolved load — the dominant natural pathway for
+weathering products to the sea). One implicit accumulation solve
+:math:`(I - W^\mathsf{T})\,L = s` reuses the flow-accumulation matrix with the
+per-node seepage export :math:`s` as the source, so the dissolved load :math:`L`
+(``riverSolute``) grows downstream and is delivered at the shoreline; solute
+routed into a closed continental basin is trapped there (evaporite behaviour).
+No deposition or cascade is needed — unlike sediment, dissolved load neither
+settles nor fills pits. The coastal-delivered total cross-checks the lumped
+per-tracer ocean flux.
+
 Compatibility
 -------------
 

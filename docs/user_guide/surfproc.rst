@@ -800,6 +800,13 @@ carbonate). Two forms, on top of the scalar default:
 The map is the present-day surface lithology and is static (it does not follow
 exhumation of deeper layers — a documented refinement).
 
+Set ``river_load: True`` to route the exported (seepage/baseflow) solute **down
+the surface drainage network** to the shoreline — the river dissolved load. A
+single conservative accumulation on the flow matrix; the routed field
+``riverSolute`` (m³/yr) grows downstream, is delivered at the coast, and is
+trapped in closed continental basins (evaporite behaviour). No new inputs beyond
+the flag.
+
 .. note::
 
     New outputs: ``recharge``, ``wtable``, ``wtdepth`` (water table), ``baseflow``

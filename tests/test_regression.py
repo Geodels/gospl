@@ -1056,6 +1056,48 @@ def test_geochem_spatial_weatherability():
         m.destroy()
 
 
+def test_geochem_river_load():
+    """
+    Protects (Level-B geochemistry, extension 2 — DESIGN_GEOCHEM_EXTENSIONS.md
+    §2): the groundwater-exported (seepage) solute is routed **down the surface
+    drainage network** as a conservative passive tracer, reusing the flow-
+    accumulation matrix ``(I − Wᵀ) L = s``. Verified by rebuilding the flow matrix,
+    injecting a known unit source and routing it directly: the load **accumulates
+    downstream** (max ≫ source), and it is **conserved** — by the flow operator's
+    column-sum identity ``Σ s == Σᵢ Lᵢ·(1 − outwᵢ)`` with ``(1 − outw) = (I − W)·1
+    = fMatiᵀ·1`` (using the *actual* matrix weights, incl. outlet/pit overrides).
+    """
+    m = _gw_model("minimal_gw_river.yml")
+    try:
+        assert m.gwGeochemOn and m.gwRiverLoad
+        assert hasattr(m, "riverSolute") and hasattr(m, "riverSoluteG")
+        m.tEnd = m.tNow + m.dt
+        m.runProcesses()                      # one step; river_load runs in-pipeline
+        assert np.all(np.isfinite(m.riverSolute)) and (m.riverSolute >= 0.0).all()
+
+        # Controlled check: rebuild the flow matrix, inject a unit source, route it.
+        m.flowAccumulation()
+        m.gwSoluteFlux[:] = 1.0
+        m._routeRiverSolute()
+        # Accumulation: the routed load far exceeds the per-node unit source.
+        assert m.riverSolute.max() > 1.0 + 1.0e-9, "no downstream accumulation"
+        # Exact conservation via the operator: Σ s == Σᵢ Lᵢ·(1 − outwᵢ). Build s
+        # afresh (global), and (1 − outw) = fMatiᵀ·1 with the real matrix weights.
+        s = m.hGlobal.duplicate()
+        m.soluteL.setArray(m.gwSoluteFlux)
+        m.dm.localToGlobal(m.soluteL, s)
+        e = m.hGlobal.duplicate()
+        e.set(1.0)
+        y = m.hGlobal.duplicate()
+        m.fMati.multTranspose(e, y)           # y = (I − W)·1  = per-node (1 − outw)
+        lhs = e.dot(s)                        # Σ s  (total injected)
+        rhs = y.dot(m.riverSoluteG)           # Σᵢ Lᵢ·(1 − outwᵢ) == Σ s
+        s.destroy(); e.destroy(); y.destroy()
+        assert np.isclose(lhs, rhs, rtol=1.0e-5), "river solute not conserved (%g vs %g)" % (lhs, rhs)
+    finally:
+        m.destroy()
+
+
 def test_groundwater_recharge():
     """
     Protects (water-table + duricrust, **Phase 1** — DESIGN_WATERTABLE_DURICRUST.md
