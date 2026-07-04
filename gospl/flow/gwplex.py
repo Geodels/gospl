@@ -150,6 +150,14 @@ class GWMesh(object):
             # n_species=1, multi-tracer otherwise — sharing one transport template.
             if getattr(self, "gwGeochemOn", False):
                 nsp = int(self.gwNspecies)
+                if getattr(self, "duriOn", False) and MPIrank == 0 and self.verbose:
+                    print(
+                        "[gw] geochem on: the duricrust source is the transported "
+                        "precipitated solute — the per-species `precip_rate` (a "
+                        "1/yr rate) governs crust growth; the Level-A `form_rate` "
+                        "is NOT used. Scale `precip_rate` down for long timesteps.",
+                        flush=True,
+                    )
                 # Per-species parameters (parser lists -> numpy, len n_species).
                 # `gwGeoWeather` stays a RAW list (each entry a scalar, a
                 # per-vertex `[file, key]` map, or a table used with a lithology
@@ -1148,12 +1156,16 @@ class GWMesh(object):
             Deff = diss / (A * dt)
 
             # 2. Precipitation sink at the fringe — a LINEAR removal `k_p·Φ`
-            # (proportional to the local concentration). Kept linear so the
-            # operator is constant under constant forcing → the solute reaches a
-            # true per-step steady state (a hard `c > c_sat` on/off gate instead
-            # oscillates). The `c_sat` saturation threshold is a documented
-            # refinement needing a nonlinear/Picard treatment (see DESIGN §3).
-            p = self.gwGeoPrecip[k] * Phi
+            # (proportional to the local concentration), **self-limiting** as the
+            # crust fills: `·(1 − duriH/duriH_max)` (mirrors the Level-A ODE), so a
+            # crust at `max_thickness` REJECTS further solute — precipitation → 0
+            # there and the solute is exported to the rivers instead of piling into
+            # an already-full crust. Uses the running `duriH` (updated per species),
+            # so it also shares the remaining room across tracers. Kept linear so
+            # the operator is constant under constant forcing → the solute reaches
+            # a true per-step steady state (a hard `c > c_sat` gate would
+            # oscillate; `c_sat` is a documented nonlinear refinement, DESIGN §3).
+            p = self.gwGeoPrecip[k] * Phi * np.maximum(0.0, 1.0 - duriH / Hmax)
 
             # 3. Transport: (advection + seepage sink + precip sink) c = Deff.
             coeffs = adv.copy()

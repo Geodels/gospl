@@ -762,9 +762,11 @@ the water table sits in the capillary fringe (feeding the crust ``duriH``) and
 the remainder **exported** to the rivers — a closed mass budget
 (``dissolved = precipitated + exported``) with a dissolved flux to the ocean.
 When ``geochem:`` is on the transported precipitation **replaces** the Level-A
-proxy/rate supply as the crust source. Coupled multi-species aqueous equilibrium
-(speciation, pH, activity) is deliberately **out of scope** — the lumped
-multi-tracer model is the scale-appropriate choice at km / My.
+proxy/rate supply as the crust source — so the duricrust ``form_rate`` is **not
+used**; the per-species ``precip_rate`` (below) governs crust growth instead.
+Coupled multi-species aqueous equilibrium (speciation, pH, activity) is
+deliberately **out of scope** — the lumped multi-tracer model is the
+scale-appropriate choice at km / My.
 
 A single tracer ships by default; several tracers give calcrete / silcrete /
 ferricrete typing (the dominant one per node is the ``crust_type`` output). Full
@@ -783,7 +785,7 @@ declaration with sensible values:
             species:
               - name: carbonate           # tracer label (names the per-species outputs)
                 weatherability: 1.0        # relative dissolution rate (scalar, map, or by-class)
-                precip_rate: 1.0           # relative fringe-precipitation efficiency
+                precip_rate: 1.0           # fringe-precipitation RATE (1/yr); scale down for large dt
                 solid_volume: 1.0          # crust volume per unit precipitated solute
                 c_sat: 1.0                 # saturation threshold (reserved; see note)
                 river_decay: 0.0           # in-transit river loss (0 = conservative)
@@ -841,7 +843,7 @@ declaration with sensible values:
       - list of per-lithology weatherabilities gathered by the ``lithology`` map or the provenance class (see the three forms below).
       - *(none)*
     * - ``precip_rate``
-      - relative **fringe-precipitation** efficiency ``k_p`` (how readily the transported solute precipitates into crust in the capillary fringe).
+      - **fringe-precipitation rate** ``k_p`` (per year) — how fast the transported solute precipitates into crust in the capillary fringe. Precipitation is **self-limiting** (``·(1−duriH/max_thickness)``): a crust at ``max_thickness`` rejects further solute, which is exported instead. ``k_p`` is a **rate**, so scale it with the timestep — at a My ``dt`` a value near 1 saturates the crust to ``max_thickness`` in one step; use a small value (e.g. ``1e-6``) for gradual growth.
       - ``1.0``
     * - ``solid_volume``
       - crust **volume produced per unit precipitated solute** (a molar-volume-like factor turning precipitated mass into ``duriH``).
