@@ -232,9 +232,22 @@ class GWMesh(object):
         3. **Duricrust** (``_updateDuricrust``, only when ``duriOn``): evolve the
            capillary-fringe crust ``duriH`` and the induration ``duriF`` / armor
            multiplier ``duriKarmor`` from the new water-table depth.
+        4. **Geochemistry** (``_updateSolute``, only when ``gwGeochemOn`` — Level
+           B): per tracer, dissolve → transport (down ``q = -T∇h``) → precipitate
+           at the fringe (feeding ``duriH``, replacing the Level-A supply) →
+           export; a closed mass budget with per-species crust typing, optional
+           solute-source provenance and a dissolved ocean flux.
+        5. **River routing** (``_routeRiverSolute``, only when ``gwRiverLoad``):
+           route the exported solute down the surface drainage network to the
+           coast (per species; optional in-transit loss + marine coupling).
+        6. **Stratigraphic archive** (``_recordInduration``, when ``duriOn`` and
+           stratigraphy is on): record the induration degree and, with geochem,
+           the crust's dominant species / source per layer (exhumation re-arm +
+           formation write-down).
 
-        No-op when ``gwOn`` is off. The head solve is collective (KSP); the
-        recharge and duricrust steps are purely rank-local (per-node).
+        No-op when ``gwOn`` is off. The head, solute-transport and river-routing
+        solves are collective (KSP); recharge, duricrust and the archive are
+        purely rank-local (per-node).
         """
         if not getattr(self, "gwOn", False):
             return

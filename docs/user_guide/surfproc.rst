@@ -755,32 +755,108 @@ soil production rate). ``rate`` and ``prodsoil`` fall back to the proxy when soi
 is off.
 
 A further optional ``geochem:`` sub-block turns on **conservative solute
-geochemistry** (Level B): one or more lumped tracers are dissolved, transported
-along the groundwater flux, precipitated at the fringe (feeding the crust) and
-exported to the rivers, with a closed mass budget and a dissolved flux to the
-ocean. The solute is an ``n_species`` list (a single tracer by default; several
-for calcrete / silcrete / ferricrete typing):
+geochemistry** (Level B). One or more lumped **tracers** (a "species" = a solute
+class such as carbonate, silica or iron) are, each step: **dissolved** on
+subaerial land, **transported** down the groundwater flux, **precipitated** where
+the water table sits in the capillary fringe (feeding the crust ``duriH``) and
+the remainder **exported** to the rivers — a closed mass budget
+(``dissolved = precipitated + exported``) with a dissolved flux to the ocean.
+When ``geochem:`` is on the transported precipitation **replaces** the Level-A
+proxy/rate supply as the crust source. Coupled multi-species aqueous equilibrium
+(speciation, pH, activity) is deliberately **out of scope** — the lumped
+multi-tracer model is the scale-appropriate choice at km / My.
+
+A single tracer ships by default; several tracers give calcrete / silcrete /
+ferricrete typing (the dominant one per node is the ``crust_type`` output). Full
+declaration with sensible values:
 
 .. code:: yaml
 
     groundwater:
         # ... hydrology + duricrust keys ...
         geochem:
-            conserve: True
+            conserve: True                # keep/report the closed solute budget
+            weatherability_from: source_class   # (optional) lithology label for the tables below
+            lithology: [litho, rock_class]      # (optional) standalone per-vertex lithology map
+            river_load: True              # (optional) route the export down the rivers
+            marine_coupling: True         # (optional) accumulate the coastal delivery
             species:
-              - {name: carbonate, weatherability: 1.0, c_sat: 1.0, precip_rate: 1.0, solid_volume: 1.0}
-              - {name: silica,    weatherability: 0.5, c_sat: 2.0, precip_rate: 0.8, solid_volume: 1.0}
+              - name: carbonate           # tracer label (names the per-species outputs)
+                weatherability: 1.0        # relative dissolution rate (scalar, map, or by-class)
+                precip_rate: 1.0           # relative fringe-precipitation efficiency
+                solid_volume: 1.0          # crust volume per unit precipitated solute
+                c_sat: 1.0                 # saturation threshold (reserved; see note)
+                river_decay: 0.0           # in-transit river loss (0 = conservative)
+              - name: silica
+                weatherability: 0.5
+                precip_rate: 0.8
+                river_decay: 0.3
 
-Per-species keys: ``weatherability`` (dissolution scaling), ``precip_rate`` (the
-fringe precipitation rate), ``solid_volume`` (crust volume per unit precipitated
-solute), and ``c_sat`` (a saturation threshold, reserved for a future nonlinear
-refinement). When ``geochem:`` is on, the transported precipitation **replaces**
-the proxy/rate supply as the crust source. Coupled multi-species aqueous
-equilibrium (speciation, pH) is out of scope.
+**Block-level** ``geochem:`` keys:
 
-The ``weatherability`` may vary **in space**, so *lithology* controls which
-species each region yields (e.g. mafic rock → Fe/silica, a carbonate platform →
-carbonate). Three forms, on top of the scalar default:
+.. list-table::
+    :header-rows: 1
+    :widths: 22 58 20
+
+    * - Key
+      - Meaning
+      - Default
+    * - ``species``
+      - list of tracers (one mapping per species; keys below). Empty / absent ⇒ one default tracer.
+      - one tracer
+    * - ``conserve``
+      - keep the per-step mass budget (``dissolved = precipitated + exported``) and report it.
+      - ``True``
+    * - ``weatherability_from``
+      - lithology label for the ``weatherability_by_class`` tables: ``source_class`` (static bedrock) or ``surface_class`` (dynamic top stratigraphic layer). Needs ``provenance:``.
+      - *(none)*
+    * - ``lithology``
+      - ``[file, key]`` per-vertex **integer** lithology map (an alternative label for the by-class tables, independent of provenance).
+      - *(none)*
+    * - ``river_load``
+      - route the exported solute **down the drainage network** to the coast (per species) — the river dissolved load ``riverSolute``.
+      - ``False``
+    * - ``marine_coupling``
+      - accumulate the delivered coastal flux into a per-species marine reservoir + write ``marineSoluteInput``. Needs ``river_load``.
+      - ``False``
+
+**Per-species** keys (inside each ``species:`` entry). ``weatherability``,
+``precip_rate`` and ``solid_volume`` are **relative, dimensionless** tuning knobs
+— what matters is their ratio between species, not the absolute value:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 20 60 20
+
+    * - Key
+      - Meaning
+      - Default
+    * - ``name``
+      - tracer label; names the per-species outputs (e.g. ``solute_carbonate``).
+      - ``solute<i>``
+    * - ``weatherability``
+      - relative **dissolution** rate (scales the Level-A weathering supply for this tracer). A scalar, a per-vertex map ``[file, key]``, or a per-lithology ``weatherability_by_class`` list. ``0`` ⇒ this species does not weather here.
+      - ``1.0``
+    * - ``weatherability_by_class``
+      - list of per-lithology weatherabilities gathered by the ``lithology`` map or the provenance class (see the three forms below).
+      - *(none)*
+    * - ``precip_rate``
+      - relative **fringe-precipitation** efficiency ``k_p`` (how readily the transported solute precipitates into crust in the capillary fringe).
+      - ``1.0``
+    * - ``solid_volume``
+      - crust **volume produced per unit precipitated solute** (a molar-volume-like factor turning precipitated mass into ``duriH``).
+      - ``1.0``
+    * - ``c_sat``
+      - saturation threshold (**reserved** — precipitation is currently a linear fringe sink; a hard ``c > c_sat`` gate is a future nonlinear refinement).
+      - ``1.0``
+    * - ``river_decay``
+      - first-order **in-transit loss** along the river (in-channel precipitation / uptake), per drainage step. ``0`` = conservative; a small value (``0.1``–``0.5``) for a reactive species.
+      - ``0.0``
+
+**Spatial (lithology-driven) weatherability.** The ``weatherability`` may vary in
+space so *lithology* controls which species each region yields (mafic rock →
+Fe / silica, a carbonate platform → carbonate). Three forms, on top of the scalar
+default:
 
 .. code:: yaml
 
@@ -792,54 +868,47 @@ carbonate). Three forms, on top of the scalar default:
               - {name: silica,    weatherability: [litho, sil_wab]}      # (a) per-vertex map
 
 * **(a)** ``weatherability: [file, key]`` — a **per-vertex map** for that species
-  (loaded like ``infiltration`` / the rate-mode ``weatherability``).
+  (loaded like ``infiltration``).
 * **(b)** ``weatherability_by_class: [...]`` with a standalone ``lithology:
   [file, key]`` integer map — a **per-(class, species) table** gathered by that
   per-vertex lithology label (independent of provenance).
-* **(c)** the same ``weatherability_by_class`` with ``weatherability_from:
-  source_class`` — gathered by the provenance label instead (needs
-  ``provenance:`` on; no extra input), keeping ``crust_source`` and the species
-  mix mutually consistent.
+* **(c)** the same ``weatherability_by_class`` with ``weatherability_from:``
+  a provenance class — ``source_class`` (**static** bedrock) or ``surface_class``
+  (**dynamic** — the dominant provenance of the top stratigraphic layer,
+  re-derived each step, so the weatherability tracks the rock actually exposed as
+  erosion exhumes deeper layers or deposition buries the surface). Needs
+  ``provenance:``; no extra input.
 
 The label for (b)/(c) is the ``lithology:`` map when given, otherwise the
-provenance class. For (c) the class may be **static** (``source_class`` — the
-bedrock) or **dynamic** (``weatherability_from: surface_class`` — the dominant
-provenance of the **top stratigraphic layer**, re-derived each step, so the
-weatherability tracks the rock actually exposed as erosion exhumes deeper layers
-or deposition buries the surface under sediment of a different provenance).
+provenance class.
 
-The map is the present-day surface lithology and is static (it does not follow
-exhumation of deeper layers — a documented refinement).
+**River dissolved load** (``river_load: True``). The exported (seepage / baseflow)
+solute is routed **down the drainage network** to the shoreline — the dominant
+natural pathway of weathering products to the sea — **per species** on the flow
+matrix. ``riverSolute`` (m³/yr) grows downstream, is delivered at the coast, and
+is trapped in closed continental basins (evaporite behaviour). Two refinements:
 
-Set ``river_load: True`` to route the exported (seepage/baseflow) solute **down
-the surface drainage network** to the shoreline — the river dissolved load,
-routed **per species** on the flow matrix. The field ``riverSolute`` (m³/yr)
-grows downstream, is delivered at the coast, and is trapped in closed continental
-basins (evaporite behaviour). Two optional refinements:
+* per-species ``river_decay`` — a first-order **in-transit loss** (in-channel
+  precipitation / uptake; ``0`` = conservative);
+* ``marine_coupling: True`` — accumulate the delivered coastal flux into a
+  per-species marine reservoir + write the per-node ``marineSoluteInput``
+  (where weathering solute enters the sea).
 
-* a per-species ``river_decay`` (a first-order **in-transit loss** along the
-  river — in-channel precipitation / biological uptake; ``0`` = conservative);
-* ``marine_coupling: True`` — the delivered coastal flux accumulates into a
-  per-species marine reservoir, with a per-node ``marineSoluteInput`` output
-  showing where weathering solute enters the sea.
-
-.. code:: yaml
-
-        geochem:
-            river_load: True
-            marine_coupling: True
-            species:
-              - {name: carbonate, weatherability: 1.0}
-              - {name: silica,    weatherability: 0.5, river_decay: 0.5}
+Extract the per-basin dissolved / species flux at river mouths with
+``gospl-catchment`` (see :ref:`running`).
 
 .. note::
 
-    New outputs: ``recharge``, ``wtable``, ``wtdepth`` (water table), ``baseflow``
-    (with ``conserve_baseflow``), and ``duricrust``, ``induration``, ``Karmor``
-    (with ``duricrust:``). When stratigraphy is on the per-layer induration is
-    archived (``stratDuri``) and shown by ``gospl-strata-volume --field
-    induration``. With ``geochem:`` on: ``solute`` (concentration), ``soluteflux``
-    (dissolved export) and — for several tracers — ``crust_type`` (dominant crust
-    former). See the technical
+    **Outputs.** Water table: ``recharge``, ``wtable``, ``wtdepth``, and
+    ``baseflow`` (with ``conserve_baseflow``). Duricrust: ``duricrust``,
+    ``induration``, ``Karmor``; with stratigraphy, the per-layer archive
+    ``stratDuri`` (degree) plus ``stratCrustType`` / ``stratCrustSource`` (which
+    crust and from where), all shown by ``gospl-strata-volume``. Geochemistry:
+    ``solute`` (concentration), ``soluteflux`` (dissolved export), ``crust_type``
+    (dominant former, several tracers), ``crust_source`` (with ``provenance:``),
+    ``riverSolute`` (with ``river_load``) and ``marineSoluteInput`` (with
+    ``marine_coupling``). With several tracers every aggregate is **also written
+    per species** (``solute_<name>``, ``soluteflux_<name>``, ``crust_<name>``,
+    ``riverSolute_<name>``). See the technical
     `groundwater documentation <https://gospl.readthedocs.io/en/latest/tech_guide/groundwater.html>`_
     for the formulation.

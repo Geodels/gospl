@@ -33,7 +33,7 @@ Input file
         - **marine deposition** at river mouth,
         - **hillslope processes** (linear and non-linear) in both marine and inland areas,
         - **soil / regolith** production, weathering and transport,
-        - **groundwater** (implicit water table) driving a generic **duricrust** that armors erodibility,
+        - **groundwater** (implicit water table) driving a generic **duricrust** that armors erodibility, with optional **conservative solute geochemistry** (multi-tracer dissolution → transport → precipitation → river/ocean export),
         - **ice sheets and glacial erosion** (glacial abrasion, till/moraine deposition, meltwater and ice loading),
         - **dual-lithology** (coarse/fine) sediment tracking and **sediment provenance** (source-to-sink attribution),
         - **sediment compaction** as stratigraphic layers geometry and properties change,

@@ -325,3 +325,25 @@ hook, a fixture + tests. No new matrix or solver machinery.
 Each is a separate commit on `feat/watertable-geochem` (or a fresh branch),
 following the standing invariants and the AGENTS milestone/checklist.
 
+---
+
+## Post-processing & outputs (DONE)
+
+**Per-species outputs.** With `n_species > 1`, `outmesh` writes per-tracer
+HDF5+XDMF fields named by species — `solute_<name>` (concentration),
+`crust_<name>` (crust contribution), `soluteflux_<name>` (groundwater seepage
+export) and, with `river_load`, `riverSolute_<name>` — alongside the aggregated
+totals (each per-species set sums to its total). `gwSoluteFluxSp` is allocated in
+the general geochem path so `soluteflux_<name>` is available regardless of
+`river_load`.
+
+**Basin extraction (`gospl-catchment`).** The geochem fields grid automatically
+(`gospl-grid` rasterises every step field). `analyse/catchment.basin_solute_flux`
+then extracts, per drainage basin, the **solute outlet** (cell of maximum total
+solute flux) with `basin,lon,lat,val` **plus one column per species** (each
+species' flux at that outlet; they sum to `val`). The total field auto-detects
+`riverSolute` → else `soluteflux`; per-species fields are found by the
+`<total>_` prefix. `basin_outflow` adds a `"solute"` entry when present;
+`catchment_flux` writes `solute{t}.csv`. This is the dissolved-load analogue of
+the water / sediment river-mouth extraction.
+
