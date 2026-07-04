@@ -11,6 +11,22 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _close_figures():
+    """
+    Close any matplotlib figures a test opens so they do not accumulate across
+    the module (the plotting helpers return an axes whose figure the caller owns;
+    past 20 open figures matplotlib emits a "More than 20 figures" warning).
+    """
+    yield
+    try:
+        import matplotlib.pyplot as plt
+
+        plt.close("all")
+    except Exception:
+        pass
+
+
 def _synthetic(tmp_path, nx=12, ny=10, dx=1000.0, L=5, sea=None, time=None):
     h5py = pytest.importorskip("h5py")
     X, Y = np.meshgrid(np.arange(nx) * dx, np.arange(ny) * dx)

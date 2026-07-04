@@ -882,6 +882,12 @@ def main(argv=None):
     # Keep the requested --figsize by default; --tight crops to content.
     ax.figure.savefig(args.out, dpi=200,
                       bbox_inches="tight" if args.tight else None)
+    # Release the figure — the CLI owns it (saved to file), so close it so
+    # repeated invocations don't accumulate open figures (matplotlib's
+    # "More than 20 figures have been opened" warning).
+    import matplotlib.pyplot as plt
+
+    plt.close(ax.figure)
     print("wrote %s (%s; %d layers)" % (args.out, args.kind, data["nlayers"]))
     return 0
 
