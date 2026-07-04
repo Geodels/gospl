@@ -569,7 +569,15 @@ class GWMesh(object):
         )
         if wsum > 0.0:
             bf[seep_owned] = Qtot * A[seep_owned] / wsum
-        self.baseflowL.setArray(bf)
+        # `bf` is set on OWNED nodes only (0 on the halo). Sync the halo from the
+        # owning rank (local -> global -> local) so shared/ghost nodes carry the
+        # owner's value; otherwise the local `baseflowL` has a 0 ring at partition
+        # boundaries — a visible seam in the output (and stale halos). The
+        # re-injection is unaffected (localToGlobal INSERT already takes the
+        # owner's value), this just makes the halo/output consistent.
+        self.tmpL.setArray(bf)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.baseflowL)
         return
 
     def _arrhenius(self):

@@ -1549,6 +1549,12 @@ def test_watertable_parallel(tmp_path):
         f"mean water-table depth differs np1 vs np2: "
         f"{s1['wmean_wt']} vs {s2['wmean_wt']}"
     )
+    # Baseflow output must be partition-consistent (no halo seam): the local
+    # baseflowL equals its owner-synced value on every rank (fixed by the
+    # _baseflowClosure local->global->local sync).
+    assert s2.get("bf_halo", 0.0) < 1.0e-9, (
+        f"baseflow not partition-consistent (halo seam): maxdiff {s2.get('bf_halo')}"
+    )
 
 
 def test_watertable_steady():
@@ -5392,6 +5398,17 @@ try:
     wmean_wt = comm.allreduce(float((wt * area).sum()), op=MPI.SUM) / at
     max_wt = comm.allreduce(float(wt.max()) if len(wt) else 0.0, op=MPI.MAX)
     sum_rech = comm.allreduce(float(rech.sum()), op=MPI.SUM)
+    # Baseflow halo consistency: the local (halo-inclusive) baseflowL must equal
+    # its owner-synced round-trip (0 diff). A partition seam (halo left at 0)
+    # would make this non-zero — guards the _baseflowClosure halo sync.
+    if getattr(m, "gwConserveBaseflow", False):
+        bf = m.baseflowL.getArray().copy()
+        m.tmpL.setArray(bf)
+        m.dm.localToGlobal(m.tmpL, m.tmp)
+        m.dm.globalToLocal(m.tmp, m.tmpL)
+        bf_halo = comm.allreduce(float(np.abs(bf - m.tmpL.getArray()).max()), op=MPI.MAX)
+    else:
+        bf_halo = 0.0
     if comm.Get_rank() == 0:
         with open(sys.argv[2], "w") as f:
             json.dump({
@@ -5400,6 +5417,7 @@ try:
                 "wmean_wt": wmean_wt,
                 "max_wt": max_wt,
                 "sum_rech": sum_rech,
+                "bf_halo": bf_halo,
             }, f)
 finally:
     m.destroy()
