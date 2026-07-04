@@ -175,8 +175,10 @@ class GWMesh(object):
                 self.gwPrecip = np.zeros(nsp, dtype=np.float64)
                 self.gwOceanFlux = np.zeros(nsp, dtype=np.float64)
                 # Per-node baseflow-carried solute export (m³/yr, summed over
-                # tracers) — the spatial output field (G3).
+                # tracers) — the spatial output field (G3) — and its per-species
+                # split (`soluteflux_<name>` output + the river-routing source).
                 self.gwSoluteFlux = np.zeros(self.lpoints, dtype=np.float64)
+                self.gwSoluteFluxSp = np.zeros((self.lpoints, nsp), dtype=np.float64)
                 # Per-node cumulative crust precipitated by each tracer, and the
                 # dominant crust-forming tracer (G4 typing: -1 = no crust).
                 self.gwCrustBySpecies = np.zeros((self.lpoints, nsp), dtype=np.float64)
@@ -203,9 +205,9 @@ class GWMesh(object):
                     self.riverSoluteL.set(0.0)
                     self.riverSolute = np.zeros(self.lpoints, dtype=np.float64)
                     self.riverSoluteToOcean = 0.0
-                    # Per-species routing: per-node seepage export and routed
-                    # river load by tracer (the total fields above are Σ over k).
-                    self.gwSoluteFluxSp = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                    # Per-species routing: routed river load by tracer (the total
+                    # fields above are Σ over k; the per-species seepage source
+                    # `gwSoluteFluxSp` is allocated with the geochem state above).
                     self.riverSoluteSp = np.zeros((self.lpoints, nsp), dtype=np.float64)
                     self.riverSoluteToOceanSp = np.zeros(nsp, dtype=np.float64)
                     self.riverSoluteLost = np.zeros(nsp, dtype=np.float64)  # in-transit
@@ -1058,9 +1060,7 @@ class GWMesh(object):
         adv, divq = self._soluteAdvecCoeffs(h, T)  # advection + seepage sink (G1)
         seep_sink = np.maximum(-divq, 0.0)         # discharge-to-surface coefficient
         self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
-        river = getattr(self, "gwRiverLoad", False)
-        if river:
-            self.gwSoluteFluxSp[:] = 0.0           # per-species export (ext 2)
+        self.gwSoluteFluxSp[:] = 0.0               # per-species export (output + routing)
         prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None
         W = self._weatheringSupply()               # base weathering rate (Level A)
         # ext 1: per-species weatherability. Resolved once and cached, EXCEPT the
@@ -1135,10 +1135,10 @@ class GWMesh(object):
             self.gwDissolved[k] += float(diss[owned].sum())
             self.gwPrecip[k] += float(precip_mass[owned].sum())
             self.gwOceanFlux[k] += float(export_mass[owned].sum())
-            # Per-node baseflow export rate (m³/yr), summed over tracers, for output.
+            # Per-node baseflow export rate (m³/yr): total (summed over tracers)
+            # and the per-species split (output + the river-routing source).
             self.gwSoluteFlux += seep_sink * c * A
-            if river:                               # per-species export (ext 2)
-                self.gwSoluteFluxSp[:, k] = seep_sink * c * A
+            self.gwSoluteFluxSp[:, k] = seep_sink * c * A
             # Per-node crust contributed by this tracer (G4 typing).
             self.gwCrustBySpecies[:, k] += precip_mass / A * self.gwGeoVsolid[k]
 

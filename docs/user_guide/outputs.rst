@@ -131,6 +131,13 @@ with the nested ``duricrust:`` block.
      - Per-node solute **entering the ocean** at coast/outlet exits (marine coupling; m³/yr).
      - ``geochem: marine_coupling``
 
+With **several tracers** the aggregated fields above (``solute``,
+``soluteflux``, ``riverSolute``) are additionally written **per species**, named
+by tracer: ``solute_<name>`` (concentration), ``crust_<name>`` (crust
+contribution), ``soluteflux_<name>`` (groundwater seepage export) and — with
+``river_load`` — ``riverSolute_<name>`` (routed river load). Each set sums to its
+total. (``crust_type`` remains the dominant-tracer label.)
+
 The per-layer diagenetic induration is additionally archived in the
 stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by
 ``gospl-strata-volume`` (see :ref:`running`). With the geochemistry on, each

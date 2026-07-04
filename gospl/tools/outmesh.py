@@ -577,6 +577,30 @@ class WriteMesh(object):
                                 **self._h5opts,
                             )
                             f["marineSoluteInput"][:, 0] = self.marineSoluteInput.copy()
+                    if self.gwNspecies > 1:
+                        # Per-species fields, named by tracer: concentration,
+                        # crust contribution, groundwater seepage export, and —
+                        # with river routing on — the routed river dissolved load.
+                        river = getattr(self, "gwRiverLoad", False)
+                        for k in range(self.gwNspecies):
+                            nm = str(self.gwGeoName[k]).replace(" ", "_")
+                            perk = [
+                                ("solute_%s" % nm, self.gwSolute[:, k]),
+                                ("crust_%s" % nm, self.gwCrustBySpecies[:, k]),
+                                ("soluteflux_%s" % nm, self.gwSoluteFluxSp[:, k]),
+                            ]
+                            if river:
+                                perk.append(
+                                    ("riverSolute_%s" % nm, self.riverSoluteSp[:, k])
+                                )
+                            for field, arr in perk:
+                                f.create_dataset(
+                                    field,
+                                    shape=(self.lpoints, 1),
+                                    dtype="float32",
+                                    **self._h5opts,
+                                )
+                                f[field][:, 0] = arr
 
             f.create_dataset(
                 "sedLoad",
@@ -992,6 +1016,18 @@ class WriteMesh(object):
                         _gwnames += ["riverSolute"]
                         if getattr(self, "gwMarineCoupling", False):
                             _gwnames += ["marineSoluteInput"]
+                    if self.gwNspecies > 1:
+                        # Per-species fields (must match the HDF5 datasets above).
+                        river = getattr(self, "gwRiverLoad", False)
+                        for k in range(self.gwNspecies):
+                            nm = str(self.gwGeoName[k]).replace(" ", "_")
+                            _gwnames += [
+                                "solute_%s" % nm,
+                                "crust_%s" % nm,
+                                "soluteflux_%s" % nm,
+                            ]
+                            if river:
+                                _gwnames += ["riverSolute_%s" % nm]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

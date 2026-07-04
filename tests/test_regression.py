@@ -2104,6 +2104,51 @@ def test_groundwater_dual_provenance_combo():
         m.destroy()
 
 
+def test_geochem_perspecies_outputs(tmp_path, monkeypatch):
+    """
+    Protects (Level-B geochemistry — per-species outputs): with several tracers
+    the model writes **per-species** HDF5 fields named by tracer —
+    ``solute_<name>``, ``crust_<name>``, ``soluteflux_<name>`` and (with river
+    routing) ``riverSolute_<name>`` — alongside the aggregated totals. Verified by
+    running the multitracer river fixture through an output step and reading the
+    HDF5: the per-species datasets exist and sum to their totals.
+    """
+    import os
+    import shutil
+    from gospl.model import Model
+
+    fx = os.path.join(os.path.dirname(__file__), "fixtures")
+    if not os.path.exists(os.path.join(fx, "minimal_gw_river2.yml")):
+        pytest.skip("minimal_gw_river2.yml fixture not present")
+    h5py = pytest.importorskip("h5py")
+    monkeypatch.chdir(tmp_path)
+    for f in ("mesh.npz", "soiltemp.npz"):
+        shutil.copy(os.path.join(fx, f), tmp_path / f)
+    (tmp_path / "gw.yml").write_text(open(os.path.join(fx, "minimal_gw_river2.yml")).read())
+
+    m = Model("gw.yml", verbose=False, showlog=False)
+    x = m.lcoords[:, 0]
+    m.source_class = np.where(x < np.median(x), 0, 1).astype(np.int64)
+    while m.tNow < m.tEnd:
+        m.runProcesses()
+    names = [str(n) for n in m.gwGeoName]
+    m.destroy()
+
+    files = sorted((tmp_path / "gw_river2_out" / "h5").glob("gospl.*.p0.h5"))
+    assert files, "no output HDF5 written"
+    with h5py.File(files[-1], "r") as f:
+        # Per-species datasets exist for every tracer + the routed river load.
+        for nm in names:
+            for pre in ("solute_", "crust_", "soluteflux_", "riverSolute_"):
+                assert pre + nm in f, "missing %s%s" % (pre, nm)
+        # Per-species concentration / seepage / river load sum to their totals.
+        for tot, pre in (("solute", "solute_"), ("soluteflux", "soluteflux_"),
+                         ("riverSolute", "riverSolute_")):
+            persum = np.sum([np.array(f[pre + nm])[:, 0] for nm in names], axis=0)
+            assert np.allclose(persum, np.array(f[tot])[:, 0], rtol=1.0e-5, atol=1.0e-6), \
+                "%s per-species sum != total" % tot
+
+
 def test_groundwater_restart(tmp_path, monkeypatch):
     """
     Protects (water-table + duricrust, **Phase 7 restart**): the water table
