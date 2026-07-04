@@ -536,6 +536,39 @@ class GWMesh(object):
             return zbed
         return z - base
 
+    def _syncHalo(self, arr):
+        r"""
+        Return ``arr`` with its halo/ghost entries overwritten by the **owning
+        rank's** value, via a local→global→local round-trip (``localToGlobal``
+        INSERT takes the owner's value; ``globalToLocal`` broadcasts it back).
+
+        For output fields computed on OWNED nodes only (e.g. the seepage export
+        ``seep_sink·c·A``, or the area-weighted baseflow), the local array's halo
+        stays 0 / stale, which renders as a **seam at partition boundaries** in
+        the per-rank output. Syncing removes the seam. Serial runs have no halo,
+        so this is a no-op there. Rank-local vectors; the round-trip is collective.
+        """
+        self.tmpL.setArray(np.ascontiguousarray(arr, dtype=np.float64))
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        return self.tmpL.getArray().copy()
+
+    def _subaerialMask(self):
+        r"""
+        Boolean per-node mask of **subaerial land** — not marine (``seaID``) and
+        not under a ponded continental lake (``pitIDs>-1 & lFill>z``). The
+        capillary-fringe duricrust forms, and Level-B solute precipitates, ONLY
+        here — there is no capillary fringe under standing water. Rank-local.
+        """
+        z = self.hLocal.getArray()
+        sub = np.zeros(self.lpoints, dtype=bool)
+        sub[self.seaID] = True
+        pitIDs = getattr(self, "pitIDs", None)
+        lFill = getattr(self, "lFill", None)
+        if pitIDs is not None and lFill is not None:
+            sub |= (pitIDs > -1) & (lFill > z)
+        return ~sub
+
     def _baseflowClosure(self, hold, hnew, seep):
         r"""
         Baseflow (seepage-return) accounting (DESIGN_WATERTABLE_DURICRUST.md §3
@@ -570,14 +603,11 @@ class GWMesh(object):
         if wsum > 0.0:
             bf[seep_owned] = Qtot * A[seep_owned] / wsum
         # `bf` is set on OWNED nodes only (0 on the halo). Sync the halo from the
-        # owning rank (local -> global -> local) so shared/ghost nodes carry the
-        # owner's value; otherwise the local `baseflowL` has a 0 ring at partition
-        # boundaries — a visible seam in the output (and stale halos). The
-        # re-injection is unaffected (localToGlobal INSERT already takes the
-        # owner's value), this just makes the halo/output consistent.
-        self.tmpL.setArray(bf)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self.dm.globalToLocal(self.tmp, self.baseflowL)
+        # owning rank so shared/ghost nodes carry the owner's value; otherwise the
+        # local `baseflowL` has a 0 ring at partition boundaries — a visible seam
+        # in the output. The re-injection is unaffected (localToGlobal INSERT
+        # already takes the owner's value); this just fixes the halo/output.
+        self.baseflowL.setArray(self._syncHalo(bf))
         return
 
     def _arrhenius(self):
@@ -795,6 +825,10 @@ class GWMesh(object):
         Hmax = float(self.duriMaxThick)
 
         Phi = np.exp(-(((wt - self.duriFringeDepth) / self.duriFringeWidth) ** 2))
+        # No capillary fringe under standing water: zero the favourability off
+        # subaerial land so the crust neither forms nor is held under the sea /
+        # a ponded lake (a submerged crust then decays via the (1-Phi) term).
+        Phi = np.where(self._subaerialMask(), Phi, 0.0)
         Psi = self._weatheringSupply()
 
         if getattr(self, "gwGeochemOn", False):
@@ -1089,19 +1123,17 @@ class GWMesh(object):
         # weatherability follows the top stratigraphic layer (exhumation/burial).
         if self._gwGeoWeatherArr is None or getattr(self, "gwWeatherFrom", None) == "surface_class":
             self._gwGeoWeatherArr = self._resolveGeoWeather()
-        # Subaerial land only (no dissolution under sea / ponded lake).
-        sub = np.zeros(self.lpoints, dtype=bool)
-        sub[self.seaID] = True
-        pitIDs = getattr(self, "pitIDs", None)
-        lFill = getattr(self, "lFill", None)
-        if pitIDs is not None and lFill is not None:
-            sub |= (pitIDs > -1) & (lFill > z)
-        subaerial = ~sub
-        # Precipitation favourability = the capillary fringe (needs the duricrust).
+        # Subaerial land only — no dissolution AND no fringe precipitation under
+        # the sea / a ponded lake (there is no capillary fringe under standing
+        # water, so a duricrust cannot form there).
+        subaerial = self._subaerialMask()
+        # Precipitation favourability = the capillary fringe (needs the
+        # duricrust), zeroed off subaerial land.
         if getattr(self, "duriOn", False):
             Phi = np.exp(
                 -(((self.wtDepth - self.duriFringeDepth) / self.duriFringeWidth) ** 2)
             )
+            Phi = np.where(subaerial, Phi, 0.0)
         else:
             Phi = np.zeros(self.lpoints, dtype=np.float64)
 
@@ -1162,6 +1194,17 @@ class GWMesh(object):
             self.gwSoluteFluxSp[:, k] = seep_sink * c * A
             # Per-node crust contributed by this tracer (G4 typing).
             self.gwCrustBySpecies[:, k] += precip_mass / A * self.gwGeoVsolid[k]
+
+        # The seepage-export fields are `seep_sink·c·A`; `seep_sink` (from the
+        # local FV advection stencil) is only correct on OWNED nodes, so sync the
+        # halo from the owner (local -> global -> local) — otherwise the
+        # `soluteflux` / `soluteflux_<name>` outputs show a partition seam (like
+        # baseflow). The river routing is unaffected (it uses localToGlobal INSERT,
+        # owner wins). `gwSolute` / `riverSolute` come from global solves and are
+        # already halo-consistent.
+        self.gwSoluteFlux = self._syncHalo(self.gwSoluteFlux)
+        for k in range(int(self.gwNspecies)):
+            self.gwSoluteFluxSp[:, k] = self._syncHalo(self.gwSoluteFluxSp[:, k])
 
         duriH = np.clip(duriH, 0.0, Hmax)
         self.duriHL.setArray(duriH)
