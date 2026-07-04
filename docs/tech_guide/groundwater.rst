@@ -187,6 +187,78 @@ is the multi-cycle, stacked-duricrust / relief-inversion behaviour of cratonic
 compaction-neutral, and is written to / restored from the stratal output; it is
 exposed per layer as the ``induration`` field of ``gospl-strata-volume``.
 
+Conservative geochemistry (Level B, opt-in)
+-------------------------------------------
+
+By default the duricrust supply is a *local, non-conservative* rate (§ above).
+Adding a ``groundwater: geochem:`` block turns on a **conservative solute cycle**:
+one or more lumped tracers are **dissolved**, **transported** with the groundwater
+flux, **precipitated** at the fringe (feeding the crust) and **exported** to the
+rivers, with a closed mass budget. See ``docs/DESIGN_WATERTABLE_GEOCHEM.md``.
+
+Each tracer ``c`` (an ``n_species`` array — a single tracer by default, several
+for calcrete / silcrete / ferricrete typing) obeys a **steady advection–reaction**
+balance, solved once per step (the transport equilibrates within a century step,
+just like the head):
+
+.. math::
+
+   \nabla\!\cdot\!(q\,c) = D - P, \qquad q = -T\nabla h,
+
+- **Dissolution** :math:`D` — a chemical-weathering source on subaerial land
+  (the climate/temperature supply scaled per tracer by ``weatherability``),
+  drawing from a conserved per-node source pool. The ``weatherability`` may vary
+  **in space** (a per-vertex map, or a per-(class, species) table gathered by a
+  standalone lithology map or the provenance class — the static ``source_class``
+  bedrock or the **dynamic** ``surface_class``, the top stratigraphic layer that
+  tracks exhumation/burial), so *lithology* sets which species each region yields
+  — mafic rock → Fe/silica, a carbonate platform → carbonate.
+- **Transport** — first-order upwind advection by the groundwater flux ``q``,
+  built from the head operator's face conductances (geometry-correct on flat and
+  global meshes); a diagonal **seepage sink** where the aquifer discharges makes
+  the operator a well-posed M-matrix.
+- **Precipitation** :math:`P = k_p\,\Phi\,c` — a linear sink at the capillary
+  fringe ``Φ`` that **feeds the crust** ``duriH`` (replacing the local proxy
+  supply when geochem is on). The saturation threshold ``c_sat`` is a future
+  refinement.
+- **Export** — the seepage sink removes the solute discharging to the surface;
+  because the upwind operator is exactly conservative, **each step
+  ``dissolved = precipitated + exported``** (machine precision). The dissolved
+  export is the ``soluteflux`` output and a per-tracer flux to the ocean — the
+  weathering-derived alkalinity/solute delivery relevant to long-term carbonate
+  and climate budgets.
+
+With several tracers, the dominant crust former per node is written as the
+``crust_type`` field (different tracers win in different settings). With in-model
+:ref:`provenance <surfproc>` on, the solute is additionally transported **per
+source-rock class** (by linearity of the transport operator), so the downstream
+crust is **attributed to the upgradient region where its solute dissolved** — the
+dominant source is the ``crust_source`` field (solute-source provenance). The
+crust's dominant species and dominant source region are additionally archived
+**per stratigraphic layer** (``stratCrustType`` / ``stratCrustSource``, the
+categorical companions to the ``stratDuri`` induration degree) — frozen on
+burial and exposed by ``gospl-strata-volume`` — so a cross-section shows *what*
+each buried crust is and *where* its chemistry came from. Outputs:
+``solute`` (concentration), ``soluteflux`` (export), ``crust_type``,
+``crust_source``. Coupled
+multi-species aqueous equilibrium (speciation, pH) is out of scope by design —
+the lumped multi-tracer model is the scale-appropriate choice at km / My.
+
+With ``geochem: river_load`` on, the exported solute does not simply vanish to
+the ocean: it is **routed down the surface drainage network**, **per species**
+(the river dissolved load — the dominant natural pathway for weathering products
+to the sea). For each tracer an implicit accumulation solve reuses the
+flow-accumulation matrix with the per-node seepage export :math:`s` as the
+source, so the dissolved load :math:`L` (``riverSolute``) grows downstream and is
+delivered at the shoreline; solute routed into a closed continental basin is
+trapped there (evaporite behaviour). No deposition or cascade is needed — unlike
+sediment, dissolved load neither settles nor fills pits. An optional per-species
+``river_decay`` adds a first-order **in-transit loss** (a diagonal term
+:math:`(I - W^\mathsf{T} + \kappa I)\,L = s` — in-channel precipitation/uptake),
+and ``marine_coupling`` accumulates the delivered coastal flux into a per-species
+marine reservoir. The coastal-delivered total cross-checks the lumped per-tracer
+ocean flux.
+
 Compatibility
 -------------
 

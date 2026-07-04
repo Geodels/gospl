@@ -66,6 +66,9 @@ class GWMesh(object):
         # Set unconditionally so destroy_DMPlex / guards never hit a missing attr.
         self._gwMat = None
         self._ksp_gw = None
+        # Cached Level-B solute-transport solver + operator (built lazily; G1+).
+        self._soluteMat = None
+        self._ksp_solute = None
 
         if getattr(self, "gwOn", False):
             # --- PETSc state (persistent, halo-synced; in destroy_DMPlex) ---
@@ -141,6 +144,79 @@ class GWMesh(object):
                     np.float64
                 )
 
+            # --- Level-B geochemistry state (opt-in; DESIGN_WATERTABLE_GEOCHEM.md
+            # G0). Allocated only when `gwGeochemOn`; nothing is solved yet (G1+).
+            # The solute is an (lpoints, n_species) array — single-tracer when
+            # n_species=1, multi-tracer otherwise — sharing one transport template.
+            if getattr(self, "gwGeochemOn", False):
+                nsp = int(self.gwNspecies)
+                # Per-species parameters (parser lists -> numpy, len n_species).
+                # `gwGeoWeather` stays a RAW list (each entry a scalar, a
+                # per-vertex `[file, key]` map, or a table used with a lithology
+                # label) — resolved lazily into `_gwGeoWeatherArr` on first use.
+                self._gwGeoWeatherArr = None
+                self.gwGeoRiverDecay = np.asarray(self.gwGeoRiverDecay, dtype=np.float64)
+                self.gwGeoCsat = np.asarray(self.gwGeoCsat, dtype=np.float64)
+                self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
+                self.gwGeoVsolid = np.asarray(self.gwGeoVsolid, dtype=np.float64)
+                # Groundwater solute concentration and the dissolvable source pool
+                # (rank-local, per tracer). The pool is seeded as an ample per-area
+                # reservoir (`1e6 · cell area`), so dissolution is rate-limited
+                # (not exhausted) over normal runs; a `source_pool` YAML refinement
+                # can later tie it to the actual weatherable rock mass.
+                self.gwSolute = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                self.gwSourcePool = 1.0e6 * self.larea[:, None] * np.ones(
+                    (self.lpoints, nsp), dtype=np.float64
+                )
+                # Cumulative mass budget per tracer (m³-equiv, owned nodes) for the
+                # conservation guard / diagnostics: dissolved = precipitated +
+                # exported (ocean) + currently in solution.
+                self.gwDissolved = np.zeros(nsp, dtype=np.float64)
+                self.gwPrecip = np.zeros(nsp, dtype=np.float64)
+                self.gwOceanFlux = np.zeros(nsp, dtype=np.float64)
+                # Per-node baseflow-carried solute export (m³/yr, summed over
+                # tracers) — the spatial output field (G3) — and its per-species
+                # split (`soluteflux_<name>` output + the river-routing source).
+                self.gwSoluteFlux = np.zeros(self.lpoints, dtype=np.float64)
+                self.gwSoluteFluxSp = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                # Per-node cumulative crust precipitated by each tracer, and the
+                # dominant crust-forming tracer (G4 typing: -1 = no crust).
+                self.gwCrustBySpecies = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                self.gwCrustType = np.full(self.lpoints, -1, dtype=np.int32)
+                # Solute-source provenance (G5, only with in-model provenance on):
+                # cumulative crust attributed to each source-rock class (where the
+                # solute dissolved), and the dominant source class per node.
+                if getattr(self, "provOn", False):
+                    self.gwCrustProv = np.zeros(
+                        (self.lpoints, int(self.provNb)), dtype=np.float64
+                    )
+                    self.gwCrustSource = np.full(self.lpoints, -1, dtype=np.int32)
+                # Scratch Vec pair for the per-species transport solve (G1+).
+                self.soluteL = self.hLocal.duplicate()
+                self.soluteG = self.hGlobal.duplicate()
+                self.soluteL.set(0.0)
+                self.soluteG.set(0.0)
+                # ext 2: river dissolved-load routing — accumulated solute flux
+                # (m³/yr) down the surface network + its ocean-delivered total.
+                if getattr(self, "gwRiverLoad", False):
+                    self.riverSoluteG = self.hGlobal.duplicate()
+                    self.riverSoluteL = self.hLocal.duplicate()
+                    self.riverSoluteG.set(0.0)
+                    self.riverSoluteL.set(0.0)
+                    self.riverSolute = np.zeros(self.lpoints, dtype=np.float64)
+                    self.riverSoluteToOcean = 0.0
+                    # Per-species routing: routed river load by tracer (the total
+                    # fields above are Σ over k; the per-species seepage source
+                    # `gwSoluteFluxSp` is allocated with the geochem state above).
+                    self.riverSoluteSp = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                    self.riverSoluteToOceanSp = np.zeros(nsp, dtype=np.float64)
+                    self.riverSoluteLost = np.zeros(nsp, dtype=np.float64)  # in-transit
+                    # Marine coupling: cumulative delivered inventory per tracer
+                    # (m³, integrated over time) + per-node coastal input this step.
+                    if getattr(self, "gwMarineCoupling", False):
+                        self.marineSolute = np.zeros(nsp, dtype=np.float64)
+                        self.marineSoluteInput = np.zeros(self.lpoints, dtype=np.float64)
+
         return
 
     def updateGroundwater(self):
@@ -156,9 +232,22 @@ class GWMesh(object):
         3. **Duricrust** (``_updateDuricrust``, only when ``duriOn``): evolve the
            capillary-fringe crust ``duriH`` and the induration ``duriF`` / armor
            multiplier ``duriKarmor`` from the new water-table depth.
+        4. **Geochemistry** (``_updateSolute``, only when ``gwGeochemOn`` — Level
+           B): per tracer, dissolve → transport (down ``q = -T∇h``) → precipitate
+           at the fringe (feeding ``duriH``, replacing the Level-A supply) →
+           export; a closed mass budget with per-species crust typing, optional
+           solute-source provenance and a dissolved ocean flux.
+        5. **River routing** (``_routeRiverSolute``, only when ``gwRiverLoad``):
+           route the exported solute down the surface drainage network to the
+           coast (per species; optional in-transit loss + marine coupling).
+        6. **Stratigraphic archive** (``_recordInduration``, when ``duriOn`` and
+           stratigraphy is on): record the induration degree and, with geochem,
+           the crust's dominant species / source per layer (exhumation re-arm +
+           formation write-down).
 
-        No-op when ``gwOn`` is off. The head solve is collective (KSP); the
-        recharge and duricrust steps are purely rank-local (per-node).
+        No-op when ``gwOn`` is off. The head, solute-transport and river-routing
+        solves are collective (KSP); recharge, duricrust and the archive are
+        purely rank-local (per-node).
         """
         if not getattr(self, "gwOn", False):
             return
@@ -216,11 +305,20 @@ class GWMesh(object):
         # Phase 2: solve the implicit water-table head from this recharge.
         self._solveHead()
 
-        # Phase 3: evolve the capillary-fringe duricrust from the new water table.
+        # Phase 3: evolve the capillary-fringe duricrust from the new water table
+        # (breakdown/decay; the Level-A formation supply is off when geochem is on).
         if getattr(self, "duriOn", False):
             self._updateDuricrust()
-            # Phase 6: sync the live crust with the per-layer stratigraphic
-            # induration archive (exhumation re-arm + formation write-down).
+        # Level-B (G2): dissolve → transport → precipitate the solute; the
+        # precipitation feeds the crust `duriH` (replacing the Level-A supply).
+        if getattr(self, "gwGeochemOn", False):
+            self._updateSolute()
+            # ext 2: route the exported solute down the rivers to the shoreline
+            # (river dissolved load). Uses the flow matrix built earlier this step.
+            self._routeRiverSolute()
+        # Phase 6: sync the live crust with the per-layer stratigraphic induration
+        # archive (exhumation re-arm + formation write-down) after both sources.
+        if getattr(self, "duriOn", False):
             self._recordInduration()
 
         if MPIrank == 0 and self.verbose:
@@ -502,6 +600,101 @@ class GWMesh(object):
         Tref = getattr(self, "tempRef", 15.0) + 273.15
         return np.exp(self.duriWeatherEa * (1.0 / Tref - 1.0 / self._gwTempK) / 8.314)
 
+    def _surfaceSourceClass(self):
+        r"""
+        Per-node **current surface lithology** class — the dominant provenance
+        class of the **top non-empty stratigraphic layer** (from ``stratP``),
+        falling back to the static bedrock ``source_class`` where a column has no
+        sediment. As erosion exhumes deeper layers (or deposition buries the
+        surface under transported sediment of a different provenance), the top
+        layer — and hence this label — changes, so a ``surface_class``-driven
+        weatherability tracks the rock actually exposed each step.
+
+        Uses the same top-non-empty-layer scan as ``_recordInduration`` /
+        ``_surfaceComposition``. Needs provenance (``stratP``); returns the plain
+        ``source_class`` (or ``None``) when the per-layer class record is absent.
+        Rank-local; no collective.
+        """
+        base = getattr(self, "source_class", None)
+        stratP = getattr(self, "stratP", None)
+        if base is None or stratP is None or self.stratNb == 0:
+            return base
+        top = self.stratStep + 1
+        H = self.stratH[:, :top]
+        rev = (H > 0)[:, ::-1]
+        valid = rev.any(axis=1)                       # columns with any sediment
+        label = base.copy()
+        if valid.any():
+            top_idx = (H.shape[1] - 1 - np.argmax(rev, axis=1))[valid]
+            rows = np.arange(H.shape[0])[valid]
+            label[rows] = stratP[rows, top_idx, :].argmax(axis=1)
+        return label
+
+    def _resolveGeoWeather(self):
+        r"""
+        Resolve the per-species weatherability to a list of **scalar or
+        ``(lpoints,)`` array** entries (Level-B extension 1 — lithology →
+        chemistry). Lets lithology control *which* species each region yields:
+
+        - **(a) per-vertex map** — a species' ``weatherability: [file, key]`` is
+          loaded and subset to the local partition (``self.locIDs``), exactly
+          like ``duriWeatherability`` / ``gwInfiltration``.
+        - **(b) table by a standalone lithology map** — a species'
+          ``weatherability_by_class: [...]`` is gathered by a per-vertex integer
+          ``lithology: [file, key]`` map (independent of provenance).
+        - **(c) table by the provenance label** — the same
+          ``weatherability_by_class`` gathered by a per-vertex class label:
+          ``weatherability_from: source_class`` uses the **static bedrock**
+          class, while ``weatherability_from: surface_class`` uses the
+          **dynamic current surface** class (the top stratigraphic layer,
+          recomputed each step, so weatherability tracks exhumation/burial). Both
+          need no new input beyond provenance.
+        - otherwise the scalar (the default; byte-identical to the old path).
+
+        The lithology label for (b)/(c) is the ``lithology:`` map when given,
+        else the provenance class (static ``source_class`` or dynamic
+        ``surface_class``). Resolved lazily (first ``_updateSolute``) so it runs
+        after provenance seeds ``source_class``; the dynamic ``surface_class``
+        form is re-resolved every step. Rank-local, partition-exact, no
+        collective.
+        """
+        label = None
+        lithomap = getattr(self, "_gwLithoMap", None)
+        wfrom = getattr(self, "gwWeatherFrom", None)
+        if lithomap is not None:                          # (b) standalone map
+            d = np.load(lithomap[0] + ".npz")
+            label = d[lithomap[1]][self.locIDs].astype(np.int64)
+        elif wfrom == "surface_class":                    # (c) dynamic top layer
+            label = self._surfaceSourceClass()
+            if label is None and MPIrank == 0 and self.verbose:
+                print(
+                    "[gw] geochem weatherability_from='surface_class' needs "
+                    "provenance on — falling back to scalar weatherability.",
+                    flush=True,
+                )
+        elif wfrom == "source_class":                     # (c) static bedrock
+            label = getattr(self, "source_class", None)
+            if label is None and MPIrank == 0 and self.verbose:
+                print(
+                    "[gw] geochem weatherability_from='source_class' needs "
+                    "provenance on — falling back to scalar weatherability.",
+                    flush=True,
+                )
+        byclass = getattr(self, "gwGeoWeatherByClass", None)
+        out = []
+        for k in range(int(self.gwNspecies)):
+            wab = self.gwGeoWeather[k]
+            tbl = byclass[k] if byclass is not None else None
+            if isinstance(wab, (list, tuple)):            # (a) per-vertex map
+                d = np.load(wab[0] + ".npz")
+                out.append(d[wab[1]][self.locIDs].astype(np.float64))
+            elif tbl is not None and label is not None:   # (c) table by label
+                tblA = np.asarray(tbl, dtype=np.float64)
+                out.append(tblA[np.clip(label, 0, len(tblA) - 1)])
+            else:                                          # scalar (unchanged)
+                out.append(float(wab))
+        return out
+
     def _weatheringSupply(self):
         r"""
         Solute-supply rate ``Ψ`` feeding in-situ fringe precipitation
@@ -596,9 +789,15 @@ class GWMesh(object):
         Phi = np.exp(-(((wt - self.duriFringeDepth) / self.duriFringeWidth) ** 2))
         Psi = self._weatheringSupply()
 
-        supply = self.duriFormRate * Phi * Psi
-        if getattr(self, "cptSoil", False):                      # regolith-limited
-            supply = np.minimum(supply, self._regolithSupplyRate())
+        if getattr(self, "gwGeochemOn", False):
+            # Level-B conservative geochemistry provides the crust source (the
+            # transported, precipitated solute in `_updateSolute`), so the Level-A
+            # proxy/rate supply is switched off here to avoid double-counting.
+            supply = np.zeros(self.lpoints, dtype=np.float64)
+        else:
+            supply = self.duriFormRate * Phi * Psi
+            if getattr(self, "cptSoil", False):                  # regolith-limited
+                supply = np.minimum(supply, self._regolithSupplyRate())
 
         duriH = self.duriHL.getArray().copy()
         duriH += self.dt * supply * (1.0 - duriH / Hmax)
@@ -665,6 +864,14 @@ class GWMesh(object):
           re-exhumed — so an exhumed crust resists incision over its full
           thickness, not one layer's worth.
 
+        With Level-B geochemistry on, the same write-down also stamps the
+        crust's **dominant solute species** into ``stratCrustType`` (and, with
+        in-model provenance, its **dominant source region** into
+        ``stratCrustSource``) across the crust's depth range, so a stratigraphic
+        section preserves *what* each crust layer is and *where* its chemistry
+        came from — the categorical companions to the ``stratDuri`` degree.
+        These are archive-only (no exhumation read-up).
+
         No-op (surface-only ``duriF``, no archive) when ``stratDuri`` is
         unallocated (``stratNb == 0``). Composition-only — no geometry change.
         Rank-local (per-node); no collective.
@@ -695,4 +902,378 @@ class GWMesh(object):
             np.maximum(self.stratDuri[:, :top], self.duriF[:, None]),
             self.stratDuri[:, :top],
         )
+
+        # Level-B chemistry archive: stamp the crust's DOMINANT solute species
+        # (and, with provenance, its dominant source region) into every layer
+        # of the crust's depth range, wherever crust has actually precipitated
+        # (gwCrustType >= 0). Categorical, so a later step overwrites rather than
+        # accumulates — the layer carries the current dominant while it is within
+        # the live crust, then freezes when buried below duriH. Archive-only (no
+        # read-up); the live gwCrustType/gwCrustSource are recomputed each step.
+        if getattr(self, "stratCrustType", None) is not None:
+            paint = within & (self.gwCrustType[:, None] >= 0)
+            self.stratCrustType[:, :top] = np.where(
+                paint, self.gwCrustType[:, None].astype(np.float64),
+                self.stratCrustType[:, :top],
+            )
+        if getattr(self, "stratCrustSource", None) is not None:
+            paint = within & (self.gwCrustSource[:, None] >= 0)
+            self.stratCrustSource[:, :top] = np.where(
+                paint, self.gwCrustSource[:, None].astype(np.float64),
+                self.stratCrustSource[:, :top],
+            )
+        return
+
+    # ------------------------------------------------------------------ #
+    #  Level-B geochemistry — solute transport (G1: operator + solver).   #
+    #  Steady advection ∇·(q c) of a lumped conservative tracer along the #
+    #  groundwater flux q = −T∇h, reusing the head operator's face        #
+    #  conductances. NOT wired into updateGroundwater yet (inert); the    #
+    #  dissolution source, fringe precipitation and export land in G2/G3. #
+    # ------------------------------------------------------------------ #
+
+    def _makeSoluteKSP(self):
+        """
+        Cached KSP for the solute-transport solve: ``fgmres`` + block-Jacobi
+        (``gw_solute_`` prefix, pivot shift). The upwind advection operator is
+        non-symmetric but diagonally dominant (an M-matrix, anchored by the
+        seepage Dirichlet sink), so — unlike the stiff elliptic *head* operator
+        — a Krylov + ILU solve converges quickly (same class as the orographic
+        advection solver). Env-overridable via the ``gw_solute_`` prefix.
+        """
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType("fgmres")
+        ksp.getPC().setType("bjacobi")
+        ksp.setTolerances(rtol=1.0e-10, max_it=500)
+        ksp.setInitialGuessNonzero(True)
+        ksp.setOptionsPrefix("gw_solute_")
+        petsc4py.PETSc.Options()["gw_solute_sub_pc_factor_shift_type"] = "nonzero"
+        ksp.setFromOptions()
+        return ksp
+
+    def _soluteAdvecCoeffs(self, h, T):
+        r"""
+        Upwind finite-volume coefficients for the steady solute advection
+        ``∇·(q c)`` by the groundwater flux ``q = −T∇h`` (area-normalised, per
+        cell). Reuses ``jacobiancoeff`` — its off-diagonals are the
+        area-normalised face conductances ``C_ik/A_i`` (correct for **flat and
+        global** meshes alike), so the signed face flux ``i→k`` is
+        ``f_ik = (C_ik/A_i)·(h_i − h_k)``. First-order upwinding puts the
+        outflow (``f>0``) on the diagonal (carries ``c_i``) and the inflow
+        (``f<0``) on the neighbour column (carries ``c_k``). Returns
+        ``(adv, divq)``: ``adv`` is the ``(lpoints, 1+maxnb)`` array for
+        ``_assembleDiffMatCSR`` (col 0 = diagonal), and ``divq = Σ_k f_ik`` is the
+        lateral divergence (used for the seepage sink / export).
+        """
+        zeroKp = np.zeros(self.lpoints, dtype=np.float64)
+        lap = jacobiancoeff(h, T, zeroKp)                 # area-norm neg-Laplacian
+        ncol = lap.shape[1] - 1
+        cond = -lap[:, 1:]                                # C_ik/A_i ≥ 0 (off-diag)
+        flux = np.zeros((self.lpoints, ncol), dtype=np.float64)
+        for k in range(ncol):
+            flux[:, k] = cond[:, k] * (h - h[self.FVmesh_ngbID[:, k]])
+        adv = np.zeros((self.lpoints, 1 + ncol), dtype=np.float64)
+        adv[:, 0] = np.maximum(flux, 0.0).sum(axis=1)     # outflow → c_i (diagonal)
+        adv[:, 1:] = np.minimum(flux, 0.0)                # inflow  → c_k (neighbour)
+        # Vertical exchange closes the balance: the lateral divergence
+        # div q = Σ_k f_ik equals recharge (source, >0) minus seepage (sink, <0).
+        # At a DISCHARGE node (net lateral inflow, div q < 0) the solute leaves the
+        # aquifer to the surface — a diagonal sink `−div q` that makes the operator
+        # a well-posed, diagonally-dominant M-matrix (pure lateral advection has no
+        # sink there and blows up). Recharge nodes carry their source in the RHS.
+        divq = flux.sum(axis=1)
+        adv[:, 0] += np.maximum(-divq, 0.0)
+        return adv, divq
+
+    def _solveSoluteTransport(self, source, dmask, dval):
+        r"""
+        Solve one steady tracer transport ``M c = source`` with Dirichlet nodes
+        ``dmask`` pinned to ``dval`` (``M`` = upwind advection of §``_soluteAdvecCoeffs``
+        at the current head). The seepage set is pinned (``c`` leaves the aquifer
+        there — the export sink), which anchors the M-matrix. G1 machinery: the
+        physical dissolution source / fringe precipitation / baseflow export are
+        added in G2/G3. Collective (KSP); returns the local concentration array.
+        """
+        z = self.hLocal.getArray()
+        h = self.headL.getArray()
+        T = self.gwKsat * np.maximum(h - self._gwZbed(z), float(self.gwMinSatThick))
+        adv, _ = self._soluteAdvecCoeffs(h, T)
+        M = self._assembleDiffMatCSR(adv)
+        IntType = petsc4py.PETSc.IntType
+        owned_d = np.where(dmask & (self.inIDs == 1))[0].astype(IntType)
+        M.zeroRowsLocal(owned_d, diag=1.0)                # c = dval on Dirichlet rows
+
+        rhs = np.asarray(source, dtype=np.float64).copy()
+        rhs[dmask] = dval[dmask]
+        if self._ksp_solute is None:
+            self._ksp_solute = self._makeSoluteKSP()
+        ksp = self._ksp_solute
+        self.soluteL.setArray(rhs)
+        self.dm.localToGlobal(self.soluteL, self.tmp)     # rhs (global)
+        self.dm.localToGlobal(self.soluteL, self.soluteG)  # nonzero guess = rhs
+        ksp.setOperators(M, M)
+        ksp.solve(self.tmp, self.soluteG)
+        M.destroy()
+        self.dm.globalToLocal(self.soluteG, self.soluteL)
+        return self.soluteL.getArray().copy()
+
+    def _soluteSolveRHS(self, M, rhs, guess):
+        r"""
+        Solve ``M c = rhs`` for the (pre-assembled) transport operator ``M`` with
+        a warm-start ``guess``, returning the local concentration (clipped ≥ 0).
+        A thin wrapper so ``_updateSolute`` can reuse one assembled operator for
+        several right-hand sides (the per-source-class provenance solves, G5).
+        Collective (KSP).
+        """
+        if self._ksp_solute is None:
+            self._ksp_solute = self._makeSoluteKSP()
+        ksp = self._ksp_solute
+        self.soluteL.setArray(rhs)
+        self.dm.localToGlobal(self.soluteL, self.tmp)          # rhs (global)
+        self.soluteL.setArray(guess)
+        self.dm.localToGlobal(self.soluteL, self.soluteG)      # nonzero guess
+        ksp.setOperators(M, M)
+        ksp.solve(self.tmp, self.soluteG)
+        self.dm.globalToLocal(self.soluteG, self.soluteL)
+        return np.maximum(self.soluteL.getArray().copy(), 0.0)
+
+    def _updateSolute(self):
+        r"""
+        Level-B per-step solute update (G2), per tracer: **dissolve → transport →
+        precipitate → export**, conservatively accounted.
+
+        1. **Dissolution** — a chemical-weathering source (the Level-A
+           ``_weatheringSupply`` scaled per tracer by ``weatherability``), on
+           subaerial land only, **debiting the conserved source pool**.
+        2. **Transport** — the steady ``M c = D`` solve of ``_soluteAdvecCoeffs``
+           (upwind advection by ``q = −T∇h`` + the vertical seepage sink), plus a
+           **precipitation sink** at the capillary fringe added to the diagonal
+           (``k_p·Φ`` where the tracer is super-saturated — a one-step-lagged
+           ``c > c_sat`` gate).
+        3. **Precipitation** — the sink mass ``k_p·Φ·c`` feeds the duricrust
+           ``duriH`` (Level-B thus **replaces** the Level-A proxy supply as the
+           crust source; the induration/armoring then follow unchanged).
+        4. **Export** — by domain mass balance, the solute that is neither
+           precipitated nor left in solution has discharged to the surface network
+           (→ ocean; the flux is formalised in G3).
+
+        Budget per tracer (owned nodes): ``dissolved = precipitated + exported +
+        Δ(in solution)`` — accumulated in ``gwDissolved``/``gwPrecip``/``gwOceanFlux``
+        for the conservation guard. Rank-local accounting (KSP solve collective).
+        """
+        if not getattr(self, "gwGeochemOn", False):
+            return
+        z = self.hLocal.getArray()
+        h = self.headL.getArray()
+        T = self.gwKsat * np.maximum(h - self._gwZbed(z), float(self.gwMinSatThick))
+        A = self.larea
+        dt = self.dt
+        owned = self.inIDs == 1
+
+        adv, divq = self._soluteAdvecCoeffs(h, T)  # advection + seepage sink (G1)
+        seep_sink = np.maximum(-divq, 0.0)         # discharge-to-surface coefficient
+        self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
+        self.gwSoluteFluxSp[:] = 0.0               # per-species export (output + routing)
+        prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None
+        W = self._weatheringSupply()               # base weathering rate (Level A)
+        # ext 1: per-species weatherability. Resolved once and cached, EXCEPT the
+        # dynamic surface-lithology form, which is re-resolved every step so the
+        # weatherability follows the top stratigraphic layer (exhumation/burial).
+        if self._gwGeoWeatherArr is None or getattr(self, "gwWeatherFrom", None) == "surface_class":
+            self._gwGeoWeatherArr = self._resolveGeoWeather()
+        # Subaerial land only (no dissolution under sea / ponded lake).
+        sub = np.zeros(self.lpoints, dtype=bool)
+        sub[self.seaID] = True
+        pitIDs = getattr(self, "pitIDs", None)
+        lFill = getattr(self, "lFill", None)
+        if pitIDs is not None and lFill is not None:
+            sub |= (pitIDs > -1) & (lFill > z)
+        subaerial = ~sub
+        # Precipitation favourability = the capillary fringe (needs the duricrust).
+        if getattr(self, "duriOn", False):
+            Phi = np.exp(
+                -(((self.wtDepth - self.duriFringeDepth) / self.duriFringeWidth) ** 2)
+            )
+        else:
+            Phi = np.zeros(self.lpoints, dtype=np.float64)
+
+        duriH = self.duriHL.getArray().copy()
+        Hmax = float(self.duriMaxThick)
+        for k in range(int(self.gwNspecies)):
+            # 1. Dissolution — debit the source pool.
+            # weatherability: scalar OR a per-vertex array (ext 1) — broadcasts.
+            Drate = np.where(subaerial, self._gwGeoWeatherArr[k] * W, 0.0)
+            diss = np.minimum(Drate * A * dt, self.gwSourcePool[:, k])
+            self.gwSourcePool[:, k] -= diss
+            Deff = diss / (A * dt)
+
+            # 2. Precipitation sink at the fringe — a LINEAR removal `k_p·Φ`
+            # (proportional to the local concentration). Kept linear so the
+            # operator is constant under constant forcing → the solute reaches a
+            # true per-step steady state (a hard `c > c_sat` on/off gate instead
+            # oscillates). The `c_sat` saturation threshold is a documented
+            # refinement needing a nonlinear/Picard treatment (see DESIGN §3).
+            p = self.gwGeoPrecip[k] * Phi
+
+            # 3. Transport: (advection + seepage sink + precip sink) c = Deff.
+            coeffs = adv.copy()
+            coeffs[:, 0] += p
+            M = self._assembleDiffMatCSR(coeffs)
+            if prov:
+                # G5 solute-source provenance: by linearity of the (fixed)
+                # operator, transport the solute dissolved in each source-rock
+                # class separately (same M, class-restricted RHS), sum to the
+                # total, and attribute the precipitated crust to each source.
+                c = np.zeros(self.lpoints, dtype=np.float64)
+                for r in range(int(self.provNb)):
+                    Deff_r = np.where(self.source_class == r, Deff, 0.0)
+                    c_r = self._soluteSolveRHS(M, Deff_r, self.gwSolute[:, k])
+                    c += c_r
+                    self.gwCrustProv[:, r] += p * c_r * dt * self.gwGeoVsolid[k]
+            else:
+                c = self._soluteSolveRHS(M, Deff, self.gwSolute[:, k])
+            M.destroy()
+            c = np.maximum(c, 0.0)                               # guard tiny negatives
+            self.gwSolute[:, k] = c
+
+            # 4. Sinks: precipitation feeds the crust; seepage exports to the
+            # surface (baseflow). The steady operator is exactly conservative
+            # (upwind internal faces cancel), so per step
+            # dissolved = precipitated + exported to the solver tolerance — no
+            # storage term (a steady solve maintains, not accumulates, the
+            # standing concentration).
+            precip_mass = p * c * A * dt                     # → crust
+            export_mass = seep_sink * c * A * dt             # → surface / ocean
+            duriH += precip_mass / A * self.gwGeoVsolid[k]
+            self.gwDissolved[k] += float(diss[owned].sum())
+            self.gwPrecip[k] += float(precip_mass[owned].sum())
+            self.gwOceanFlux[k] += float(export_mass[owned].sum())
+            # Per-node baseflow export rate (m³/yr): total (summed over tracers)
+            # and the per-species split (output + the river-routing source).
+            self.gwSoluteFlux += seep_sink * c * A
+            self.gwSoluteFluxSp[:, k] = seep_sink * c * A
+            # Per-node crust contributed by this tracer (G4 typing).
+            self.gwCrustBySpecies[:, k] += precip_mass / A * self.gwGeoVsolid[k]
+
+        duriH = np.clip(duriH, 0.0, Hmax)
+        self.duriHL.setArray(duriH)
+        self.dm.localToGlobal(self.duriHL, self.duriHG)
+        if getattr(self, "duriOn", False):
+            self.duriF = duriH / Hmax
+            self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
+
+        # G4 typing: the dominant crust-forming tracer per node (−1 = no crust).
+        tot = self.gwCrustBySpecies.sum(axis=1)
+        self.gwCrustType = np.where(
+            tot > 0.0, self.gwCrustBySpecies.argmax(axis=1), -1
+        ).astype(np.int32)
+        # G5 provenance: the dominant SOURCE-ROCK class of the crust per node.
+        if prov:
+            ptot = self.gwCrustProv.sum(axis=1)
+            self.gwCrustSource = np.where(
+                ptot > 0.0, self.gwCrustProv.argmax(axis=1), -1
+            ).astype(np.int32)
+
+        if self.verbose:
+            tot = MPI.COMM_WORLD.allreduce(
+                float(self.gwSoluteFlux[owned].sum()), op=MPI.SUM
+            )
+            if MPIrank == 0:
+                per = ", ".join(
+                    "%s=%0.3g" % (self.gwGeoName[k], self.gwOceanFlux[k])
+                    for k in range(int(self.gwNspecies))
+                )
+                print(
+                    "[gw] dissolved solute flux to surface: %0.4g m3/yr "
+                    "(cumulative per tracer: %s)" % (tot, per),
+                    flush=True,
+                )
+        return
+
+    def _routeRiverSolute(self):
+        r"""
+        Route the groundwater-exported (seepage/baseflow) solute **down the
+        surface drainage network** to the shoreline — the river dissolved load
+        (Level-B extension 2, DESIGN_GEOCHEM_EXTENSIONS.md §2), **per species**.
+
+        For each tracer an implicit accumulation solve reuses the **cached
+        flow-accumulation matrix** ``fMati`` (the ``_getSedFlux`` pattern) with
+        that species' per-node seepage export ``gwSoluteFluxSp[:, k]`` (already an
+        extensive m³/yr flux — no area weighting) as the source:
+
+        - **conservative** (``river_decay = 0``): ``(I − Wᵀ) L = s`` — a passive
+          tracer; solute reaching a coast/outlet leaves the continent, solute
+          into a closed basin is trapped (evaporite), both from the filled-topo
+          matrix with no special handling.
+        - **in-transit loss** (``river_decay = κ > 0``): a first-order removal
+          along the network adds a diagonal sink, ``(I − Wᵀ + κ I) L = s`` (built
+          as ``fMati.shift(κ)``); the lost mass ``κ·Σ L`` is a per-species
+          diagnostic (in-channel precipitation / uptake).
+
+        Per-species fields ``riverSoluteSp`` / ``riverSoluteToOceanSp`` /
+        ``riverSoluteLost`` are summed into the totals ``riverSolute`` /
+        ``riverSoluteToOcean``. With ``marine_coupling`` on, the delivered coastal
+        flux accumulates into a per-species marine reservoir ``marineSolute``
+        (m³, integrated) and the per-node coastal input ``marineSoluteInput``.
+
+        Called at the end of ``updateGroundwater`` — ``flowAccumulation`` (which
+        caches ``fMati``) runs earlier in the step, so the matrix is fresh and no
+        reordering is needed. No-op unless ``river_load`` is on; the flow matrix
+        must exist (guarded for the first call). Collective (KSP per tracer).
+        """
+        if not getattr(self, "gwRiverLoad", False):
+            return
+        if getattr(self, "fMati", None) is None:
+            return                                    # no flow matrix yet
+        owned = self.inIDs == 1
+        exitm = np.zeros(self.lpoints, dtype=bool)    # coast / outlet exits
+        exitm[self.seaID] = True
+        outl = getattr(self, "outletIDs", None)
+        if outl is not None:
+            exitm[outl] = True
+
+        self.riverSolute[:] = 0.0
+        for k in range(int(self.gwNspecies)):
+            # RHS = this species' per-node seepage export (m³/yr, extensive).
+            self.soluteL.setArray(self.gwSoluteFluxSp[:, k])
+            self.dm.localToGlobal(self.soluteL, self.tmp)
+            kappa = float(self.gwGeoRiverDecay[k])
+            if kappa > 0.0:                           # in-transit first-order loss
+                M = self.fMati.copy()
+                M.shift(kappa)                        # (I − Wᵀ) + κ I
+                self._solve_KSP(False, M, self.tmp, self.riverSoluteG)
+                M.destroy()
+            else:                                     # conservative accumulation
+                self._solve_KSP(False, self.fMati, self.tmp, self.riverSoluteG)
+            self.dm.globalToLocal(self.riverSoluteG, self.riverSoluteL)
+            Lk = np.maximum(self.riverSoluteL.getArray().copy(), 0.0)
+            self.riverSoluteSp[:, k] = Lk
+            self.riverSolute += Lk
+            self.riverSoluteToOceanSp[k] = MPI.COMM_WORLD.allreduce(
+                float(Lk[owned & exitm].sum()), op=MPI.SUM
+            )
+            # In-transit loss (mass balance: Σs = Σ_terminal L + κ·Σ L).
+            self.riverSoluteLost[k] = (
+                MPI.COMM_WORLD.allreduce(float(kappa * Lk[owned].sum()), op=MPI.SUM)
+                if kappa > 0.0 else 0.0
+            )
+        self.riverSoluteToOcean = float(self.riverSoluteToOceanSp.sum())
+
+        # Marine coupling: the delivered coastal flux feeds a per-species marine
+        # reservoir (integrated over time) + a per-node coastal-input field.
+        if getattr(self, "gwMarineCoupling", False):
+            self.marineSoluteInput[:] = 0.0
+            self.marineSoluteInput[exitm] = self.riverSolute[exitm]
+            self.marineSolute += self.riverSoluteToOceanSp * self.dt
+
+        if MPIrank == 0 and self.verbose:
+            per = ", ".join(
+                "%s=%0.3g" % (self.gwGeoName[k], self.riverSoluteToOceanSp[k])
+                for k in range(int(self.gwNspecies))
+            )
+            print(
+                "[gw] river dissolved load to ocean: %0.4g m3/yr (per tracer: %s)"
+                % (self.riverSoluteToOcean, per),
+                flush=True,
+            )
         return

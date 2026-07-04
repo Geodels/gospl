@@ -42,6 +42,19 @@ where :math:`\mathrm{\kappa}` is the precipitation-independent sediment erodibil
 
 In goSPL, :math:`\mathrm{\kappa}` is user defined and the coefficients :math:`\mathrm{m}` and :math:`\mathrm{n}` are set by default to 0.5 and 1 respectively (but could also be tuned).
 
+.. note::
+
+  **Duricrust armoring.** When the optional :ref:`groundwater / duricrust <groundwater>`
+  module is active, the erodibility :math:`\mathrm{\kappa}` is **reduced at indurated
+  cells** through the shared surface-erodibility hook: it is multiplied by
+  :math:`(1 - \mathrm{armor\_max}\cdot duriF)`, where :math:`duriF \in [0,1]` is the
+  induration degree of the capillary-fringe crust. A fully indurated cell therefore
+  erodes up to ``armor_max`` (e.g. 10×) more slowly than bare rock, so a chemically
+  hardened crust protects the surface beneath it — driving **relief inversion**
+  (crusted highs persist while the surrounding bare terrain is lowered) and, when
+  stratigraphy is on, resisting incision as buried crusts are exhumed. The same
+  factor optionally armors the hillslope diffusivity. See :ref:`groundwater`.
+
 In the detachment-limited case with default values of :math:`\mathrm{m}` and :math:`\mathrm{n}`, the elevation (:math:`\mathrm{\eta_i}`) will change due to local river erosion rate and is defined implicitly by:
 
 .. math::

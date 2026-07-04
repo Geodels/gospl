@@ -2144,6 +2144,50 @@ class ReadYaml(object):
             self.duriWeatherL = float(weath.get("path_length", 20.0))
             self.duriWeatherability = weath.get("weatherability", 1.0)
 
+            # Level-B conservative geochemistry (opt-in; DESIGN_WATERTABLE_GEOCHEM.md).
+            # The solute is an `n_species` array (default 1): single-tracer ships
+            # first, multi-tracer (calcrete/silcrete/ferricrete typing) is just a
+            # longer `species:` list. Coupled multi-species aqueous equilibrium is
+            # OUT of scope. Per-species params kept as lists here; gwplex builds the
+            # numpy arrays + state. State alloc only in G0 (nothing solved yet).
+            geo = gwDict.get("geochem", {}) or {}
+            self.gwGeochemOn = bool(geo)
+            species = geo.get("species", []) or []
+            if self.gwGeochemOn and not species:
+                species = [{}]                          # default single tracer
+            self.gwNspecies = max(1, len(species))
+            self.gwGeoName = [
+                str(s.get("name", "solute%d" % i)) for i, s in enumerate(species)
+            ] or ["solute0"]
+            # weatherability: scalar OR a per-vertex `[file, key]` map (a), so
+            # lithology can control which species a region yields; kept RAW here
+            # (gwplex resolves it). `weatherability_by_class` + `weatherability_from`
+            # give the table form (c): a per-(class, species) value gathered by a
+            # per-vertex lithology label (currently `source_class`, i.e. provenance).
+            self.gwGeoWeather = [s.get("weatherability", 1.0) for s in species] or [1.0]
+            self.gwGeoWeatherByClass = [
+                s.get("weatherability_by_class", None) for s in species
+            ] or [None]
+            self.gwWeatherFrom = geo.get("weatherability_from", None)
+            # (b) a standalone per-vertex integer lithology map `[file, key]`
+            # (independent of provenance) — the label for `weatherability_by_class`.
+            self._gwLithoMap = geo.get("lithology", None)
+            self.gwGeoCsat = [float(s.get("c_sat", 1.0)) for s in species] or [1.0]
+            self.gwGeoPrecip = [float(s.get("precip_rate", 1.0)) for s in species] or [1.0]
+            self.gwGeoVsolid = [float(s.get("solid_volume", 1.0)) for s in species] or [1.0]
+            self.gwGeochemConserve = bool(geo.get("conserve", True))
+            # ext 2: route the groundwater-exported (seepage/baseflow) solute
+            # DOWN the surface drainage network to the shoreline (river dissolved
+            # load), reusing the flow-accumulation matrix. Opt-in. Per-species.
+            self.gwRiverLoad = bool(geo.get("river_load", False))
+            # ext 2 refinement: per-species first-order IN-TRANSIT loss along the
+            # river (0 = conservative). And marine coupling: accumulate the
+            # delivered coastal flux into a per-species marine reservoir.
+            self.gwGeoRiverDecay = [
+                float(s.get("river_decay", 0.0)) for s in species
+            ] or [0.0]
+            self.gwMarineCoupling = bool(geo.get("marine_coupling", False))
+
         except KeyError:
             self.gwOn = False
             self.duriOn = False
@@ -2177,6 +2221,20 @@ class ReadYaml(object):
             self.duriWeatherDw = 1.0
             self.duriWeatherL = 20.0
             self.duriWeatherability = 1.0
+            self.gwGeochemOn = False
+            self.gwNspecies = 1
+            self.gwGeoName = ["solute0"]
+            self.gwGeoWeather = [1.0]
+            self.gwGeoWeatherByClass = [None]
+            self.gwWeatherFrom = None
+            self._gwLithoMap = None
+            self.gwGeoCsat = [1.0]
+            self.gwGeoPrecip = [1.0]
+            self.gwGeoVsolid = [1.0]
+            self.gwGeochemConserve = True
+            self.gwRiverLoad = False
+            self.gwGeoRiverDecay = [0.0]
+            self.gwMarineCoupling = False
 
         return
 

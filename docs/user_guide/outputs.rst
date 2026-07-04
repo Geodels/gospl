@@ -112,10 +112,40 @@ with the nested ``duricrust:`` block.
    * - ``Karmor``
      - Erodibility **armoring multiplier** ``1 − armor_max·duriF`` (≤ 1) applied to ``K``.
      - ``duricrust:`` on
+   * - ``solute``
+     - Dissolved **solute concentration** in the groundwater (summed over tracers).
+     - ``geochem:`` on
+   * - ``soluteflux``
+     - **Dissolved export** discharged to the surface (baseflow-carried, m³/yr).
+     - ``geochem:`` on
+   * - ``crust_type``
+     - Dominant **crust-forming tracer** per node (−1 = no crust).
+     - ``geochem:`` multi-tracer
+   * - ``crust_source``
+     - Dominant **source-rock class** of the crust (solute-source provenance; −1 = no crust).
+     - ``geochem:`` + ``provenance:``
+   * - ``riverSolute``
+     - **River dissolved load** — exported solute routed (per species) down the surface network, accumulating downstream to the coast (m³/yr).
+     - ``geochem: river_load``
+   * - ``marineSoluteInput``
+     - Per-node solute **entering the ocean** at coast/outlet exits (marine coupling; m³/yr).
+     - ``geochem: marine_coupling``
+
+With **several tracers** the aggregated fields above (``solute``,
+``soluteflux``, ``riverSolute``) are additionally written **per species**, named
+by tracer: ``solute_<name>`` (concentration), ``crust_<name>`` (crust
+contribution), ``soluteflux_<name>`` (groundwater seepage export) and — with
+``river_load`` — ``riverSolute_<name>`` (routed river load). Each set sums to its
+total. (``crust_type`` remains the dominant-tracer label.)
 
 The per-layer diagenetic induration is additionally archived in the
 stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by
-``gospl-strata-volume`` (see :ref:`running`).
+``gospl-strata-volume`` (see :ref:`running`). With the geochemistry on, each
+layer additionally records its crust's **dominant solute species**
+(``stratCrustType``) and — with in-model provenance — its **dominant source
+region** (``stratCrustSource``), exposed per layer as ``crust_type`` /
+``crust_source`` cell fields so a stratigraphic section shows *what* each buried
+crust is and *where* its chemistry came from.
 
 Soil, tectonics & flexure
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

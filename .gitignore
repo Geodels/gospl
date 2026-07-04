@@ -42,9 +42,16 @@ tests/fixtures/soiltemp_out*/
 tests/fixtures/gw_out*/
 tests/fixtures/gw_nosoil_out*/
 tests/fixtures/gw_combo_out*/
+tests/fixtures/gw_geochem_out*/
+tests/fixtures/gw_geochemprov_out*/
 tests/fixtures/prov_src.npz
 *.so
 .eggs
 MANIFEST
 .ipynb_checkpoints
 fortran/meshparams.mod
+gw_geochemlitho_out
+gw_river_out
+gw_geochemlitho2_out
+gw_geochemsurface_out
+gw_river2_out

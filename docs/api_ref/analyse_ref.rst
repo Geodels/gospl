@@ -43,6 +43,7 @@ Per-basin outflow fluxes — ``gospl-catchment``
 .. rubric:: Functions
 
 .. autofunction:: analyse.catchment.basin_outflow
+.. autofunction:: analyse.catchment.basin_solute_flux
 .. autofunction:: analyse.catchment.catchment_flux
 
 

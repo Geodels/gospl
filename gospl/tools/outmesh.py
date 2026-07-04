@@ -242,6 +242,31 @@ class WriteMesh(object):
                     :, : self.stratStep + 1
                 ]
 
+            # Level-B crust chemistry archive: per-layer dominant solute species
+            # (stratCrustType) and, with provenance, dominant source region
+            # (stratCrustSource). Integer codes stored as float64 (-1 = no
+            # crust). Only written when geochemistry is on; restored on restart.
+            if getattr(self, "stratCrustType", None) is not None:
+                f.create_dataset(
+                    "stratCrustType",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    **self._h5opts,
+                )
+                f["stratCrustType"][:, : self.stratStep + 1] = self.stratCrustType[
+                    :, : self.stratStep + 1
+                ]
+            if getattr(self, "stratCrustSource", None) is not None:
+                f.create_dataset(
+                    "stratCrustSource",
+                    shape=(self.lpoints, self.stratStep + 1),
+                    dtype="float64",
+                    **self._h5opts,
+                )
+                f["stratCrustSource"][:, : self.stratStep + 1] = self.stratCrustSource[
+                    :, : self.stratStep + 1
+                ]
+
             # In-model provenance: per-layer per-class thickness (lpoints,
             # layers, classes). Only written when provenance tracers are on.
             if getattr(self, "provOn", False):
@@ -495,6 +520,87 @@ class WriteMesh(object):
                         **self._h5opts,
                     )
                     f["Karmor"][:, 0] = self.duriKarmor.copy()
+                if getattr(self, "gwGeochemOn", False):
+                    # Level-B geochemistry: total dissolved solute concentration
+                    # (summed over tracers) and the baseflow-carried export flux.
+                    f.create_dataset(
+                        "solute",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["solute"][:, 0] = self.gwSolute.sum(axis=1)
+                    f.create_dataset(
+                        "soluteflux",
+                        shape=(self.lpoints, 1),
+                        dtype="float32",
+                        **self._h5opts,
+                    )
+                    f["soluteflux"][:, 0] = self.gwSoluteFlux.copy()
+                    if self.gwNspecies > 1:
+                        # Dominant crust-forming tracer per node (−1 = no crust);
+                        # small ints stored as float32 for the generic XDMF path.
+                        f.create_dataset(
+                            "crust_type",
+                            shape=(self.lpoints, 1),
+                            dtype="float32",
+                            **self._h5opts,
+                        )
+                        f["crust_type"][:, 0] = self.gwCrustType.astype("float32")
+                    if getattr(self, "provOn", False):
+                        # Dominant source-rock class of the crust (solute-source
+                        # provenance, −1 = no crust).
+                        f.create_dataset(
+                            "crust_source",
+                            shape=(self.lpoints, 1),
+                            dtype="float32",
+                            **self._h5opts,
+                        )
+                        f["crust_source"][:, 0] = self.gwCrustSource.astype("float32")
+                    if getattr(self, "gwRiverLoad", False):
+                        # River dissolved load: solute routed down the surface
+                        # network (m³/yr), accumulating downstream to the coast.
+                        f.create_dataset(
+                            "riverSolute",
+                            shape=(self.lpoints, 1),
+                            dtype="float32",
+                            **self._h5opts,
+                        )
+                        f["riverSolute"][:, 0] = self.riverSolute.copy()
+                        if getattr(self, "gwMarineCoupling", False):
+                            # Per-node solute entering the ocean at coast/outlet
+                            # exits this step (marine coupling, m³/yr).
+                            f.create_dataset(
+                                "marineSoluteInput",
+                                shape=(self.lpoints, 1),
+                                dtype="float32",
+                                **self._h5opts,
+                            )
+                            f["marineSoluteInput"][:, 0] = self.marineSoluteInput.copy()
+                    if self.gwNspecies > 1:
+                        # Per-species fields, named by tracer: concentration,
+                        # crust contribution, groundwater seepage export, and —
+                        # with river routing on — the routed river dissolved load.
+                        river = getattr(self, "gwRiverLoad", False)
+                        for k in range(self.gwNspecies):
+                            nm = str(self.gwGeoName[k]).replace(" ", "_")
+                            perk = [
+                                ("solute_%s" % nm, self.gwSolute[:, k]),
+                                ("crust_%s" % nm, self.gwCrustBySpecies[:, k]),
+                                ("soluteflux_%s" % nm, self.gwSoluteFluxSp[:, k]),
+                            ]
+                            if river:
+                                perk.append(
+                                    ("riverSolute_%s" % nm, self.riverSoluteSp[:, k])
+                                )
+                            for field, arr in perk:
+                                f.create_dataset(
+                                    field,
+                                    shape=(self.lpoints, 1),
+                                    dtype="float32",
+                                    **self._h5opts,
+                                )
+                                f[field][:, 0] = arr
 
             f.create_dataset(
                 "sedLoad",
@@ -708,6 +814,19 @@ class WriteMesh(object):
                 if self.stratDuri is not None and "/stratDuri" in hf:
                     self.stratDuri.fill(0.0)
                     self.stratDuri[:, : self.stratStep] = np.array(hf["/stratDuri"])
+                # Level-B crust chemistry archive. Falls back to the empty
+                # (-1 = no crust) init from readStratLayers when the output
+                # predates the field, so the restore stays robust.
+                if self.stratCrustType is not None and "/stratCrustType" in hf:
+                    self.stratCrustType.fill(-1.0)
+                    self.stratCrustType[:, : self.stratStep] = np.array(
+                        hf["/stratCrustType"]
+                    )
+                if self.stratCrustSource is not None and "/stratCrustSource" in hf:
+                    self.stratCrustSource.fill(-1.0)
+                    self.stratCrustSource[:, : self.stratStep] = np.array(
+                        hf["/stratCrustSource"]
+                    )
                 # In-model provenance: restore per-layer per-class thickness.
                 # Restarting a provenance run from an output without /stratP
                 # falls back to the bedrock-seeded stratP (set in
@@ -887,6 +1006,28 @@ class WriteMesh(object):
                     _gwnames += ["baseflow"]
                 if getattr(self, "duriOn", False):
                     _gwnames += ["duricrust", "induration", "Karmor"]
+                if getattr(self, "gwGeochemOn", False):
+                    _gwnames += ["solute", "soluteflux"]
+                    if self.gwNspecies > 1:
+                        _gwnames += ["crust_type"]
+                    if getattr(self, "provOn", False):
+                        _gwnames += ["crust_source"]
+                    if getattr(self, "gwRiverLoad", False):
+                        _gwnames += ["riverSolute"]
+                        if getattr(self, "gwMarineCoupling", False):
+                            _gwnames += ["marineSoluteInput"]
+                    if self.gwNspecies > 1:
+                        # Per-species fields (must match the HDF5 datasets above).
+                        river = getattr(self, "gwRiverLoad", False)
+                        for k in range(self.gwNspecies):
+                            nm = str(self.gwGeoName[k]).replace(" ", "_")
+                            _gwnames += [
+                                "solute_%s" % nm,
+                                "crust_%s" % nm,
+                                "soluteflux_%s" % nm,
+                            ]
+                            if river:
+                                _gwnames += ["riverSolute_%s" % nm]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

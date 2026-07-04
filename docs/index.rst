@@ -161,9 +161,6 @@ Salles et al. (2025) **Carbonate burial regimes, the Meso-Cenozoic climate, and 
 Hadler Boggiani et al. (2026) **Evolution and Provenance of the Polish Rotliegend in the Southern Permian Basin**, Journal of Geophysical Research: Earth Surface, 131:e2025JF008473, `doi: 10.1029/2025JF008473 <https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/2025JF008473>`_.
 
 
-Shyu et al. (2026) **DynEarthSol v2.0: an efficient explicit Lagrangian solver for geodynamics, surface processes, and earthquake-cycle dynamics**, EGUsphere [preprint], `doi: 10.5194/egusphere-2026-2922 <https://egusphere.copernicus.org/preprints/2026/egusphere-2026-2922/>`_.
-
-
 Contributing to goSPL
 --------------------------
 

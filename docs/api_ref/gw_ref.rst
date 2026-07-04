@@ -34,6 +34,14 @@ Class GWMesh
       ~GWMesh._updateDuricrust
       ~GWMesh._regolithSupplyRate
       ~GWMesh._recordInduration
+      ~GWMesh._surfaceSourceClass
+      ~GWMesh._resolveGeoWeather
+      ~GWMesh._makeSoluteKSP
+      ~GWMesh._soluteAdvecCoeffs
+      ~GWMesh._solveSoluteTransport
+      ~GWMesh._soluteSolveRHS
+      ~GWMesh._updateSolute
+      ~GWMesh._routeRiverSolute
 
 
 Public functions
@@ -56,3 +64,11 @@ Private functions
 .. automethod:: flow.gwplex.GWMesh._updateDuricrust
 .. automethod:: flow.gwplex.GWMesh._regolithSupplyRate
 .. automethod:: flow.gwplex.GWMesh._recordInduration
+.. automethod:: flow.gwplex.GWMesh._surfaceSourceClass
+.. automethod:: flow.gwplex.GWMesh._resolveGeoWeather
+.. automethod:: flow.gwplex.GWMesh._makeSoluteKSP
+.. automethod:: flow.gwplex.GWMesh._soluteAdvecCoeffs
+.. automethod:: flow.gwplex.GWMesh._solveSoluteTransport
+.. automethod:: flow.gwplex.GWMesh._soluteSolveRHS
+.. automethod:: flow.gwplex.GWMesh._updateSolute
+.. automethod:: flow.gwplex.GWMesh._routeRiverSolute
