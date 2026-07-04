@@ -467,7 +467,14 @@ class GWMesh(object):
 
         self.headL.setArray(hloc)
         self.dm.localToGlobal(self.headL, self.headG)
-        self.wtDepth = z - hloc
+        # Water-table depth, BOUNDED by the aquifer thickness (z − z_bed): a water
+        # table cannot sit below its aquifer base. Where the head drains below the
+        # base (a dry aquifer — kept solvable by the `min_sat_thickness` floor on
+        # T), `z − h` would otherwise report a spurious depth far exceeding the
+        # aquifer (e.g. tens of m in a few-m regolith with `aquifer_base:
+        # from_soil`), which also zeroes the capillary-fringe favourability Φ and
+        # wrongly suppresses the duricrust there. Clamp to [0, z − z_bed].
+        self.wtDepth = np.clip(z - hloc, 0.0, np.maximum(z - zbed, 0.0))
 
         # Phase 5: account the seepage-return (baseflow) discharge (opt-in).
         if getattr(self, "gwConserveBaseflow", False):

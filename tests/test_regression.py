@@ -1666,6 +1666,14 @@ def test_watertable_steady():
             f"last Δ={deltas[-1]:.3g}"
         )
         assert deltas[-5:].mean() < deltas[:5].mean(), "no convergence trend"
+        # The water-table depth is bounded by the aquifer thickness (z - z_bed):
+        # a water table cannot sit below its aquifer base (the head can drain
+        # below it via the min_sat_thickness floor, but the REPORTED wtDepth is
+        # clamped). So 0 <= wtDepth <= z - z_bed everywhere.
+        z = m.hLocal.getArray()
+        aq = np.maximum(z - m._gwZbed(z), 0.0)
+        assert (m.wtDepth >= -1.0e-9).all(), "negative water-table depth"
+        assert (m.wtDepth <= aq + 1.0e-6).all(), "wtDepth exceeds the aquifer thickness"
     finally:
         m.destroy()
 

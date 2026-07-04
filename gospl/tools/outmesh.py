@@ -826,7 +826,12 @@ class WriteMesh(object):
                 if "/wtable" in hf:
                     self.headL.setArray(np.array(hf["/wtable"])[:, 0])
                     self.dm.localToGlobal(self.headL, self.headG)
-                    self.wtDepth = self.hLocal.getArray() - self.headL.getArray()
+                    z = self.hLocal.getArray()
+                    # Bounded by the aquifer thickness (see _solveHead).
+                    self.wtDepth = np.clip(
+                        z - self.headL.getArray(), 0.0,
+                        np.maximum(z - self._gwZbed(z), 0.0),
+                    )
                 if getattr(self, "duriOn", False) and "/duricrust" in hf:
                     self.duriHL.setArray(np.array(hf["/duricrust"])[:, 0])
                     self.dm.localToGlobal(self.duriHL, self.duriHG)
