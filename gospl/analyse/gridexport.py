@@ -539,6 +539,20 @@ _VAR_META = {
     "filled": ("m", "priority-flood-filled (hydrologically-conditioned) elevation"),
     "flexIso": ("m", "cumulative isostatic (flexural) response"),
     "rain": ("m/yr", "rainfall (precipitation) rate"),
+    # Groundwater + Level-B geochemistry fields.
+    "recharge": ("m/yr", "groundwater recharge"),
+    "wtable": ("m", "water-table elevation"),
+    "wtdepth": ("m", "water-table depth below the surface"),
+    "baseflow": ("m3/yr", "groundwater baseflow to rivers"),
+    "duricrust": ("m", "duricrust thickness"),
+    "induration": ("1", "duricrust induration degree (0-1)"),
+    "Karmor": ("1", "erodibility armoring multiplier from the duricrust"),
+    "solute": ("kg/m3", "dissolved solute concentration (summed over species)"),
+    "soluteflux": ("m3/yr", "groundwater dissolved-solute export / baseflow (summed over species)"),
+    "riverSolute": ("m3/yr", "river dissolved load routed downstream (summed over species)"),
+    "marineSoluteInput": ("m3/yr", "dissolved solute entering the ocean at coast / outlet exits"),
+    "crust_type": ("1", "dominant crust-forming solute species (index; -1 = none)"),
+    "crust_source": ("1", "dominant source-rock class of the crust (index; -1 = none)"),
     # spoken-name aliases, in case a field is written under these names
     "flexiso": ("m", "cumulative isostatic (flexural) response"),
     "rainfall": ("m/yr", "rainfall (precipitation) rate"),
@@ -596,6 +610,18 @@ def to_netcdf(result, path, time=None):
                                   zlib=True)
             v[:, :] = grid
             meta = _VAR_META.get(name)
+            if meta is None:
+                # Per-species geochem fields (solute_<name>, soluteflux_<name>,
+                # riverSolute_<name>, crust_<name>) — describe by their prefix.
+                for pre, unit, base in (
+                    ("riverSolute_", "m3/yr", "river dissolved load"),
+                    ("soluteflux_", "m3/yr", "groundwater dissolved-solute export"),
+                    ("solute_", "kg/m3", "dissolved solute concentration"),
+                    ("crust_", "m", "duricrust contribution"),
+                ):
+                    if name.startswith(pre):
+                        meta = (unit, "%s — species '%s'" % (base, name[len(pre):]))
+                        break
             if meta is not None:
                 v.units, v.long_name = meta
     return path

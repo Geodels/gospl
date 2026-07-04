@@ -129,3 +129,89 @@ def test_catchment_flux_batch_csv(tmp_path):
     df = pd.read_csv(fcsv)
     assert list(df.columns) == ["basin", "lon", "lat", "val"]
     assert df.set_index("basin").loc[1, "val"] == 800.0
+    # No solute field in this grid -> no solute output, and no "solute" key.
+    assert not (outdir / "solute3.csv").exists()
+    assert "solute" not in res[3]
+
+
+def _write_solute_grid(path):
+    """4x4 two-basin grid + riverSolute total and two per-species fields."""
+    netCDF4 = pytest.importorskip("netCDF4")
+    lon = np.array([0.0, 1.0, 2.0, 3.0])
+    lat = np.array([0.0, 1.0, 2.0, 3.0])
+    basin = np.array([
+        [0, 0, 1, 1],
+        [0, 0, 1, 1],
+        [0, 0, 1, 1],
+        [-1, -1, -1, -1],
+    ], dtype=np.int32)
+    fa = np.zeros((4, 4))
+    sed = np.zeros((4, 4))
+    riv = np.zeros((4, 4))
+    carb = np.zeros((4, 4))
+    sil = np.zeros((4, 4))
+    # Basin 0 solute outlet at (lon=1, lat=0): total 30 = 20 carbonate + 10 silica.
+    riv[0, 1], carb[0, 1], sil[0, 1] = 30.0, 20.0, 10.0
+    # Basin 1 solute outlet at (lon=2, lat=2): total 50 = 5 carbonate + 45 silica.
+    riv[2, 2], carb[2, 2], sil[2, 2] = 50.0, 5.0, 45.0
+    with netCDF4.Dataset(str(path), "w") as ds:
+        ds.createDimension("lat", 4)
+        ds.createDimension("lon", 4)
+        ds.createVariable("lon", "f8", ("lon",))[:] = lon
+        ds.createVariable("lat", "f8", ("lat",))[:] = lat
+        for nm, g in (("FA", fa), ("sedLoad", sed), ("riverSolute", riv),
+                      ("riverSolute_carbonate", carb), ("riverSolute_silica", sil)):
+            ds.createVariable(nm, "f8", ("lat", "lon"))[:, :] = g
+        ds.createVariable("basin", "i4", ("lat", "lon"))[:, :] = basin
+    return str(path)
+
+
+def test_basin_solute_flux_per_species(tmp_path):
+    """
+    basin_solute_flux picks each basin's solute outlet (max total flux) and reports
+    the total plus each species' flux AT that cell; per-species columns sum to val.
+    """
+    pytest.importorskip("netCDF4")
+    cm = pytest.importorskip("gospl.analyse.catchment")
+    ncf = _write_solute_grid(tmp_path / "sol.nc")
+
+    df = cm.basin_solute_flux(ncf, min_cells=0).set_index("basin")
+    assert list(df.columns) == ["lon", "lat", "val", "carbonate", "silica"]
+    # Basin 0 outlet + total + species breakdown.
+    assert (df.loc[0, "lon"], df.loc[0, "lat"], df.loc[0, "val"]) == (1.0, 0.0, 30.0)
+    assert (df.loc[0, "carbonate"], df.loc[0, "silica"]) == (20.0, 10.0)
+    # Basin 1 outlet elsewhere, silica-dominated.
+    assert (df.loc[1, "lon"], df.loc[1, "lat"], df.loc[1, "val"]) == (2.0, 2.0, 50.0)
+    assert (df.loc[1, "carbonate"], df.loc[1, "silica"]) == (5.0, 45.0)
+    # Species columns sum to the total flux at each outlet.
+    assert np.allclose(df["carbonate"] + df["silica"], df["val"])
+
+
+def test_basin_solute_flux_absent_and_alias(tmp_path):
+    """No solute field -> basin_outflow omits 'solute' (KeyError swallowed);
+    with soluteflux (no riverSolute) the fallback alias is used."""
+    netCDF4 = pytest.importorskip("netCDF4")
+    cm = pytest.importorskip("gospl.analyse.catchment")
+
+    # (a) plain flow/sed grid: basin_outflow has no 'solute'; direct call raises.
+    plain = _synthetic(tmp_path, _GRIDEXPORT)
+    assert "solute" not in cm.basin_outflow(plain, min_cells=0)
+    with pytest.raises(KeyError):
+        cm.basin_solute_flux(plain, min_cells=0)
+
+    # (b) only `soluteflux` present (no riverSolute) -> alias fallback works.
+    lon = np.array([0.0, 1.0, 2.0, 3.0])
+    lat = np.array([0.0, 1.0, 2.0, 3.0])
+    basin = np.zeros((4, 4), dtype=np.int32)
+    sf = np.zeros((4, 4)); sf[2, 2] = 12.0
+    p = tmp_path / "sf.nc"
+    with netCDF4.Dataset(str(p), "w") as ds:
+        ds.createDimension("lat", 4); ds.createDimension("lon", 4)
+        ds.createVariable("lon", "f8", ("lon",))[:] = lon
+        ds.createVariable("lat", "f8", ("lat",))[:] = lat
+        ds.createVariable("soluteflux", "f8", ("lat", "lon"))[:, :] = sf
+        ds.createVariable("basin", "i4", ("lat", "lon"))[:, :] = basin
+    df = cm.basin_solute_flux(str(p), min_cells=0).set_index("basin")
+    assert (df.loc[0, "lon"], df.loc[0, "lat"], df.loc[0, "val"]) == (2.0, 2.0, 12.0)
+    # No per-species fields present -> only the base columns.
+    assert list(df.columns) == ["lon", "lat", "val"]

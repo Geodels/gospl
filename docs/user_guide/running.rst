@@ -226,6 +226,18 @@ step **serially** — the old MPI fan-out is no longer needed. From a notebook:
 :func:`~gospl.analyse.catchment.catchment_flux` (batch → CSVs) and
 :func:`~gospl.analyse.catchment.basin_outflow` (one file → two DataFrames).
 
+When the run used the Level-B **geochemistry**, the gridded surface also carries
+the dissolved-solute flux (``riverSolute`` — the routed river dissolved load — and
+its per-species fields ``riverSolute_<name>``). ``gospl-catchment`` then also
+writes ``flowsed/solute{time}.csv`` — for each basin, the **solute outlet** (cell
+of maximum total solute flux) with columns ``basin,lon,lat,val`` **plus one column
+per species** (e.g. ``carbonate``, ``silica``), each the species' flux at that
+outlet (they sum to ``val``). The total field defaults to ``riverSolute``, falling
+back to the raw seepage export ``soluteflux`` (``--solute-var`` overrides). From a
+notebook, :func:`~gospl.analyse.catchment.basin_solute_flux` returns that
+DataFrame directly, and :func:`~gospl.analyse.catchment.basin_outflow` adds a
+``"solute"`` entry when the field is present.
+
 Sediment provenance — ``gospl-provenance``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
