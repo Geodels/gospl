@@ -471,22 +471,32 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["recharge"][:, 0] = self.rechargeL.getArray().copy()
-                # Water-table head (m, saturated-surface elevation).
+                # Water-table head (m) and depth below surface (m). These are a
+                # SUBAERIAL concept — under the sea the head is pinned to the
+                # surface (h=z, a boundary condition, not a water table), so the
+                # marine nodes are masked (NaN) in the output to avoid showing a
+                # spurious "water table" in the ocean. The solve itself is
+                # unchanged (h is computed globally); only the output is masked.
+                marine = np.zeros(self.lpoints, dtype=bool)
+                marine[self.seaID] = True
+                wtable = self.headL.getArray().copy()
+                wtable[marine] = np.nan
                 f.create_dataset(
                     "wtable",
                     shape=(self.lpoints, 1),
                     dtype="float32",
                     **self._h5opts,
                 )
-                f["wtable"][:, 0] = self.headL.getArray().copy()
-                # Water-table depth below the surface (m) — the duricrust driver.
+                f["wtable"][:, 0] = wtable
+                wtdepth = self.wtDepth.copy()
+                wtdepth[marine] = np.nan
                 f.create_dataset(
                     "wtdepth",
                     shape=(self.lpoints, 1),
                     dtype="float32",
                     **self._h5opts,
                 )
-                f["wtdepth"][:, 0] = self.wtDepth.copy()
+                f["wtdepth"][:, 0] = wtdepth
                 if getattr(self, "gwConserveBaseflow", False):
                     # Seepage-return (baseflow) discharge (m^3/yr).
                     f.create_dataset(
@@ -763,7 +773,14 @@ class WriteMesh(object):
             # dry-start / uncemented init, so the restore stays robust.
             if getattr(self, "gwOn", False):
                 if "/wtable" in hf:
-                    self.headL.setArray(np.array(hf["/wtable"])[:, 0])
+                    # Marine nodes are written as NaN (the output masks the
+                    # spurious "water table" under the sea); restore them to the
+                    # surface z, which is exactly the pinned head there (h = z).
+                    zloc = self.hLocal.getArray()
+                    head = np.array(hf["/wtable"])[:, 0]
+                    nan = ~np.isfinite(head)
+                    head[nan] = zloc[nan]
+                    self.headL.setArray(head)
                     self.dm.localToGlobal(self.headL, self.headG)
                     self.wtDepth = self.hLocal.getArray() - self.headL.getArray()
                 if getattr(self, "duriOn", False) and "/duricrust" in hf:
