@@ -567,6 +567,16 @@ class WriteMesh(object):
                             **self._h5opts,
                         )
                         f["riverSolute"][:, 0] = self.riverSolute.copy()
+                        if getattr(self, "gwMarineCoupling", False):
+                            # Per-node solute entering the ocean at coast/outlet
+                            # exits this step (marine coupling, m³/yr).
+                            f.create_dataset(
+                                "marineSoluteInput",
+                                shape=(self.lpoints, 1),
+                                dtype="float32",
+                                **self._h5opts,
+                            )
+                            f["marineSoluteInput"][:, 0] = self.marineSoluteInput.copy()
 
             f.create_dataset(
                 "sedLoad",
@@ -980,6 +990,8 @@ class WriteMesh(object):
                         _gwnames += ["crust_source"]
                     if getattr(self, "gwRiverLoad", False):
                         _gwnames += ["riverSolute"]
+                        if getattr(self, "gwMarineCoupling", False):
+                            _gwnames += ["marineSoluteInput"]
                 for _gwname in _gwnames:
                     f.write(
                         '         <Attribute Type="Scalar" Center="Node" Name="%s">\n'

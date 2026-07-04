@@ -812,11 +812,25 @@ The map is the present-day surface lithology and is static (it does not follow
 exhumation of deeper layers — a documented refinement).
 
 Set ``river_load: True`` to route the exported (seepage/baseflow) solute **down
-the surface drainage network** to the shoreline — the river dissolved load. A
-single conservative accumulation on the flow matrix; the routed field
-``riverSolute`` (m³/yr) grows downstream, is delivered at the coast, and is
-trapped in closed continental basins (evaporite behaviour). No new inputs beyond
-the flag.
+the surface drainage network** to the shoreline — the river dissolved load,
+routed **per species** on the flow matrix. The field ``riverSolute`` (m³/yr)
+grows downstream, is delivered at the coast, and is trapped in closed continental
+basins (evaporite behaviour). Two optional refinements:
+
+* a per-species ``river_decay`` (a first-order **in-transit loss** along the
+  river — in-channel precipitation / biological uptake; ``0`` = conservative);
+* ``marine_coupling: True`` — the delivered coastal flux accumulates into a
+  per-species marine reservoir, with a per-node ``marineSoluteInput`` output
+  showing where weathering solute enters the sea.
+
+.. code:: yaml
+
+        geochem:
+            river_load: True
+            marine_coupling: True
+            species:
+              - {name: carbonate, weatherability: 1.0}
+              - {name: silica,    weatherability: 0.5, river_decay: 0.5}
 
 .. note::
 

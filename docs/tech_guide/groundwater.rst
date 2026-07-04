@@ -245,16 +245,19 @@ multi-species aqueous equilibrium (speciation, pH) is out of scope by design —
 the lumped multi-tracer model is the scale-appropriate choice at km / My.
 
 With ``geochem: river_load`` on, the exported solute does not simply vanish to
-the ocean: it is **routed down the surface drainage network** as a conservative
-passive tracer (the river dissolved load — the dominant natural pathway for
-weathering products to the sea). One implicit accumulation solve
-:math:`(I - W^\mathsf{T})\,L = s` reuses the flow-accumulation matrix with the
-per-node seepage export :math:`s` as the source, so the dissolved load :math:`L`
-(``riverSolute``) grows downstream and is delivered at the shoreline; solute
-routed into a closed continental basin is trapped there (evaporite behaviour).
-No deposition or cascade is needed — unlike sediment, dissolved load neither
-settles nor fills pits. The coastal-delivered total cross-checks the lumped
-per-tracer ocean flux.
+the ocean: it is **routed down the surface drainage network**, **per species**
+(the river dissolved load — the dominant natural pathway for weathering products
+to the sea). For each tracer an implicit accumulation solve reuses the
+flow-accumulation matrix with the per-node seepage export :math:`s` as the
+source, so the dissolved load :math:`L` (``riverSolute``) grows downstream and is
+delivered at the shoreline; solute routed into a closed continental basin is
+trapped there (evaporite behaviour). No deposition or cascade is needed — unlike
+sediment, dissolved load neither settles nor fills pits. An optional per-species
+``river_decay`` adds a first-order **in-transit loss** (a diagonal term
+:math:`(I - W^\mathsf{T} + \kappa I)\,L = s` — in-channel precipitation/uptake),
+and ``marine_coupling`` accumulates the delivered coastal flux into a per-species
+marine reservoir. The coastal-delivered total cross-checks the lumped per-tracer
+ocean flux.
 
 Compatibility
 -------------

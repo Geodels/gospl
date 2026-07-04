@@ -1,0 +1,75 @@
+name: groundwater + Level-B geochemistry + per-species river load + reactions + marine
+
+# Extension 2 refinements: per-species river routing (2 tracers), a first-order
+# in-transit loss on silica (river_decay), and marine coupling (delivered coastal
+# flux accumulates into a per-species reservoir). Lithology-driven weatherability
+# via provenance source_class. Shared mesh + soiltemp.
+
+domain:
+    npdata: ['mesh','v','c','z']
+    flowdir: 2
+    bc: '1111'
+    seadepo: True
+    nodep: False
+
+time:
+    start: 0.
+    end: 40
+    tout: 20
+    dt: 10.
+    strat: 10.
+
+spl:
+    K: 4.0e-6
+    d: 0.
+    m: 0.5
+    G: 1.0
+
+diffusion:
+    hillslopeKa: 0.01
+    hillslopeKm: 0.2
+
+soil:
+    mode: 'regolith'
+    soilK: 8.0e-6
+    maxProd: 50.e-6
+    depthProd: 0.5
+    uniform: 1.0
+    tempMap: ['soiltemp', 't']
+    activation: 40.e3
+    tempRef: 15.0
+
+provenance:
+    classes: 2
+    uniform: 0
+
+groundwater:
+    Ksat: 3.65e4
+    specific_yield: 0.1
+    aquifer_base: 50.0
+    infiltration: 0.02
+    conserve_baseflow: True
+    duricrust:
+        form_rate: 1.0e-4
+        max_thickness: 5.0
+        fringe_depth: 3.0
+        fringe_width: 2.0
+        armor_max: 0.9
+    geochem:
+        conserve: True
+        weatherability_from: source_class
+        river_load: True
+        marine_coupling: True
+        species:
+          - {name: carbonate, weatherability_by_class: [1.0, 0.0], c_sat: 1.0, precip_rate: 1.0, solid_volume: 1.0}
+          - {name: silica,    weatherability_by_class: [0.0, 1.0], c_sat: 2.0, precip_rate: 1.0, solid_volume: 1.0, river_decay: 0.5}
+
+sea:
+    position: -100.
+
+climate:
+  - start: 0.
+    uniform: 1
+
+output:
+    dir: 'gw_river2_out'

@@ -2178,8 +2178,15 @@ class ReadYaml(object):
             self.gwGeochemConserve = bool(geo.get("conserve", True))
             # ext 2: route the groundwater-exported (seepage/baseflow) solute
             # DOWN the surface drainage network to the shoreline (river dissolved
-            # load), reusing the flow-accumulation matrix. Opt-in.
+            # load), reusing the flow-accumulation matrix. Opt-in. Per-species.
             self.gwRiverLoad = bool(geo.get("river_load", False))
+            # ext 2 refinement: per-species first-order IN-TRANSIT loss along the
+            # river (0 = conservative). And marine coupling: accumulate the
+            # delivered coastal flux into a per-species marine reservoir.
+            self.gwGeoRiverDecay = [
+                float(s.get("river_decay", 0.0)) for s in species
+            ] or [0.0]
+            self.gwMarineCoupling = bool(geo.get("marine_coupling", False))
 
         except KeyError:
             self.gwOn = False
@@ -2226,6 +2233,8 @@ class ReadYaml(object):
             self.gwGeoVsolid = [1.0]
             self.gwGeochemConserve = True
             self.gwRiverLoad = False
+            self.gwGeoRiverDecay = [0.0]
+            self.gwMarineCoupling = False
 
         return
 

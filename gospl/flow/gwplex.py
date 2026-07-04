@@ -155,6 +155,7 @@ class GWMesh(object):
                 # per-vertex `[file, key]` map, or a table used with a lithology
                 # label) — resolved lazily into `_gwGeoWeatherArr` on first use.
                 self._gwGeoWeatherArr = None
+                self.gwGeoRiverDecay = np.asarray(self.gwGeoRiverDecay, dtype=np.float64)
                 self.gwGeoCsat = np.asarray(self.gwGeoCsat, dtype=np.float64)
                 self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
                 self.gwGeoVsolid = np.asarray(self.gwGeoVsolid, dtype=np.float64)
@@ -202,6 +203,17 @@ class GWMesh(object):
                     self.riverSoluteL.set(0.0)
                     self.riverSolute = np.zeros(self.lpoints, dtype=np.float64)
                     self.riverSoluteToOcean = 0.0
+                    # Per-species routing: per-node seepage export and routed
+                    # river load by tracer (the total fields above are Σ over k).
+                    self.gwSoluteFluxSp = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                    self.riverSoluteSp = np.zeros((self.lpoints, nsp), dtype=np.float64)
+                    self.riverSoluteToOceanSp = np.zeros(nsp, dtype=np.float64)
+                    self.riverSoluteLost = np.zeros(nsp, dtype=np.float64)  # in-transit
+                    # Marine coupling: cumulative delivered inventory per tracer
+                    # (m³, integrated over time) + per-node coastal input this step.
+                    if getattr(self, "gwMarineCoupling", False):
+                        self.marineSolute = np.zeros(nsp, dtype=np.float64)
+                        self.marineSoluteInput = np.zeros(self.lpoints, dtype=np.float64)
 
         return
 
@@ -1046,6 +1058,9 @@ class GWMesh(object):
         adv, divq = self._soluteAdvecCoeffs(h, T)  # advection + seepage sink (G1)
         seep_sink = np.maximum(-divq, 0.0)         # discharge-to-surface coefficient
         self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
+        river = getattr(self, "gwRiverLoad", False)
+        if river:
+            self.gwSoluteFluxSp[:] = 0.0           # per-species export (ext 2)
         prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None
         W = self._weatheringSupply()               # base weathering rate (Level A)
         # ext 1: per-species weatherability. Resolved once and cached, EXCEPT the
@@ -1122,6 +1137,8 @@ class GWMesh(object):
             self.gwOceanFlux[k] += float(export_mass[owned].sum())
             # Per-node baseflow export rate (m³/yr), summed over tracers, for output.
             self.gwSoluteFlux += seep_sink * c * A
+            if river:                               # per-species export (ext 2)
+                self.gwSoluteFluxSp[:, k] = seep_sink * c * A
             # Per-node crust contributed by this tracer (G4 typing).
             self.gwCrustBySpecies[:, k] += precip_mass / A * self.gwGeoVsolid[k]
 
@@ -1164,50 +1181,86 @@ class GWMesh(object):
         r"""
         Route the groundwater-exported (seepage/baseflow) solute **down the
         surface drainage network** to the shoreline — the river dissolved load
-        (Level-B extension 2, DESIGN_GEOCHEM_EXTENSIONS.md §2).
+        (Level-B extension 2, DESIGN_GEOCHEM_EXTENSIONS.md §2), **per species**.
 
-        A conservative passive tracer on the flow graph: no deposition, no
-        coarse/fine, no pit-overspill cascade. One implicit accumulation solve
-        ``(I − Wᵀ) L = s`` reusing the **cached flow-accumulation matrix**
-        ``fMati`` (the ``_getSedFlux`` pattern), with the per-node seepage export
-        ``gwSoluteFlux`` (already an extensive m³/yr flux — no area weighting) as
-        the source. ``L`` (``riverSolute``) is the accumulated dissolved load at
-        every node, increasing downstream; solute reaching a coastal/outlet exit
-        leaves the continent (summed into ``riverSoluteToOcean``), while solute
-        routed into a truly closed basin terminates there (evaporite trapping) —
-        both fall out of the filled-topo matrix with no special handling.
+        For each tracer an implicit accumulation solve reuses the **cached
+        flow-accumulation matrix** ``fMati`` (the ``_getSedFlux`` pattern) with
+        that species' per-node seepage export ``gwSoluteFluxSp[:, k]`` (already an
+        extensive m³/yr flux — no area weighting) as the source:
+
+        - **conservative** (``river_decay = 0``): ``(I − Wᵀ) L = s`` — a passive
+          tracer; solute reaching a coast/outlet leaves the continent, solute
+          into a closed basin is trapped (evaporite), both from the filled-topo
+          matrix with no special handling.
+        - **in-transit loss** (``river_decay = κ > 0``): a first-order removal
+          along the network adds a diagonal sink, ``(I − Wᵀ + κ I) L = s`` (built
+          as ``fMati.shift(κ)``); the lost mass ``κ·Σ L`` is a per-species
+          diagnostic (in-channel precipitation / uptake).
+
+        Per-species fields ``riverSoluteSp`` / ``riverSoluteToOceanSp`` /
+        ``riverSoluteLost`` are summed into the totals ``riverSolute`` /
+        ``riverSoluteToOcean``. With ``marine_coupling`` on, the delivered coastal
+        flux accumulates into a per-species marine reservoir ``marineSolute``
+        (m³, integrated) and the per-node coastal input ``marineSoluteInput``.
 
         Called at the end of ``updateGroundwater`` — ``flowAccumulation`` (which
-        caches ``fMati``) runs earlier in the step, so the matrix is fresh and
-        no reordering is needed. No-op unless ``river_load`` is on; the flow
-        matrix must exist (guarded for the very first call). Collective (KSP).
+        caches ``fMati``) runs earlier in the step, so the matrix is fresh and no
+        reordering is needed. No-op unless ``river_load`` is on; the flow matrix
+        must exist (guarded for the first call). Collective (KSP per tracer).
         """
         if not getattr(self, "gwRiverLoad", False):
             return
         if getattr(self, "fMati", None) is None:
             return                                    # no flow matrix yet
-        # RHS = per-node seepage export (m³/yr), already extensive.
-        self.soluteL.setArray(self.gwSoluteFlux)
-        self.dm.localToGlobal(self.soluteL, self.tmp)
-        # (I − Wᵀ) L = s — upstream accumulation on the flow matrix.
-        self._solve_KSP(False, self.fMati, self.tmp, self.riverSoluteG)
-        self.dm.globalToLocal(self.riverSoluteG, self.riverSoluteL)
-        self.riverSolute = np.maximum(self.riverSoluteL.getArray().copy(), 0.0)
-        # Delivered to the ocean = routed load reaching a coast / outlet exit
-        # (closed continental basins are interior terminals — trapped, excluded).
         owned = self.inIDs == 1
-        exitm = np.zeros(self.lpoints, dtype=bool)
+        exitm = np.zeros(self.lpoints, dtype=bool)    # coast / outlet exits
         exitm[self.seaID] = True
         outl = getattr(self, "outletIDs", None)
         if outl is not None:
             exitm[outl] = True
-        self.riverSoluteToOcean = MPI.COMM_WORLD.allreduce(
-            float(self.riverSolute[owned & exitm].sum()), op=MPI.SUM
-        )
+
+        self.riverSolute[:] = 0.0
+        for k in range(int(self.gwNspecies)):
+            # RHS = this species' per-node seepage export (m³/yr, extensive).
+            self.soluteL.setArray(self.gwSoluteFluxSp[:, k])
+            self.dm.localToGlobal(self.soluteL, self.tmp)
+            kappa = float(self.gwGeoRiverDecay[k])
+            if kappa > 0.0:                           # in-transit first-order loss
+                M = self.fMati.copy()
+                M.shift(kappa)                        # (I − Wᵀ) + κ I
+                self._solve_KSP(False, M, self.tmp, self.riverSoluteG)
+                M.destroy()
+            else:                                     # conservative accumulation
+                self._solve_KSP(False, self.fMati, self.tmp, self.riverSoluteG)
+            self.dm.globalToLocal(self.riverSoluteG, self.riverSoluteL)
+            Lk = np.maximum(self.riverSoluteL.getArray().copy(), 0.0)
+            self.riverSoluteSp[:, k] = Lk
+            self.riverSolute += Lk
+            self.riverSoluteToOceanSp[k] = MPI.COMM_WORLD.allreduce(
+                float(Lk[owned & exitm].sum()), op=MPI.SUM
+            )
+            # In-transit loss (mass balance: Σs = Σ_terminal L + κ·Σ L).
+            self.riverSoluteLost[k] = (
+                MPI.COMM_WORLD.allreduce(float(kappa * Lk[owned].sum()), op=MPI.SUM)
+                if kappa > 0.0 else 0.0
+            )
+        self.riverSoluteToOcean = float(self.riverSoluteToOceanSp.sum())
+
+        # Marine coupling: the delivered coastal flux feeds a per-species marine
+        # reservoir (integrated over time) + a per-node coastal-input field.
+        if getattr(self, "gwMarineCoupling", False):
+            self.marineSoluteInput[:] = 0.0
+            self.marineSoluteInput[exitm] = self.riverSolute[exitm]
+            self.marineSolute += self.riverSoluteToOceanSp * self.dt
+
         if MPIrank == 0 and self.verbose:
+            per = ", ".join(
+                "%s=%0.3g" % (self.gwGeoName[k], self.riverSoluteToOceanSp[k])
+                for k in range(int(self.gwNspecies))
+            )
             print(
-                "[gw] river dissolved load delivered to ocean: %0.4g m3/yr"
-                % self.riverSoluteToOcean,
+                "[gw] river dissolved load to ocean: %0.4g m3/yr (per tracer: %s)"
+                % (self.riverSoluteToOcean, per),
                 flush=True,
             )
         return

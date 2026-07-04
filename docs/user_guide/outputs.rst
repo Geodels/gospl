@@ -125,8 +125,11 @@ with the nested ``duricrust:`` block.
      - Dominant **source-rock class** of the crust (solute-source provenance; −1 = no crust).
      - ``geochem:`` + ``provenance:``
    * - ``riverSolute``
-     - **River dissolved load** — exported solute routed down the surface network, accumulating downstream to the coast (m³/yr).
+     - **River dissolved load** — exported solute routed (per species) down the surface network, accumulating downstream to the coast (m³/yr).
      - ``geochem: river_load``
+   * - ``marineSoluteInput``
+     - Per-node solute **entering the ocean** at coast/outlet exits (marine coupling; m³/yr).
+     - ``geochem: marine_coupling``
 
 The per-layer diagenetic induration is additionally archived in the
 stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by

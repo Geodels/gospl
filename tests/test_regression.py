@@ -1178,15 +1178,16 @@ def test_geochem_river_load():
         assert np.all(np.isfinite(m.riverSolute)) and (m.riverSolute >= 0.0).all()
 
         # Controlled check: rebuild the flow matrix, inject a unit source, route it.
+        # Routing is per-species (gwSoluteFluxSp); this fixture is single-tracer.
         m.flowAccumulation()
-        m.gwSoluteFlux[:] = 1.0
+        m.gwSoluteFluxSp[:] = 1.0
         m._routeRiverSolute()
         # Accumulation: the routed load far exceeds the per-node unit source.
         assert m.riverSolute.max() > 1.0 + 1.0e-9, "no downstream accumulation"
         # Exact conservation via the operator: Σ s == Σᵢ Lᵢ·(1 − outwᵢ). Build s
         # afresh (global), and (1 − outw) = fMatiᵀ·1 with the real matrix weights.
         s = m.hGlobal.duplicate()
-        m.soluteL.setArray(m.gwSoluteFlux)
+        m.soluteL.setArray(m.gwSoluteFluxSp[:, 0])
         m.dm.localToGlobal(m.soluteL, s)
         e = m.hGlobal.duplicate()
         e.set(1.0)
@@ -1196,6 +1197,56 @@ def test_geochem_river_load():
         rhs = y.dot(m.riverSoluteG)           # Σᵢ Lᵢ·(1 − outwᵢ) == Σ s
         s.destroy(); e.destroy(); y.destroy()
         assert np.isclose(lhs, rhs, rtol=1.0e-5), "river solute not conserved (%g vs %g)" % (lhs, rhs)
+    finally:
+        m.destroy()
+
+
+def test_geochem_river_species_reactions_marine():
+    """
+    Protects (Level-B geochemistry, extension 2 refinements §2.6 —
+    DESIGN_GEOCHEM_EXTENSIONS.md): **per-species** river routing, **in-transit
+    reactions** (a first-order loss `river_decay = κ`), and **marine coupling**
+    (delivered coastal flux → a per-species reservoir). Verified by injecting a
+    unit source per species and routing: the per-species loads sum to the total;
+    each species satisfies the mass balance ``Σ s = (delivered + trapped) + lost``
+    where delivered+trapped = ``(fMatiᵀ·1)·L`` and lost = ``riverSoluteLost``
+    (= 0 for the conservative species, > 0 for the decaying one); and the marine
+    reservoir grows by exactly ``riverSoluteToOceanSp · dt``.
+    """
+    m = _gw_model("minimal_gw_river2.yml")
+    try:
+        assert m.gwGeochemOn and m.gwRiverLoad and m.gwMarineCoupling
+        assert m.gwNspecies == 2 and m.gwGeoRiverDecay[0] == 0.0 and m.gwGeoRiverDecay[1] > 0.0
+        x = m.lcoords[:, 0]
+        m.source_class = np.where(x < np.median(x), 0, 1).astype(np.int64)
+        m.tEnd = m.tNow + m.dt
+        m.runProcesses()                       # one in-pipeline step
+        # Per-species loads sum to the totals.
+        assert np.allclose(m.riverSoluteSp.sum(axis=1), m.riverSolute)
+        assert np.isclose(m.riverSoluteToOceanSp.sum(), m.riverSoluteToOcean)
+
+        # Controlled: rebuild the flow matrix, inject a unit source PER SPECIES.
+        m.flowAccumulation()
+        m.gwSoluteFluxSp[:] = 1.0
+        before = m.marineSolute.copy()
+        m._routeRiverSolute()
+
+        e = m.hGlobal.duplicate(); e.set(1.0)
+        y = m.hGlobal.duplicate(); m.fMati.multTranspose(e, y)   # (I − W)·1
+        sg = m.hGlobal.duplicate(); Lg = m.hGlobal.duplicate()
+        for k in range(m.gwNspecies):
+            m.soluteL.setArray(m.gwSoluteFluxSp[:, k]); m.dm.localToGlobal(m.soluteL, sg)
+            m.soluteL.setArray(m.riverSoluteSp[:, k]); m.dm.localToGlobal(m.soluteL, Lg)
+            # Σ s == (delivered + trapped) + in-transit lost   (per species).
+            lhs = e.dot(sg)
+            rhs = y.dot(Lg) + float(m.riverSoluteLost[k])
+            assert np.isclose(lhs, rhs, rtol=1.0e-4), "species %d not conserved (%g vs %g)" % (k, lhs, rhs)
+        # Conservative species loses nothing; the decaying one loses a real amount.
+        assert m.riverSoluteLost[0] == 0.0
+        assert m.riverSoluteLost[1] > 0.0
+        # Marine reservoir grew by exactly the delivered coastal flux × dt.
+        assert np.allclose(m.marineSolute - before, m.riverSoluteToOceanSp * m.dt)
+        sg.destroy(); Lg.destroy(); e.destroy(); y.destroy()
     finally:
         m.destroy()
 

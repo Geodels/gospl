@@ -178,15 +178,20 @@ mirroring `_duriWeatherArr`), a one-line use-site change, one fixture + test.
 
 ## Extension 2 — river dissolved-load coupling
 
-> **STATUS: DONE** (built as designed — the single-solve conservative variant).
-> Opt-in `geochem: river_load: true` → `gwRiverLoad`. `_routeRiverSolute` solves
-> `(I − Wᵀ)L = s` on the cached `fMati` with `gwSoluteFlux` as the RHS, called at
-> the end of `updateGroundwater` (matrix is fresh — no reordering). Outputs
-> `riverSolute`; verbose `riverSoluteToOcean`. **Exact conservation** verified via
-> the operator identity `Σs = Σᵢ Lᵢ(1−outwᵢ)` (`test_geochem_river_load`);
-> closed-basin trapping confirmed (np=2: ~5% trapped, `toOcean < Σs`). Full
-> `tests/` 152 passed. Per-species routing, in-transit reactions and marine
-> coupling remain the noted refinements (§2.6).
+> **STATUS: DONE — incl. all §2.6 refinements.** Opt-in `geochem: river_load:
+> true` → `gwRiverLoad`. `_routeRiverSolute` routes the seepage export down the
+> flow network **per species** (RHS `gwSoluteFluxSp[:, k]` on the cached `fMati`),
+> called at the end of `updateGroundwater` (matrix fresh — no reordering).
+> Refinements built: **per-species routing** (`riverSoluteSp` /
+> `riverSoluteToOceanSp`); **in-transit reactions** — a first-order per-species
+> loss `river_decay = κ` via the shifted operator `(I − Wᵀ + κ I)L = s`
+> (`fMati.shift(κ)`), lost mass `riverSoluteLost`; **marine coupling**
+> (`marine_coupling`) — delivered coastal flux accumulates into a per-species
+> reservoir `marineSolute` + per-node `marineSoluteInput` output. **Exact
+> conservation** per species via `Σs = (fMatiᵀ·1)·L + riverSoluteLost`
+> (`test_geochem_river_load` conservative, `test_geochem_river_species_reactions_marine`
+> full); np=2 confirmed (per-species exact, decay loss, marine accumulation).
+> Full `tests/` 155 passed.
 
 ### 2.1 Motivation & the current gap
 The solute the model dissolves is exported to the ocean via **groundwater
@@ -281,14 +286,18 @@ uses the pre-erosion `fMati` consistent with the groundwater step.)
   per step (or `n_species`), cheap next to the flow/sediment solves.
 - **Conservative & partition-invariant** by construction (same operator as water
   discharge).
-- **In-transit processes (v1 omits):** real rivers also gain/lose solute in
-  transit — extra in-channel weathering, evapoconcentration, carbonate
-  precipitation, biological uptake. v1 is a **conservative passive** routing (the
-  right level at My steps, where in-channel residence is instantaneous). A
-  first-order in-channel loss/gain would add a diagonal reaction term to the
-  operator (like the seepage sink in the groundwater solute solve) — deferred.
-- **Marine coupling (out of scope):** the delivered coastal flux could seed a
-  marine solute / alkalinity state; noted, not built.
+- **In-transit reactions (BUILT):** a per-species first-order loss
+  `river_decay = κ` (in-channel precipitation / uptake) via the shifted operator
+  `(I − Wᵀ + κ I)L = s` (`fMati.shift(κ)`); the lost mass `κ·Σ L` is a per-species
+  diagnostic `riverSoluteLost`. `κ = 0` (default) is the conservative passive
+  routing. NOTE the loss is a **per-node** first-order retention, so it is
+  mesh-resolution-sensitive (a distance-weighted form using `distRcv` is the
+  further refinement) — the rate is a tunable knob, not a calibrated constant.
+- **Marine coupling (BUILT):** the delivered coastal flux (`riverSoluteToOceanSp`)
+  accumulates into a per-species reservoir `marineSolute` (m³, integrated over
+  time) with a per-node `marineSoluteInput` output. It is a **delivery reservoir**
+  (the ocean's weathering-derived inventory), NOT a marine reactive-transport
+  model — that (mixing, carbonate system, sedimentation) remains out of scope.
 
 ### 2.7 Testing
 - Fixture: a ramp draining to one open coast; inject a uniform `gwSoluteFlux`.
