@@ -604,7 +604,15 @@ class GWMesh(object):
         Qtot = MPI.COMM_WORLD.allreduce(float(rvol - svol), op=MPI.SUM)
 
         bf = np.zeros(self.lpoints, dtype=np.float64)
-        seep_owned = seep & owned
+        # Distribute the return flow over the SUBAERIAL seepage nodes only — the
+        # springs / lakes / land outlets that actually feed the rivers. Marine
+        # (`seaID`) nodes are seepage BCs too, but baseflow injected there is lost
+        # to the sea (it never reaches a river), which would break the water
+        # conservation this closure exists to enforce (and paints "baseflow" over
+        # the ocean in the output). So exclude the marine seepage nodes.
+        marine = np.zeros(self.lpoints, dtype=bool)
+        marine[self.seaID] = True
+        seep_owned = seep & owned & (~marine)
         wsum = MPI.COMM_WORLD.allreduce(
             float(np.where(seep_owned, A, 0.0).sum()), op=MPI.SUM
         )

@@ -471,41 +471,41 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["recharge"][:, 0] = self.rechargeL.getArray().copy()
-                # Water-table head (m) and depth below surface (m). These are a
-                # SUBAERIAL concept — under the sea the head is pinned to the
-                # surface (h=z, a boundary condition, not a water table), so the
-                # marine nodes are masked (NaN) in the output to avoid showing a
-                # spurious "water table" in the ocean. The solve itself is
-                # unchanged (h is computed globally); only the output is masked.
-                marine = np.zeros(self.lpoints, dtype=bool)
-                marine[self.seaID] = True
-                wtable = self.headL.getArray().copy()
-                wtable[marine] = np.nan
+                # Water-table head (m) and depth below the surface (m). Under the
+                # sea the head is pinned to the surface (h = z, a boundary
+                # condition), so marine nodes carry the physical values there —
+                # `wtable = z` and `wtdepth = 0` (a flat sea surface, not a
+                # spurious deep water table). These are the raw fields.
                 f.create_dataset(
                     "wtable",
                     shape=(self.lpoints, 1),
                     dtype="float32",
                     **self._h5opts,
                 )
-                f["wtable"][:, 0] = wtable
-                wtdepth = self.wtDepth.copy()
-                wtdepth[marine] = np.nan
+                f["wtable"][:, 0] = self.headL.getArray().copy()
                 f.create_dataset(
                     "wtdepth",
                     shape=(self.lpoints, 1),
                     dtype="float32",
                     **self._h5opts,
                 )
-                f["wtdepth"][:, 0] = wtdepth
+                f["wtdepth"][:, 0] = self.wtDepth.copy()
                 if getattr(self, "gwConserveBaseflow", False):
-                    # Seepage-return (baseflow) discharge (m^3/yr).
+                    # Seepage-return (baseflow) discharge to the rivers (m^3/yr).
+                    # It is a LAND flux (feeds rivers); the closure already
+                    # excludes marine seepage nodes, but a few coastal nodes can
+                    # flip land->sea between the groundwater step and this output
+                    # (seaID is recomputed after erosion), so zero the marine
+                    # nodes here to keep baseflow strictly on land in the output.
+                    bflow = self.baseflowL.getArray().copy()
+                    bflow[self.seaID] = 0.0
                     f.create_dataset(
                         "baseflow",
                         shape=(self.lpoints, 1),
                         dtype="float32",
                         **self._h5opts,
                     )
-                    f["baseflow"][:, 0] = self.baseflowL.getArray().copy()
+                    f["baseflow"][:, 0] = bflow
                 if getattr(self, "duriOn", False):
                     # Duricrust thickness (m), induration degree (0..1) and the
                     # erodibility armoring multiplier Karmor = 1 - armor_max*duriF.
@@ -773,14 +773,7 @@ class WriteMesh(object):
             # dry-start / uncemented init, so the restore stays robust.
             if getattr(self, "gwOn", False):
                 if "/wtable" in hf:
-                    # Marine nodes are written as NaN (the output masks the
-                    # spurious "water table" under the sea); restore them to the
-                    # surface z, which is exactly the pinned head there (h = z).
-                    zloc = self.hLocal.getArray()
-                    head = np.array(hf["/wtable"])[:, 0]
-                    nan = ~np.isfinite(head)
-                    head[nan] = zloc[nan]
-                    self.headL.setArray(head)
+                    self.headL.setArray(np.array(hf["/wtable"])[:, 0])
                     self.dm.localToGlobal(self.headL, self.headG)
                     self.wtDepth = self.hLocal.getArray() - self.headL.getArray()
                 if getattr(self, "duriOn", False) and "/duricrust" in hf:

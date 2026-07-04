@@ -2254,17 +2254,14 @@ def test_groundwater_restart(tmp_path, monkeypatch):
     import h5py
 
     with h5py.File(tmp_path / "gw_out" / "h5" / "gospl.1.p0.h5", "r") as f:
-        h1 = np.array(f["wtable"])[:, 0].copy()   # marine nodes are NaN (masked output)
+        h1 = np.array(f["wtable"])[:, 0].copy()
         d1 = np.array(f["duricrust"])[:, 0].copy()
 
     # Restart from step 1 and check the state was restored (not re-initialised).
     (tmp_path / "gwr.yml").write_text(base.replace("start: 0.", "start: 0.\n    rstep: 1"))
     mr = Model("gwr.yml", verbose=False, showlog=False)
     try:
-        # wtable is masked (NaN) under the sea in the output; the restart fills
-        # those with z (the pinned head). Compare head on the LAND nodes it wrote.
-        land = np.isfinite(h1)
-        assert np.allclose(mr.headL.getArray()[land], h1[land], atol=1.0e-4), "head not restored"
+        assert np.allclose(mr.headL.getArray(), h1, atol=1.0e-4), "head not restored"
         assert np.allclose(mr.duriHL.getArray(), d1, atol=1.0e-6), "duriH not restored"
         assert np.allclose(
             mr.wtDepth, mr.hLocal.getArray() - mr.headL.getArray(), atol=1.0e-6
