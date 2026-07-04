@@ -94,13 +94,64 @@ class WriteMesh(object):
         # Output time step for first step
         if self.saveTime == self.tStart:
             self._outputMesh()
+            self._outputSoluteBudget()
             self.saveTime += self.tout
 
         # Output time step after start time
         elif self.tNow >= self.saveTime:
             self._outputMesh()
+            self._outputSoluteBudget()
             self.saveTime += self.tout
 
+        return
+
+    def _outputSoluteBudget(self):
+        """
+        Append the domain-integrated **solute budget** (Level-B geochemistry) to a
+        ``<outputDir>/gw_solute_budget.csv`` time series — the per-tracer scalars
+        that are NOT mesh fields (so cannot be gridded output): cumulative
+        dissolved / precipitated / ocean-exported mass, and, with river routing /
+        marine coupling, the per-step river flux delivered to the ocean and the
+        cumulative marine reservoir. This is where to read ``gwOceanFlux`` &c.
+
+        ``gwDissolved``/``gwPrecip``/``gwOceanFlux`` are per-rank partial sums, so
+        they are reduced to global totals here (collective — all ranks call);
+        rank 0 writes the row. Called once per output step from ``visModel``.
+        """
+        if not getattr(self, "gwGeochemOn", False):
+            return
+        nsp = int(self.gwNspecies)
+        diss = np.zeros(nsp); prec = np.zeros(nsp); ocn = np.zeros(nsp)
+        MPIcomm.Allreduce(np.ascontiguousarray(self.gwDissolved), diss, op=MPI.SUM)
+        MPIcomm.Allreduce(np.ascontiguousarray(self.gwPrecip), prec, op=MPI.SUM)
+        MPIcomm.Allreduce(np.ascontiguousarray(self.gwOceanFlux), ocn, op=MPI.SUM)
+        river = getattr(self, "gwRiverLoad", False)
+        marine = getattr(self, "gwMarineCoupling", False)
+        if MPIrank != 0:
+            return
+        path = os.path.join(self.outputDir, "gw_solute_budget.csv")
+        names = [str(n) for n in self.gwGeoName]
+        fresh = not getattr(self, "_soluteBudgetOpened", False) and self.rStep == 0
+        self._soluteBudgetOpened = True
+        header = fresh or not os.path.exists(path)
+        with open(path, "w" if fresh else "a") as fcsv:
+            if header:
+                cols = ["time"]
+                for nm in names:
+                    cols += ["dissolved_" + nm, "precipitated_" + nm, "oceanflux_" + nm]
+                    if river:
+                        cols += ["riverToOcean_" + nm]
+                    if marine:
+                        cols += ["marine_" + nm]
+                fcsv.write(",".join(cols) + "\n")
+            row = ["%.6g" % self.tNow]
+            for k, nm in enumerate(names):
+                row += ["%.6g" % diss[k], "%.6g" % prec[k], "%.6g" % ocn[k]]
+                if river:
+                    row += ["%.6g" % self.riverSoluteToOceanSp[k]]
+                if marine:
+                    row += ["%.6g" % self.marineSolute[k]]
+            fcsv.write(",".join(row) + "\n")
         return
 
     def _createOutputDir(self):

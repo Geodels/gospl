@@ -2225,6 +2225,15 @@ def test_geochem_perspecies_outputs(tmp_path, monkeypatch):
             assert np.allclose(persum, np.array(f[tot])[:, 0], rtol=1.0e-5, atol=1.0e-6), \
                 "%s per-species sum != total" % tot
 
+    # The domain-integrated solute budget (incl. the ocean flux, a scalar not
+    # in the mesh output) is written to a CSV time series.
+    budget = tmp_path / "gw_river2_out" / "gw_solute_budget.csv"
+    assert budget.exists(), "gw_solute_budget.csv not written"
+    hdr = budget.read_text().splitlines()[0].split(",")
+    for nm in names:
+        assert "oceanflux_" + nm in hdr, "missing oceanflux_%s in budget CSV" % nm
+        assert "riverToOcean_" + nm in hdr and "marine_" + nm in hdr
+
 
 def test_groundwater_restart(tmp_path, monkeypatch):
     """

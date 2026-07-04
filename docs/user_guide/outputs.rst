@@ -138,6 +138,15 @@ contribution), ``soluteflux_<name>`` (groundwater seepage export) and — with
 ``river_load`` — ``riverSolute_<name>`` (routed river load). Each set sums to its
 total. (``crust_type`` remains the dominant-tracer label.)
 
+The **domain-integrated solute budget** — the per-tracer *scalars* that are not
+mesh fields (so cannot be gridded) — is written as a CSV time series
+``<output-dir>/gw_solute_budget.csv``, one row per output step: ``time`` plus,
+per species, ``dissolved_<name>`` / ``precipitated_<name>`` / ``oceanflux_<name>``
+(cumulative dissolved, crust-precipitated and ocean-exported mass), and — with
+``river_load`` / ``marine_coupling`` — ``riverToOcean_<name>`` (the river flux
+delivered to the coast, m³/yr) and ``marine_<name>`` (the cumulative marine
+reservoir). This is where the ocean solute flux (``gwOceanFlux``) is reported.
+
 The per-layer diagenetic induration is additionally archived in the
 stratigraphy (``stratDuri``) and exposed as a per-layer ``induration`` field by
 ``gospl-strata-volume`` (see :ref:`running`). With the geochemistry on, each
