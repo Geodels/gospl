@@ -11,6 +11,7 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import jacobiancoeff
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
+MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 
 
 class GWMesh(object):
@@ -163,6 +164,11 @@ class GWMesh(object):
                 # per-vertex `[file, key]` map, or a table used with a lithology
                 # label) — resolved lazily into `_gwGeoWeatherArr` on first use.
                 self._gwGeoWeatherArr = None
+                # A node whose water table sits within this depth of the surface is
+                # treated as a saturated seepage cell in the solute export sink (its
+                # recharge discharges vertically); reuse the `min_sat_thickness`
+                # scale (the "thin saturated layer" floor), default ~1 m.
+                self._gwSatTol = float(self.gwMinSatThick)
                 self.gwGeoRiverDecay = np.asarray(self.gwGeoRiverDecay, dtype=np.float64)
                 self.gwGeoCsat = np.asarray(self.gwGeoCsat, dtype=np.float64)
                 self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
@@ -999,20 +1005,31 @@ class GWMesh(object):
 
     def _makeSoluteKSP(self):
         """
-        Cached KSP for the solute-transport solve: ``fgmres`` + block-Jacobi
-        (``gw_solute_`` prefix, pivot shift). The upwind advection operator is
-        non-symmetric but diagonally dominant (an M-matrix, anchored by the
-        seepage Dirichlet sink), so — unlike the stiff elliptic *head* operator
-        — a Krylov + ILU solve converges quickly (same class as the orographic
-        advection solver). Env-overridable via the ``gw_solute_`` prefix.
+        Cached KSP for the solute-transport solve: a **direct LU factorisation**
+        (``preonly`` + ``lu``; MUMPS in parallel), ``gw_solute_`` prefix.
+
+        The upwind advection operator is a non-symmetric M-matrix, but its
+        diagonal is only weakly dominant: at a flat, poorly-drained *saturated*
+        node the lateral outflow, the seepage sink and the recharge floor are all
+        small, so the operator is **badly conditioned**. A Krylov + block-Jacobi
+        solve then STALLS there for the strong (high-weatherability) tracers —
+        it returns a non-converged iterate with a concentration ~10× too large,
+        which silently breaks the per-step ``dissolved = precipitated + exported``
+        mass balance (the ocean/marine budget then drifts by an order of
+        magnitude). A direct solve is exact, so it is both robust to the
+        conditioning and conservative to round-off; the operator is the same size
+        / sparsity as the flexure biharmonic that already uses this path, and the
+        per-species factorisation is reused across the provenance right-hand
+        sides. Env-overridable via the ``gw_solute_`` prefix (e.g. request an
+        iterative solver for meshes too large to factorise).
         """
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
-        ksp.setType("fgmres")
-        ksp.getPC().setType("bjacobi")
-        ksp.setTolerances(rtol=1.0e-10, max_it=500)
-        ksp.setInitialGuessNonzero(True)
+        ksp.setType("preonly")
+        pc = ksp.getPC()
+        pc.setType("lu")
+        if MPIsize > 1:
+            pc.setFactorSolverType("mumps")              # parallel direct solve
         ksp.setOptionsPrefix("gw_solute_")
-        petsc4py.PETSc.Options()["gw_solute_sub_pc_factor_shift_type"] = "nonzero"
         ksp.setFromOptions()
         return ksp
 
@@ -1137,6 +1154,21 @@ class GWMesh(object):
 
         adv, divq = self._soluteAdvecCoeffs(h, T)  # advection + seepage sink (G1)
         seep_sink = np.maximum(-divq, 0.0)         # discharge-to-surface coefficient
+        # Vertical seepage at a saturated (water-table-at-surface) node discharges
+        # the *recharge* to the surface as well as the lateral convergence: the
+        # steady balance ∇·q = R − seepage gives seepage = R − ∇·q = R + |∇·q|.
+        # The `−div q` sink alone DROPS the recharge term, so a flat, fully
+        # saturated seepage node (∇·q ≈ 0, no lateral outflow) is left with a ZERO
+        # transport diagonal — a singular operator whose solve blows the solute
+        # concentration up (and with it the ocean/marine flux). Add the recharge
+        # discharge there, and ONLY there: at an unsaturated recharge node the water
+        # goes to lateral flow / storage, not vertical seepage, so its sink stays 0.
+        R = self.rechargeL.getArray()
+        sat = self.wtDepth <= self._gwSatTol       # water table at the surface
+        extra = np.where(sat, np.maximum(R - divq, 0.0) - seep_sink, 0.0)
+        extra = np.maximum(extra, 0.0)             # never a negative (source) term
+        adv[:, 0] += extra                          # keep the operator diagonal in sync
+        seep_sink = seep_sink + extra
         self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
         self.gwSoluteFluxSp[:] = 0.0               # per-species export (output + routing)
         prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None
