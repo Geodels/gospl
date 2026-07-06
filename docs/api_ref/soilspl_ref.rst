@@ -28,6 +28,9 @@ Class soilSPL
       ~soilSPL._form_residual_soil
       ~soilSPL._monitorsoil
       ~soilSPL._build_soil_snes
+      ~soilSPL._soilErodibility
+      ~soilSPL._soilSNESsolve
+      ~soilSPL._adaptiveSubstepSoil
       ~soilSPL._solveSoil
       ~soilSPL._getEroDepRateSoil
       ~soilSPL._evalFunctionSoil
@@ -48,6 +51,9 @@ Private functions
 .. automethod:: eroder.soilSPL.soilSPL._form_residual_soil
 .. automethod:: eroder.soilSPL.soilSPL._monitorsoil
 .. automethod:: eroder.soilSPL.soilSPL._build_soil_snes
+.. automethod:: eroder.soilSPL.soilSPL._soilErodibility
+.. automethod:: eroder.soilSPL.soilSPL._soilSNESsolve
+.. automethod:: eroder.soilSPL.soilSPL._adaptiveSubstepSoil
 .. automethod:: eroder.soilSPL.soilSPL._solveSoil
 .. automethod:: eroder.soilSPL.soilSPL._getEroDepRateSoil
 .. automethod:: eroder.soilSPL.soilSPL._evalFunctionSoil

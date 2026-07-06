@@ -492,7 +492,7 @@ Soil production, erosion, transport and deposition
 
         .. note::
 
-            If the chosen primary solver stalls on a stiff soil-production residual, goSPL automatically retries that timestep with the *complementary* solver (quasi-Newton ⇄ ``ngmres`` multigrid accelerator) at a relaxed tolerance before continuing.
+            If the chosen primary solver stalls on a stiff soil-production residual, goSPL automatically retries that timestep with the *complementary* solver (quasi-Newton ⇄ ``ngmres`` multigrid accelerator) before continuing. If **both** solvers still diverge — which happens when a node whose duricrust/armour has just eroded off suddenly captures a large drainage, so the demanded single-step incision becomes very large and the slope term overshoots — the fluvial solve is retried with **adaptive sub-stepping**: the step is split into ``N = 4 → 8 → 16`` increments of :math:`\Delta t/N` (each cuts the demanded per-solve incision by ``N`` until the residual is smooth enough to converge), and the increments sum to the full step's erosion. Erosion is therefore *retained*, not skipped; only a step still diverging after ``N = 16`` is reverted to its prior elevation (no fluvial erosion that step) as a last resort. This makes the solve robust to drainage-capture / de-armouring transients that would otherwise spike the topography.
 
 
 Sediment surface erodibility factor

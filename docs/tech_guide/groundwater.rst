@@ -215,8 +215,15 @@ just like the head):
   — mafic rock → Fe/silica, a carbonate platform → carbonate.
 - **Transport** — first-order upwind advection by the groundwater flux ``q``,
   built from the head operator's face conductances (geometry-correct on flat and
-  global meshes); a diagonal **seepage sink** where the aquifer discharges makes
-  the operator a well-posed M-matrix.
+  global meshes). A diagonal **discharge-to-surface sink** ``max(0, R − ∇·q)``
+  (the recharge that cannot be transmitted laterally leaves at the surface)
+  anchors the operator as a well-posed M-matrix; the recharge term is essential
+  where the groundwater carries no lateral flow — a fully **saturated** seepage
+  node or a **dry** aquifer node — which would otherwise have a zero diagonal and
+  spike the concentration. The steady transport is solved with a **direct LU
+  factorisation** (MUMPS in parallel), which is exact and robust to the weak
+  diagonal dominance at those poorly-drained nodes (an iterative solve can stall
+  there and silently break the mass balance).
 - **Precipitation** :math:`P = k_p\,\Phi\,c` — a linear sink at the capillary
   fringe ``Φ`` that **feeds the crust** ``duriH`` (replacing the local proxy
   supply when geochem is on). The saturation threshold ``c_sat`` is a future
