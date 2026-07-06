@@ -70,11 +70,23 @@ water volume), the steady reactive-transport balance is
   flat and global meshes): the signed face flux is `f_ik = (C_ik/A_i)(h_i − h_k)`,
   upwinded (outflow → diagonal, inflow → neighbour). The lateral divergence
   `div q = Σ_k f_ik` is closed by the **vertical exchange** — a recharge source
-  (`div q > 0`, in the RHS) and a **seepage sink** `max(0, −div q)` added to the
-  diagonal (`div q < 0`, solute leaving to the surface). Without the sink the pure
-  `∇·(qc)=0` is ill-posed and blows up at discharge nodes. Solved with a cached
-  `gw_solute_` KSP (fgmres + block-Jacobi — the operator is a well-conditioned
-  M-matrix, not the stiff elliptic head, so no multigrid needed).
+  (`div q > 0`, in the RHS) and a **seepage sink** added to the diagonal where
+  solute leaves to the surface (`div q < 0`). At an unsaturated node that sink is
+  the lateral convergence `max(0, −div q)`; at a **saturated** node (water table
+  within `min_sat_thickness` of the surface) the vertical seepage also discharges
+  the *recharge*, so the sink is `max(0, R − div q) = R + |div q|`. Dropping that
+  recharge term leaves a flat, fully saturated node (`div q ≈ 0`, no lateral
+  outflow) with a **zero diagonal** — a singular operator whose solve blows the
+  concentration (and with it the ocean/marine flux) up. Solved with a cached
+  `gw_solute_` KSP: a **direct LU factorisation** (MUMPS in parallel). The
+  operator is an M-matrix but only *weakly* diagonally dominant at poorly-drained
+  saturated nodes, where a Krylov + block-Jacobi solve stalls for the strongest
+  (high-weatherability) tracer and returns a non-converged iterate ~10× too large
+  that silently breaks the per-step mass balance; a direct solve is exact — robust
+  to the conditioning and conservative to round-off, and the per-species
+  factorisation is reused across the provenance right-hand sides. Env-overridable
+  via the `gw_solute_` prefix (e.g. request an iterative solver for meshes too
+  large to factorise).
 - **Dissolution `D`** — the solute source (mass/vol/yr): the chemical-weathering
   rate driving material into solution, from the Level-A driver
   (`_weatheringSupply` / `prodSoil` / recharge `R`), scaled per tracer by a
@@ -88,13 +100,14 @@ water volume), the steady reactive-transport balance is
   `max(0, c − c_sat)` saturation gate instead oscillates between steps; the
   `c_sat` threshold is a documented refinement needing a nonlinear/Picard
   treatment. This is the crust source term — it feeds `duriH` (below).
-- **Export** — the **vertical seepage sink** `max(0,−div q)` already in the
-  operator removes the solute discharging to the surface at the seepage/discharge
-  nodes; that removal `Σ seep·c·A` is the **dissolved baseflow flux to the surface
-  network / ocean**. Because the upwind advection is exactly conservative
-  (internal faces cancel), **each step `dissolved = precipitated + exported`** to
-  the solver tolerance — no storage term (the steady solve maintains, not
-  accumulates, the standing concentration).
+- **Export** — the **vertical seepage sink** already in the operator (`max(0,−div
+  q)`, plus the recharge `R` at saturated nodes) removes the solute discharging to
+  the surface at the seepage/discharge nodes; that removal `Σ seep·c·A` is the
+  **dissolved baseflow flux to the surface network / ocean**. Because the upwind
+  advection is exactly conservative (internal faces cancel) and the direct solve
+  is exact, **each step `dissolved = precipitated + exported`** to round-off — no
+  storage term (the steady solve maintains, not accumulates, the standing
+  concentration).
 
 The precipitated mass converts to a crust-thickness increment (a per-tracer solid
 molar volume), so Level B's `P` **replaces** Level A's supply `Ψ` as the
