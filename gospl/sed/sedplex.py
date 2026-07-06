@@ -1036,6 +1036,20 @@ class SEDMesh(object):
         if self.provOn:
             self._pitProvFraction(depo)
 
+        # Robustness guard (B): a pit fills bottom-up toward its spill rim
+        # (`lFill`), which is bounded by the surrounding relief — so pit
+        # deposition can never physically raise a node above the highest existing
+        # terrain. If a transient upstream instability corrupts the fill level
+        # (e.g. a de-armoured high-discharge node whose soil-SPL solve diverged),
+        # `delta` can otherwise pile hundreds of km into an isolated deep pit and
+        # spike the topography. Cap the deposited thickness so the new elevation
+        # never exceeds the pre-deposition global maximum; legitimate basin fills
+        # (toward a rim well below the highest peak) are far under this bound and
+        # untouched.
+        gmax = self.hGlobal.max()[1]
+        cur = self.hLocal.getArray()               # current elevation (post continental depo)
+        delta = np.minimum(delta, np.maximum(gmax - cur, 0.0))
+
         # Apply deposit
         self.tmpL.setArray(delta)
         self.dm.localToGlobal(self.tmpL, self.tmp)

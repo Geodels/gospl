@@ -287,6 +287,129 @@ class soilSPL(object):
         snes.setFromOptions()
         return snes, f
 
+    def _soilErodibility(self, PA, surfK):
+        """
+        (Re)build the dt-scaled stream-power erodibility coefficients ``Kbr``
+        (bedrock) and ``K_soil`` (soil layer) for the CURRENT ``self.dt`` and
+        ``self.hOldArray``. The erosion limiter follows the current elevation
+        (drop to the receiver), so this is recomputed per sub-step by the
+        adaptive sub-stepper as well as once for the full step.
+        """
+        dh = (self.hOldArray[:, None] - self.hOldArray[self.rcvIDi]).max(axis=1)
+        elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
+                             where=dh != 0)
+        if self.sedfacVal is not None:
+            self.Kbr = self.K * surfK * self.sedfacVal * (self.rainVal ** self.coeffd)
+        else:
+            self.Kbr = self.K * surfK * (self.rainVal ** self.coeffd)
+        self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
+        self.Kbr[self.seaID] = 0.0
+        self.K_soil = self.Ksoil * self.dt * (PA ** self.spl_m) * elimiter
+        self.K_soil[self.seaID] = 0.0
+
+    def _soilSNESsolve(self, x, guess):
+        """
+        Solve the soil-SPL SNES into ``x`` from initial guess ``guess``: the
+        primary solver, then the complementary quasi-Newton / ngmres fallback on
+        failure (same primary→fallback net as the flow KSP). Returns the final
+        converged reason (``>= 0`` converged, ``< 0`` both failed). Prints only
+        the informational "fallback recovered" line; the caller decides what to
+        do on an outright failure (sub-step, then discard).
+        """
+        guess.copy(result=x)
+        self._snes_soil.solve(None, x)
+        r = self._snes_soil.getConvergedReason()
+        if r < 0:
+            if self._snes_soil_fb is None:
+                self._snes_soil_fb, self._snes_soil_fb_f = self._build_soil_snes(
+                    primary=False
+                )
+            r0, it0 = r, self._snes_soil.getIterationNumber()
+            guess.copy(result=x)
+            self._snes_soil_fb.solve(None, x)
+            r = self._snes_soil_fb.getConvergedReason()
+            if MPIrank == 0 and r >= 0:
+                pn = self.soil_solver
+                fn = "ngmres" if self.soil_solver == "qn" else "qn"
+                print(
+                    "Soil SPL: primary (%s) stalled (reason %d after %d its); "
+                    "%s fallback converged (reason %d, %d its)."
+                    % (pn, r0, it0, fn, r, self._snes_soil_fb.getIterationNumber()),
+                    flush=True,
+                )
+        return r
+
+    def _adaptiveSubstepSoil(self, x, PA, surfK):
+        """
+        Adaptive sub-stepping for the soil-SPL solve when the full-Δt SNES
+        diverges. The divergence is a stiffness problem: a de-armoured node that
+        has just captured a large discharge demands an enormous single-step
+        incision (``Kbr·Sⁿ`` with ``Kbr ∝ Δt·A^m``), so the slope term overshoots
+        and the residual grows. Because ``Kbr ∝ Δt``, splitting the step into
+        ``N`` increments of ``Δt/N`` cuts the demanded per-solve incision by
+        ``N`` until the residual is smooth enough to converge; summing the
+        increments recovers the FULL step's erosion (unlike simply discarding).
+
+        Escalates ``N`` over ``_soilSubstepN`` (default 4, 8, 16); accepts the
+        first ``N`` whose every sub-step converges. If none does, the step is
+        discarded (revert to the prior elevation) as a last resort. On success
+        the step-start bookkeeping (``hOld``/``hOldArray``/``soilH``/``dt``) is
+        restored and one final residual evaluation rebuilds ``nsoilH`` /
+        ``_soilDepoGrowth`` consistently with the full step (used by the soil
+        update). Returns the final reason (``0`` sub-stepped OK, ``-1``
+        discarded).
+        """
+        dt_full = self.dt
+        hstart = self.hOld.getArray().copy()          # step-start (owned) elevation
+        hOldArray0 = self.hOldArray.copy()
+        soilH0 = self.soilH.copy()
+
+        converged, used = False, 0
+        for N in getattr(self, "_soilSubstepN", (4, 8, 16)):
+            x.setArray(hstart)                        # running elevation ← step start
+            self.soilH = soilH0.copy()
+            self.dt = dt_full / N
+            ok = True
+            for _ in range(N):
+                x.copy(result=self.hOld)              # sub-step start = current elevation
+                self.dm.globalToLocal(self.hOld, self.hOldLocal)
+                self.hOldArray = self.hOldLocal.getArray().copy()
+                self._soilErodibility(PA, surfK)      # Kbr/K_soil at Δt/N + current elev
+                if self._soilSNESsolve(x, self.hOld) < 0:
+                    ok = False
+                    break
+                self.soilH = self.nsoilH.copy()       # soil carried across sub-steps
+            if ok:
+                converged, used = True, N
+                break
+
+        # Restore full-step bookkeeping (step-start state, full Δt) so the eroded
+        # thickness `x − hOld` and the soil update reflect the whole step.
+        self.dt = dt_full
+        self.hOld.setArray(hstart)
+        self.dm.globalToLocal(self.hOld, self.hOldLocal)
+        self.hOldArray = hOldArray0
+        self.soilH = soilH0
+        if not converged:
+            x.setArray(hstart)                        # last resort: no erosion this step
+        # Rebuild nsoilH / _soilDepoGrowth (Kbr-independent) at the final
+        # elevation with the full-Δt production convention.
+        self._form_residual_soil(self._snes_soil, x, self.tmp)
+        if MPIrank == 0:
+            if converged:
+                print(
+                    "  Soil SPL: full-Δt solve diverged — converged via %d "
+                    "sub-steps (Δt/%d); fluvial erosion retained." % (used, used),
+                    flush=True,
+                )
+            else:
+                print(
+                    "  Soil SPL: still diverged after sub-stepping — discarded "
+                    "(no fluvial erosion this step).",
+                    flush=True,
+                )
+        return 0 if converged else -1
+
     def _solveSoil(self):
         """
         Solves the non-linear stream power law for the transport limited and soil case. This calls the following *private function*:
@@ -308,11 +431,6 @@ class soilSPL(object):
         # Upstream-averaged mean annual precipitation rate based on drainage area
         PA = self.FAL.getArray()
 
-        # Define erosion limiter to prevent formation of flat
-        dh = (self.hOldArray[:, None] - self.hOldArray[self.rcvIDi]).max(axis=1)
-        elimiter = np.divide(dh, dh + 1.0e-2, out=np.zeros_like(dh),
-                             where=dh != 0)
-
         # Per-node erodibility multiplier from the top of the local
         # stratigraphic column (1.0 = use self.K as-is). Only scales the
         # *bedrock* SPL coefficient; the soil-layer K is governed by
@@ -321,21 +439,12 @@ class soilSPL(object):
         # single-fraction, so behaviour is unchanged): K_eff = K*surfK*litK.
         surfK = self._surfaceK() * self._surfaceLithoK()
 
-        # Incorporate the effect of local mean annual precipitation rate on erodibility (for soil and bedrock)
-        if self.sedfacVal is not None:
-            self.Kbr = self.K * surfK * self.sedfacVal * (self.rainVal ** self.coeffd)
-        else:
-            self.Kbr = self.K * surfK * (self.rainVal ** self.coeffd)
-        self.Kbr *= self.dt * (PA ** self.spl_m) * elimiter
-        self.Kbr[self.seaID] = 0.0
-
-        self.K_soil = self.Ksoil * self.dt * (PA ** self.spl_m) * elimiter
-        self.K_soil[self.seaID] = 0.0
-
-        # Dimensionless depositional coefficient fDep = fDepa*area / PA. Floor
-        # the denominator at the cap value (num/0.99) so a denormal-tiny PA — far
-        # more likely with evaporation reducing the discharge — does not overflow
-        # to inf before the 0.99 cap; bit-identical to dividing then clamping.
+        # Dimensionless depositional coefficient fDep = fDepa*area / PA (step-
+        # constant — depends on drainage area, not on Δt or the evolving
+        # elevation). Floor the denominator at the cap value (num/0.99) so a
+        # denormal-tiny PA — more likely with evaporation reducing the discharge —
+        # does not overflow to inf before the 0.99 cap; bit-identical to dividing
+        # then clamping.
         num = self.fDepa * self.larea
         self.fDep = np.divide(
             num, np.maximum(PA, num / 0.99),
@@ -346,53 +455,23 @@ class soilSPL(object):
         if self.flatModel:
             self.fDep[self.outletIDs] = 0.
 
+        # dt-scaled erodibility (erosion limiter + Kbr / K_soil) for the full step.
+        self._soilErodibility(PA, surfK)
+
         if self._snes_soil is None:
             self._snes_soil, self._snes_soil_f = self._build_soil_snes(primary=True)
             self._snes_soil_x = self.hGlobal.duplicate()
 
-        snes = self._snes_soil
         x = self._snes_soil_x
-        self.hGlobal.copy(result=x)
-        snes.solve(None, x)
-        r = snes.getConvergedReason()
+        r = self._soilSNESsolve(x, self.hGlobal)
 
-        # Robustness net (mirrors the flow KSP's primary -> fallback path): if
-        # the accelerated fixed-point solver stalls (typically
-        # SNES_DIVERGED_MAX_IT on the stiff soil-production residual), retry
-        # from the same initial guess with the limited-memory quasi-Newton
-        # fallback. It only runs on the timesteps where the primary failed.
+        # When the full-Δt solve diverges (both primary and fallback), retry with
+        # adaptive sub-stepping — Δt/N increments make the demanded per-solve
+        # incision small enough to converge, and summing them recovers the full
+        # step's erosion. Only a still-diverging step (after sub-stepping) is
+        # discarded. See `_adaptiveSubstepSoil`.
         if r < 0:
-            if self._snes_soil_fb is None:
-                self._snes_soil_fb, self._snes_soil_fb_f = self._build_soil_snes(
-                    primary=False
-                )
-            fb = self._snes_soil_fb
-            r0, it0 = r, snes.getIterationNumber()
-            self.hGlobal.copy(result=x)
-            fb.solve(None, x)
-            r = fb.getConvergedReason()
-            # Name the actual solvers: the primary is `self.soil_solver` and the
-            # fallback is its complement (qn <-> ngmres), so the label is correct
-            # whichever way the YAML `solver:` key is set.
-            primary_name = self.soil_solver
-            fallback_name = "ngmres" if self.soil_solver == "qn" else "qn"
-            if MPIrank == 0:
-                if r >= 0:
-                    print(
-                        "Soil SPL: primary (%s) stalled (reason %d after %d its); "
-                        "%s fallback converged (reason %d, %d its)."
-                        % (primary_name, r0, it0, fallback_name, r,
-                           fb.getIterationNumber()),
-                        flush=True,
-                    )
-                else:
-                    print(
-                        "Soil SPL SNES failed to converge: primary (%s, reason %d) "
-                        "and %s fallback (reason %d) both diverged; continuing "
-                        "with the best available iterate."
-                        % (primary_name, r0, fallback_name, r),
-                        flush=True,
-                    )
+            self._adaptiveSubstepSoil(x, PA, surfK)
 
         # Get eroded sediment thicknesses
         self.tmp.waxpy(-1.0, self.hOld, x)
