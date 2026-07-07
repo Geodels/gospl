@@ -1560,6 +1560,15 @@ def test_watertable_parallel(tmp_path):
     assert s2.get("bf_halo", 0.0) < 1.0e-9, (
         f"baseflow not partition-consistent (halo seam): maxdiff {s2.get('bf_halo')}"
     )
+    # Duricrust / induration / Karmor outputs must be partition-consistent (no halo
+    # seam): the local duriHL and duriF equal their owner-synced values on every
+    # rank (fixed by the _updateDuricrust/_updateSolute/_recordInduration syncs).
+    assert s2.get("duri_halo", 0.0) < 1.0e-9, (
+        f"duricrust not partition-consistent (halo seam): maxdiff {s2.get('duri_halo')}"
+    )
+    assert s2.get("durf_halo", 0.0) < 1.0e-9, (
+        f"induration not partition-consistent (halo seam): maxdiff {s2.get('durf_halo')}"
+    )
 
 
 def test_geochem_flux_parallel(tmp_path):
@@ -5544,6 +5553,22 @@ try:
         sf_halo = comm.allreduce(float(np.abs(sf - m.tmpL.getArray()).max()), op=MPI.MAX)
     else:
         sf_halo = 0.0
+    # Duricrust halo consistency: duriH (duricrust), duriF (induration) and the
+    # Karmor multiplier are written to output, so their ghost nodes must equal the
+    # owners' values. A partition seam (halo left at the rank-local computed value)
+    # would make these non-zero — guards the _updateDuricrust / _updateSolute /
+    # _recordInduration halo syncs.
+    def _halo(arr):
+        m.tmpL.setArray(arr.copy())
+        m.dm.localToGlobal(m.tmpL, m.tmp)
+        m.dm.globalToLocal(m.tmp, m.tmpL)
+        return comm.allreduce(float(np.abs(arr - m.tmpL.getArray()).max()), op=MPI.MAX)
+    if getattr(m, "duriOn", False):
+        duri_halo = _halo(m.duriHL.getArray())
+        durf_halo = _halo(m.duriF)
+    else:
+        duri_halo = 0.0
+        durf_halo = 0.0
     if comm.Get_rank() == 0:
         with open(sys.argv[2], "w") as f:
             json.dump({
@@ -5554,6 +5579,8 @@ try:
                 "sum_rech": sum_rech,
                 "bf_halo": bf_halo,
                 "sf_halo": sf_halo,
+                "duri_halo": duri_halo,
+                "durf_halo": durf_halo,
             }, f)
 finally:
     m.destroy()

@@ -889,6 +889,12 @@ class GWMesh(object):
 
         self.duriHL.setArray(duriH)
         self.dm.localToGlobal(self.duriHL, self.duriHG)
+        # Refresh the halo from the owners (localToGlobal INSERT took the owned
+        # values; globalToLocal broadcasts them back) so the crust `duriH`, the
+        # induration `duriF` and the armor `duriKarmor` are halo-consistent and the
+        # `duricrust`/`induration`/`Karmor` outputs show no partition seam.
+        self.dm.globalToLocal(self.duriHG, self.duriHL)
+        duriH = self.duriHL.getArray()
         self.duriF = duriH / Hmax
         self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
         self.gwZlast = z.copy()
@@ -970,6 +976,10 @@ class GWMesh(object):
         top_idx = (H.shape[1] - 1 - np.argmax(rev, axis=1))[valid]
         rows = np.arange(H.shape[0])[valid]
         self.duriF[valid] = np.maximum(self.duriF[valid], self.stratDuri[rows, top_idx])
+        # The read-up is rank-local and reads `stratDuri`, so sync `duriF` from the
+        # owners (owner wins) before deriving the armor, keeping the induration /
+        # Karmor outputs free of a partition seam even when a crust is exhumed.
+        self.duriF = self._syncHalo(self.duriF)
         self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
 
         # Write-down: record duriF into every layer within `duriH` of the surface.
@@ -1327,7 +1337,11 @@ class GWMesh(object):
         duriH = np.clip(duriH, 0.0, Hmax)
         self.duriHL.setArray(duriH)
         self.dm.localToGlobal(self.duriHL, self.duriHG)
+        # Refresh the halo from the owners so the crust / induration / armor are
+        # halo-consistent (no partition seam in the outputs); see _updateDuricrust.
+        self.dm.globalToLocal(self.duriHG, self.duriHL)
         if getattr(self, "duriOn", False):
+            duriH = self.duriHL.getArray()
             self.duriF = duriH / Hmax
             self.duriKarmor = 1.0 - self.duriArmorMax * self.duriF
 
