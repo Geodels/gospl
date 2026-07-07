@@ -232,7 +232,12 @@ just like the head):
 
 - **Dissolution** :math:`D` — a chemical-weathering source on subaerial land
   (the climate/temperature supply scaled per tracer by ``weatherability``),
-  drawing from a conserved per-node source pool. The ``weatherability`` may vary
+  drawing from a conserved per-node source pool seeded as ``source_pool`` × cell
+  area (a weatherable-rock reservoir, default ``1e6``). Dissolution debits the pool,
+  so a pool too small for the run's weathering rate **exhausts** and the tracer goes
+  inert (a one-time warning is printed) — set it small to model an exhaustible
+  weathering front or a wet-phase pulse, or large to keep weathering rate-limited
+  over the whole run. The ``weatherability`` may vary
   **in space** (a per-vertex map, or a per-(class, species) table gathered by a
   standalone lithology map or the provenance class — the static ``source_class``
   bedrock or the **dynamic** ``surface_class``, the top stratigraphic layer that
