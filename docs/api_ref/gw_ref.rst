@@ -38,6 +38,7 @@ Class GWMesh
       ~GWMesh._resolveGeoWeather
       ~GWMesh._makeSoluteKSP
       ~GWMesh._soluteAdvecCoeffs
+      ~GWMesh._dischargeWeight
       ~GWMesh._solveSoluteTransport
       ~GWMesh._soluteSolveRHS
       ~GWMesh._updateSolute
@@ -68,6 +69,7 @@ Private functions
 .. automethod:: flow.gwplex.GWMesh._resolveGeoWeather
 .. automethod:: flow.gwplex.GWMesh._makeSoluteKSP
 .. automethod:: flow.gwplex.GWMesh._soluteAdvecCoeffs
+.. automethod:: flow.gwplex.GWMesh._dischargeWeight
 .. automethod:: flow.gwplex.GWMesh._solveSoluteTransport
 .. automethod:: flow.gwplex.GWMesh._soluteSolveRHS
 .. automethod:: flow.gwplex.GWMesh._updateSolute

@@ -832,7 +832,9 @@ class GWMesh(object):
 
         - **Fringe favourability** ``Φ = exp(−((wt − d0)/w)²)`` — a Gaussian band
           on the water-table depth ``wt = z − h`` centred on the mean fringe depth
-          ``d0`` (half-width ``w``); →1 at the fringe, →0 far above/below.
+          ``d0`` (half-width ``w``); →1 at the fringe, →0 far above/below. With the
+          opt-in ``discharge_gate`` (``_dischargeWeight``) ``Φ`` is additionally
+          restricted to groundwater discharge zones (absolute-accumulation crust).
         - **Formation** ``dduriH/dt = k_form·Φ·Ψ·(1 − duriH/duriH_max)``
           (self-limiting to ``duriH_max``); ``Ψ`` from ``_weatheringSupply``. When
           soil is tracked (``cptSoil``) the formation supply is additionally
@@ -864,6 +866,16 @@ class GWMesh(object):
             # proxy/rate supply is switched off here to avoid double-counting.
             supply = np.zeros(self.lpoints, dtype=np.float64)
         else:
+            # Absolute-accumulation gate (opt-in): restrict the fringe supply to
+            # groundwater discharge zones (lateral convergence of q = −T∇h) rather
+            # than forming wherever the water table is shallow.
+            if getattr(self, "duriDischargeGate", False):
+                h = self.headL.getArray()
+                T = self.gwKsat * np.maximum(
+                    h - self._gwZbed(z), float(self.gwMinSatThick)
+                )
+                _, divq = self._soluteAdvecCoeffs(h, T)
+                Phi = Phi * self._dischargeWeight(divq, self.rechargeL.getArray())
             supply = self.duriFormRate * Phi * Psi
             if getattr(self, "cptSoil", False):                  # regolith-limited
                 supply = np.minimum(supply, self._regolithSupplyRate())
@@ -1065,6 +1077,28 @@ class GWMesh(object):
         adv[:, 0] += np.maximum(-divq, 0.0)
         return adv, divq
 
+    def _dischargeWeight(self, divq, R):
+        r"""
+        Absolute-accumulation gate (opt-in ``discharge_gate``): a per-node weight
+        ``G ∈ [0,1]`` that restricts crust formation to groundwater **discharge**
+        zones. The lateral groundwater flux ``q = −T∇h`` **converges** into a
+        discharge cell (``div q < 0``), delivering dissolved load that emerges at
+        the surface and precipitates — the *absolute-accumulation* (lateral) style
+        of valley/footslope ferricrete, as opposed to the in-situ / relative
+        accumulation that indurates wherever the water table is shallow.
+
+        ``G = (−div q)⁺ / ((−div q)⁺ + R)`` — the fraction of the cell's upward
+        discharge that was **imported laterally** (vs supplied by local recharge
+        ``R``). Both terms are area-normalised rates (m/yr), so ``G`` is
+        dimensionless and self-scaling (no new tuning constant): ``G→1`` at a
+        strongly convergent valley floor, ``G→0`` at a recharge (divergent) rise.
+        Returns all-ones when the gate is off (backwards-compatible). Rank-local.
+        """
+        if not getattr(self, "duriDischargeGate", False):
+            return np.ones(self.lpoints, dtype=np.float64)
+        dis = np.maximum(-divq, 0.0)                       # lateral convergence
+        return dis / (dis + np.maximum(R, 0.0) + 1.0e-12)
+
     def _solveSoluteTransport(self, source, dmask, dval):
         r"""
         Solve one steady tracer transport ``M c = source`` with Dirichlet nodes
@@ -1189,6 +1223,9 @@ class GWMesh(object):
                 -(((self.wtDepth - self.duriFringeDepth) / self.duriFringeWidth) ** 2)
             )
             Phi = np.where(subaerial, Phi, 0.0)
+            # Absolute-accumulation gate: precipitate only where the groundwater
+            # discharges (converges), not everywhere the fringe is shallow.
+            Phi = Phi * self._dischargeWeight(divq, R)
         else:
             Phi = np.zeros(self.lpoints, dtype=np.float64)
 

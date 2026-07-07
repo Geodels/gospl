@@ -154,6 +154,26 @@ tracked, formation is additionally **regolith-limited** — chemical crust growt
 cannot outpace physical regolith production. A breakdown term strips the crust
 under surface incision and relaxes it away from the fringe.
 
+By default the crust indurates wherever the water table is shallow — the
+**relative-accumulation** (in-situ) style that forms the plateau / *bowal*
+cuirasses blanketing flat, low-relief laterite uplands. The optional
+``discharge_gate`` switches to the **absolute-accumulation** (lateral) style of
+valley / footslope ferricrete: the favourability :math:`\Phi` is multiplied by a
+groundwater-**discharge** weight
+
+.. math::
+
+   G = \frac{(-\nabla\!\cdot\mathbf{q})^{+}}{(-\nabla\!\cdot\mathbf{q})^{+} + R}
+   \in [0,1],
+
+the fraction of a cell's upward discharge that is imported by **lateral
+convergence** of the groundwater flux :math:`\mathbf{q} = -T\nabla h` rather than
+supplied by the local recharge :math:`R` (both area-normalised rates, so
+:math:`G` is dimensionless and needs no tuning constant). :math:`G \to 1` at a
+convergent valley floor or seepage face and :math:`G \to 0` at a divergent
+recharge rise, so the crust tracks the drainage network. The gate is off by
+default (:math:`G \equiv 1`, unchanged).
+
 The induration degree :math:`duriF = duriH/duriH_{max} \in [0,1]` is the single
 control on erodibility. It enters as a multiplicative **armoring factor** at the
 shared surface-erodibility hook,
@@ -166,8 +186,13 @@ so a fully indurated cell (:math:`duriF = 1`) is :math:`armor_{max}` less
 erodible (e.g. 0.9 ⇒ 10× more resistant). This modulates **all three eroders**
 (SPL, non-linear SPL and soil-aware SPL) with no branching in them. Armoring is
 **rate-only**: it changes no elevation the step it forms, so flow routing and
-mass balance are untouched — relief inversion emerges through the normal erosion
-pathway because crusted cells simply erode more slowly.
+mass balance are untouched — the crusted cells simply erode more slowly. This
+produces the classic **dissected cuirasse**: a laterite sheet is stripped from
+the incising valleys and survives on the armored divides as flat-topped capped
+**mesas** (differential-erosion relief growth). Note the armoring adds no
+*geometry* (no valley aggradation), so a *valley-fill* cap gets no elevation
+head-start; the standing landforms are the armored highs, not inverted valley
+floors.
 
 Stratigraphic induration record
 --------------------------------

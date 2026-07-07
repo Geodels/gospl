@@ -2129,6 +2129,12 @@ class ReadYaml(object):
             self.duriMaxThick = float(duri.get("max_thickness", 5.0))      # duriH_max (m)
             self.duriFringeDepth = float(duri.get("fringe_depth", 3.0))    # d0 (m)
             self.duriFringeWidth = float(duri.get("fringe_width", 2.0))    # w (m)
+            # Absolute-accumulation gate: restrict crust to groundwater DISCHARGE
+            # zones (lateral flow converges, delivering dissolved load that emerges
+            # and precipitates) rather than forming wherever the water table is
+            # shallow (the in-situ / relative-accumulation default). Off ->
+            # backwards-compatible (weight 1 everywhere). See DESIGN §3b.
+            self.duriDischargeGate = bool(duri.get("discharge_gate", False))
             self.duriSupplyExp = float(duri.get("supply_exp", 1.0))        # p on (rain-evap)
             self.duriWeatherEa = float(duri.get("weather_Ea", 0.0))        # Arrhenius (0=off)
             self.duriArmorMax = float(duri.get("armor_max", 0.9))          # max K reduction 0..1
@@ -2215,6 +2221,7 @@ class ReadYaml(object):
             self.duriMaxThick = 5.0
             self.duriFringeDepth = 3.0
             self.duriFringeWidth = 2.0
+            self.duriDischargeGate = False
             self.duriSupplyExp = 1.0
             self.duriWeatherEa = 0.0
             self.duriArmorMax = 0.0

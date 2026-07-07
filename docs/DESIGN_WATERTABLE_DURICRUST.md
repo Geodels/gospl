@@ -147,6 +147,10 @@ groundwater sets the armoring state that erosion then reads.
    - **Fringe favourability** `Φ = exp(−((wt − d0)/w)²)` — a Gaussian band centred on the
      mean capillary-fringe depth `d0` with half-width `w` (both YAML). Φ→1 when the
      surface sits at the fringe, →0 far above/below the table.
+   - **Absolute-accumulation gate (opt-in `discharge_gate`, §3b)** — multiplies `Φ` by a
+     groundwater-discharge weight so the crust forms only where the lateral flow
+     *converges and discharges* (valley floors, footslopes, seepage faces), not merely
+     wherever the water table is shallow. Off by default (weight ≡ 1, backwards-compatible).
    - **Weathering supply** `Ψ` — the solute-supply rate feeding precipitation. Two modes,
      selected by the optional `weathering:` sub-block (§3a); both plug in at the *same* place:
      - **proxy (default)** `Ψ = clip(rain − evap, 0, ·)^p · arrhenius(T_annual)` — a
@@ -246,6 +250,35 @@ B**, a separate geochemical solute-transport module scoped in §15 — the ingre
 feature with its own design doc: **`DESIGN_WATERTABLE_GEOCHEM.md`** (single-tracer → multi-tracer;
 coupled multi-species equilibrium explicitly out of scope).
 
+### 3b. Absolute-accumulation gate (`discharge_gate`) — where the crust forms
+
+The default fringe favourability `Φ(wt)` indurates the ground **wherever the water table is
+shallow**. That is the **relative-accumulation** (in-situ) style of duricrust — the plateau /
+*bowal* cuirasses that legitimately blanket flat, low-relief laterite uplands. It is *not* the
+right rule for **valley / footslope ferricrete**, which forms by **absolute accumulation**:
+dissolved iron (or silica, carbonate) is transported laterally by the groundwater flux
+`q = −T∇h` and re-precipitated where that flow **converges and discharges** at the surface
+(valley floors, seepage faces, springs). On a broad wet plain the relative-accumulation rule
+over-predicts crust everywhere; the absolute-accumulation rule confines it to the discharge
+network, and (because the armored valleys then resist the base-level fall) is the setup that
+produces **relief inversion**.
+
+The opt-in `discharge_gate` multiplies `Φ` by a **discharge weight** built from the lateral
+divergence `div q = Σ_k f_ik` already computed for the solute transport (`_soluteAdvecCoeffs`):
+
+```
+G = (−div q)⁺ / ((−div q)⁺ + R)          # _dischargeWeight
+```
+
+`(−div q)⁺` is the lateral **convergence** (net inflow, m/yr; a discharge cell has `div q < 0`)
+and `R` is the local recharge (m/yr) — both area-normalised, so `G ∈ [0,1]` is **dimensionless
+and self-scaling** (no new tuning constant). It is the fraction of the cell's upward discharge
+that was *imported laterally* rather than supplied by local recharge: `G→1` at a strongly
+convergent valley floor, `G→0` at a divergent recharge rise. The gate is applied in **both**
+formation paths — the Level-A supply (`_updateDuricrust`) and the Level-B fringe-precipitation
+sink `p = k_p·Φ·(1−duriH/duriH_max)` (`_updateSolute`). Off by default → `G ≡ 1`, so existing
+runs are unchanged.
+
 ---
 
 ## 4. State variables (all gated on `gwOn`)
@@ -324,6 +357,7 @@ groundwater:
         max_thickness: 5.0    # duriH_max (m)
         fringe_depth: 3.0     # d0 — centre of the capillary fringe below surface (m)
         fringe_width: 2.0     # w — Gaussian half-width (m)
+        discharge_gate: False # form only in gw discharge zones (absolute accumulation, §3b)
         supply_exp: 1.0       # p on (rain − evap)
         weather_Ea: 0.0       # Arrhenius activation energy (0 ⇒ no T dependence)
         armor_max: 0.9        # max fractional K reduction (0..1)

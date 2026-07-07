@@ -701,6 +701,7 @@ production when soil is tracked.
                     max_thickness: 5.0    # duriH_max (m)
                     fringe_depth: 3.0     # d0 — fringe centre below surface (m)
                     fringe_width: 2.0     # w — Gaussian half-width (m)
+                    discharge_gate: False # crust only in gw discharge zones
                     supply_exp: 1.0       # p on (rain − evap) in the proxy
                     weather_Ea: 0.0       # Arrhenius activation energy (0 ⇒ off)
                     armor_max: 0.9        # max fractional K reduction (0..1)
@@ -741,11 +742,12 @@ The nested **duricrust keys** (omit the ``duricrust:`` block for a water table w
 a. ``form_rate`` — crust formation rate ``k_form`` (m/yr at full favourability and supply).
 b. ``max_thickness`` — maximum crust thickness ``duriH_max`` (m); the induration degree is ``duriF = duriH/max_thickness``.
 c. ``fringe_depth`` / ``fringe_width`` — centre ``d0`` and Gaussian half-width ``w`` (m) of the capillary-fringe favourability band ``Φ`` on the water-table depth.
-d. ``supply_exp`` — exponent ``p`` on ``(rain − evap)`` in the default climate proxy supply.
-e. ``weather_Ea`` — Arrhenius activation energy (J/mol) for an optional temperature scaling of the supply (``0`` ⇒ off; reuses the soil ``tempMap`` when present).
-f. ``armor_max`` — maximum fractional erodibility reduction (0–1); a fully indurated cell (``duriF = 1``) has its ``K`` multiplied by ``1 − armor_max`` (e.g. ``0.9`` ⇒ 10× more resistant).
-g. ``armor_diffusion`` — also armor the hillslope diffusivity ``Cd`` by the same factor (default ``False``).
-h. ``break_rate`` / ``decay_rate`` — breakdown per unit surface incision ``k_break`` and the slow disequilibrium decay ``k_decay`` (1/yr) away from the fringe.
+d. ``discharge_gate`` — restrict crust formation to groundwater **discharge zones** (default ``False``). When ``True`` the favourability ``Φ`` is multiplied by ``G = (−∇·q)⁺ / ((−∇·q)⁺ + R)``, the fraction of the cell's upward discharge imported by **lateral convergence** of the groundwater flux (vs local recharge ``R``): ``G→1`` at a convergent valley floor / seepage face, ``G→0`` at a divergent recharge rise. This is the **absolute-accumulation** (lateral, valley/footslope ferricrete) style, as opposed to the default **relative-accumulation** style that indurates wherever the water table is shallow (the plateau/*bowal* cuirasses that blanket flat uplands). Off ⇒ weight ``1`` everywhere (unchanged).
+e. ``supply_exp`` — exponent ``p`` on ``(rain − evap)`` in the default climate proxy supply.
+f. ``weather_Ea`` — Arrhenius activation energy (J/mol) for an optional temperature scaling of the supply (``0`` ⇒ off; reuses the soil ``tempMap`` when present).
+g. ``armor_max`` — maximum fractional erodibility reduction (0–1); a fully indurated cell (``duriF = 1``) has its ``K`` multiplied by ``1 − armor_max`` (e.g. ``0.9`` ⇒ 10× more resistant).
+h. ``armor_diffusion`` — also armor the hillslope diffusivity ``Cd`` by the same factor (default ``False``).
+i. ``break_rate`` / ``decay_rate`` — breakdown per unit surface incision ``k_break`` and the slow disequilibrium decay ``k_decay`` (1/yr) away from the fringe.
 
 The optional ``weathering:`` sub-block selects the **solute supply** ``Ψ`` feeding
 formation: ``mode: proxy`` (default, climate/temperature stand-in), ``rate`` (an

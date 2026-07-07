@@ -1744,6 +1744,43 @@ def test_duricrust_forms_at_fringe():
         m.destroy()
 
 
+def test_duricrust_discharge_gate():
+    """
+    Protects the absolute-accumulation gate (DESIGN_WATERTABLE_DURICRUST.md §3b):
+    `_dischargeWeight` restricts crust formation to groundwater DISCHARGE zones.
+
+    - Gate OFF (default) → weight ≡ 1 everywhere (backwards-compatible: the crust
+      forms wherever the fringe favourability `Φ` is non-zero).
+    - Gate ON → `G = (−div q)⁺ / ((−div q)⁺ + R)` ∈ [0,1]: 0 at a recharge
+      (divergent, `div q > 0`) node, →1 at a strongly convergent discharge node.
+    """
+    m = _gw_model("minimal_gw.yml")
+    try:
+        n = m.lpoints
+        R = np.full(n, 0.2)                      # uniform recharge (m/yr)
+        # Synthetic lateral divergence: recharge (divergent), neutral, and strong
+        # convergence (discharge) populations.
+        divq = np.zeros(n)
+        divq[0::3] = +0.5                         # recharge / divergent  → G = 0
+        divq[1::3] = 0.0                          # neutral               → G = 0
+        divq[2::3] = -100.0                       # strong convergence    → G → 1
+
+        # Gate OFF → all ones regardless of divq.
+        m.duriDischargeGate = False
+        assert np.allclose(m._dischargeWeight(divq, R), 1.0)
+
+        # Gate ON → discharge-only weight in [0,1].
+        m.duriDischargeGate = True
+        G = m._dischargeWeight(divq, R)
+        assert np.isfinite(G).all()
+        assert (G >= 0.0).all() and (G <= 1.0).all()
+        assert np.allclose(G[0::3], 0.0), "recharge (divergent) node must not form crust"
+        assert np.allclose(G[1::3], 0.0), "neutral node must not form crust"
+        assert (G[2::3] > 0.99).all(), "strong discharge node should form crust (G→1)"
+    finally:
+        m.destroy()
+
+
 def test_duricrust_soilfree():
     """
     Protects (Phase 3): the duricrust ships **soil-independent** — it forms on a
