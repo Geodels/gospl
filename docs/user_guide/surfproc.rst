@@ -848,6 +848,9 @@ declaration with sensible values:
     * - ``solid_volume``
       - crust **volume produced per unit precipitated solute** (a molar-volume-like factor turning precipitated mass into ``duriH``).
       - ``1.0``
+    * - ``source_pool``
+      - dissolvable **source-rock reservoir** per unit cell area (the weatherable rock mass). Dissolution debits it, so a pool too small for the run's weathering rate **exhausts** and the tracer goes inert (a one-time ``[gw] geochem: source pool exhausting`` warning is printed). Set it **large** (a thick saprolite source) to keep weathering *rate-limited* over long, fast-weathering runs, or small to model a finite, exhaustible weathering front (e.g. a wet-phase iron pulse).
+      - ``1.0e6``
     * - ``c_sat``
       - saturation threshold (**reserved** — precipitation is currently a linear fringe sink; a hard ``c > c_sat`` gate is a future nonlinear refinement).
       - ``1.0``

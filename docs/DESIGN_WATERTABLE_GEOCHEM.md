@@ -94,7 +94,11 @@ water volume), the steady reactive-transport balance is
   rate driving material into solution, from the Level-A driver
   (`_weatheringSupply` / `prodSoil` / recharge `R`), scaled per tracer by a
   `weatherability`. Debits a conserved source pool (regolith/rock) so mass is
-  tracked.
+  tracked. The pool is seeded per species as `source_pool · cell area` (YAML
+  `source_pool`, default `1e6`): dissolution debits it and a pool too small for
+  the run's weathering rate **exhausts** (the tracer goes inert; a one-time
+  rank-0 warning is printed). Set it large to keep weathering rate-limited over
+  the whole run, or small to model a finite, exhaustible weathering front.
 - **Precipitation `P`** — the sink at the fringe, added as a **second diagonal
   sink** to the transport operator. **As built (G2):** a *linear* fringe removal
   `P = k_p · Φ · c` (proportional to the local concentration where the water table

@@ -2175,6 +2175,11 @@ class ReadYaml(object):
             self.gwGeoCsat = [float(s.get("c_sat", 1.0)) for s in species] or [1.0]
             self.gwGeoPrecip = [float(s.get("precip_rate", 1.0)) for s in species] or [1.0]
             self.gwGeoVsolid = [float(s.get("solid_volume", 1.0)) for s in species] or [1.0]
+            # Dissolvable source-rock reservoir per unit cell area (the weatherable
+            # rock mass, default 1e6). Dissolution debits it, so a small pool
+            # exhausts and the tracer goes inert; set it large where weathering must
+            # stay rate-limited for the whole run (e.g. a thick saprolite source).
+            self.gwGeoSourcePool = [float(s.get("source_pool", 1.0e6)) for s in species] or [1.0e6]
             self.gwGeochemConserve = bool(geo.get("conserve", True))
             # ext 2: route the groundwater-exported (seepage/baseflow) solute
             # DOWN the surface drainage network to the shoreline (river dissolved

@@ -169,14 +169,17 @@ class GWMesh(object):
                 self.gwGeoPrecip = np.asarray(self.gwGeoPrecip, dtype=np.float64)
                 self.gwGeoVsolid = np.asarray(self.gwGeoVsolid, dtype=np.float64)
                 # Groundwater solute concentration and the dissolvable source pool
-                # (rank-local, per tracer). The pool is seeded as an ample per-area
-                # reservoir (`1e6 · cell area`), so dissolution is rate-limited
-                # (not exhausted) over normal runs; a `source_pool` YAML refinement
-                # can later tie it to the actual weatherable rock mass.
+                # (rank-local, per tracer). The pool is seeded per species as
+                # `source_pool · cell area` (weatherable rock mass, default 1e6);
+                # dissolution debits it, so a pool too small for the run's
+                # weathering rate exhausts and the tracer goes inert. Set
+                # `source_pool` large (a thick saprolite source) to keep weathering
+                # rate-limited over long, fast-weathering runs. `_solutePoolWarned`
+                # gates the one-time exhaustion warning.
+                self.gwGeoSourcePool = np.asarray(self.gwGeoSourcePool, dtype=np.float64)
                 self.gwSolute = np.zeros((self.lpoints, nsp), dtype=np.float64)
-                self.gwSourcePool = 1.0e6 * self.larea[:, None] * np.ones(
-                    (self.lpoints, nsp), dtype=np.float64
-                )
+                self.gwSourcePool = self.larea[:, None] * self.gwGeoSourcePool[None, :]
+                self._solutePoolWarned = False
                 # Cumulative mass budget per tracer (m³-equiv, owned nodes) for the
                 # conservation guard / diagnostics: dissolved = precipitated +
                 # exported (ocean) + currently in solution.
@@ -1195,9 +1198,31 @@ class GWMesh(object):
             # 1. Dissolution — debit the source pool.
             # weatherability: scalar OR a per-vertex array (ext 1) — broadcasts.
             Drate = np.where(subaerial, self._gwGeoWeatherArr[k] * W, 0.0)
-            diss = np.minimum(Drate * A * dt, self.gwSourcePool[:, k])
+            want = Drate * A * dt
+            diss = np.minimum(want, self.gwSourcePool[:, k])
             self.gwSourcePool[:, k] -= diss
             Deff = diss / (A * dt)
+            # One-time warning when the finite source pool starts to limit
+            # dissolution (the tracer will go inert as it empties) — a silent
+            # exhaustion otherwise looks like the geochemistry has stopped. Raise
+            # `source_pool` for that species to keep weathering rate-limited. The
+            # `not _solutePoolWarned` gate is uniform across ranks (the flag is set
+            # from a reduced count), so the Allreduce below is reached collectively.
+            if not self._solutePoolWarned:
+                limited = MPI.COMM_WORLD.allreduce(
+                    int(((want > diss + 1.0e-30) & (self.inIDs == 1)).sum()),
+                    op=MPI.SUM,
+                )
+                if limited > 0:
+                    self._solutePoolWarned = True
+                    if MPIrank == 0:
+                        print(
+                            "[gw] geochem: source pool exhausting for '%s' at %d "
+                            "node(s) — dissolution now supply-limited (raise "
+                            "`source_pool` to keep it rate-limited)."
+                            % (self.gwGeoName[k], limited),
+                            flush=True,
+                        )
 
             # 2. Precipitation sink at the fringe — a LINEAR removal `k_p·Φ`
             # (proportional to the local concentration), **self-limiting** as the
