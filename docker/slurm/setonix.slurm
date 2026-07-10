@@ -29,7 +29,7 @@ export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
 # Path to the .sif (scp'd from your local build) and the goSPL input YAML.
-CONTAINER="${CONTAINER:-${MYSCRATCH}/gospl-hpc-v2026.06.11.sif}"
+CONTAINER="${CONTAINER:-${MYSCRATCH}/gospl-hpc-v2026.7.14.sif}"
 INPUT="${INPUT:-input.yml}"
 
 # srun (not mpirun) is the Pawsey-recommended launcher with the -mpi module.

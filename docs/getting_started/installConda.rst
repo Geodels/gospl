@@ -56,7 +56,7 @@ and verify the install::
 
 To install a specific version (e.g. for reproducibility)::
 
-    mamba create -n gospl -c geodels -c conda-forge gospl=2026.6.13
+    mamba create -n gospl -c geodels -c conda-forge gospl=2026.7.14
 
 .. note::
 
@@ -65,7 +65,9 @@ To install a specific version (e.g. for reproducibility)::
     ========================= ============= ========================================
     Version                   Date          Install command
     ========================= ============= ========================================
-    ``v2026.6.13``            2026-06-12    ``mamba install -c geodels -c conda-forge gospl``
+    ``v2026.7.14``            2026-07-14    ``mamba install -c geodels -c conda-forge gospl``
+    ``v2026.6.30``            2026-06-30    ``mamba install -c geodels -c conda-forge gospl=2026.6.30``
+    ``v2026.6.13``            2026-06-12    ``mamba install -c geodels -c conda-forge gospl=2026.6.13``
     ``v2026.06.11``           2026-06-11    ``mamba install -c geodels -c conda-forge gospl=2026.06.11``
     ``v2026.06.08``           2026-06-08    ``mamba install -c geodels -c conda-forge gospl=2026.06.08``
     ========================= ============= ========================================

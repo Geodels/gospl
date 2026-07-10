@@ -72,7 +72,7 @@ Installing a specific version
 
 To pin to a specific release::
 
-    pip install --no-deps --no-build-isolation gospl==2026.6.13
+    pip install --no-deps --no-build-isolation gospl==2026.7.14
 
 Pre-release / **release candidate** builds (suffixed ``rcN``) are not
 installed by default; request them explicitly with ``--pre``::
@@ -86,7 +86,8 @@ installed by default; request them explicitly with ``--pre``::
     ========================= ============= ====================================
     Version                   Date          Install command
     ========================= ============= ====================================
-    ``2026.6.30``             2026-06-30    ``pip install --no-deps --no-build-isolation gospl``
+    ``2026.7.14``             2026-07-14    ``pip install --no-deps --no-build-isolation gospl``
+    ``2026.6.30``             2026-06-30    ``pip install --no-deps --no-build-isolation gospl==2026.6.30``
     ``2026.6.13``             2026-06-12    ``pip install --no-deps --no-build-isolation gospl==2026.6.13``
     ``2026.6.12``             2026-06-12    ``pip install --no-deps --no-build-isolation gospl==2026.6.12``
     ``2024.9.1``              2024-08-24    *historical release*
