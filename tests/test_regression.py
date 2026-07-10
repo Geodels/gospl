@@ -1080,6 +1080,15 @@ def test_geochem_lithology_map():
     cwd = os.getcwd()
     os.chdir(os.path.join(os.path.dirname(__file__), "fixtures"))
     try:
+        # prov_src.npz is a gitignored, generated fixture (see conftest.py
+        # minimal_prov_multi_model). Regenerate it here so this test does not
+        # depend on a provenance test having produced it first.
+        rockAll = (
+            np.load("mesh.npz")["v"][:, 0]
+            > np.load("mesh.npz")["v"][:, 0].mean()
+        ).astype(np.int64)
+        np.savez("prov_src.npz", rock=rockAll)
+
         assert m.gwGeochemOn and not getattr(m, "provOn", False)
         assert m._gwLithoMap == ["prov_src", "rock"]
         rock = np.load("prov_src.npz")["rock"][m.locIDs].astype(np.int64)
