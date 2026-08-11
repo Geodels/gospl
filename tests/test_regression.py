@@ -6565,6 +6565,92 @@ def test_marine_picard_solver(minimal_model, minimal_picard_model):
     )
 
 
+def test_marine_diffusion_conserves_on_steep_bathymetry(minimal_model):
+    """
+    Protects: mass conservation of the marine sediment diffusion
+    (`seaplex.seaChange` -> `hillslope._diffuseOcean`) on steep seafloor relief.
+
+    Silent failure prevented: `_diffuseImplicit` / `_diffuseImplicitPicard`
+    solve the marine diffusion on the ABSOLUTE seafloor (`bed + deposit`) and
+    then clamp the result to >= 0 (a fresh deposit cannot erode the pre-existing
+    bed). Over steep bathymetry that clamp is asymmetric -- it keeps the
+    basin-fill half of the otherwise volume-conserving smoothing and discards
+    the paired highs-erosion half -- so the diffused deposit can carry several
+    times its input volume, i.e. marine sediment appears from nowhere and breaks
+    the global mass budget (observed ~5-8x on a real-Earth run). `_diffuseOcean`
+    rescales the (>=0) diffused deposit back to the incoming marine volume,
+    mirroring the per-pit rescale the continental large-pit path already uses
+    (`sedplex._diffuseLargePit`; dep.rst "A final per-pit mass rescale absorbs
+    any boundary drift introduced by the diffusion").
+
+    Why `test_mass_conservation` did not catch this: its backing fixture
+    (minimal.yml) uses a tiny `nlK`/`dt` so its marine deposit barely diffuses,
+    and it deposits little marine sediment overall, so the clamped volume stays
+    under the 1e-4 budget tolerance. This test drives `_diffuseOcean` directly
+    with a THIN deposit on the mesh's natural STEEP bathymetry and a strong
+    diffusivity, where the pre-fix clamp inflates the volume by ~2x.
+    """
+    from mpi4py import MPI
+
+    model = minimal_model
+    if getattr(model, "flatModel", False):
+        pytest.skip("needs a sphere fixture with submarine relief")
+
+    owned = model.inIDs == 1
+    larea = model.larea
+
+    # Natural (steep) mesh bathymetry as the bed; raise sea level so a large
+    # steep-relief region is submarine. A THIN deposit on that steep relief is
+    # what drives the absolute-surface diffusion below the pre-deposition bed.
+    bed = model.hLocal.getArray().copy()
+    model.sealevel = 2000.0
+    model.seaID = bed < model.sealevel
+
+    n_sea = MPI.COMM_WORLD.allreduce(int(np.sum(model.seaID & owned)), op=MPI.SUM)
+    if n_sea < 10:
+        pytest.skip(
+            f"fixture has too few submarine cells ({n_sea}) at sealevel=2000 "
+            f"for a meaningful steep-bathymetry marine-diffusion test"
+        )
+
+    # Strong marine diffusion so the deposit spreads far over the steep bed and
+    # the clamp actually fires (with the fixture's tiny nlK/dt it would not).
+    model.dt = 5.0e4
+    model.nlK = 5.0e4
+
+    dh = np.zeros(model.lpoints)
+    dh[model.seaID] = 5.0                      # thin deposit (m)
+    vin = MPI.COMM_WORLD.allreduce(
+        float(np.sum((dh * larea)[owned])), op=MPI.SUM
+    )
+    assert vin > 0.0
+
+    # Run ONLY the marine diffusion; it writes the applied deposit into self.tmp.
+    model._diffuseOcean(dh)
+    model.dm.globalToLocal(model.tmp, model.tmpL)
+    applied = model.tmpL.getArray().copy()
+    vout = MPI.COMM_WORLD.allreduce(
+        float(np.sum((applied * larea)[owned])), op=MPI.SUM
+    )
+
+    rel = abs(vout - vin) / vin
+    # Pre-fix this is ~1.0 (deposit volume ~doubles); the rescale drives it to 0.
+    assert rel < 1.0e-6, (
+        f"marine diffusion does not conserve volume on steep bathymetry: "
+        f"Vin={vin:.4e} Vout={vout:.4e} ratio={vout / vin:.3f} rel={rel:.3e}. "
+        f"The _diffuseOcean mass-conservation rescale is missing or wrong."
+    )
+
+    # Physical: a fresh marine deposit must never erode the pre-existing bed.
+    min_applied = MPI.COMM_WORLD.allreduce(
+        float(np.min(applied[owned])) if owned.any() else 0.0, op=MPI.MIN
+    )
+    assert min_applied >= -1.0e-9, (
+        f"marine diffusion eroded the pre-existing bed (min deposit "
+        f"{min_applied:.3e} m < 0)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # TEST 9 - Stratigraphy: deposition + compaction physics
 # ---------------------------------------------------------------------------

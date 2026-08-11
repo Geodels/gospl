@@ -766,6 +766,34 @@ class hillSLP(object):
         ndepo = self._diffuseImplicit(
             dh, self.seaID, self.nlK, label="marine"
         )
+
+        # Mass conservation. `_diffuseImplicit` solves the diffusion on the
+        # ABSOLUTE seafloor (`bed + dh`) and clamps its result to >= 0 (a fresh
+        # deposit cannot erode the pre-existing bed). Over steep marine
+        # bathymetry that clamp is asymmetric: it keeps the basin-fill half of
+        # the otherwise volume-conserving smoothing and discards the paired
+        # highs-erosion half, so the returned deposit can carry several times
+        # the incoming volume (observed ~5x on a real-Earth run) -- deposited
+        # sediment appearing from nowhere and breaking the mass budget. The
+        # continental large-pit path absorbs the identical drift with a mass
+        # rescale (`sedplex._diffuseLargePit`; see dep.rst "A final per-pit mass
+        # rescale absorbs any boundary drift introduced by the diffusion") but
+        # the marine path had none. Rescale the (>=0) diffused deposit so its
+        # volume matches the incoming marine deposit volume. This is a no-op
+        # once deposits sit on gentle slopes (the clamp then discards ~nothing).
+        owned = self.inIDs == 1
+        vin = MPI.COMM_WORLD.allreduce(
+            float(np.sum((dh * self.larea)[owned])), op=MPI.SUM
+        )
+        vout = MPI.COMM_WORLD.allreduce(
+            float(np.sum((ndepo * self.larea)[owned])), op=MPI.SUM
+        )
+        if vout > 0.0:
+            scale = vin / vout
+            ndepo = ndepo * scale
+            if provThick is not None:
+                provThick = provThick * scale
+
         self.tmpL.setArray(ndepo)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
