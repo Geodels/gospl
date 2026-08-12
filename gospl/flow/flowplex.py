@@ -241,6 +241,9 @@ class FAMesh(object):
             # itself break the run; `nbad` stays -1 (-> loud, the safe default)
             # if it cannot be computed.
             worst_id, worst_val, nbad = -1, float("nan"), -1
+            # Local boolean mask (owned rows) of the un-drained cells, captured
+            # so the fatal-solve recovery below can pond exactly those cells.
+            bad_mask_local = None
             try:
                 resid = vector1.duplicate()
                 matrix.mult(vector2, resid)        # A x
@@ -249,7 +252,8 @@ class FAMesh(object):
                 worst_id, worst_val = resid.max()  # (global index, value)
                 bnorm = vector1.norm()
                 thr = 1.0e-3 * bnorm if bnorm > 0.0 else 1.0e-3
-                nbad = int(np.count_nonzero(resid.getArray() > thr))
+                bad_mask_local = (resid.getArray() > thr).copy()  # owned rows
+                nbad = int(np.count_nonzero(bad_mask_local))
                 nbad = MPI.COMM_WORLD.allreduce(nbad, op=MPI.SUM)
                 resid.destroy()
             except Exception:
@@ -279,11 +283,40 @@ class FAMesh(object):
                 mat_finite = bool(
                     np.isfinite(matrix.norm(petsc4py.PETSc.NormType.FROBENIUS))
                 )
+            # Recovery for the FATAL main discharge solve. A SMALL, finite
+            # un-drained region is a knife-edge flow-routing degeneracy: a
+            # near-flat region whose MFD tie-break forms a near-cycle makes
+            # (I - W^T) locally singular over O(100) cells. It is exactly what a
+            # restart's float32 elevation truncation -- or a different partition
+            # -- perturbs away, so aborting a 55-min run over so few cells is
+            # disproportionate. Instead pond those cells (local sinks: discharge
+            # = their own runoff, nothing passed downstream) and KEEP the
+            # converged discharge on the other ~mpoints cells (their residual is
+            # <= thr). Abort ONLY on a genuine global failure: a LARGE region
+            # (> the benign cap), a non-finite RHS (NaN source) / matrix, or a
+            # region that could not be localized (nbad < 0 / no mask). `nbad`,
+            # `rhs_finite`, `mat_finite` and the cap are all global, and `fatal`
+            # is a shared arg, so `pond_fatal` is identical on every rank -> the
+            # raise / pond branch is collective-consistent (no np>1 deadlock).
+            pond_fatal = (
+                fatal
+                and rhs_finite
+                and mat_finite
+                and 0 <= nbad <= self._undrained_benign_cap
+                and bad_mask_local is not None
+            )
             if MPIrank == 0:
                 if benign:
                     print(
                         "[flow] %d isolated un-drained cell(s) left as local "
                         "sinks (benign: they pond, mass conserved)" % nbad,
+                        flush=True,
+                    )
+                elif pond_fatal:
+                    print(
+                        "[flow] main discharge solve: %d un-drained cell(s) "
+                        "ponded as local sinks (recovered, mass conserved) -- "
+                        "knife-edge routing degeneracy, continuing" % nbad,
                         flush=True,
                     )
                 else:
@@ -303,19 +336,45 @@ class FAMesh(object):
                             % (worst_val, worst_id, nbad),
                             flush=True,
                         )
-            if fatal:
-                # Only the main flow-accumulation discharge solve passes
-                # fatal=True: a zero discharge there would silently feed a
-                # no-river state into the erosion/sediment routines, so abort
-                # instead. Raising on every rank is collective -> no deadlock.
+            if fatal and not pond_fatal:
+                # Genuine global failure of the main flow-accumulation discharge
+                # solve (large un-drained region, non-finite RHS/matrix, or
+                # un-localizable): a zero/garbage discharge here would silently
+                # feed a no-river state into the erosion/sediment routines, so
+                # abort. Raising on every rank is collective -> no deadlock.
                 raise RuntimeError(
                     "Flow-accumulation KSP failed to converge (reason %s) after "
                     "%d iterations; aborting rather than continuing with zero "
                     "discharge." % (KSPReasons.get(r, r), its)
                 )
-            # Auxiliary / iterative-cascade solves degrade gracefully: drop
-            # this solve's contribution (zero) and continue, as before.
-            vector2.set(0.0)
+            if pond_fatal:
+                # Pond the un-drained cells in place; keep the rest of the
+                # (converged) discharge. A local sink accumulates only its own
+                # runoff b_i (already >= 0) and passes nothing downstream, so a
+                # spurious null-space blow-up there can't leak into erosion.
+                #
+                # Pond two sets: (1) the residual-flagged cells (`bad_mask_local`
+                # -- where the near-cycle imbalance shows up), AND (2) any cell
+                # whose discharge exceeds the TOTAL domain runoff `Sum(b)`. The
+                # latter is a hard physical bound (no cell can drain more water
+                # than exists) that catches the self-consistent-but-inflated
+                # interior of a cycle, which balances locally (small residual, so
+                # (1) misses it) yet holds an unphysical b/eps discharge. The
+                # global outlet sits at ~Sum(b) and is (correctly) not flagged.
+                # `vector1.sum()` is collective (all ranks); the array ops are
+                # rank-local.
+                total_runoff = float(vector1.sum())
+                arr = vector2.getArray()
+                b = vector1.getArray()
+                pond = bad_mask_local.copy()
+                if total_runoff > 0.0:
+                    pond |= arr > total_runoff
+                arr[pond] = np.maximum(b[pond], 0.0)
+                vector2.setArray(arr)
+            else:
+                # Auxiliary / iterative-cascade (non-fatal) solves degrade
+                # gracefully: drop this solve's contribution (zero) and continue.
+                vector2.set(0.0)
         safe_garbage_cleanup()
 
         return vector2

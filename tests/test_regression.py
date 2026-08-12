@@ -6651,6 +6651,115 @@ def test_marine_diffusion_conserves_on_steep_bathymetry(minimal_model):
     )
 
 
+def _singular_flow_system(ncycles, rhs_all=False):
+    """Build a standalone singular `(I - W^T)`-like system for the fatal-solve
+    recovery test. N=1000 identity matrix with `ncycles` disjoint 2-cycles
+    (rows 2k, 2k+1): the 2x2 block ``[[1,-1],[-1,1]]`` is singular (null vector
+    [1,1]), so Richardson cannot converge on a block whose RHS has a component
+    along that null space -- exactly the knife-edge un-drainable configuration
+    the fatal flow solve hits. Returns (A, b, x) with x seeded to b.
+    """
+    import petsc4py
+    PETSc = petsc4py.PETSc
+    N = 1000
+    A = PETSc.Mat().create(PETSc.COMM_WORLD)
+    A.setSizes(((None, N), (None, N)))
+    A.setType("aij")
+    A.setPreallocationNNZ((2, 2))
+    A.setUp()
+    istart, iend = A.getOwnershipRange()
+    for gi in range(istart, iend):
+        A.setValue(gi, gi, 1.0)
+    for k in range(ncycles):
+        i, j = 2 * k, 2 * k + 1
+        if istart <= i < iend:
+            A.setValue(i, j, -1.0)
+        if istart <= j < iend:
+            A.setValue(j, i, -1.0)
+    A.assemble()
+    b = A.createVecLeft()
+    b.set(0.0)
+    if rhs_all:
+        for k in range(ncycles):
+            i = 2 * k
+            if istart <= i < iend:
+                b.setValue(i, 1.0)
+    elif istart <= 0 < iend:
+        b.setValue(0, 1.0)
+    b.assemble()
+    x = b.duplicate()
+    b.copy(result=x)
+    return A, b, x
+
+
+def test_fatal_flow_solve_ponds_small_undrained_region(minimal_model):
+    """
+    Protects: the fatal flow-accumulation discharge solve must RECOVER from a
+    small, knife-edge un-drained region (pond it and continue) but still ABORT
+    on a genuinely broken (large / non-finite) system
+    (flowplex._solve_KSP2, fatal=True).
+
+    Silent failure prevented: a near-flat region whose MFD tie-break forms a
+    near-cycle makes `(I - W^T)` locally singular over O(100) cells. That is a
+    floating-point knife-edge -- a restart's float32 elevation truncation, or a
+    different partition, perturbs it away -- yet the fatal main solve used to
+    abort the whole (potentially many-hour) run over it. It now ponds a small
+    finite region (discharge -> local runoff `b`, plus a hard clamp on any cell
+    whose discharge exceeds the total domain runoff, which no physical cell can)
+    and continues, exactly as the non-fatal benign path does; it still aborts a
+    large region or a non-finite RHS/matrix (a real broken state).
+
+    The mesh cannot reproduce the knife-edge deterministically, so this drives
+    `_solve_KSP2(fatal=True)` directly with a standalone singular matrix.
+    """
+    from mpi4py import MPI
+
+    model = minimal_model
+    cap = int(model._undrained_benign_cap)
+
+    # --- SMALL region (1 singular cell): must POND, not abort ---
+    A, b, x = _singular_flow_system(ncycles=1)
+    try:
+        raised = False
+        try:
+            model._solve_KSP2(A, b, x, fatal=True)
+        except RuntimeError:
+            raised = True
+        total_runoff = float(b.sum())
+        xmax = x.max()[1]
+        xfinite = bool(np.isfinite(x.norm()))
+    finally:
+        A.destroy(); b.destroy(); x.destroy()
+
+    assert not raised, (
+        "fatal flow solve aborted on a SMALL un-drained region; it should pond "
+        "those cells and continue (knife-edge routing degeneracy recovery)."
+    )
+    assert xfinite, "ponded discharge is not finite."
+    # Every cell ponded/clamped to a physical value: no cell drains more than
+    # the total domain runoff (the null-space blow-up is removed).
+    assert xmax <= total_runoff + 1.0e-6, (
+        f"ponded discharge {xmax:.3e} exceeds total runoff {total_runoff:.3e}: "
+        f"the null-space blow-up was not clamped."
+    )
+
+    # --- LARGE region (> benign cap singular cells): must ABORT ---
+    A, b, x = _singular_flow_system(ncycles=cap + 50, rhs_all=True)
+    try:
+        raised = False
+        try:
+            model._solve_KSP2(A, b, x, fatal=True)
+        except RuntimeError:
+            raised = True
+    finally:
+        A.destroy(); b.destroy(); x.destroy()
+
+    assert raised, (
+        f"fatal flow solve did NOT abort on a LARGE un-drained region "
+        f"(> {cap} cells); a genuinely broken discharge must still abort."
+    )
+
+
 # ---------------------------------------------------------------------------
 # TEST 9 - Stratigraphy: deposition + compaction physics
 # ---------------------------------------------------------------------------
