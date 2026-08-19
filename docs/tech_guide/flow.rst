@@ -130,6 +130,18 @@ Iterative methods allow for an initial guess to be provided. When this initial g
 
   The flow routing approach and corresponding flow CSR matrix (**W**) is also used in the sediment routing algorithm.
 
+When the overspill iteration stops
+----------------------------------
+
+Each pass of that iteration rebuilds the flow matrix on the updated water surface and re-solves the system, so the number of passes drives the cost of the flow phase. goSPL therefore watches the residual downstream flux (the water still waiting to be routed) and stops on whichever of these comes first:
+
+* **Converged**: the residual has fallen below a small fraction of its value on the first pass (``GOSPL_CASCADE_REL_FLOOR``, default :math:`\mathrm{10^{-3}}`; set it to ``0`` to disable). What remains is a trickle whose routing would cost a full matrix rebuild and solve per pass, so it is left ponded. This is the normal outcome and is reported only in verbose mode as ``[flow] downstream cascade complete after N passes …``.
+* **Un-drainable**: the residual has stopped shrinking altogether for several consecutive passes (``GOSPL_CASCADE_PATIENCE``, default 3). The remaining water sits in a depression that has no path out on this decomposition, which is physically a closed basin, so it is left ponded and a ``[flow] downstream cascade stalled after N passes …`` warning is printed. A hard cap (``GOSPL_CASCADE_MAX_STEPS``, default 100) is a final backstop.
+
+.. warning::
+
+  A *stalled* message is worth investigating when the depression involved should physically drain, because the water it ponds never reaches the downstream network. The usual cause is a wide, nearly flat pocket only a metre or two above its outlet: the depression-filling step then produces a flat water surface on which the spill point's flow directions can point back into the pocket itself. Such a feature is a property of the **input topography** rather than of the solver (the residual is identical whichever Krylov solver is used), and it is best removed by conditioning the DEM, carving a gently descending channel from the pocket to its outlet, rather than by loosening the thresholds above. A deep interior basin, by contrast, is genuinely endorheic and *should* pond.
+
 Coupling with glacial meltwater
 -------------------------------
 

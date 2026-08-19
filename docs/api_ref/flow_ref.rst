@@ -32,6 +32,9 @@ Class FAMesh
       ~FAMesh._buildFlowDirection
       ~FAMesh._potentialLakeEvap
       ~FAMesh._distributeDownstream
+      ~FAMesh._cascadeResetProgress
+      ~FAMesh._cascadeStopReason
+      ~FAMesh._losingStreamSolve
 
 Public functions
 ---------------------
@@ -51,3 +54,6 @@ Private functions
 .. automethod:: flow.flowplex.FAMesh._buildFlowDirection
 .. automethod:: flow.flowplex.FAMesh._potentialLakeEvap
 .. automethod:: flow.flowplex.FAMesh._distributeDownstream
+.. automethod:: flow.flowplex.FAMesh._cascadeResetProgress
+.. automethod:: flow.flowplex.FAMesh._cascadeStopReason
+.. automethod:: flow.flowplex.FAMesh._losingStreamSolve

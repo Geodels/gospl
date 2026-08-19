@@ -109,6 +109,32 @@ class FAMesh(object):
         self._cascade_rel_improve = 1.0e-3
         self._cascade_resid = 0.0
 
+        # Relative residual FLOOR for the same loop -- the converged-enough exit,
+        # complementary to the stagnation break above. The only other cheap exit
+        # is ABSOLUTE (`_distributeDownstream` skips the solve once the residual
+        # flux drops under `maxarea`, i.e. ~1 m of water over the largest cell),
+        # which on a coarse mesh (larea ~1e8 m2) is reached only after the cascade
+        # has chased a residual already 5-6 orders of magnitude below where it
+        # started -- several extra passes (each a full fMat rebuild + KSP solve)
+        # that route a physically irrelevant trickle. So also stop once the
+        # residual falls below `_cascade_rel_floor` of the FIRST pass's residual:
+        # the leftover is ponded exactly like the stagnation case, but it is a
+        # calm, expected exit rather than a failure (measured on a 10 km / np=8
+        # global-scale run with evaporation: 4 of 18 passes dropped, ~17% off the
+        # flow-accumulation wall-time, for 0.005% of the cascade flux left
+        # ponded). Set 0 to disable (pre-2026-08 behaviour). Both `resid` and the
+        # captured `resid0` are global `Vec.sum` values -- identical on every rank
+        # -- so this break is collective-consistent (no np>1 desync).
+        # Env GOSPL_CASCADE_REL_FLOOR.
+        self._cascade_rel_floor = float(
+            os.environ.get("GOSPL_CASCADE_REL_FLOOR", 1.0e-3)
+        )
+        # Per-call progress state of the cascade tracker (reset by
+        # `_cascadeResetProgress` at the top of every cascade).
+        self._cascade_resid0 = None
+        self._cascade_best = None
+        self._cascade_stall = 0
+
         # Identity matrix construction
         self.II = np.arange(0, self.lpoints + 1, dtype=petsc4py.PETSc.IntType)
         self.JJ = np.arange(0, self.lpoints, dtype=petsc4py.PETSc.IntType)
@@ -768,6 +794,76 @@ class FAMesh(object):
 
         return excess, pitVol, nFA
 
+    def _cascadeResetProgress(self):
+        """
+        Resets the per-call progress state of the downstream-cascade tracker
+        (`_cascadeStopReason`). Called once at the top of each cascade, before
+        the first pass.
+
+        Scratch Vecs: none.
+        """
+
+        self._cascade_resid0 = None
+        self._cascade_best = None
+        self._cascade_stall = 0
+
+        return
+
+    def _cascadeStopReason(self, resid):
+        """
+        Decides whether the OUTER downstream-routing loop (`while excess` in
+        `flowAccumulation`) should stop, given this pass's residual downstream
+        flux. Two independent reasons, both leaving the residual **ponded**:
+
+        - ``"floor"`` -- the residual has dropped below `_cascade_rel_floor` of
+          the FIRST pass's residual: the cascade has done its job and what is
+          left is an irrelevant trickle. A calm, expected exit (the remaining
+          passes would each pay a full `fMat` rebuild + KSP solve to route it).
+        - ``"stall"`` -- the residual failed to shrink by `_cascade_rel_improve`
+          for `_cascade_patience` consecutive passes: an un-drainable pocket
+          (physically a closed basin). Reported loudly by the caller.
+
+        .. important::
+
+            `resid` is a global `Vec.sum` (identical on every rank) and every
+            threshold is a config scalar, so the returned reason is the same on
+            every rank -- the caller's `break` stays collective-consistent (see
+            AGENTS.md > MPI contract). Do NOT feed a rank-local quantity in.
+
+        Scratch Vecs: none.
+
+        :arg resid: global residual downstream flux of the pass just completed
+
+        :return: None (keep going), "floor" or "stall"
+        """
+
+        # First pass: nothing to compare against, so it only seeds the baselines.
+        if self._cascade_resid0 is None:
+            self._cascade_resid0 = resid
+            self._cascade_best = resid
+            self._cascade_stall = 0
+            return None
+
+        # Converged-enough exit, tested BEFORE stagnation: a residual this far
+        # below where it started is negligible whether or not it is still
+        # shrinking, and "floor" reports calmly where "stall" reports loudly.
+        if (
+            self._cascade_rel_floor > 0.0
+            and resid < self._cascade_rel_floor * self._cascade_resid0
+        ):
+            return "floor"
+
+        if resid < self._cascade_best * (1.0 - self._cascade_rel_improve):
+            self._cascade_best = resid
+            self._cascade_stall = 0
+            return None
+
+        self._cascade_stall += 1
+        if self._cascade_stall >= self._cascade_patience:
+            return "stall"
+
+        return None
+
     def _losingStreamSolve(self, rainA):
         r"""
         "Losing stream" flow accumulation: evaporation is debited from the
@@ -934,14 +1030,16 @@ class FAMesh(object):
             FA = self.FAL.getArray().copy() * self.dt
             excess = True
             step = 0
-            # Stagnation tracking (see __init__): break as soon as the residual
-            # downstream flux stops shrinking, rather than grinding to the hard
-            # step cap (the backstop on the `while`). An un-drainable pocket
-            # plateaus within a few passes; continuing past that wastes wall-time
-            # and, at scale, overflows the collective PETSc garbage collector.
-            best_resid = None
-            stall = 0
+            # Progress tracking (see __init__ + `_cascadeStopReason`): break as
+            # soon as the residual downstream flux either stops shrinking (an
+            # un-drainable pocket -- loud) or drops to a negligible fraction of
+            # its initial value (converged enough -- calm), rather than grinding
+            # to the hard step cap (the backstop on the `while`). Continuing past
+            # either point wastes wall-time and, at scale, overflows the
+            # collective PETSc garbage collector.
+            self._cascadeResetProgress()
             stalled = False
+            floored = False
             while excess and step <= self._cascade_max_steps:
                 t1 = process_time()
                 excess, pitVol, FA = self._distributeDownstream(pitVol, FA, hl, step)
@@ -952,29 +1050,41 @@ class FAMesh(object):
                         flush=True,
                     )
                 step += 1
-                # Progress check only while flux remains to route. `_cascade_resid`
-                # is a global Vec.sum, so `stall` is identical on every rank and
-                # the break stays collective-consistent.
+                # Progress check only while flux remains to route. The decision
+                # is driven by `_cascade_resid`, a global Vec.sum, so the reason
+                # (and hence the break) is identical on every rank and stays
+                # collective-consistent. See `_cascadeStopReason`.
                 if excess:
-                    resid = self._cascade_resid
-                    if best_resid is None or resid < best_resid * (
-                        1.0 - self._cascade_rel_improve
-                    ):
-                        best_resid = resid
-                        stall = 0
-                    else:
-                        stall += 1
-                        if stall >= self._cascade_patience:
-                            stalled = True
-                            break
+                    reason = self._cascadeStopReason(self._cascade_resid)
+                    if reason == "floor":
+                        floored = True
+                        break
+                    if reason == "stall":
+                        stalled = True
+                        break
 
+            # Converged-enough exit (relative residual floor): the leftover flux
+            # is a negligible fraction of what the cascade started with, so it is
+            # ponded like any closed-basin residue -- but this is the EXPECTED
+            # outcome, not a failure, so it is reported calmly under -v only and
+            # deliberately excluded from the loud branch below.
+            if floored and MPIrank == 0 and self.verbose:
+                print(
+                    "[flow] downstream cascade complete after %d passes; residual "
+                    "flux %.3e m3/yr (%.2e of the initial %.3e) left ponded"
+                    % (step, self._cascade_resid,
+                       self._cascade_resid / self._cascade_resid0
+                       if self._cascade_resid0 else 0.0,
+                       self._cascade_resid0 or 0.0),
+                    flush=True,
+                )
             # Non-convergence: either the residual plateaued (stagnation break,
             # the common case) or the hard step cap was hit. Either way the
             # residual flux stays ponded in those cells -- physically correct,
             # they are closed/un-drainable basins on this partition -- instead of
             # spinning the loop and overflowing the PETSc garbage collector.
             # Report loudly; the converged-reason path is unaffected (OUTER loop).
-            if (excess or stalled) and MPIrank == 0:
+            if (excess or stalled) and not floored and MPIrank == 0:
                 if stalled:
                     why = "stalled after %d passes (residual flux no longer " \
                           "shrinking)" % step

@@ -7008,3 +7008,110 @@ def test_stratigraphy_deposition_and_compaction():
             "bedrock indices."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# TEST 12 - Downstream cascade: relative residual floor vs stagnation break
+# ---------------------------------------------------------------------------
+#
+# Pure-logic test (no Model, no PETSc) — instantiates FAMesh via `__new__`
+# to bypass the heavy init and exercises the cascade progress tracker
+# directly. Runs in microseconds; belongs to the fast tier.
+# ---------------------------------------------------------------------------
+
+
+def _cascade_tracker(rel_floor=1.0e-3, patience=3, rel_improve=1.0e-3):
+    """
+    Bare FAMesh carrying only the cascade-tracker state (no mesh, no PETSc).
+    """
+    from gospl.flow.flowplex import FAMesh
+
+    fa = FAMesh.__new__(FAMesh)
+    fa._cascade_rel_floor = rel_floor
+    fa._cascade_patience = patience
+    fa._cascade_rel_improve = rel_improve
+    fa._cascadeResetProgress()
+    return fa
+
+
+def test_cascade_relative_residual_floor():
+    """
+    Protects: `flowplex._cascadeStopReason` — the OUTER downstream-routing loop
+    must stop once the residual flux is a negligible fraction of its initial
+    value ("floor", calm), and must keep reporting a genuine plateau loudly
+    ("stall"), and must be able to fall back to the pre-floor behaviour.
+
+    Silent failure prevented: the only other cheap exit from that loop is
+    ABSOLUTE (`_distributeDownstream` skips the solve below `maxarea`, i.e. ~1 m
+    of water over the largest cell). On a coarse mesh that threshold is reached
+    only after the cascade has chased a residual already 5-6 orders of magnitude
+    below where it started, each extra pass paying a full `fMat` rebuild + KSP
+    solve to route a physically irrelevant trickle (measured on a 10 km / np=8
+    run: 5 of 18 passes, ~17% of the flow-accumulation wall-time, for 0.005% of
+    the cascade flux). Regressing the floor silently restores that cost; getting
+    its precedence wrong instead re-labels a normal completion as the loud
+    "cascade stalled ... un-drainable" warning (or vice versa, hiding a real
+    un-drainable pocket behind a calm message).
+
+    Every input is a global `Vec.sum` in production, so the decision is a pure
+    function of globally-identical scalars — that is what keeps the caller's
+    `break` collective-consistent, and it is why this can be tested without MPI.
+    """
+    # --- 1. A steadily-shrinking residual runs until it crosses the floor ---
+    fa = _cascade_tracker(rel_floor=1.0e-3)
+    assert fa._cascadeStopReason(1.0e13) is None, (
+        "the first pass only seeds the baseline; it can never stop the loop."
+    )
+    assert fa._cascadeStopReason(1.0e12) is None, "1e-1 of initial: keep routing."
+    assert fa._cascadeStopReason(1.0e11) is None, "1e-2 of initial: keep routing."
+    assert fa._cascadeStopReason(5.0e9) == "floor", (
+        "residual fell to 5e-4 of the initial flux (below the 1e-3 floor) but "
+        "the cascade did not take the calm converged-enough exit."
+    )
+
+    # --- 2. A plateau at HIGH residual is still the loud stagnation break ---
+    fa = _cascade_tracker(rel_floor=1.0e-3, patience=3)
+    assert fa._cascadeStopReason(3.79e12) is None
+    reasons = [fa._cascadeStopReason(3.79e12) for _ in range(3)]
+    assert reasons == [None, None, "stall"], (
+        f"a frozen residual must trip the stagnation break exactly on the "
+        f"patience-th non-improving pass, got {reasons}."
+    )
+
+    # --- 3. The floor OUTRANKS the stagnation break (calm beats loud) ---
+    # A residual that is both negligible AND no longer shrinking is a completed
+    # cascade, not an un-drainable pocket: it must NOT raise the loud warning.
+    fa = _cascade_tracker(rel_floor=1.0e-3, patience=1)
+    assert fa._cascadeStopReason(1.0e13) is None
+    assert fa._cascadeStopReason(1.0e6) == "floor"
+    assert fa._cascadeStopReason(1.0e6) == "floor", (
+        "a negligible, plateaued residual was reported as a stalled "
+        "un-drainable pocket; the floor must take precedence."
+    )
+
+    # --- 4. rel_floor = 0 restores the pre-floor (stagnation-only) behaviour ---
+    fa = _cascade_tracker(rel_floor=0.0)
+    seq = [1.0e13, 1.0e12, 1.0e11, 1.0e10, 1.0e-6]
+    assert [fa._cascadeStopReason(r) for r in seq] == [None] * len(seq), (
+        "with GOSPL_CASCADE_REL_FLOOR=0 the loop must behave exactly as before "
+        "the floor existed (only the stagnation break and the absolute "
+        "maxarea/step-cap exits stop it)."
+    )
+
+    # --- 5. The baseline is per-cascade: reset must re-arm the floor ---
+    # flowAccumulation runs the cascade twice per timestep (water, then again
+    # after erosion) and sedplex runs it for sediment. A second cascade legiti-
+    # mately STARTS with a small residual; if the baseline leaked across calls
+    # it would "floor" on its very first comparison and skip real routing.
+    fa = _cascade_tracker(rel_floor=1.0e-3)
+    fa._cascadeStopReason(1.0e13)
+    fa._cascadeStopReason(1.0e9)          # would floor
+    fa._cascadeResetProgress()
+    assert fa._cascade_resid0 is None, "reset must clear the residual baseline."
+    assert fa._cascadeStopReason(1.0e9) is None, (
+        "after a reset the next cascade must re-baseline on its own first pass, "
+        "not inherit the previous cascade's (much larger) initial residual."
+    )
+    assert fa._cascadeStopReason(1.0e8) is None, (
+        "1e-1 of the NEW baseline must keep routing."
+    )
