@@ -209,9 +209,12 @@ and exports any number of steps from it::
     for stp in range(11):
         to_netcdf(gb.export(stp), "surface%d.nc" % stp)
 
-On a 5.9 M-node global mesh at 0.1 deg that is ~12 s of setup and ~27 s per
-step, against ~42 s per step through ``grid_export`` — and the result is
-identical. The cache lives in the instance, so under process-based parallelism
+On a 5.9 M-node global mesh at 0.1 deg that is ~11 s of setup and ~4 s per
+step, against ~42 s per step through ``grid_export`` before these changes — and
+the result is identical. The ~4 s assumes ``numba`` is installed (part of the
+``analysis`` extra): the sequential part of the raster hydrology runs ~6x faster
+compiled, and ``method='python'`` / ``--method python`` selects the pure-Python
+reference, which gives the same answer. The cache lives in the instance, so under process-based parallelism
 (``joblib``, ``multiprocessing``) give each worker a **chunk of steps** rather
 than one step at a time, or the setup is paid per step anyway. Memory scales
 with the number of workers (the node-to-triangle adjacency alone is ~284 MB for

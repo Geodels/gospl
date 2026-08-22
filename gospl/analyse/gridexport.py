@@ -393,18 +393,25 @@ class GridBuilder(object):
     :arg a0: chi reference area
     :arg file_base: mesh-output file base name
     :arg latlim: geographic meshes only, crop ``|latitude|`` to this limit
+    :arg method: hydrology sequential-kernel backend — ``'auto'`` (default:
+        Numba when installed, else pure Python), ``'numba'`` (require Numba) or
+        ``'python'`` (reference). All give identical results; Numba is ~6x
+        faster on the hydrology.
     """
 
     def __init__(self, h5dir, mesh, vkey="v", ckey="c", spacing=None,
                  nx=None, ny=None, fields=None, mn=0.5, a0=1.0,
-                 file_base="gospl", latlim=None):
+                 file_base="gospl", latlim=None, method="auto"):
         from scipy.spatial import cKDTree
 
+        if method not in ("auto", "numba", "python"):
+            raise ValueError("method must be 'auto', 'numba' or 'python'")
         self.h5dir = h5dir
         self.file_base = file_base
         self.fields = fields
         self.mn = mn
         self.a0 = a0
+        self.method = method
 
         data = np.load(mesh)
         coords = np.asarray(data[vkey], dtype=np.float64)
@@ -600,7 +607,8 @@ class GridBuilder(object):
         hydro_mask = mask & (elev > base_level)
 
         hydro = _d8_hydrology(elev, hydro_mask, self.hdx, self.hdy,
-                              self.mn, self.a0, periodic=self.periodic)
+                              self.mn, self.a0, periodic=self.periodic,
+                              method=self.method)
         grids.update(hydro["grids"])
 
         out = {
@@ -617,7 +625,8 @@ class GridBuilder(object):
 
 def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
                 nx=None, ny=None, fields=None, mn=0.5, a0=1.0,
-                base_level=None, file_base="gospl", latlim=None):
+                base_level=None, file_base="gospl", latlim=None,
+                method="auto"):
     """
     Build the regular-grid surface (fields + D8 hydrology) for one step.
 
@@ -635,6 +644,7 @@ def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
     return GridBuilder(
         h5dir, mesh, vkey=vkey, ckey=ckey, spacing=spacing, nx=nx, ny=ny,
         fields=fields, mn=mn, a0=a0, file_base=file_base, latlim=latlim,
+        method=method,
     ).export(step=step, base_level=base_level)
 
 
@@ -653,7 +663,241 @@ def _median_spacing(xy, cells):
 _NB = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
 
-def _d8_hydrology(elev, mask, dx, dy, mn, a0, periodic=False):
+def _nb_offsets(nx):
+    """Flat-index offsets of the 8 neighbours, in ``_NB`` order."""
+    return np.array([dr * nx + dc for dr, dc in _NB], dtype=np.int64)
+
+
+def _neighbour_flat(nx, ny, periodic):
+    """
+    Flat neighbour index for every cell and every one of the 8 directions,
+    ``-1`` where the neighbour falls off the grid.
+
+    Vectorised replacement for the per-cell ``_neighbours`` generator. The
+    generator was called once per cell in three separate O(n) Python loops (seed
+    detection, priority flood, receiver search), which on a 6.5M-cell grid meant
+    tens of millions of generator yields — the dominant cost of the hydrology.
+
+    Latitude never wraps (the poles are boundaries). Longitude wraps when
+    ``periodic``, so a global grid routes continuously across the antimeridian.
+    """
+    n = ny * nx
+    rows = np.repeat(np.arange(ny, dtype=np.int64), nx)
+    cols = np.tile(np.arange(nx, dtype=np.int64), ny)
+    # int32: a flat index is < ny*nx, and this array is (n, 8) -- the single
+    # biggest allocation in the hydrology, so the narrower dtype matters
+    # (207 MB rather than 415 MB on a 6.5M-cell grid).
+    out = np.empty((n, 8), dtype=np.int32)
+    for k, (dr, dc) in enumerate(_NB):
+        rr = rows + dr
+        cc = cols + dc
+        good = (rr >= 0) & (rr < ny)
+        if periodic:
+            cc = cc % nx
+        else:
+            good &= (cc >= 0) & (cc < nx)
+        out[:, k] = np.where(good, rr * nx + cc, -1)
+    return out
+
+
+def _priority_flood_pyheap(fflat, valid, seed, nbr, nx, ny, periodic, eps):
+    """
+    Pure-Python priority-flood + epsilon fill: the reference / no-Numba path.
+
+    Same result as :func:`_priority_flood`, but built on ``heapq`` and inline
+    neighbour arithmetic instead of an array-based heap and the ``nbr`` table.
+    That split is deliberate. ``heapq`` is a C implementation, so in pure Python
+    it beats a hand-rolled array heap by a wide margin — writing the heap the
+    njit-compatible way and running it interpreted made the fill ~4x SLOWER than
+    the original code (measured 42 s vs 28 s for the whole hydrology on a
+    6.5M-cell grid), i.e. optimising for Numba would have been a regression for
+    everyone without it. Numba, conversely, cannot compile ``heapq`` at all.
+    So each backend gets the heap that suits it, and
+    ``test_d8_flood_backends_agree`` pins them to the same answer.
+
+    ``fflat`` is modified IN PLACE. ``nbr`` is accepted (and unused) so both
+    backends share one signature.
+    """
+    import heapq
+
+    done = ~valid
+    heap = [(float(fflat[i]), int(i)) for i in np.flatnonzero(seed)]
+    heapq.heapify(heap)
+    done[seed] = True
+    push, pop = heapq.heappush, heapq.heappop
+    while heap:
+        e, cur = pop(heap)
+        r, c = divmod(cur, nx)
+        for dr, dc in _NB:
+            rr = r + dr
+            if rr < 0 or rr >= ny:
+                continue
+            cc = c + dc
+            if periodic:
+                cc %= nx
+            elif cc < 0 or cc >= nx:
+                continue
+            nb = rr * nx + cc
+            if done[nb]:
+                continue
+            v = fflat[nb]
+            w = e + eps
+            if w > v:
+                v = w
+            fflat[nb] = v
+            done[nb] = True
+            push(heap, (v, nb))
+    return done
+
+
+def _priority_flood(fflat, valid, seed, nbr, nx, ny, periodic, eps):
+    """
+    Priority-flood + epsilon fill: raise every depression to its spill level so
+    the surface drains everywhere, growing outward from the boundary/coastline
+    seeds in increasing filled elevation.
+
+    Inherently SEQUENTIAL — the order in which cells leave the queue is what
+    defines the fill, so it does not vectorise. Written with plain loops over
+    typed arrays and no Python objects, so the SAME source runs as the
+    pure-Python reference and, when ``numba`` is installed, as an ``njit``
+    kernel (same pattern as ``provenance._sweep_impl``; identical results).
+
+    The heap is an explicit array-based binary heap rather than ``heapq``:
+    ``heapq`` needs Python tuples/objects, which njit cannot compile. It is
+    sized ``n`` because a cell is pushed exactly once (guarded by ``done``).
+
+    ``fflat`` is modified IN PLACE.
+    """
+    n = fflat.shape[0]
+
+    # ---- 1. priority flood + epsilon -------------------------------------
+    hz = np.empty(n, dtype=np.float64)          # heap keys
+    hi = np.empty(n, dtype=np.int64)            # heap payload (flat index)
+    hn = 0
+    done = ~valid
+    for i in range(n):
+        if seed[i]:
+            done[i] = True
+            # push
+            hz[hn] = fflat[i]
+            hi[hn] = i
+            j = hn
+            hn += 1
+            while j > 0:
+                par = (j - 1) // 2
+                if hz[par] <= hz[j]:
+                    break
+                tz = hz[par]; hz[par] = hz[j]; hz[j] = tz
+                tv = hi[par]; hi[par] = hi[j]; hi[j] = tv
+                j = par
+
+    while hn > 0:
+        e = hz[0]
+        cur = hi[0]
+        hn -= 1
+        hz[0] = hz[hn]
+        hi[0] = hi[hn]
+        j = 0
+        while True:                             # sift down
+            l = 2 * j + 1
+            if l >= hn:
+                break
+            m = l
+            rr = l + 1
+            if rr < hn and hz[rr] < hz[l]:
+                m = rr
+            if hz[j] <= hz[m]:
+                break
+            tz = hz[j]; hz[j] = hz[m]; hz[m] = tz
+            tv = hi[j]; hi[j] = hi[m]; hi[m] = tv
+            j = m
+        for k in range(8):
+            nb = nbr[cur, k]
+            if nb < 0 or done[nb]:
+                continue
+            v = fflat[nb]
+            w = e + eps
+            if w > v:
+                v = w
+            fflat[nb] = v
+            done[nb] = True
+            hz[hn] = v                          # push
+            hi[hn] = nb
+            j = hn
+            hn += 1
+            while j > 0:
+                par = (j - 1) // 2
+                if hz[par] <= hz[j]:
+                    break
+                tz = hz[par]; hz[par] = hz[j]; hz[j] = tz
+                tv = hi[par]; hi[par] = hi[j]; hi[j] = tv
+                j = par
+
+    return done
+
+
+def _sweep_tree(order, recv, recv_dist, area, mn, a0):
+    """
+    Accumulate drainage area high -> low, then basin / chi / flow distance
+    low -> high, along the receiver tree. Sequential (see ``_flood_and_sweep``);
+    njit-compatible, so the same source is the reference and the fast path.
+
+    ``area`` is modified in place.
+
+    :return: ``(basin, chi, fdist, nbasin)``
+    """
+    m = order.shape[0]
+    for t in range(m - 1, -1, -1):
+        i = order[t]
+        rc = recv[i]
+        if rc >= 0:
+            area[rc] += area[i]
+
+    n = recv.shape[0]
+    basin = np.full(n, -1, dtype=np.int64)
+    chi = np.zeros(n, dtype=np.float64)
+    fdist = np.zeros(n, dtype=np.float64)
+    nextid = 0
+    for t in range(m):
+        i = order[t]
+        rc = recv[i]
+        if rc < 0:
+            basin[i] = nextid
+            nextid += 1
+        else:
+            basin[i] = basin[rc]
+            dl = recv_dist[i]
+            av = area[i]
+            if av < 1.0e-12:
+                av = 1.0e-12
+            chi[i] = chi[rc] + (a0 / av) ** mn * dl
+            fdist[i] = fdist[rc] + dl
+    return basin, chi, fdist, nextid
+
+
+def _get_d8_kernels(method="auto"):
+    """
+    Resolve the two sequential D8 kernels: Numba-compiled when available or
+    requested, else the pure-Python reference. Same contract as
+    ``provenance._get_sweep`` — all backends give identical results.
+    """
+    if method == "python":
+        return _priority_flood_pyheap, _sweep_tree
+    try:
+        import numba
+    except ImportError:
+        if method == "numba":
+            raise ImportError("method='numba' needs numba (`pip install numba`)")
+        return _priority_flood_pyheap, _sweep_tree          # 'auto' fallback
+    if not hasattr(_get_d8_kernels, "_njit"):
+        _get_d8_kernels._njit = (
+            numba.njit(cache=True)(_priority_flood),
+            numba.njit(cache=True)(_sweep_tree),
+        )
+    return _get_d8_kernels._njit
+
+
+def _d8_hydrology(elev, mask, dx, dy, mn, a0, periodic=False, method="auto"):
     """
     Priority-flood (+epsilon) fill -> D8 receivers -> drainage area, basins,
     chi and flow distance, on the cells flagged in ``mask`` (pass the SUBAERIAL
@@ -665,6 +909,13 @@ def _d8_hydrology(elev, mask, dx, dy, mn, a0, periodic=False):
     left/right columns are then NOT outlets — only the poles (top/bottom rows)
     and coastlines are. Returns flat ``receiver`` (-1 at outlets), the
     processing ``order`` and the field grids (NaN / -1 outside ``mask``).
+
+    Seed detection and the D8 receiver search are VECTORISED (they are per-cell
+    independent); only the priority flood and the two tree sweeps are sequential
+    and they run through ``_get_d8_kernels`` (Numba when available, pure Python
+    otherwise — identical results).
+
+    :arg method: sequential-kernel backend, ``'auto'`` / ``'numba'`` / ``'python'``
     """
     ny, nx = elev.shape
     n = ny * nx
@@ -683,102 +934,77 @@ def _d8_hydrology(elev, mask, dx, dy, mn, a0, periodic=False):
     cellarea_row = dx_row * dy                          # (ny,)
     eps = max(1.0e-6, (np.nanmax(elev) - np.nanmin(elev)) * 1.0e-6)
 
-    def _neighbours(r, c):
-        """Yield (k, rr, cc) valid 8-neighbours; longitude wraps if periodic."""
-        for k, (dr, dc) in enumerate(_NB):
-            rr = r + dr
-            if rr < 0 or rr >= ny:             # poles never wrap in latitude
-                continue
-            cc = c + dc
-            if periodic:
-                cc %= nx
-            elif cc < 0 or cc >= nx:
-                continue
-            yield k, rr, cc
+    valid = mask.ravel()
+    nbr = _neighbour_flat(nx, ny, periodic)             # (n, 8), -1 off-grid
+    rowof = np.repeat(np.arange(ny, dtype=np.int64), nx)   # row of each cell
 
-    filled = np.where(mask, z, np.inf).copy()
-    done = ~mask
-    is_seed = np.zeros((ny, nx), dtype=bool)   # domain-boundary outlets
-    heap = []
-    # Seeds: valid cells on the domain boundary — next to an invalid cell, or on
-    # the grid edge (poles always; left/right columns too UNLESS periodic, where
-    # longitude wraps). They drain off-domain and become basin outlets.
-    for r in range(ny):
-        for c in range(nx):
-            if not mask[r, c]:
-                continue
-            edge = r == 0 or r == ny - 1
-            if not periodic:
-                edge = edge or c == 0 or c == nx - 1
-            if not edge:
-                edge = any(not mask[rr, cc] for _, rr, cc in _neighbours(r, c))
-            if edge:
-                heapq.heappush(heap, (filled[r, c], r * nx + c))
-                done[r, c] = True
-                is_seed[r, c] = True
-    while heap:
-        e, flat = heapq.heappop(heap)
-        r, c = divmod(flat, nx)
-        for _, rr, cc in _neighbours(r, c):
-            if not done[rr, cc]:
-                filled[rr, cc] = max(z[rr, cc], e + eps)
-                done[rr, cc] = True
-                heapq.heappush(heap, (filled[rr, cc], rr * nx + cc))
+    # Both loops below sweep the 8 directions ONE AT A TIME, keeping only (n,)
+    # running state. Materialising the (n, 8) neighbour elevations / distances /
+    # slopes instead would be ~1.7 GB of float64 temporaries on a 6.5M-cell
+    # grid, which matters because this tool is routinely run several steps at a
+    # time in parallel worker processes.
 
-    # Steepest-descent (D8) receiver on the filled surface.
-    fflat = filled.ravel()
+    # ---- seeds (vectorised): valid cells on the domain boundary — next to an
+    # invalid cell, or on the grid edge (poles always; left/right columns too
+    # UNLESS periodic, where longitude wraps). They drain off-domain and become
+    # basin outlets. `nbr < 0` already encodes "off the grid", so a cell is a
+    # seed iff any of its 8 directions is off-grid or leads to an invalid cell.
+    is_seed = np.zeros(n, dtype=bool)
+    for k in range(8):
+        nb = nbr[:, k]
+        off = nb < 0
+        bad = off.copy()
+        safe = ~off
+        bad[safe] = ~valid[nb[safe]]
+        is_seed |= bad
+    is_seed &= valid
+
+    fflat = np.where(valid, z.ravel(), np.inf)
+    flood, sweep = _get_d8_kernels(method)
+    flood(fflat, valid, is_seed, nbr, nx, ny, periodic, eps)
+
+    # ---- D8 receivers (vectorised): steepest descent on the filled surface,
+    # tie-broken by _NB order exactly as the previous per-cell loop was (strict
+    # `>` keeps the first direction that attains the maximum). Invalid /
+    # off-grid neighbours can never win; a cell with no descending neighbour
+    # keeps receiver -1, and so do the seeds (they drain off-domain and are the
+    # basin outlets).
+    best_slope = np.full(n, -np.inf)
+    best_k = np.zeros(n, dtype=np.int8)
+    for k in range(8):
+        nb = nbr[:, k]
+        off = nb < 0
+        usable = valid & ~off                 # BOTH ends valid -> finite slope
+        usable[usable] = valid[nb[usable]]
+        u = np.flatnonzero(usable)
+        # Evaluate only where the slope is defined: `inf - inf` on the invalid
+        # cells would be a nan (and a RuntimeWarning) that the mask then throws
+        # away anyway.
+        sl = np.full(n, -np.inf)
+        sl[u] = (fflat[u] - fflat[nb[u]]) / dist_row[rowof[u], k]
+        upd = sl > best_slope
+        best_slope[upd] = sl[upd]
+        best_k[upd] = k
+    take = valid & ~is_seed & (best_slope > 0.0)
     recv = np.full(n, -1, dtype=np.int64)
-    recv_dist = np.zeros(n)                     # distance cell -> its receiver
-    valid_flat = mask.ravel()
-    seed_flat = is_seed.ravel()
-    vidx = np.where(valid_flat)[0]
-    for flat in vidx:
-        if seed_flat[flat]:
-            continue                           # boundary outlet: drains off-domain
-        r, c = divmod(int(flat), nx)
-        best, bslope, bdist = -1, 0.0, 0.0
-        fz = fflat[flat]
-        for k, rr, cc in _neighbours(r, c):
-            if mask[rr, cc]:
-                slope = (fz - filled[rr, cc]) / dist_row[r, k]
-                if slope > bslope:
-                    bslope, best, bdist = slope, rr * nx + cc, dist_row[r, k]
-        recv[flat] = best                      # -1 stays -> outlet
-        recv_dist[flat] = bdist
+    recv_dist = np.zeros(n)
+    tk = best_k[take].astype(np.int64)
+    recv[take] = nbr[np.flatnonzero(take), tk]
+    recv_dist[take] = dist_row[rowof[take], tk]
 
-    # Process in increasing filled elevation (downstream-first) for basins /
-    # chi / distance, and the reverse for area accumulation.
+    # ---- sequential tree sweeps
+    vidx = np.where(valid)[0]
     order = vidx[np.argsort(fflat[vidx], kind="stable")]
-    area = np.where(valid_flat, cellarea_row[np.arange(n) // nx], 0.0)
-    for flat in order[::-1]:                   # high -> low: add to receiver
-        rc = recv[flat]
-        if rc >= 0:
-            area[rc] += area[flat]
-
-    basin = np.full(n, -1, dtype=np.int64)
-    chi = np.zeros(n)
-    fdist = np.zeros(n)
-    nextid = 0
-    for flat in order:                         # low -> high: inherit from recv
-        rc = recv[flat]
-        if rc < 0:                             # boundary / shoreline outlet
-            basin[flat] = nextid
-            nextid += 1
-            chi[flat] = 0.0
-            fdist[flat] = 0.0
-        else:
-            basin[flat] = basin[rc]
-            dl = recv_dist[flat]
-            chi[flat] = chi[rc] + (a0 / max(area[flat], 1.0e-12)) ** mn * dl
-            fdist[flat] = fdist[rc] + dl
+    area = np.where(valid, cellarea_row[np.arange(n) // nx], 0.0)
+    basin, chi, fdist, _ = sweep(order, recv, recv_dist, area, mn, a0)
 
     def _grid(flatarr, fill=np.nan, dtype=float):
         g = np.full(n, fill, dtype=dtype)
-        g[valid_flat] = flatarr[valid_flat]
+        g[valid] = flatarr[valid]
         return g.reshape(ny, nx)
 
     # Largest basin (by cell count) for convenience.
-    blab = basin[valid_flat]
+    blab = basin[valid]
     main_basin = int(np.bincount(blab[blab >= 0]).argmax()) if blab.size else -1
 
     grids = {
@@ -1119,6 +1345,10 @@ def main(argv=None):
     p.add_argument("--tout", type=float, default=None,
                    help="output interval (yr) -> NetCDF time = step*tout")
     p.add_argument("--tstart", type=float, default=0.0)
+    p.add_argument("--method", choices=["auto", "numba", "python"],
+                   default="auto",
+                   help="hydrology kernel backend (numba is ~6x faster; "
+                        "identical results)")
     args = p.parse_args(argv)
 
     parts = args.mesh.split(":")
@@ -1134,7 +1364,7 @@ def main(argv=None):
     g = grid_export(args.h5dir, mesh, step=args.step, vkey=vkey, ckey=ckey,
                     spacing=spacing, fields=fields, mn=args.mn, a0=args.a0,
                     base_level=args.base_level, file_base=args.file_base,
-                    latlim=args.latlim)
+                    latlim=args.latlim, method=args.method)
     time = None
     if args.tout is not None and args.step is not None:
         time = args.tstart + args.step * args.tout

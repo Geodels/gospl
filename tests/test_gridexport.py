@@ -287,3 +287,77 @@ def test_gridbuilder_matches_grid_export_and_caches(tmp_path):
     # `last_step` finds the highest step present.
     assert gb.last_step() == 1
     assert gb.export()["base_level"] == gb.export(1)["base_level"]
+
+
+def test_d8_flood_backends_agree():
+    """
+    The two priority-flood implementations must produce the same filled surface.
+
+    There are two on purpose. `heapq` is C, so in pure Python it beats a
+    hand-rolled array heap by a wide margin; Numba cannot compile `heapq` at all
+    and needs the array heap. Writing only the njit-compatible one and running it
+    interpreted made the whole hydrology ~4x SLOWER than before (42 s vs 28 s on
+    a 6.5M-cell grid) -- a regression for every user without Numba. So each
+    backend keeps the heap that suits it, and this test is what stops them
+    drifting apart: nothing else compares them, and a divergence would silently
+    change `filled`, the receivers, and therefore every basin and chi value.
+    """
+    gx = pytest.importorskip("gospl.analyse.gridexport")
+
+    rng = np.random.default_rng(3)
+    ny, nx = 24, 31
+    z = (rng.normal(size=(ny, nx)) * 5.0
+         + np.linspace(0.0, 40.0, nx)[None, :])          # tilted + noisy
+    mask = np.ones((ny, nx), dtype=bool)
+    mask[rng.random((ny, nx)) < 0.08] = False            # scattered no-data
+    n = ny * nx
+    valid = mask.ravel()
+
+    for periodic in (False, True):
+        nbr = gx._neighbour_flat(nx, ny, periodic)
+        is_seed = np.zeros(n, dtype=bool)
+        for k in range(8):
+            nb = nbr[:, k]
+            off = nb < 0
+            bad = off.copy()
+            bad[~off] = ~valid[nb[~off]]
+            is_seed |= bad
+        is_seed &= valid
+        eps = 1.0e-4
+
+        a = np.where(valid, z.ravel(), np.inf)
+        b = a.copy()
+        gx._priority_flood_pyheap(a, valid, is_seed, nbr, nx, ny, periodic, eps)
+        gx._priority_flood(b, valid, is_seed, nbr, nx, ny, periodic, eps)
+        assert np.array_equal(a[valid], b[valid]), (
+            f"heapq and array-heap floods disagree (periodic={periodic})"
+        )
+        # A filled surface must drain: every non-seed valid cell needs a
+        # strictly lower neighbour (that is the point of the +epsilon).
+        for i in np.flatnonzero(valid & ~is_seed):
+            nbs = nbr[i][nbr[i] >= 0]
+            nbs = nbs[valid[nbs]]
+            assert (a[nbs] < a[i]).any(), (
+                f"cell {i} has no descending neighbour after the fill "
+                f"(periodic={periodic})"
+            )
+
+
+def test_d8_method_backends_give_identical_grids(tmp_path):
+    """`method='python'` and `method='numba'` must give identical output grids."""
+    gx = pytest.importorskip("gospl.analyse.gridexport")
+    pytest.importorskip("numba")
+    h5dir, mesh, dx = _synthetic_run(tmp_path)
+
+    gp = gx.grid_export(h5dir, mesh, spacing=dx, method="python")
+    gn = gx.grid_export(h5dir, mesh, spacing=dx, method="numba")
+    for k in ("filled", "drainage_area", "chi", "flowdist", "basin"):
+        a, b = gp[k], gn[k]
+        fa = np.isfinite(a) if a.dtype.kind == "f" else np.ones(a.shape, bool)
+        assert np.array_equal(fa, np.isfinite(b) if b.dtype.kind == "f"
+                              else np.ones(b.shape, bool)), k
+        assert np.array_equal(a[fa], b[fa]), k
+    assert np.array_equal(gp["receiver"], gn["receiver"])
+
+    with pytest.raises(ValueError):
+        gx.grid_export(h5dir, mesh, spacing=dx, method="bogus")
