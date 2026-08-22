@@ -77,7 +77,7 @@ Hillslope and marine deposition parameters
 
         f. ``tsSteps`` is the maximum number of internal time-steps the adaptive controller may take per goSPL step (default: 2000). Increase if the verbose log shows many rejected steps,
         g. ``offshore`` is the distance offshore (m) beyond which the clinoform-distance cap is no longer applied (default: 1.0e7),
-        h. ``oFill`` is the minimum elevation (m) below which the priority-flood algorithm is not applied — used to skip deep ocean cells (default: -6000.0).
+        h. ``oFill`` is a depth (m, negative) **relative to sea level** below which the priority-flood algorithm is not applied — used to skip deep ocean cells (default: -6000.0). The cut-off elevation is ``sea level + oFill``, so with a sea level of 0 the value reads directly as an elevation, but on a model with a deep datum (e.g. ``sea: position: -2200``) an ``oFill`` of ``-1500`` means ``-3700`` m, not ``-1500`` m. Keep it well **below** sea level: the depression fill and the marine flow-direction surface are only smoothed at or above this cut-off, so a value above sea level leaves every bathymetric pocket on the shelf in place and sediment gets trapped at the coast.
 
         *Optional: marine/lake diffusion solver*
 

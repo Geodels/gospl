@@ -7115,3 +7115,60 @@ def test_cascade_relative_residual_floor():
     assert fa._cascadeStopReason(1.0e8) is None, (
         "1e-1 of the NEW baseline must keep routing."
     )
+
+
+@pytest.mark.slow
+def test_ofill_is_relative_to_sea_level(minimal_model):
+    """
+    Protects: `oFill` means the SAME thing everywhere — a depth below sea level.
+    `pitfilling.fillElevation` / `fillIceElevation` compute the depression-fill
+    cut-off as `max(minh, sealevel + oFill)`, and `seaplex._matOcean` must hand
+    `epsfill` the same `sealevel + oFill` (recorded as `_oceanFillLevel`).
+
+    Silent failure prevented: `_matOcean` used to treat `self.oFill` as an
+    ABSOLUTE elevation. That is the same number only when the sea level is 0 —
+    which is true of every fixture, benchmark and Earth example, so nothing here
+    would ever have caught it — and it diverges by `sealevel` otherwise.
+
+    Why it is not cosmetic: `epsfill` only eps-fills the cells AT OR ABOVE its
+    cut-off (everything below is pre-flagged in its seeding loop and never
+    revisited). A cut-off placed above sea level therefore skips the ENTIRE
+    marine domain, so every closed bathymetric pocket on the shelf survives into
+    the marine flow-direction surface and river sediment is trapped at the coast
+    instead of routing basinward. A model with a deep datum hits this with a
+    perfectly reasonable-looking YAML: `sea: position: -2200` with
+    `oFill: -1500` gave a cut-off of -1500 m, i.e. 700 m ABOVE sea level.
+
+    The `minimal` fixture is a global sphere with `sea: position: -100.` and the
+    default `oFill: -6000.`, deep enough (zmin ~ -16 km) that the `minh` floor
+    does not mask the difference: the correct cut-off is -6100 m, the old
+    absolute reading gave -6000 m.
+    """
+    model = minimal_model
+    # `_matOcean` runs inside `seaChange`, so the marine path has to execute
+    # once. The minimal fixture is a short global-sphere run with deposition on.
+    model.runProcesses()
+
+    level = getattr(model, "_oceanFillLevel", None)
+    assert level is not None, (
+        "`seaplex._matOcean` no longer records `_oceanFillLevel`; the oFill "
+        "contract is then untestable from here — re-add it or update this test."
+    )
+
+    minh = model.hGlobal.min()[1] + 0.1
+    expected = max(minh, model.sealevel + model.oFill)
+    assert level == pytest.approx(expected), (
+        f"marine eps-fill cut-off is {level} m but `sealevel + oFill` gives "
+        f"{expected} m (sealevel={model.sealevel}, oFill={model.oFill})."
+    )
+
+    # Guard the specific regression: the raw (absolute) oFill must NOT be used.
+    assert model.sealevel != 0.0, (
+        "this fixture must keep a non-zero sea level or the test cannot "
+        "distinguish the relative reading from the absolute one."
+    )
+    assert level != pytest.approx(max(minh, model.oFill)), (
+        "the marine eps-fill cut-off equals the raw `oFill`, i.e. it is being "
+        "read as an absolute elevation again (the pre-fix behaviour)."
+    )
+

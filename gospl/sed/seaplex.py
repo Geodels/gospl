@@ -145,16 +145,35 @@ class SEAMesh(object):
         From these downstream directions, a local ocean downstream matrix is computed.
         """
 
-        # Define multiple flow directions for filled + eps elevations
+        # Define multiple flow directions for filled + eps elevations.
+        #
+        # `oFill` is a depth BELOW SEA LEVEL, so the cut-off handed to `epsfill`
+        # is `sealevel + oFill` — exactly as `pitfilling.fillElevation` and
+        # `fillIceElevation` compute it. This site used to compare the raw
+        # `self.oFill` as an ABSOLUTE elevation, which is the same number only
+        # when the sea level is 0 (every Earth example, fixture and benchmark)
+        # and diverges by `sealevel` otherwise, so one YAML key meant two
+        # different things in two places.
+        #
+        # It matters because `epsfill` only eps-fills the cells AT OR ABOVE its
+        # cut-off (every cell below it is pre-flagged in the seeding loop and
+        # never revisited). Putting the cut-off above sea level therefore skips
+        # the entire marine domain: every closed bathymetric pocket on the shelf
+        # survives into the routing surface, and sediment gets trapped at the
+        # coast instead of routing basinward. On a run with a deep datum
+        # (`sea: position: -2200` with `oFill: -1500`) the absolute reading gave
+        # a cut-off of -1500 m, i.e. 700 m ABOVE sea level.
         hl = self.hLocal.getArray().copy()
         minh = self.hGlobal.min()[1] + 0.1
+        minh = max(minh, self.sealevel + self.oFill)
+        # Recorded so the contract is assertable from a test (and visible when
+        # debugging a marine-routing problem); nothing reads it in the model.
+        self._oceanFillLevel = minh
         if not self.flatModel:
             # Only consider filleps in the first kms offshore
-            minh = max(minh, self.oFill)
             hsmth = self._hillSlope(smooth=2)
             hsmth[self.coastDist > self.offshore] = BOUNDARY_FLOW_SENTINEL
         else:
-            minh = max(minh, self.oFill)
             hsmth = hl.copy()
             hsmth[self.outletIDs] = BOUNDARY_FLOW_SENTINEL
 
