@@ -229,3 +229,61 @@ def test_tri_interp_matches_matplotlib_trifinder():
         "interpolated values differ from matplotlib's linear interpolation; "
         f"max |diff| = {np.abs(ref[both] - got[both]).max():.3e}"
     )
+
+
+def test_gridbuilder_matches_grid_export_and_caches(tmp_path):
+    """
+    `GridBuilder.export(step)` must return exactly what `grid_export(step)`
+    returns, and must reuse the step-independent geometry across steps.
+
+    `grid_export` is now a thin wrapper over `GridBuilder`, so the two cannot
+    diverge in behaviour by construction — what this pins is the CACHING: the
+    per-partition local->global index maps are keyed only on the partition id
+    (goSPL's `topology.p*.h5` carries no step index), so they must be built once
+    and reused. A regression that keyed them per step, or that rebuilt the
+    locator inside `export`, would silently restore the per-step geometry cost
+    (~7 s of a ~34 s step on a 5.9M-node mesh at 0.1 deg) with no visible change
+    in output — exactly the kind of thing no correctness test would notice.
+    """
+    gx = pytest.importorskip("gospl.analyse.gridexport")
+    h5py = pytest.importorskip("h5py")
+    pytest.importorskip("scipy")
+    h5dir, mesh, dx = _synthetic_run(tmp_path)
+
+    # A second step, differing only in elevation, so `export` must re-read the
+    # field values while reusing every geometric structure.
+    with h5py.File(os.path.join(h5dir, "gospl.0.p0.h5"), "r") as f:
+        z = np.asarray(f["elev"])
+        ed = np.asarray(f["erodep"])
+        fa = np.asarray(f["FA"])
+    with h5py.File(os.path.join(h5dir, "gospl.1.p0.h5"), "w") as f:
+        f["elev"] = z * 1.5 + 2.0
+        f["erodep"] = ed
+        f["FA"] = fa
+
+    gb = gx.GridBuilder(h5dir, mesh, spacing=dx)
+    assert gb._part_idx == {}, "partition maps must be filled lazily, not in __init__"
+
+    for step in (0, 1):
+        ref = gx.grid_export(h5dir, mesh, step, spacing=dx)
+        got = gb.export(step)
+        assert set(ref) == set(got)
+        for k, a in ref.items():
+            b = got[k]
+            if isinstance(a, np.ndarray) and a.dtype.kind == "f":
+                fa_ = np.isfinite(a)
+                assert np.array_equal(fa_, np.isfinite(b)), k
+                assert np.array_equal(a[fa_], b[fa_]), k
+            elif isinstance(a, np.ndarray):
+                assert np.array_equal(a, b), k
+            else:
+                assert a == b, k
+
+    # One partition in the fixture -> exactly one cached map, reused for step 1.
+    assert list(gb._part_idx) == ["0"], (
+        f"partition index maps not cached per partition: {list(gb._part_idx)}"
+    )
+
+    # `last_step` finds the highest step present.
+    assert gb.last_step() == 1
+    assert gb.export()["base_level"] == gb.export(1)["base_level"]

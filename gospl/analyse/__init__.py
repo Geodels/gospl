@@ -28,6 +28,7 @@ from .catchment import (  # noqa: F401
     catchment_flux,
 )
 from .gridexport import (  # noqa: F401
+    GridBuilder,
     basin_rivers,
     grid_export,
     plot_basin_map,

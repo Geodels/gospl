@@ -28,6 +28,8 @@ Regular-grid NetCDF + river profiles — ``gospl-grid``
 
 .. rubric:: Functions
 
+.. autoclass:: analyse.gridexport.GridBuilder
+   :members: export, last_step
 .. autofunction:: analyse.gridexport.grid_export
 .. autofunction:: analyse.gridexport.to_netcdf
 .. autofunction:: analyse.gridexport.basin_rivers

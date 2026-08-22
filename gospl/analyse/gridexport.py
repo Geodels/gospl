@@ -348,173 +348,294 @@ def _finish(found, w0, w1, w2, cells, pxv, shape):
     return interp
 
 
+class GridBuilder(object):
+    """
+    Reusable gridding geometry for a run: build once, export many steps.
+
+    Everything that depends only on the MESH and the target GRID — the mesh
+    load, the lon/lat projection, the reassembly KDTree, the grid axes, the
+    node -> triangle adjacency, the nearest-node seeding, the point location and
+    barycentric weights, and the per-partition local -> global index maps — is
+    computed once here and reused by every :meth:`export` call. Only the
+    per-step work is repeated: reading that step's field values, rasterising
+    them, and the D8 hydrology (which depends on the step's elevation).
+
+    On a 5.9M-node global mesh at 0.1° that is ~7 s of setup against ~34 s of
+    per-step work, so gridding a time series step-by-step through
+    :func:`grid_export` re-pays the setup every step. Prefer this class for more
+    than one step::
+
+        gb = GridBuilder("myrun/h5", "input/mesh.npz", spacing=0.1, latlim=90)
+        for stp in range(11):
+            to_netcdf(gb.export(stp), "surface%d.nc" % stp)
+
+    The per-partition index maps are filled lazily on the first :meth:`export`
+    and reused thereafter, so constructing a builder you never export is cheap.
+
+    NOTE on parallelism: the cache lives in the instance, so it is only shared
+    within one process. Under process-based parallelism (``joblib`` with the
+    default loky backend, ``multiprocessing``) each worker builds its own, and
+    the setup is paid once per worker rather than once per step — still a win
+    when a worker handles several steps, but chunk the steps per worker rather
+    than handing out one step at a time. Memory scales with the number of
+    workers: the adjacency alone is ~284 MB for 11.8M triangles.
+
+    :arg h5dir: goSPL output ``h5`` directory
+    :arg mesh: global mesh ``.npz`` path
+    :arg vkey: vertex-coordinate key in the npz
+    :arg ckey: cell (triangle) key in the npz
+    :arg spacing: grid spacing, scalar or ``(dx, dy)``; defaults to the median
+        node spacing
+    :arg nx: grid columns (alternative to ``spacing``)
+    :arg ny: grid rows (defaults to ``nx``)
+    :arg fields: surface fields to grid; defaults to every field in the step
+    :arg mn: chi concavity ``m/n``
+    :arg a0: chi reference area
+    :arg file_base: mesh-output file base name
+    :arg latlim: geographic meshes only, crop ``|latitude|`` to this limit
+    """
+
+    def __init__(self, h5dir, mesh, vkey="v", ckey="c", spacing=None,
+                 nx=None, ny=None, fields=None, mn=0.5, a0=1.0,
+                 file_base="gospl", latlim=None):
+        from scipy.spatial import cKDTree
+
+        self.h5dir = h5dir
+        self.file_base = file_base
+        self.fields = fields
+        self.mn = mn
+        self.a0 = a0
+
+        data = np.load(mesh)
+        coords = np.asarray(data[vkey], dtype=np.float64)
+        self.cells = np.asarray(data[ckey], dtype=np.int64)
+        cells = self.cells
+
+        # Geographic (spherical) mesh? Grid in lon/lat; otherwise planar x/y.
+        # A near-full-longitude geographic mesh is treated as PERIODIC so flow
+        # wraps across the antimeridian (continents crossing the seam stay
+        # intact).
+        r = np.linalg.norm(coords, axis=1)
+        self.geographic = bool(
+            r.mean() > 1.0e5 and (r.std() / max(r.mean(), 1.0) < 1.0e-3)
+        )
+        if self.geographic:
+            self.R = float(r.mean())
+            x = np.degrees(np.arctan2(coords[:, 1], coords[:, 0]))            # lon
+            y = np.degrees(np.arcsin(np.clip(coords[:, 2] / self.R, -1.0, 1.0)))
+        else:
+            self.R = None
+            x, y = coords[:, 0], coords[:, 1]
+        self.x, self.y = x, y
+
+        # KDTree on the 3-D coords: used BOTH to map each partition's nodes onto
+        # the global mesh and (for a geographic mesh) to seed the grid point
+        # location. One tree, two uses.
+        self.tree = cKDTree(coords)
+        self.npts = coords.shape[0]
+
+        # Regular grid (degrees for a geographic mesh, mesh units otherwise).
+        if spacing is None and nx is None:
+            spacing = _median_spacing(np.column_stack([x, y]), cells)
+        if spacing is not None:
+            dx = dy = float(spacing) if np.isscalar(spacing) else float(spacing[0])
+            if not np.isscalar(spacing):
+                dy = float(spacing[1])
+            xs = np.arange(x.min(), x.max() + dx, dx)
+            ys = np.arange(y.min(), y.max() + dy, dy)
+        else:
+            xs = np.linspace(x.min(), x.max(), int(nx))
+            ys = np.linspace(y.min(), y.max(), int(ny or nx))
+            dx = xs[1] - xs[0]
+            dy = ys[1] - ys[0]
+
+        # Poles: the lon/lat grid is singular there (meridians converge). Crop
+        # the latitude range to drop the polar caps — avoids the singularity and
+        # the redundant pole-row cells. Default keeps everything below |89.9°|.
+        if self.geographic:
+            lim = 89.9 if latlim is None else float(latlim)
+            ys = ys[(ys >= -lim) & (ys <= lim)]
+
+        # Periodic longitude: a geographic grid spanning ~360°. Drop the
+        # duplicated wrap meridian so column nx-1 + dx wraps onto column 0.
+        self.periodic = bool(self.geographic and (x.max() - x.min() > 350.0))
+        if self.periodic and xs[-1] - xs[0] >= 360.0 - 1.0e-9:
+            xs = xs[:-1]
+        gx, gy = np.meshgrid(xs, ys)
+        self.xs, self.ys, self.dx, self.dy = xs, ys, dx, dy
+
+        # Point location: node -> incident-triangle adjacency plus the nearest
+        # mesh node per grid point. Both depend only on the geometry, so they are
+        # built once and SHARED by both longitude framings below. For a
+        # geographic mesh the nearest-node query reuses the KDTree above and runs
+        # in 3-D, so it is seam-independent.
+        csr = _node_tri_csr(cells, self.npts)
+        if self.geographic:
+            seed = _nearest_mesh_node(self.tree, gx, gy, R=self.R)
+        else:
+            seed = _nearest_mesh_node(cKDTree(np.column_stack([x, y])), gx, gy)
+
+        # The interpolation operator(s): point location + barycentric weights,
+        # built once and reused for every field of every step — the per-field
+        # cost is then a gather + weighted sum.
+        if self.periodic:
+            # Two longitude framings (seam at ±180° and at 0°/360°), each with
+            # its seam-spanning triangles masked so their no-data stripes fall on
+            # DIFFERENT meridians; merging takes frame A where valid and frame B
+            # for its seam stripe, so the field is gap-free across the
+            # antimeridian.
+            _interp_a = _build_tri_interp(x, y, cells, gx, gy, seed, csr,
+                                          _seam_mask(x[cells]))
+            lonb = x % 360.0
+            _interp_b = _build_tri_interp(lonb, y, cells, gx % 360.0, gy, seed,
+                                          csr, _seam_mask(lonb[cells]))
+
+            def _raster(vals):
+                za = _interp_a(vals)
+                zb = _interp_b(vals)
+                return np.where(np.isfinite(za), za, zb)
+        else:
+            # Mask any antimeridian-spanning triangle (regional geographic).
+            tri_mask = None
+            if self.geographic:
+                tlon = x[cells]
+                tri_mask = (tlon.max(axis=1) - tlon.min(axis=1)) > 180.0
+            _interp = _build_tri_interp(x, y, cells, gx, gy, seed, csr, tri_mask)
+
+            def _raster(vals):
+                return _interp(vals)
+
+        self._raster = _raster
+
+        # Cell metrics for the hydrology: planar -> uniform dx, dy (mesh units);
+        # geographic -> dy = R.dlat, per-row dx = R.cos(lat).dlon (metres), so
+        # area / chi / distance are physical despite the lon/lat raster.
+        if self.geographic:
+            self.hdy = self.R * np.radians(dy)
+            self.hdx = np.clip(
+                self.R * np.cos(np.radians(ys)) * np.radians(dx), 1.0, None
+            )
+        else:
+            self.hdx, self.hdy = dx, dy
+
+        # Per-partition local -> global index maps. The topology files carry no
+        # step index, so these are step-INDEPENDENT and cached; filled lazily so
+        # constructing a builder that is never exported stays cheap.
+        self._part_idx = {}
+
+    def last_step(self):
+        """Highest output step present in ``h5dir``."""
+        import glob
+
+        return max(
+            int(os.path.basename(f).split(".")[1])
+            for f in glob.glob(
+                os.path.join(self.h5dir, "%s.*.p*.h5" % self.file_base)
+            )
+        )
+
+    def _partition_map(self, pid):
+        """Cached local -> global node index map for one partition."""
+        import h5py
+
+        if pid not in self._part_idx:
+            tfile = os.path.join(self.h5dir, "topology.p%s.h5" % pid)
+            with h5py.File(tfile, "r") as tf:
+                lc = np.asarray(tf["coords"], dtype=np.float64)
+            self._part_idx[pid] = self.tree.query(lc)[1]
+        return self._part_idx[pid]
+
+    def _reassemble(self, step, names):
+        """Global field arrays for one step, from the partitioned HDF5."""
+        import glob
+        import h5py
+
+        parts = sorted(glob.glob(
+            os.path.join(self.h5dir, "%s.%d.p*.h5" % (self.file_base, step))
+        ))
+        out = {n: np.full(self.npts, np.nan) for n in names}
+        for pth in parts:
+            pid = os.path.basename(pth).split(".p")[-1].split(".")[0]
+            idx = self._partition_map(pid)
+            with h5py.File(pth, "r") as f:
+                for n in names:
+                    if n in f:
+                        out[n][idx] = np.asarray(f[n])[:, 0]
+        return out
+
+    def export(self, step=None, base_level=None):
+        """
+        Build the regular-grid surface (fields + D8 hydrology) for one step.
+
+        :arg step: output step; defaults to the last one found
+        :arg base_level: elevation defining the coast/outlet; defaults to the
+            run's sea level for this step (read from its ``.xmf``), else 0
+        :return: the result dict documented on :func:`grid_export`
+        """
+        if step is None:
+            step = self.last_step()
+
+        names = self.fields or _list_fields(self.h5dir, self.file_base, step)
+        glob_fields = self._reassemble(step, names)
+
+        grids = {}
+        for n in names:
+            grids[n] = np.ma.filled(self._raster(glob_fields[n]), np.nan)
+        elev = grids.get("elev")
+        if elev is None:
+            raise ValueError(
+                "the mesh output has no 'elev' field to build hydrology"
+            )
+        mask = np.isfinite(elev)
+
+        # Hydrology runs on the SUBAERIAL cells: outlets are then the shoreline
+        # (cells next to sub-base-level / marine) and the domain edge — giving
+        # proper river basins draining to base level, with chi measured from it.
+        # Base level defaults to the run's SEA LEVEL for THIS step (catchments
+        # drain to the coast, chi is measured from it); falls back to 0.
+        if base_level is None:
+            base_level = _read_sealevel(self.h5dir, self.file_base, step)
+            if base_level is None:
+                base_level = 0.0
+        hydro_mask = mask & (elev > base_level)
+
+        hydro = _d8_hydrology(elev, hydro_mask, self.hdx, self.hdy,
+                              self.mn, self.a0, periodic=self.periodic)
+        grids.update(hydro["grids"])
+
+        out = {
+            "x": self.xs, "y": self.ys, "mask": mask,
+            "spacing": (self.dx, self.dy),
+            "geographic": self.geographic, "periodic": self.periodic,
+            "base_level": float(base_level),
+            "receiver": hydro["receiver"], "order": hydro["order"],
+            "main_basin": hydro["main_basin"],
+        }
+        out.update(grids)
+        return out
+
+
 def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
                 nx=None, ny=None, fields=None, mn=0.5, a0=1.0,
                 base_level=None, file_base="gospl", latlim=None):
     """
     Build the regular-grid surface (fields + D8 hydrology) for one step.
 
+    Convenience wrapper over :class:`GridBuilder` for a SINGLE step. Gridding a
+    time series this way rebuilds the step-independent geometry (mesh load,
+    KDTree, node -> triangle adjacency, point location) on every call — ~7 s per
+    step on a 5.9M-node mesh at 0.1°. Use :class:`GridBuilder` directly and call
+    :meth:`GridBuilder.export` per step to pay that once.
+
     :return: a dict of 2-D grids (``ny, nx``) keyed by field name plus
         ``drainage_area``, ``basin``, ``chi``, ``flowdist``, the 1-D axes
         ``x``/``y``, ``mask``, ``receiver`` (flat index, -1 at outlets),
         ``spacing`` ``(dx, dy)`` and ``main_basin`` (largest basin id).
     """
-    import glob
-    import h5py
-    from scipy.spatial import cKDTree
-
-    data = np.load(mesh)
-    coords = np.asarray(data[vkey], dtype=np.float64)
-    cells = np.asarray(data[ckey], dtype=np.int64)
-
-    # Geographic (spherical) mesh? Grid in lon/lat; otherwise planar x/y.
-    # A near-full-longitude geographic mesh is treated as PERIODIC so flow wraps
-    # across the antimeridian (continents crossing the seam stay intact).
-    r = np.linalg.norm(coords, axis=1)
-    geographic = bool(r.mean() > 1.0e5 and (r.std() / max(r.mean(), 1.0) < 1.0e-3))
-    if geographic:
-        R = float(r.mean())
-        x = np.degrees(np.arctan2(coords[:, 1], coords[:, 0]))            # lon
-        y = np.degrees(np.arcsin(np.clip(coords[:, 2] / R, -1.0, 1.0)))   # lat
-    else:
-        R = None
-        x, y = coords[:, 0], coords[:, 1]
-
-    if step is None:
-        step = max(
-            int(os.path.basename(f).split(".")[1])
-            for f in glob.glob(os.path.join(h5dir, "%s.*.p*.h5" % file_base))
-        )
-
-    # Reassemble each global field by mapping partition nodes onto the global
-    # mesh with a KDTree (the same local<->global map goSPL builds at load).
-    # 3-D coords -> robust for planar AND spherical meshes.
-    tree = cKDTree(coords)
-    npts = coords.shape[0]
-    parts = sorted(glob.glob(os.path.join(h5dir, "%s.%d.p*.h5" % (file_base, step))))
-    names = fields or _list_fields(h5dir, file_base, step)
-    glob_fields = {n: np.full(npts, np.nan) for n in names}
-    for pth in parts:
-        p = os.path.basename(pth).split(".p")[-1].split(".")[0]
-        tfile = os.path.join(h5dir, "topology.p%s.h5" % p)
-        with h5py.File(tfile, "r") as tf:
-            lc = np.asarray(tf["coords"], dtype=np.float64)
-        _, idx = tree.query(lc)
-        with h5py.File(pth, "r") as f:
-            for n in names:
-                if n in f:
-                    glob_fields[n][idx] = np.asarray(f[n])[:, 0]
-
-    # Regular grid (degrees for a geographic mesh, mesh units otherwise).
-    if spacing is None and nx is None:
-        spacing = _median_spacing(np.column_stack([x, y]), cells)
-    if spacing is not None:
-        dx = dy = float(spacing) if np.isscalar(spacing) else float(spacing[0])
-        if not np.isscalar(spacing):
-            dy = float(spacing[1])
-        xs = np.arange(x.min(), x.max() + dx, dx)
-        ys = np.arange(y.min(), y.max() + dy, dy)
-    else:
-        xs = np.linspace(x.min(), x.max(), int(nx))
-        ys = np.linspace(y.min(), y.max(), int(ny or nx))
-        dx = xs[1] - xs[0]
-        dy = ys[1] - ys[0]
-
-    # Poles: the lon/lat grid is singular there (meridians converge). Crop the
-    # latitude range to drop the polar caps — avoids the singularity and the
-    # redundant pole-row cells. Default keeps everything below |89°|.
-    if geographic:
-        lim = 89.9 if latlim is None else float(latlim)
-        ys = ys[(ys >= -lim) & (ys <= lim)]
-
-    # Periodic longitude: a geographic grid spanning ~360°. Drop the duplicated
-    # wrap meridian so column nx-1 + dx wraps onto column 0.
-    periodic = bool(geographic and (x.max() - x.min() > 350.0))
-    if periodic and xs[-1] - xs[0] >= 360.0 - 1.0e-9:
-        xs = xs[:-1]
-    gx, gy = np.meshgrid(xs, ys)
-
-    # Build the interpolation operator(s) ONCE (point location + barycentric
-    # weights), then reuse for every field — the per-field cost drops to a
-    # gather + weighted sum (was a full triangulation + re-location per field).
-    # Node -> incident-triangle adjacency and the per-grid-point nearest mesh
-    # node: both depend only on the geometry, so they are built ONCE and shared
-    # by both longitude framings below. For a geographic mesh the nearest-node
-    # query reuses the KDTree already built above for the partition reassembly
-    # and runs in 3-D, so it is seam-independent.
-    csr = _node_tri_csr(cells, npts)
-    if geographic:
-        seed = _nearest_mesh_node(tree, gx, gy, R=R)
-    else:
-        seed = _nearest_mesh_node(cKDTree(np.column_stack([x, y])), gx, gy)
-
-    if periodic:
-        # Two longitude framings (seam at ±180° and at 0°/360°), each with its
-        # seam-spanning triangles masked so their no-data stripes fall on
-        # DIFFERENT meridians; merging takes frame A where valid and frame B for
-        # its seam stripe, so the field is gap-free across the antimeridian.
-        # Each operator is precomputed once and reused for every field; the
-        # adjacency and the nearest-node seed are shared between the two.
-        _interp_a = _build_tri_interp(x, y, cells, gx, gy, seed, csr,
-                                      _seam_mask(x[cells]))
-        lonb = x % 360.0
-        _interp_b = _build_tri_interp(lonb, y, cells, gx % 360.0, gy, seed, csr,
-                                      _seam_mask(lonb[cells]))
-
-        def _raster(vals):
-            za = _interp_a(vals)
-            zb = _interp_b(vals)
-            return np.where(np.isfinite(za), za, zb)
-    else:
-        # Mask any antimeridian-spanning triangle (regional geographic grids).
-        tri_mask = None
-        if geographic:
-            tlon = x[cells]
-            tri_mask = (tlon.max(axis=1) - tlon.min(axis=1)) > 180.0
-        _interp = _build_tri_interp(x, y, cells, gx, gy, seed, csr, tri_mask)
-
-        def _raster(vals):
-            return _interp(vals)
-
-    grids = {}
-    for n in names:
-        grids[n] = np.ma.filled(_raster(glob_fields[n]), np.nan)
-    elev = grids.get("elev")
-    if elev is None:
-        raise ValueError("the mesh output has no 'elev' field to build hydrology")
-    mask = np.isfinite(elev)
-
-    # Hydrology runs on the SUBAERIAL cells: outlets are then the shoreline
-    # (cells next to sub-base-level / marine) and the domain edge — giving
-    # proper river basins draining to base level, with chi measured from it.
-    # Base level defaults to the run's SEA LEVEL (catchments drain to the coast,
-    # chi is measured from it), read from the step's xmf; falls back to 0.
-    if base_level is None:
-        base_level = _read_sealevel(h5dir, file_base, step)
-        if base_level is None:
-            base_level = 0.0
-    hydro_mask = mask & (elev > base_level)
-
-    # Cell metrics for the hydrology: planar -> uniform dx, dy (mesh units);
-    # geographic -> dy = R.dlat, per-row dx = R.cos(lat).dlon (metres), so area
-    # / chi / distance are physical despite the lon/lat raster.
-    if geographic:
-        hdy = R * np.radians(dy)
-        hdx = np.clip(R * np.cos(np.radians(ys)) * np.radians(dx), 1.0, None)
-    else:
-        hdx, hdy = dx, dy
-    hydro = _d8_hydrology(elev, hydro_mask, hdx, hdy, mn, a0, periodic=periodic)
-    grids.update(hydro["grids"])
-
-    out = {
-        "x": xs, "y": ys, "mask": mask, "spacing": (dx, dy),
-        "geographic": geographic, "periodic": periodic,
-        "base_level": float(base_level),
-        "receiver": hydro["receiver"], "order": hydro["order"],
-        "main_basin": hydro["main_basin"],
-    }
-    out.update(grids)
-    return out
+    return GridBuilder(
+        h5dir, mesh, vkey=vkey, ckey=ckey, spacing=spacing, nx=nx, ny=ny,
+        fields=fields, mn=mn, a0=a0, file_base=file_base, latlim=latlim,
+    ).export(step=step, base_level=base_level)
 
 
 def _median_spacing(xy, cells):

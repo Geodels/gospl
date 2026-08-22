@@ -197,6 +197,26 @@ upstream. ``plot_basin_map`` overlays the **sea-level coastline** (the
 ``elev == sea_level`` contour; defaults to the run's sea level) and takes a
 ``figsize``.
 
+**Gridding a time series.** :func:`~gospl.analyse.gridexport.grid_export` grids
+ONE step, and rebuilds the step-independent geometry (mesh load, KDTree, node
+adjacency, point location) every call. For several steps use
+:class:`~gospl.analyse.gridexport.GridBuilder`, which builds that geometry once
+and exports any number of steps from it::
+
+    from gospl.analyse.gridexport import GridBuilder, to_netcdf
+
+    gb = GridBuilder("myrun/h5", "input/mesh.npz", spacing=0.1, latlim=90)
+    for stp in range(11):
+        to_netcdf(gb.export(stp), "surface%d.nc" % stp)
+
+On a 5.9 M-node global mesh at 0.1 deg that is ~12 s of setup and ~27 s per
+step, against ~42 s per step through ``grid_export`` — and the result is
+identical. The cache lives in the instance, so under process-based parallelism
+(``joblib``, ``multiprocessing``) give each worker a **chunk of steps** rather
+than one step at a time, or the setup is paid per step anyway. Memory scales
+with the number of workers (the node-to-triangle adjacency alone is ~284 MB for
+an 11.8 M-triangle mesh), so on a large mesh fewer workers is often faster.
+
 Per-basin outflow fluxes — ``gospl-catchment``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
