@@ -153,9 +153,35 @@ class GridProcess(object):
         lon2d, lat2d = np.meshgrid(np.deg2rad(self.dh_lon),
                                    np.deg2rad(self.dh_lat))
         cosLat = np.cos(lat2d)
-        gridXYZ = np.stack([self.radius * cosLat * np.cos(lon2d),
-                            self.radius * cosLat * np.sin(lon2d),
-                            self.radius * np.sin(lat2d)],
+
+        # The DH grid is placed on the sphere the MESH actually occupies, not on
+        # the physical `domain: radius`. This grid only supplies DIRECTIONS for
+        # the mesh <-> grid interpolation below, which is a 3-D nearest-neighbour
+        # / inverse-distance match against `self.mCoords`. If the two shells have
+        # different radii, every query point sits a constant radial offset away
+        # from the whole mesh: the k neighbour distances become near-degenerate,
+        # the cKDTree loses all pruning, and the match is angularly meaningless
+        # anyway. Measured on a 5.9M-node mesh with a 2.98e6 m offset (a Mars
+        # `radius: 3389500` declared against an Earth-radius input mesh) the
+        # query went from ~2 s to ~4 h -- and because `_buildDHGrid` runs on
+        # rank 0 inside `Model.__init__` while every other rank waits at the next
+        # collective, that reads as a hang during initialisation, not as a slow
+        # step. The physical radius is still what sets the flexural wavelength,
+        # so it is kept for the elastic-operator eigenvalues in step 4 below.
+        meshR = float(np.linalg.norm(self.mCoords[:, :3], axis=1).mean())
+        if abs(meshR - self.radius) > 0.01 * meshR:
+            print(
+                "Warning: the declared domain radius (%.1f m) differs from the "
+                "input mesh radius (%.1f m) by more than 1%%. Mesh geometry "
+                "(cell areas, edge lengths, drainage areas) is derived from the "
+                "MESH coordinates, so the two should agree -- rebuild the mesh "
+                "at the intended radius. Flexure uses the declared radius."
+                % (self.radius, meshR),
+                flush=True,
+            )
+        gridXYZ = np.stack([meshR * cosLat * np.cos(lon2d),
+                            meshR * cosLat * np.sin(lon2d),
+                            meshR * np.sin(lat2d)],
                            axis=-1).reshape(-1, 3)
 
         tree = spatial.cKDTree(self.mCoords[:, :3], leafsize=10)

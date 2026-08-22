@@ -43,6 +43,10 @@ Native virtual-environment install (Gadi)
 
     # Install goSPL Python dependencies
     python3 -m pip cache purge
+    python3 -m pip install numpy
+    python3 -m pip install ninja
+    python3 -m pip install meson
+    python3 -m pip install meson_python  # 0.16+
     python3 -m pip install mpi4py        # 4.0+
     python3 -m pip install netCDF4       # 1.7+
     python3 -m pip install h5py          # 3.11+
@@ -51,7 +55,6 @@ Native virtual-environment install (Gadi)
     python3 -m pip install ruamel.yaml
     python3 -m pip install numpy-indexed
     python3 -m pip install pyshtools
-    python3 -m pip install meson_python  # 0.16+
 
     # Install goSPL from the goSPL repository (cd into your clone)
     python3 -m pip install --no-deps --no-build-isolation .
@@ -61,7 +64,8 @@ Native virtual-environment install (Gadi)
     ``--no-deps`` is correct here because the virtual environment already
     supplies all runtime dependencies via the system modules and the ``pip
     install`` steps above. ``--no-build-isolation`` ensures the build uses the
-    MPI and PETSc libraries from the loaded modules.
+    MPI and PETSc libraries from the loaded modules. An alternative is to build
+    goSPL via ``pip install -e . --no-build-isolation -v``.
 
 
 Testing the installation (Gadi)
@@ -91,6 +95,10 @@ Set up a PBS job script (replace ``PRJ`` with your NCI project code and
     export PYTHONPATH=$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH
 
     source ~/envi_gospl/bin/activate
+
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
 
     mpirun -np $PBS_NCPUS python3 runModel.py -i input-file-name.yml
 

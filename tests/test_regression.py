@@ -7172,3 +7172,78 @@ def test_ofill_is_relative_to_sea_level(minimal_model):
         "read as an absolute elevation again (the pre-fix behaviour)."
     )
 
+
+def test_dh_flexure_grid_placed_at_mesh_radius():
+    """
+    Protects: `addprocess._buildDHGrid` must place the Driscoll-Healy flexure
+    grid on the sphere the MESH occupies, not on the declared `domain: radius`.
+
+    Silent failure prevented — and it is not silent so much as fatal: that grid
+    exists only to supply DIRECTIONS for the mesh <-> grid interpolation, which
+    is a 3-D nearest-neighbour + inverse-distance match against `self.mCoords`
+    via `cKDTree`. If the two shells have different radii, every query point
+    sits a constant radial offset from the whole mesh, all `k` neighbour
+    distances become near-degenerate, and the KD-tree loses all pruning. On a
+    real 5.9M-node mesh, declaring a Mars radius (3389.5 km) against an
+    Earth-radius mesh (6371.2 km) took the grid query from ~2 s to ~4 h. Because
+    `_buildDHGrid` runs on RANK 0 ONLY inside `Model.__init__` while every other
+    rank waits at the next collective, that presents as a hang during
+    initialisation rather than as a slow step.
+
+    The declared radius is still what sets the flexural wavelength, so it must
+    stay in the elastic-operator eigenvalues `dh_P_l ~ 1 / radius**4`.
+    """
+    addprocess = pytest.importorskip(
+        "gospl.tools.addprocess",
+        reason="goSPL runtime deps not installed",
+    )
+
+    # Bare instance: `_buildDHGrid` only reads mCoords / radius / flex_res_deg /
+    # rgrd_interp, so skip the whole GridProcess bootstrap (the `__new__` stub
+    # pattern used elsewhere in this file).
+    grid = addprocess.GridProcess.__new__(addprocess.GridProcess)
+    meshR = 6371220.0
+    rng = np.random.default_rng(0)
+    xyz = rng.normal(size=(4000, 3))
+    xyz *= (meshR / np.linalg.norm(xyz, axis=1))[:, None]
+    grid.mCoords = xyz
+    grid.flex_res_deg = 10.0          # tiny DH grid: 18 x 36
+    grid.rgrd_interp = 4
+
+    # A radius that agrees with the mesh, and one that does not (Mars).
+    grid.radius = meshR
+    grid._buildDHGrid()
+    w_match = grid.dhWeights.copy()
+    pl_match = grid.dh_P_l.copy()
+
+    grid.radius = 3389500.0
+    grid._buildDHGrid()
+
+    # NOTE the neighbour IDS are not a useful assertion: for query points on a
+    # concentric shell the squared distance is monotonic in the angle, so the
+    # k-nearest SET and its order survive any radial offset. What breaks is the
+    # inverse-distance WEIGHTS (`1/d**2`), which flatten to near-uniform once
+    # every neighbour sits ~offset away, degrading the mesh->DH interpolation to
+    # a plain k-point average; and, far more seriously, the cKDTree query time,
+    # because near-degenerate distances defeat all of the tree's pruning.
+    assert np.allclose(grid.dhWeights, w_match, rtol=1.0e-12, atol=0.0), (
+        "the mesh->DH inverse-distance weights changed when only the DECLARED "
+        "radius changed, so the grid is being placed at `self.radius` instead "
+        "of the mesh radius."
+    )
+    # The interpolation must stay LOCAL: neighbour distances of order the mesh
+    # spacing, not of order the radius mismatch.
+    dist = 1.0 / np.sqrt(grid.dhWeights[grid.dhWeights > 0.0])
+    spacing = np.sqrt(4.0 * np.pi * meshR ** 2 / len(xyz))
+    assert dist.max() < 10.0 * spacing, (
+        f"largest mesh->DH neighbour distance {dist.max():.4g} m is far beyond "
+        f"the mesh spacing {spacing:.4g} m: the DH grid is on a different shell "
+        f"from the mesh."
+    )
+    # atol=0: these eigenvalues are ~1e-26, so the default absolute
+    # tolerance would call any two of them equal.
+    assert not np.allclose(grid.dh_P_l, pl_match, atol=0.0), (
+        "`dh_P_l` did not change with the declared radius. The flexural "
+        "eigenvalues are physical and MUST scale as 1/radius**4 — only the "
+        "interpolation geometry should follow the mesh."
+    )
