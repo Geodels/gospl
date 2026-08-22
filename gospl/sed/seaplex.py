@@ -8,6 +8,7 @@ vtk.vtkObject.GlobalWarningDisplayOff()
 import warnings
 import petsc4py
 from gospl.tools.petscgc import safe_garbage_cleanup
+from gospl.tools.zprobe import reportVolume
 import numpy as np
 from scipy import spatial
 
@@ -446,6 +447,11 @@ class SEAMesh(object):
         marVol = self.maxDepQs.copy()
         sinkVol = sedflux.copy()
         vdep = np.zeros(self.lpoints, dtype=float)
+        # Diagnostic accumulator for the two UNBOUNDED escapes in this routine
+        # (the clinoform capacity `marVol` bounds everything else): the
+        # force-deposit at terminal sinks and the residual drained at loop exit.
+        # Both can pile an arbitrary thickness onto a single degenerate cell.
+        sinkForced = np.zeros(self.lpoints, dtype=float)
 
         # Provenance lockstep state: one routed sub-flux per source class,
         # carried in parallel with the total `sinkVol`/`self.tmp`. `pvCur[c]`
@@ -476,6 +482,7 @@ class SEAMesh(object):
             sink_mass = sinkVol[self.is_sink_local]
             if (sink_mass != 0).any():
                 vdep[self.is_sink_local] += sink_mass
+                sinkForced[self.is_sink_local] += sink_mass
                 sinkVol[self.is_sink_local] = 0.0
                 if prov:
                     vdepP[self.is_sink_local, :] += sinkVolP[self.is_sink_local, :]
@@ -553,6 +560,7 @@ class SEAMesh(object):
             sink_mask = self.is_sink_local
             if sink_mask.any():
                 vdep[sink_mask] += sinkVol[sink_mask]
+                sinkForced[sink_mask] += sinkVol[sink_mask]
                 sinkVol[sink_mask] = 0.0
 
             # Provenance: split each node's arriving per-class flux into the
@@ -618,6 +626,15 @@ class SEAMesh(object):
         if residual.any():
             vdep += residual
             vdep[self.outletIDs] = 0.0
+
+        # Diagnostic: report the two unbounded escapes as THICKNESSES so a
+        # needle is obvious (marVol-bounded deposition can never lift a cell
+        # above the clinoform surface; these two can).
+        reportVolume(self, "marine sink force-dep", sinkForced / self.larea,
+                     note="(%d terminal sink cells)"
+                     % int(self.is_sink_local.sum()))
+        reportVolume(self, "marine residual drain", residual / self.larea,
+                     note="(cascade exited after %d iters)" % step)
 
         # Provenance: drain the per-class residual in lockstep (Σ_c == residual),
         # store the per-node deposited composition for _marineProvFraction, and
@@ -797,6 +814,7 @@ class SEAMesh(object):
         provOn = getattr(self, "provOn", False)
         provFlux = (self.provFrac * sedFlux[:, None]) if provOn else None
         marDep = self._distOcean(sedFlux, provFlux=provFlux)
+        reportVolume(self, "marine routed deposit", marDep / self.larea)
         if not self.flatModel and self.Gmar > 0.:
             vdep = self._depMarineSystem(marDep)
             if provOn:
@@ -838,6 +856,8 @@ class SEAMesh(object):
         self._diffuseOcean(dh, provThick=provThick)
 
         # Update cumulative erosion and deposition as well as elevation
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        reportVolume(self, "marine diffused depo", self.tmpL.getArray().copy())
         self.cumED.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.hGlobal.axpy(1.0, self.tmp)

@@ -5,3 +5,4 @@ from .inputparser import ReadYaml
 from .addprocess import GridProcess
 from .outmesh import WriteMesh
 from .profiler import Profiler
+from .zprobe import probeZ, resetZ, reportVolume

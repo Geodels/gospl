@@ -327,6 +327,23 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 - **`flow/flowplex.py`** — owns `_solve_KSP`, `_solve_KSP2`, `_matrix_build`, `_matrix_build_diag`, `_buildFlowDirection`. Consumed by every downstream module.
 - **`tools/inputparser.py`** — owns all parameter parsing; forcing DataFrame column order is API; the `_extra*` chain is mandatory.
 
+## Debugging an elevation spike (`tools/zprobe.py`)
+A recurring failure class in goSPL is a **km-scale elevation needle at one cell** that is only noticed several output steps later, by which time the output alone cannot say which stage produced it (`tout` is usually several `dt`, so one output hides multiple steps of every process). `gospl/tools/zprobe.py` exists to answer that in **one run**: `probeZ(model, tag)` prints the global elevation extremes at a named point in the step and how far the maximum moved since the previous probe (tagging the culprit `<== RAISED THE GLOBAL MAXIMUM`), and `reportVolume(model, tag, thickness)` prints a deposit increment's volume **and peak thickness** — which is what separates "this stage moved a lot of sediment" from "this stage moved sediment badly".
+
+**Verbose-only** (`-v`); grep the log for `zprobe`, `mass rescale`, `fDep at the`.
+
+**Why these hook points.** Most deposition is bounded by a physical envelope — a pit fills toward its spill rim (`_bottomUpDelta` clamps at `lFill`), marine deposition cannot exceed the clinoform surface (`maxDepQs = (clinoH − hl)·larea`, and `clinoH ≤ sealevel`), pit infill is capped at the pre-deposition global max. A **short list of sites is deliberately unbounded**, because they exist to conserve mass when the routing has nowhere else to put the sediment, and those are what the probes cover:
+- `sedplex._distributeSediment` closed-sink deposit (`_closedDepo`) — active whenever `_domainHasOutlet` is False, i.e. **always on a global sphere**;
+- `seaplex._distOcean` force-deposit at terminal sinks, and the residual drained at cascade exit (both bypass `marVol`);
+- plus the two amplifiers/conditioners that turn a normal deposit into a needle: the `_diffuseOcean` global mass rescale (the one place a marine deposit can be multiplied up) and the `fDep` 0.99-cap population in `SPL` (see below);
+- plus how much the `_updateSinks` `gmax` guard had to clip — which also reveals when that guard has been rendered useless by an earlier unbounded stage having already raised `gmax`.
+
+**NOT instrumented** (add a probe when you need it): ice/glacial till, soil production and creep, groundwater/duricrust, tectonics and horizontal advection, and the `nlSPL`/`soilSPL` erosion flavours. The facility is intentionally partial; keep it honest by extending the module docstring's scope list when you add a hook.
+
+**MPI**: every call is collective (`Vec.max`/`Vec.min`, `allreduce`) and is gated ONLY on `self.verbose`, a config scalar identical on every rank. Adding a probe behind a rank-local condition is the #1 deadlock class — see `## MPI contract`.
+
+**The `fDep` cap is the first thing to check on a deposition spike.** With `spl: G` non-zero, `fDep = G·larea/PA` is capped at 0.99 to keep the coupled `(I−Wᵀ)Q` + `(1−fDep)h` block non-singular. It reaches the cap where `PA ≤ G·larea/0.99`, which expressed as a multiple of a cell's OWN runoff is **`G/(0.99·rain)` — the cell area cancels, so the criterion is mesh-resolution-independent**. At `G=2` with `rain=2` m/yr that ratio is 1.01, so the entire headwater network pins at the cap with `1−fDep = 0.01`; the solve degrades step after step (a real case: `Solve SPL accounting for sediment deposition` climbing 24→72 s and peaking on the step that produced a 25 km needle at a river mouth) and a trunk-river load can land on a handful of cells. At `G=0.5` the ratio is 0.25, nothing saturates, the solve time plateaus and the needle does not form. **Rule of thumb: keep `G ≲ rain/2` (rain in m/yr).** The probe prints the saturated count every step.
+
 ## Known bugs (fix before refactoring)
 - _(none currently open)_
 

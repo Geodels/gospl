@@ -3,6 +3,7 @@ import gc
 import sys
 import petsc4py
 from gospl.tools.petscgc import safe_garbage_cleanup
+from gospl.tools.zprobe import probeZ, reportVolume
 import numpy as np
 import numpy_indexed as npi
 
@@ -501,12 +502,18 @@ class SEDMesh(object):
             delta = np.zeros(self.lpoints)
             nz = self._closedDepo > 0.0
             delta[nz] = self._closedDepo[nz] / self.larea[nz]   # volume -> thickness
+            # Diagnostic: this deposit is deliberately UNBOUNDED (it exists so a
+            # closed domain conserves mass), so a stray flow-terminal cell can
+            # take a whole trunk-river load and needle the topography.
+            reportVolume(self, "closed-sink deposit", delta,
+                         note="(unbounded; stray flow-terminal cells)")
             self.tmpL.setArray(delta)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             self.cumED.axpy(1.0, self.tmp)
             self.hGlobal.axpy(1.0, self.tmp)
             self.dm.globalToLocal(self.cumED, self.cumEDLocal)
             self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        probeZ(self, "  closed-sink depo")
 
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
         if self.stratLith:
@@ -1048,15 +1055,24 @@ class SEDMesh(object):
         # untouched.
         gmax = self.hGlobal.max()[1]
         cur = self.hLocal.getArray()               # current elevation (post continental depo)
-        delta = np.minimum(delta, np.maximum(gmax - cur, 0.0))
+        capped = np.minimum(delta, np.maximum(gmax - cur, 0.0))
+        # Diagnostic: how much the guard had to clip. A large clipped volume
+        # means the fill demanded an unphysical level (corrupted upstream
+        # state) -- and note the guard is only as good as `gmax`: if an earlier
+        # UNBOUNDED stage already spiked the topography this cap is useless.
+        reportVolume(self, "pit-fill clipped", delta - capped,
+                     note="(gmax = %.2f m)" % gmax)
+        delta = capped
 
         # Apply deposit
+        reportVolume(self, "pit/lake infill", delta)
         self.tmpL.setArray(delta)
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self.cumED.axpy(1.0, self.tmp)
         self.hGlobal.axpy(1.0, self.tmp)
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        probeZ(self, "  pit/lake infill")
 
         # Update soil thickness (both modes — updateSoilThickness applies the
         # subaqueous/ice gates; in regolith mode it skips the deposition increment

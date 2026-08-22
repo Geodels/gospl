@@ -23,6 +23,8 @@ if "READTHEDOCS" not in os.environ:
     from .mesher import Tectonics as _Tectonics
     from .tools import WriteMesh as _WriteMesh
     from .tools import Profiler as _Profiler
+    from .tools import probeZ as _probeZ
+    from .tools import resetZ as _resetZ
 
 else:
 
@@ -45,6 +47,12 @@ else:
     class _WriteMesh(object):
         def __init__(self):
             pass
+
+    def _probeZ(obj, tag):
+        pass
+
+    def _resetZ(obj):
+        pass
 
     class _FAMesh(object):
         def __init__(self):
@@ -391,6 +399,12 @@ class Model(
                 _Tectonics.getTectonics(self)
 
             if not self.fast:
+                # Elevation-spike probe (verbose only, collective on every
+                # rank): each stage below reports how far it moved the global
+                # elevation maximum, so a runaway local deposit names the stage
+                # that produced it. Scope + limits: tools/zprobe.py.
+                _resetZ(self)
+                _probeZ(self, "step start")
                 if self.iceOn:
                     # Compute ice accumulation
                     with self.profiler.phase("ice"), self._phase("ice"):
@@ -417,6 +431,7 @@ class Model(
                     else:
                         # Non-linear slope dependencies
                         _nlSPL.erodepSPLnl(self)
+                _probeZ(self, "after SPL")
 
                 # Glacial till: abrasion-produced till transported by ice and
                 # deposited (melt-out) as moraine in the ablation zone (glacial
@@ -432,14 +447,17 @@ class Model(
                         _FAMesh.flowAccumulation(self)
                     with self.profiler.phase("sed"), self._phase("sediment"):
                         _SEDMesh.sedChange(self)
+                    _probeZ(self, "after continental sed")
                     if self.seaDepo:
                         # Downstream sediment deposition in marine environments
                         with self.profiler.phase("sea"), self._phase("marine"):
                             _SEAMesh.seaChange(self)
+                        _probeZ(self, "after marine sed")
 
                 # Hillslope diffusion (linear and non-linear)
                 with self.profiler.phase("hillslope"), self._phase("hillslope"):
                     _hillSLP.getHillslope(self)
+                _probeZ(self, "after hillslope")
 
                 # Per-step dual-lithology + provenance status lines ([dual] /
                 # [prov]; verbose only, no-op when each is off). Keeps the
@@ -461,6 +479,7 @@ class Model(
             ):
                 with self.profiler.phase("flexure"), self._phase("flexure"):
                     _GridProcess.applyFlexure(self)
+                _probeZ(self, "after flexure")
 
             # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:

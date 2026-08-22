@@ -324,6 +324,28 @@ class SPL(object):
             # Cap fDep to keep the coupled (I - W^T) Q + (1-fDep) h block
             # well-conditioned; values approaching 1 lead to a singular system.
             self.fDep[self.fDep > 0.99] = 0.99
+            # Diagnostic (verbose, collective): the fraction of subaerial cells
+            # sitting AT the cap. `fDep = G*area/PA` reaches 0.99 once a cell's
+            # discharge drops to `G*area/0.99`, which as a multiple of the
+            # cell's OWN runoff is `G/(0.99*rain)` -- the cell area cancels, so
+            # the criterion is resolution-independent. At G=2 with 2 m/yr rain
+            # that ratio is 1.01, so the whole headwater network pins at the cap
+            # and the h-block diagonal sits at `1 - fDep = 0.01`: a
+            # near-singular coupled system whose solve time climbs step after
+            # step and which can dump a trunk-river load onto a few cells. At
+            # G=0.5 the ratio is 0.25 and nothing saturates. Keep G <~ rain/2.
+            _nsat = MPI.COMM_WORLD.allreduce(
+                int(((self.fDep >= 0.99) & (self.inIDs == 1)).sum()), op=MPI.SUM
+            )
+            _nsub = MPI.COMM_WORLD.allreduce(
+                int(((self.fDep > 0.0) & (self.inIDs == 1)).sum()), op=MPI.SUM
+            )
+            if MPIrank == 0 and self.verbose:
+                print(
+                    "  fDep at the 0.99 cap on %d / %d subaerial cells (%.1f%%)"
+                    % (_nsat, _nsub, 100.0 * _nsat / max(_nsub, 1)),
+                    flush=True,
+                )
             if self.flatModel:
                 self.fDep[self.outletIDs] = 0.
             self._coupledEDSystem(eMat)

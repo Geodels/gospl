@@ -3,6 +3,7 @@ import gc
 import sys
 import petsc4py
 from gospl.tools.petscgc import safe_garbage_cleanup
+from gospl.tools.zprobe import reportVolume
 import numpy as np
 
 from mpi4py import MPI
@@ -790,6 +791,18 @@ class hillSLP(object):
         )
         if vout > 0.0:
             scale = vin / vout
+            # Diagnostic: this is the ONE global amplifier in the marine path.
+            # scale < 1 is the expected case (the >= 0 clamp inflated the
+            # deposit over steep bathymetry). scale > 1 means the clamped solve
+            # LOST volume, so the rescale is multiplying every marine deposit
+            # up -- a factor well above 1 turns a normal clinoform into a
+            # needle at its thickest cell.
+            if MPIrank == 0 and getattr(self, "verbose", False):
+                print(
+                    "  Marine diffusion mass rescale: %.6g (in %.4e m3, "
+                    "out %.4e m3)" % (scale, vin, vout),
+                    flush=True,
+                )
             ndepo = ndepo * scale
             if provThick is not None:
                 provThick = provThick * scale
