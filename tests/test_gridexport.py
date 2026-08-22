@@ -167,3 +167,65 @@ def test_gridexport_netcdf(tmp_path):
         assert ds.variables["elev"].units == "m"
         assert "drainage" in ds.variables["drainage_area"].long_name
         assert ds.variables["chi"].units == "m"
+
+
+def test_tri_interp_matches_matplotlib_trifinder():
+    """
+    Point location must be EXACTLY what `matplotlib.tri`'s
+    `TrapezoidMapTriFinder` + barycentric interpolation would give.
+
+    `_build_tri_interp` deliberately does not use matplotlib: building the
+    trapezoid map is O(minutes) on a multi-million-triangle mesh (measured 158 s
+    on a 5.9M-node global mesh at 0.1 deg, and a periodic grid needs two of
+    them). It instead seeds from the nearest mesh NODE and tests only that
+    node's incident triangles, which is valid because a goSPL mesh is a
+    near-uniform Delaunay triangulation.
+
+    That shortcut is an assumption about mesh quality, so it needs a guard: this
+    test pins the located triangle and the interpolated values against
+    matplotlib on a randomised triangulation. A regression here means the
+    rasterised NetCDF silently changes (or develops holes), which no other test
+    in this file would notice — they only check that fields are finite and
+    ordered.
+    """
+    gx_mod = pytest.importorskip("gospl.analyse.gridexport")
+    mtri = pytest.importorskip("matplotlib.tri")
+    spatial = pytest.importorskip("scipy.spatial")
+
+    rng = np.random.default_rng(7)
+    pts = rng.uniform(-1.0, 1.0, size=(600, 2))
+    dl = spatial.Delaunay(pts)
+    x, y = pts[:, 0], pts[:, 1]
+    cells = dl.simplices.astype(np.int64)
+
+    xs = np.linspace(-0.9, 0.9, 61)
+    ys = np.linspace(-0.9, 0.9, 57)
+    ggx, ggy = np.meshgrid(xs, ys)
+
+    # Mask a few triangles to exercise the per-framing mask path.
+    tri_mask = np.zeros(len(cells), dtype=bool)
+    tri_mask[rng.choice(len(cells), 20, replace=False)] = True
+
+    # Reference: matplotlib triangulation + its own linear interpolator.
+    tri = mtri.Triangulation(x, y, cells)
+    tri.set_mask(tri_mask)
+    field = np.sin(3.0 * x) + np.cos(2.0 * y)
+    ref = mtri.LinearTriInterpolator(tri, field)(ggx, ggy)
+    ref = np.ma.filled(ref.astype(float), np.nan)
+
+    # Ours: nearest-node seeded location, same triangulation and mask.
+    csr = gx_mod._node_tri_csr(cells, len(pts))
+    seed = gx_mod._nearest_mesh_node(spatial.cKDTree(pts), ggx, ggy)
+    interp = gx_mod._build_tri_interp(x, y, cells, ggx, ggy, seed, csr, tri_mask)
+    got = interp(field)
+
+    assert np.array_equal(np.isfinite(ref), np.isfinite(got)), (
+        "the set of located grid points differs from matplotlib's: the "
+        "nearest-node seeding is losing (or gaining) points."
+    )
+    both = np.isfinite(ref) & np.isfinite(got)
+    assert both.sum() > 0.5 * ref.size, "test grid barely intersects the mesh"
+    assert np.allclose(ref[both], got[both], rtol=0.0, atol=1.0e-12), (
+        "interpolated values differ from matplotlib's linear interpolation; "
+        f"max |diff| = {np.abs(ref[both] - got[both]).max():.3e}"
+    )

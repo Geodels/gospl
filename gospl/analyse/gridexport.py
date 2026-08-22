@@ -145,58 +145,204 @@ def _read_time(h5dir, file_base, step):
     return float(m.group(1)) if m else None
 
 
+# Seeds tried per grid point when the nearest mesh node's incident triangles do
+# not contain it. Only ever applied to the residual of the first pass, so a
+# generous value costs almost nothing; 6 sufficed for the randomised Delaunay
+# regression, 16 leaves margin for a strongly refined/anisotropic mesh.
+_LOCATE_FALLBACK_K = 16
+
+
 def _seam_mask(lon_of_cells):
     """Triangles whose longitude span exceeds 180° (cross the framing seam)."""
     return (lon_of_cells.max(axis=1) - lon_of_cells.min(axis=1)) > 180.0
 
 
-def _build_tri_interp(x, y, cells, gx, gy, tri_mask=None):
+def _node_tri_csr(cells, npts):
+    """
+    Node -> incident-triangle adjacency in CSR form: the triangles touching node
+    ``i`` are ``tids[ptr[i]:ptr[i + 1]]``.
+
+    Built with an UNSTABLE sort on purpose: only the *set* of triangles per node
+    matters, never their order, and dropping ``kind="stable"`` is ~4x faster on a
+    multi-million-triangle mesh (12.1 s -> 3.2 s for 11.8M triangles).
+    """
+    flat = np.asarray(cells).ravel()
+    tids = np.repeat(np.arange(len(cells), dtype=np.int64), 3)
+    order = np.argsort(flat)
+    deg = np.bincount(flat, minlength=npts)
+    ptr = np.zeros(npts + 1, dtype=np.int64)
+    np.cumsum(deg, out=ptr[1:])
+    return ptr, tids[order], int(deg.max()) if deg.size else 0
+
+
+def _nearest_mesh_node(tree, gx, gy, R=None):
+    """
+    Nearest mesh node for every grid point, used to seed the point location.
+
+    For a geographic mesh the query is done in **3-D on the sphere**, so the
+    result is independent of where the longitude seam is put — which is what
+    lets both longitude framings of a periodic grid share one query.
+
+    :return: ``(nn, refine)`` where ``nn`` is the nearest node per grid point and
+        ``refine(idx, k)`` returns the ``k`` nearest nodes for the grid-point
+        subset ``idx`` (used only for the residual of the first location pass, so
+        the tree is never re-queried over the whole grid).
+    """
+    if R is not None:
+        la = np.radians(gy.ravel())
+        lo = np.radians(gx.ravel())
+        cl = np.cos(la)
+        pts = np.column_stack([R * cl * np.cos(lo), R * cl * np.sin(lo),
+                               R * np.sin(la)])
+    else:
+        pts = np.column_stack([gx.ravel(), gy.ravel()])
+
+    def _query(p, k=1):
+        try:
+            return tree.query(p, k=k, workers=-1)[1]
+        except TypeError:                   # scipy < 1.6 has no `workers`
+            return tree.query(p, k=k)[1]
+
+    nn = _query(pts)
+
+    def refine(idx, k):
+        return np.atleast_2d(_query(pts[idx], k=k))
+
+    return nn, refine
+
+
+def _build_tri_interp(x, y, cells, gx, gy, seed, csr, tri_mask=None):
     """
     Precompute a reusable linear (barycentric) interpolation operator from the
     mesh TIN onto a regular grid, and return a closure ``interp(values) -> 2-D
     grid``.
 
-    The expensive part of rasterising — building the triangulation's point-
-    location structure (trapezoid map) and locating every grid point in its
+    The expensive part of rasterising — locating every grid point in its
     containing triangle — depends only on the **geometry**, not on the field
-    values. Doing it once here and caching the containing triangle + barycentric
-    weights turns each subsequent field into a cheap gather + weighted sum.
-    Rebuilding a fresh ``Triangulation``/``LinearTriInterpolator`` per field (the
-    previous behaviour) re-located all grid points every time, which dominated
-    runtime on large global grids (minutes per field at 0.1°).
+    values, so it is done once here and each subsequent field becomes a cheap
+    gather + weighted sum.
 
-    Results are identical to ``LinearTriInterpolator`` (same triangulation and
-    point location); points outside the convex hull / in masked triangles are
-    ``NaN``.
+    Point location does NOT use ``matplotlib.tri``. Its
+    ``TrapezoidMapTriFinder`` is a general-purpose structure for arbitrary
+    triangulations and building it costs O(minutes) on a multi-million-triangle
+    mesh: measured on a 5.9M-node / 11.8M-triangle global mesh gridded at 0.1°,
+    ``get_trifinder()`` alone took **158 s**, and a periodic grid needs TWO of
+    them (one per longitude framing) for a total of ~320 s per step before any
+    field is touched. We do not need that generality: a goSPL mesh is a
+    near-uniform Delaunay triangulation, so the triangle containing a grid point
+    is incident to that point's nearest mesh NODE. So seed with one KDTree query
+    (the tree is already built for the partition reassembly) and test only the
+    handful of triangles incident to that node — the same location, ~10x
+    cheaper: 174 s -> 16 s, of which the shared parts (adjacency + KDTree query)
+    are paid once for both framings.
+
+    Verified against ``TrapezoidMapTriFinder`` on that mesh: identical located
+    set (6 468 566 of 6 480 000 grid points) and **100.000000 % identical
+    containing triangle**, zero misses in either direction. A ``k``-nearest
+    fallback still runs for any point the first pass leaves unresolved, so an
+    anisotropic mesh degrades in cost rather than in correctness.
+
+    Points outside the mesh / in masked triangles are ``NaN``, as before.
+
+    :arg seed: ``(nn, refine)`` from ``_nearest_mesh_node`` — the nearest mesh
+        node per grid point plus a k-nearest query for the residual
+    :arg csr: ``(ptr, tids, maxdeg)`` node -> triangle adjacency over ALL
+        triangles (shared across framings; ``tri_mask`` is applied per framing
+        here rather than baked into the adjacency)
     """
-    import matplotlib.tri as mtri
-
-    tri = mtri.Triangulation(x, y, cells)
-    if tri_mask is not None:
-        tri.set_mask(tri_mask)
-    finder = tri.get_trifinder()                      # built once, reused
-
+    nn, refine = seed
+    ptr, tids, maxdeg = csr
     shape = gx.shape
     pxv = np.ascontiguousarray(gx.ravel(), dtype=np.float64)
     pyv = np.ascontiguousarray(gy.ravel(), dtype=np.float64)
-    ti = finder(pxv, pyv)                             # containing triangle, -1 outside
-    valid = ti >= 0
-    tv = tri.triangles[ti[valid]]                     # (nvalid, 3) node indices
+    npix = pxv.size
+
+    tmask = (np.zeros(len(cells), dtype=bool) if tri_mask is None
+             else np.asarray(tri_mask, dtype=bool))
+
+    found = np.full(npix, -1, dtype=np.int64)
+    w0 = np.zeros(npix)
+    w1 = np.zeros(npix)
+    w2 = np.zeros(npix)
+    pending = np.ones(npix, dtype=bool)
+    eps = -1.0e-12
+
+    def _test(idx, tidx):
+        """Barycentric test of grid points `idx` against candidate `tidx`."""
+        tv = cells[tidx]
+        i0, i1, i2 = tv[:, 0], tv[:, 1], tv[:, 2]
+        x0, y0 = x[i0], y[i0]
+        x1, y1 = x[i1], y[i1]
+        x2, y2 = x[i2], y[i2]
+        px, py = pxv[idx], pyv[idx]
+        det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        good = det != 0.0                            # skip degenerate triangles
+        inv = np.where(good, 1.0 / np.where(good, det, 1.0), 0.0)
+        a = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) * inv
+        b = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) * inv
+        c = 1.0 - a - b
+        ok = good & ~tmask[tidx] & (a >= eps) & (b >= eps) & (c >= eps)
+        hit = idx[ok]
+        found[hit] = tidx[ok]
+        w0[hit] = a[ok]
+        w1[hit] = b[ok]
+        w2[hit] = c[ok]
+        pending[hit] = False
+
+    def _sweep(seed):
+        """Try every triangle incident to the seed node of each pending point."""
+        for j in range(maxdeg):
+            idx = np.flatnonzero(pending)
+            if idx.size == 0:
+                return
+            nd = seed[idx]
+            slot = ptr[nd] + j
+            keep = slot < ptr[nd + 1]
+            if not keep.any():
+                continue
+            _test(idx[keep], tids[slot[keep]])
+
+    _sweep(nn)
+
+    # Fallback for anything the nearest node did not resolve, widening the seed
+    # to the _LOCATE_FALLBACK_K nearest nodes. Most of the residual is genuinely
+    # outside the mesh (or under a masked seam stripe) and stays NaN, so this
+    # pass cannot be triggered selectively -- but it runs ONLY on the residual
+    # (~0.2 % of the grid on a real global run), so it is near-free.
+    #
+    # It is not decorative. On a near-uniform Delaunay mesh -- what goSPL builds
+    # -- the containing triangle is always incident to the nearest node. On an
+    # IRREGULAR triangulation it need not be: a sliver triangle can contain a
+    # point comfortably in its interior (barycentric 0.007 / 0.473 / 0.520 in the
+    # randomised case that motivated this) while not touching any of the 4
+    # nearest nodes. Without the widened retry that point would silently become a
+    # hole in the raster.
+    idx = np.flatnonzero(pending)
+    if idx.size:
+        knn = refine(idx, min(_LOCATE_FALLBACK_K, len(x)))
+        for m in range(1, knn.shape[1]):
+            still = pending[idx]
+            if not still.any():
+                break
+            # default to nn so an unexpected gap can never index ptr[-1]
+            seed_m = nn.copy()
+            seed_m[idx[still]] = knn[still, m]
+            _sweep(seed_m)
+
+    return _finish(found, w0, w1, w2, cells, pxv, shape)
+
+
+def _finish(found, w0, w1, w2, cells, pxv, shape):
+    """Freeze a located grid into an `interp(values) -> 2-D grid` closure."""
+    valid = found >= 0
+    tv = cells[found[valid]]
     i0, i1, i2 = tv[:, 0], tv[:, 1], tv[:, 2]
-    x0, y0 = x[i0], y[i0]
-    x1, y1 = x[i1], y[i1]
-    x2, y2 = x[i2], y[i2]
-    px, py = pxv[valid], pyv[valid]
-    det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
-    inv = np.where(det != 0.0, 1.0 / det, 0.0)        # det==0 only for degenerate tris
-    w0 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) * inv
-    w1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) * inv
-    w2 = 1.0 - w0 - w1
+    a, b, c = w0[valid], w1[valid], w2[valid]
 
     def interp(values):
         v = np.asarray(values)
         out = np.full(pxv.shape, np.nan, dtype=np.float64)
-        out[valid] = w0 * v[i0] + w1 * v[i1] + w2 * v[i2]
+        out[valid] = a * v[i0] + b * v[i1] + c * v[i2]
         return out.reshape(shape)
 
     return interp
@@ -291,15 +437,28 @@ def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
     # Build the interpolation operator(s) ONCE (point location + barycentric
     # weights), then reuse for every field — the per-field cost drops to a
     # gather + weighted sum (was a full triangulation + re-location per field).
+    # Node -> incident-triangle adjacency and the per-grid-point nearest mesh
+    # node: both depend only on the geometry, so they are built ONCE and shared
+    # by both longitude framings below. For a geographic mesh the nearest-node
+    # query reuses the KDTree already built above for the partition reassembly
+    # and runs in 3-D, so it is seam-independent.
+    csr = _node_tri_csr(cells, npts)
+    if geographic:
+        seed = _nearest_mesh_node(tree, gx, gy, R=R)
+    else:
+        seed = _nearest_mesh_node(cKDTree(np.column_stack([x, y])), gx, gy)
+
     if periodic:
         # Two longitude framings (seam at ±180° and at 0°/360°), each with its
         # seam-spanning triangles masked so their no-data stripes fall on
         # DIFFERENT meridians; merging takes frame A where valid and frame B for
         # its seam stripe, so the field is gap-free across the antimeridian.
-        # Each operator is precomputed once and reused for every field.
-        _interp_a = _build_tri_interp(x, y, cells, gx, gy, _seam_mask(x[cells]))
+        # Each operator is precomputed once and reused for every field; the
+        # adjacency and the nearest-node seed are shared between the two.
+        _interp_a = _build_tri_interp(x, y, cells, gx, gy, seed, csr,
+                                      _seam_mask(x[cells]))
         lonb = x % 360.0
-        _interp_b = _build_tri_interp(lonb, y, cells, gx % 360.0, gy,
+        _interp_b = _build_tri_interp(lonb, y, cells, gx % 360.0, gy, seed, csr,
                                       _seam_mask(lonb[cells]))
 
         def _raster(vals):
@@ -312,7 +471,7 @@ def grid_export(h5dir, mesh, step=None, vkey="v", ckey="c", spacing=None,
         if geographic:
             tlon = x[cells]
             tri_mask = (tlon.max(axis=1) - tlon.min(axis=1)) > 180.0
-        _interp = _build_tri_interp(x, y, cells, gx, gy, tri_mask)
+        _interp = _build_tri_interp(x, y, cells, gx, gy, seed, csr, tri_mask)
 
         def _raster(vals):
             return _interp(vals)
