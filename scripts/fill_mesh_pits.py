@@ -34,6 +34,12 @@ Seeding: a priority-flood needs outlets. Pick one of
 Outlets are never raised, whichever mode is used, so a closed basin that dips
 below ``--sea-level`` stays a sink by construction.
 
+``--max-depth`` / ``--max-volume`` / ``--max-cells`` keep the big basins: a
+depression exceeding any limit given is left at its original elevation, so a
+run removes the interpolation noise and the NODATA flats without deleting the
+real endorheic basins. Every depression is measured and the largest are
+printed even with no limit set, so one run tells you where to put one.
+
 ``--outlet-mode`` then decides what an outlet means to its upslope neighbours:
 
 * ``elevation`` (default) seeds the flood at each outlet's own elevation, the
@@ -111,6 +117,76 @@ def hull_nodes(cells):
     key = np.sort(edge_list(cells).astype(np.int64), axis=1)
     uniq, counts = np.unique(key, axis=0, return_counts=True)
     return np.unique(uniq[counts == 1])
+
+
+def vertex_areas(coords, cells):
+    """Per-vertex cell area: a third of each incident triangle.
+
+    This is the barycentric dual, not the Voronoi area goSPL itself builds in
+    `definetin`, which needs the circumcentres. On the near-uniform Delaunay
+    meshes goSPL runs the two agree to a few percent, which is far inside the
+    precision a volume threshold needs.
+    """
+    p = coords[cells[:, 0]], coords[cells[:, 1]], coords[cells[:, 2]]
+    tri = 0.5 * np.linalg.norm(np.cross(p[1] - p[0], p[2] - p[0]), axis=1) / 3.0
+    areas = np.zeros(len(coords))
+    for k in range(3):
+        areas += np.bincount(cells[:, k], weights=tri, minlength=len(coords))
+    return areas
+
+
+def depression_stats(filled, elev, indptr, indices, areas):
+    """Label each filled depression and measure it.
+
+    A depression is a connected component of the raised set. Returns
+    ``(labels, depth, volume, ncells)``: `labels` is -1 on unraised nodes and a
+    component index elsewhere; the three arrays are per component.
+
+    Caveat worth knowing before thresholding on the result: two depressions
+    that end up contiguous after filling (a small pit spilling into a large
+    basin, say) merge into ONE component and are measured together, so the
+    pair is judged by its combined size. That errs toward keeping, which is
+    the safe direction for a "preserve the real basins" switch.
+    """
+    try:
+        from scipy.sparse import csr_matrix
+        from scipy.sparse.csgraph import connected_components
+    except ImportError:  # pragma: no cover - scipy is a goSPL dependency
+        raise SystemExit(
+            "the depression-size limits need scipy (a goSPL dependency): "
+            "pip install scipy"
+        )
+
+    raised = filled > elev
+    npoints = len(elev)
+    labels = np.full(npoints, -1, dtype=np.int64)
+    if not raised.any():
+        return labels, np.empty(0), np.empty(0), np.empty(0, dtype=np.int64)
+
+    # Keep only edges with BOTH ends raised, so every unraised node is an
+    # isolated singleton and cannot bridge two distinct depressions.
+    rows = np.repeat(raised, np.diff(indptr))
+    data = (raised[indices] & rows).astype(np.int8)
+    graph = csr_matrix((data, indices, indptr), shape=(npoints, npoints))
+    graph.eliminate_zeros()
+    _, comp = connected_components(graph, directed=False)
+
+    # Re-index so only components that actually contain raised nodes are kept.
+    lab = comp[raised]
+    order = np.argsort(lab, kind="stable")
+    sorted_lab = lab[order]
+    starts = np.flatnonzero(np.r_[True, sorted_lab[1:] != sorted_lab[:-1]])
+    dz = (filled - elev)[raised][order]
+    dv = ((filled - elev) * areas)[raised][order]
+
+    depth = np.maximum.reduceat(dz, starts)
+    volume = np.add.reduceat(dv, starts)
+    ncells = np.diff(np.r_[starts, len(sorted_lab)])
+
+    remap = np.full(comp.max() + 1, -1, dtype=np.int64)
+    remap[sorted_lab[starts]] = np.arange(len(starts))
+    labels[raised] = remap[lab]
+    return labels, depth, volume, ncells
 
 
 def fill_fortran(elev, cells, outlets, base_level, absorbing):
@@ -289,6 +365,32 @@ def main(argv=None):
         "neighbour) before and after filling — the quick way to tell whether a "
         "goSPL un-drained-region abort comes from the input topography",
     )
+    limits = parser.add_argument_group(
+        "depression size limits",
+        "Keep the big basins. A depression exceeding ANY limit given is left "
+        "at its original elevation, so only the small ones (interpolation "
+        "noise, NODATA flats) are filled. Every depression is measured and "
+        "the largest are listed, so a first run with no limit tells you where "
+        "to put one.",
+    )
+    limits.add_argument(
+        "--max-depth",
+        type=float,
+        default=None,
+        help="fill only depressions whose deepest fill is at most this, in metres",
+    )
+    limits.add_argument(
+        "--max-volume",
+        type=float,
+        default=None,
+        help="fill only depressions holding at most this fill volume, in m^3",
+    )
+    limits.add_argument(
+        "--max-cells",
+        type=int,
+        default=None,
+        help="fill only depressions spanning at most this many cells",
+    )
     if argv is None:
         argv = sys.argv[1:]
     args = parser.parse_args(normalise_numeric_argv(argv))
@@ -359,12 +461,42 @@ def main(argv=None):
         filled = fill_python(elev, indptr, indices, outlets, args.epsilon, absorbing)
         print("backend: python priority-flood (increment = %g m)" % args.epsilon)
 
-    raised = filled > elev
-    print("raised %d node(s) (%.2f%%), max fill %.3f m"
-          % (raised.sum(), 100.0 * raised.sum() / npoints, (filled - elev).max()))
     if (filled < elev).any():
         raise SystemExit("internal error: the fill lowered %d node(s)"
                          % (filled < elev).sum())
+
+    labels, depth, volume, ncells = depression_stats(
+        filled, elev, indptr, indices, vertex_areas(_coords, cells)
+    )
+    if len(depth):
+        print("depressions filled: %d" % len(depth))
+        rank = np.argsort(volume)[::-1][:3]
+        for pos, comp in enumerate(rank):
+            print("  largest #%d: depth %.3f m, volume %.4g m3, %d cells"
+                  % (pos + 1, depth[comp], volume[comp], ncells[comp]))
+
+    keep = np.zeros(len(depth), dtype=bool)
+    if args.max_depth is not None:
+        keep |= depth > args.max_depth
+    if args.max_volume is not None:
+        keep |= volume > args.max_volume
+    if args.max_cells is not None:
+        keep |= ncells > args.max_cells
+    if keep.any():
+        # Restore the original surface over every depression that exceeded a
+        # limit. Reverting is exact and local: a kept basin's cells go back to
+        # their input elevation, and the fill level of everything else was
+        # fixed by its own spill path, so nothing upstream needs redoing.
+        revert = np.isin(labels, np.flatnonzero(keep))
+        filled[revert] = elev[revert]
+        print("kept %d depression(s) unfilled (%d cells, %.4g m3 of fill not "
+              "applied): over the limit"
+              % (int(keep.sum()), int(revert.sum()), float(volume[keep].sum())))
+
+    raised = filled > elev
+    print("raised %d node(s) (%.2f%%), max fill %.3f m"
+          % (raised.sum(), 100.0 * raised.sum() / npoints,
+             (filled - elev).max() if raised.any() else 0.0))
 
     if args.check:
         print("interior sinks after: %d"

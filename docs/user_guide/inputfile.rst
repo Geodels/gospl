@@ -144,6 +144,44 @@ that can make the flow operator singular over a large block and abort a run
 with an un-drained-region message (see :ref:`flow`). A count in the tens of
 thousands says the input topography is the problem rather than the solver.
 
+Keeping the real basins
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Filling everything is rarely what you want on a continental mesh: it deletes
+genuine endorheic basins along with the artefacts. Three limits restrict the
+fill to the small depressions, and a depression exceeding **any** limit given
+is left at its original elevation:
+
+- ``--max-depth`` metres, the deepest fill in the depression,
+- ``--max-volume`` m\ :sup:`3`, the fill volume it would take,
+- ``--max-cells``, how many cells it spans.
+
+Every depression is measured and the three largest are printed even when no
+limit is set, so a first run tells you where to put one:
+
+.. code-block:: none
+
+    depressions filled: 1336
+      largest #1: depth 199.967 m, volume 3.988e+06 m3, 9 cells
+      ...
+    kept 18 depression(s) unfilled (220 cells, 6.997e+07 m3 of fill not applied)
+
+Reverting is exact and local: a kept basin returns to its input elevation, and
+everything else is bit-identical to the unrestricted fill, because each other
+depression's fill level was fixed by its own spill path. The kept basins do of
+course remain sinks, so ``--check`` will report them afterwards; that is the
+point of keeping them.
+
+.. note::
+
+  A depression is measured as a connected component of the raised cells, so
+  two depressions that become contiguous once filled (a small pit spilling
+  into a large basin) are measured together as one. That errs toward keeping
+  the pair, which is the safe direction here. Cell areas use the barycentric
+  dual (a third of each incident triangle) rather than the Voronoi areas goSPL
+  builds internally; on a near-uniform Delaunay mesh the two agree to within a
+  few percent, well inside what a volume threshold needs.
+
 A priority-flood needs outlets, and the three ways of declaring them are:
 
 - ``--sea-level Z``: every node strictly below ``Z`` is an outlet. This is the
