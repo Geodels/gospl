@@ -63,6 +63,58 @@ The number of processes used to **run** the model is independent of the number
 used later for post-processing.
 
 
+Environment variables
+---------------------
+
+Everything that shapes a simulation lives in the YAML input file. The handful of
+variables below are **solver escape hatches**, not model parameters: they exist
+so a run that trips a numerical edge case can be nursed through it, or so a
+solver choice can be re-measured, without editing the code. Leave them unset
+unless a run has actually failed or slowed in the way described.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 12 62
+
+   * - Variable
+     - Default
+     - Effect
+   * - ``GOSPL_UNDRAINED_CAP``
+     - ``0.005``
+     - How many cells may fail to converge in a flow solve before the failure
+       stops counting as benign ponding. Below the cap the cells pond and the
+       run continues; above it the main discharge solve aborts. A value below 1
+       is a fraction of the mesh, a value of 1 or more an absolute node count.
+       Raise it when a wide, genuinely closed basin is aborting the run (see
+       :ref:`flow`).
+   * - ``GOSPL_FLOW_KSP``
+     - ``fgmres``
+     - Krylov solver for the implicit drainage-area system. ``richardson`` is
+       the stationary escape hatch kept for experiments; it is *not* a remedy
+       for a non-convergent solve, since it is also what the bounded fallback
+       already tried.
+   * - ``GOSPL_FLOW_PC``
+     - ``bjacobi``
+     - Preconditioner for the same system.
+   * - ``GOSPL_CASCADE_REL_FLOOR``
+     - ``1.e-3``
+     - Fraction of the first pass's residual flux at which the downstream
+       cascade is considered converged and stops. ``0`` disables the exit.
+   * - ``GOSPL_CASCADE_PATIENCE``
+     - ``3``
+     - Consecutive cascade passes that may fail to shrink the residual by 0.1 %
+       before the remaining water is declared un-drainable and left ponded.
+   * - ``GOSPL_CASCADE_MAX_STEPS``
+     - ``100``
+     - Hard backstop on the number of cascade passes in one step.
+
+Set them the same way on every rank, in front of the launcher, so the whole job
+agrees:
+
+.. code-block:: bash
+
+    GOSPL_UNDRAINED_CAP=0.02 mpirun -np 144 gospl -i input.yml -v
+
 Post-processing & utility commands
 ----------------------------------
 

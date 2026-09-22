@@ -130,6 +130,24 @@ Iterative methods allow for an initial guess to be provided. When this initial g
 
   The flow routing approach and corresponding flow CSR matrix (**W**) is also used in the sediment routing algorithm.
 
+When cells cannot be drained at all
+------------------------------------
+
+The operator :math:`\mathrm{(I - W^T)}` is singular over any set of cells that has no path out: a near-flat region whose flow-direction tie-break closes a cycle is the usual example, and no solver (Krylov or stationary) can converge there. goSPL localises that region from the residual and decides what to do from its **size**:
+
+* a region **at or below** the un-drained cap is treated as benign. Those cells are **ponded**, that is each keeps its own runoff and passes nothing downstream, the converged discharge everywhere else is kept, and the run continues. On the main discharge solve this prints ``[flow] main discharge solve: N un-drained cell(s) ponded …``.
+* a region **above** the cap, or a non-finite right-hand side or matrix, is a genuine failure (a NaN source, a broken partition) and the main discharge solve aborts rather than feed a no-river state into erosion and sediment transport.
+
+The cap defaults to ``max(256, 0.5 % of the mesh)``, which is sized so a knife-edge micro-cycle ponds while a real breakdown still stops the run. It can be raised with the ``GOSPL_UNDRAINED_CAP`` environment variable, either as a **fraction** of the mesh (a value below 1, e.g. ``0.02`` for 2 %) or as an **absolute node count** (``100000``):
+
+.. code-block:: bash
+
+    GOSPL_UNDRAINED_CAP=0.02 mpirun -np 144 gospl -i input.yml -v
+
+(the full list of solver escape hatches is in :ref:`running`). Raise it deliberately, when you know the region concerned is a wide, genuinely closed basin that should pond: at fine resolution a large endorheic interior can make the operator singular over far more cells than the default cap allows, and ponding it is the physically correct outcome. It cannot mask a corrupt state, because a non-finite right-hand side or matrix aborts at any cap. Note that the node index quoted in the failure message is PETSc's global numbering, which depends on the partition, so it cannot be looked up directly in the input mesh file.
+
+Before raising the cap it is worth knowing whether the region is real physiography or a defect in the input topography, such as a large flat patch left by a NODATA fill or by quantised elevations. Cells with no strictly lower neighbour are what seed the flat routing that closes these cycles, and ``scripts/fill_mesh_pits.py --check`` counts them on the input mesh in a single pass (see :ref:`fillpits`). A count in the tens of thousands points at the topography; a handful points at the solver edge case the cap is there to absorb.
+
 When the overspill iteration stops
 ----------------------------------
 

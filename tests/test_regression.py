@@ -6760,6 +6760,64 @@ def test_fatal_flow_solve_ponds_small_undrained_region(minimal_model):
     )
 
 
+def test_undrained_cap_env_override(minimal_model):
+    """
+    Protects: `GOSPL_UNDRAINED_CAP` resolves the un-drained-region cap
+    (`flowplex._undrainedCap`) as a fraction (< 1) or an absolute node count
+    (>= 1), and rejects a malformed value instead of silently reverting.
+
+    Why the knob exists: the default cap is `max(256, 0.5% of mpoints)`, tuned
+    so a knife-edge micro-cycle ponds and a broken partition still aborts. A
+    wide, genuinely closed near-flat basin (an endorheic interior at fine
+    resolution) can make `(I - W^T)` singular over far more cells than that,
+    and the FATAL main discharge solve then aborts a long run over a region
+    that physically just ponds. This lets the cap be raised deliberately. It
+    can NOT mask a NaN source or a broken operator: those trip the separate
+    non-finite RHS/matrix checks and abort at any cap.
+
+    The value gates COLLECTIVE branches (`benign` / `pond_fatal`), so it is
+    broadcast from rank 0 and must be identical everywhere.
+    """
+    model = minimal_model
+    mpoints = int(model.mpoints)
+    default = max(256, int(0.005 * mpoints))
+
+    assert model._undrainedCap() == default, (
+        "with the variable unset the cap must be the 0.5%-of-mesh default."
+    )
+
+    previous = os.environ.get("GOSPL_UNDRAINED_CAP")
+    try:
+        # Absolute node count (>= 1).
+        os.environ["GOSPL_UNDRAINED_CAP"] = "100000"
+        assert model._undrainedCap() == 100000
+
+        # Fraction of the mesh (< 1).
+        os.environ["GOSPL_UNDRAINED_CAP"] = "0.02"
+        assert model._undrainedCap() == int(round(0.02 * mpoints))
+
+        # A fraction small enough to round below one cell still leaves a
+        # usable cap: a zero cap would make EVERY solve failure fatal.
+        os.environ["GOSPL_UNDRAINED_CAP"] = "1.0e-12"
+        assert model._undrainedCap() == 1
+
+        # Malformed / non-positive values must fail loudly, not revert to the
+        # default -- silently ignoring the knob would read as "I raised the cap
+        # and it still aborted".
+        for bad in ("not-a-number", "-5", "0"):
+            os.environ["GOSPL_UNDRAINED_CAP"] = bad
+            with pytest.raises(ValueError):
+                model._undrainedCap()
+    finally:
+        if previous is None:
+            os.environ.pop("GOSPL_UNDRAINED_CAP", None)
+        else:
+            os.environ["GOSPL_UNDRAINED_CAP"] = previous
+
+    # The model's own cap is untouched by the probing above.
+    assert model._undrained_benign_cap == default
+
+
 # ---------------------------------------------------------------------------
 # TEST 9 - Stratigraphy: deposition + compaction physics
 # ---------------------------------------------------------------------------

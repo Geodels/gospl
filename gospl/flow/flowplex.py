@@ -60,7 +60,7 @@ class FAMesh(object):
         # plateau ponds ~0.2% of nodes (~636) — calm under the 0.5% cap (~1450)
         # — while a genuine drainage break (>>1%) stays loud. 0.5% sits well
         # above observed benign ponding yet far below any real failure.
-        self._undrained_benign_cap = max(256, int(0.005 * self.mpoints))
+        self._undrained_benign_cap = self._undrainedCap()
 
         # Iteration cap for the NON-fatal IDA cascade solves (sediment/water
         # downstream routing). The well-posed bulk converges in O(100s) of
@@ -146,6 +146,73 @@ class FAMesh(object):
         self.FAL = self.hLocal.duplicate()
 
         return
+
+    def _undrainedCap(self):
+        """
+        Resolve the un-drained-region cap, i.e. how many cells may fail to
+        converge in an `(I - W^T)` solve before the failure stops being treated
+        as benign ponding. Below it, a non-fatal solve reports calmly and the
+        FATAL main discharge solve ponds the region and continues; above it the
+        run gets the loud diagnostic and the main solve aborts.
+
+        Default `max(256, 0.5% of mpoints)`, overridable with the environment
+        variable ``GOSPL_UNDRAINED_CAP``:
+
+        - a value **< 1** is a FRACTION of the global mesh (``0.02`` = 2%),
+        - a value **>= 1** is an absolute node count (``100000``).
+
+        Raise it when a large, genuinely closed region (a wide near-flat
+        endorheic basin, whose flat routing makes `(I - W^T)` singular over a
+        big block) aborts a run you would rather let pond: the ponded cells
+        keep their own runoff, mass is conserved, and the converged discharge
+        everywhere else is kept. It is a deliberate "I know this basin does not
+        drain" switch, NOT a way to paper over a NaN source or a broken
+        partition — those trip the non-finite RHS/matrix checks instead and
+        still abort at any cap.
+
+        The value gates COLLECTIVE branches (`benign` / `pond_fatal` in
+        `_solve_KSP2`), so every rank must hold exactly the same number. The
+        environment is normally uniform across ranks, but rank 0's value is
+        broadcast so that a non-uniform environment cannot desync the branch
+        (see AGENTS.md > MPI contract).
+
+        :return: the resolved cap, as an int, identical on every rank.
+        """
+
+        default = max(256, int(0.005 * self.mpoints))
+        raw = os.environ.get("GOSPL_UNDRAINED_CAP")
+        if raw is None:
+            return default
+
+        # Parse on rank 0 only, so a malformed value produces ONE diagnostic
+        # and one shared decision; the raise below is driven by the broadcast
+        # result, so every rank raises together (a lone-rank raise would leave
+        # the others in the next collective — the #1 deadlock class).
+        cap = None
+        if MPIrank == 0:
+            try:
+                value = float(raw)
+            except ValueError:
+                value = float("nan")
+            if np.isfinite(value) and value > 0.0:
+                cap = int(round(value * self.mpoints)) if value < 1.0 else int(value)
+                cap = max(1, cap)
+        cap = MPI.COMM_WORLD.bcast(cap, root=0)
+        if cap is None:
+            raise ValueError(
+                "GOSPL_UNDRAINED_CAP='%s' is not a positive number. Use a "
+                "fraction of the mesh (e.g. 0.02 for 2%%) or an absolute node "
+                "count (e.g. 100000)." % raw
+            )
+        # getattr: a bare `__new__` stub (the test pattern used elsewhere) has
+        # no `verbose`, and this helper must stay callable on one.
+        if MPIrank == 0 and getattr(self, "verbose", False):
+            print(
+                "[flow] un-drained region cap set to %d node(s) by "
+                "GOSPL_UNDRAINED_CAP=%s (default %d)" % (cap, raw, default),
+                flush=True,
+            )
+        return cap
 
     def _matrix_build(self, nnz=(1, 1)):
         """
@@ -357,9 +424,13 @@ class FAMesh(object):
                     )
                     if nbad >= 0:
                         print(
-                            "  [flowKSP] worst residual %.3e at global node %d; "
-                            "%d nodes exceed 1e-3*||b|| (the un-drained region)"
-                            % (worst_val, worst_id, nbad),
+                            "  [flowKSP] worst residual %.3e at global node %d "
+                            "(PETSc global numbering, partition-dependent); "
+                            "%d nodes exceed 1e-3*||b|| (the un-drained region) "
+                            "vs a benign cap of %d — raise it with "
+                            "GOSPL_UNDRAINED_CAP to pond this region instead"
+                            % (worst_val, worst_id, nbad,
+                               self._undrained_benign_cap),
                             flush=True,
                         )
             if fatal and not pond_fatal:

@@ -138,6 +138,12 @@ It reports how many nodes were raised, the maximum fill thickness and (with
 **.npz** with every other array preserved. Use ``--out-key zfill`` to add the
 filled field alongside the original elevation instead of replacing it.
 
+``--check`` is also useful on its own, as a diagnostic. Interior sinks are the
+cells with no strictly lower neighbour, which are what seed the flat routing
+that can make the flow operator singular over a large block and abort a run
+with an un-drained-region message (see :ref:`flow`). A count in the tens of
+thousands says the input topography is the problem rather than the solver.
+
 A priority-flood needs outlets, and the three ways of declaring them are:
 
 - ``--sea-level Z``: every node strictly below ``Z`` is an outlet. This is the

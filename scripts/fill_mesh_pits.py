@@ -185,18 +185,21 @@ def count_sinks(elev, indptr, indices, outlets, absorbing):
     Under `absorbing` an outlet swallows whatever reaches it, so touching one is
     enough to drain; otherwise a node needs a strictly lower neighbour.
     """
-    sinks = 0
-    for node in range(len(elev)):
-        if outlets[node]:
-            continue
-        nbrs = indices[indptr[node]:indptr[node + 1]]
-        if not len(nbrs):
-            continue
-        if absorbing and outlets[nbrs].any():
-            continue
-        if not (elev[nbrs] < elev[node]).any():
-            sinks += 1
-    return sinks
+    # Vectorised over the CSR: a per-node reduction with `reduceat`, so this
+    # stays usable on a multi-million-node mesh (a Python loop over the nodes
+    # took minutes there, which defeats the point of a quick diagnostic).
+    has_nbrs = np.diff(indptr) > 0
+    starts = indptr[:-1][has_nbrs]
+    lowest = np.full(len(elev), np.inf)
+    lowest[has_nbrs] = np.minimum.reduceat(elev[indices], starts)
+    drains = lowest < elev
+    if absorbing:
+        touches = np.zeros(len(elev), dtype=bool)
+        touches[has_nbrs] = np.maximum.reduceat(
+            outlets[indices].astype(np.int8), starts
+        ).astype(bool)
+        drains |= touches
+    return int(np.count_nonzero(~drains & ~outlets & has_nbrs))
 
 
 def parse_outlets(spec, npoints):
@@ -282,8 +285,9 @@ def main(argv=None):
     parser.add_argument(
         "--check",
         action="store_true",
-        help="report the remaining interior sinks before and after (O(n), slow "
-        "on a large mesh)",
+        help="count the interior sinks (cells with no strictly lower "
+        "neighbour) before and after filling — the quick way to tell whether a "
+        "goSPL un-drained-region abort comes from the input topography",
     )
     if argv is None:
         argv = sys.argv[1:]
