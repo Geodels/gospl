@@ -40,6 +40,15 @@ run removes the interpolation noise and the NODATA flats without deleting the
 real endorheic basins. Every depression is measured and the largest are
 printed even with no limit set, so one run tells you where to put one.
 
+``--flat-resolve`` changes how each filled flat drains. Priority-Flood applies
+its increment in the order the flood reached each cell, so the filled surface
+descends along the flood tree and flow across a flat comes out in bands
+radiating from its spill point. Changing ``--epsilon`` cannot fix that (it
+rescales the gradient without reshaping it; flow directions are identical over
+four orders of magnitude). Garbrecht & Martz (1997) instead grade the flat away
+from the cells where water enters and towards the cells where it leaves, so
+the pattern follows the surrounding terrain.
+
 ``--outlet-mode`` then decides what an outlet means to its upslope neighbours:
 
 * ``elevation`` (default) seeds the flood at each outlet's own elevation, the
@@ -117,6 +126,181 @@ def hull_nodes(cells):
     key = np.sort(edge_list(cells).astype(np.int64), axis=1)
     uniq, counts = np.unique(key, axis=0, return_counts=True)
     return np.unique(uniq[counts == 1])
+
+
+def gather_neighbours(nodes, indptr, indices):
+    """All neighbours of `nodes`, plus the index into `nodes` each came from."""
+    counts = indptr[nodes + 1] - indptr[nodes]
+    total = int(counts.sum())
+    if total == 0:
+        return np.empty(0, dtype=indices.dtype), np.empty(0, dtype=np.int64)
+    source = np.repeat(np.arange(len(nodes)), counts)
+    offset = np.arange(total) - np.repeat(np.cumsum(counts) - counts, counts)
+    return indices[np.repeat(indptr[nodes], counts) + offset], source
+
+
+def multi_source_bfs(seeds, labels, indptr, indices):
+    """Breadth-first hop count from `seeds`, never crossing a label boundary.
+
+    Every flat is expanded at once; restricting each step to neighbours sharing
+    the source's label keeps two adjacent flats at different levels from
+    bleeding into one another. Returns -1 where unreached.
+    """
+    dist = np.full(len(labels), -1, dtype=np.int32)
+    frontier = np.flatnonzero(seeds).astype(np.int64)
+    dist[frontier] = 0
+    step = 0
+    while len(frontier):
+        step += 1
+        nbrs, source = gather_neighbours(frontier, indptr, indices)
+        keep = (labels[nbrs] >= 0) & (labels[nbrs] == labels[frontier[source]])
+        nbrs = np.unique(nbrs[keep & (dist[nbrs] < 0)])
+        if not len(nbrs):
+            break
+        dist[nbrs] = step
+        frontier = nbrs
+    return dist
+
+
+def flat_labels(filled, indptr, indices, tol):
+    """Label the flats that need resolving.
+
+    A flat is a connected run of cells at the same level (equal after rounding
+    to `tol`, which absorbs the fill's own epsilon) holding at least one cell
+    with no lower neighbour, i.e. somewhere water would have nowhere to go.
+    Returns (labels, nflats) with -1 outside a flat.
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    npoints = len(filled)
+    level = np.round(filled / tol) * tol
+    rows = np.repeat(np.arange(npoints), np.diff(indptr))
+    same = level[indices] == level[rows]
+
+    graph = csr_matrix((same.astype(np.int8), indices, indptr),
+                       shape=(npoints, npoints))
+    graph.eliminate_zeros()
+    _, comp = connected_components(graph, directed=False)
+
+    # Keep only components that are more than one cell AND contain a cell with
+    # no strictly lower neighbour (a single cell on a slope needs no gradient).
+    lowest = np.full(npoints, np.inf)
+    has_nbrs = np.diff(indptr) > 0
+    lowest[has_nbrs] = np.minimum.reduceat(
+        level[indices], indptr[:-1][has_nbrs]
+    )
+    stuck = np.bincount(comp, weights=(lowest >= level).astype(float),
+                        minlength=comp.max() + 1)
+    size = np.bincount(comp, minlength=comp.max() + 1)
+    active = (stuck > 0) & (size > 1)
+
+    labels = np.full(npoints, -1, dtype=np.int64)
+    sel = active[comp]
+    if sel.any():
+        remap = np.full(len(active), -1, dtype=np.int64)
+        remap[np.flatnonzero(active)] = np.arange(int(active.sum()))
+        labels[sel] = remap[comp[sel]]
+    return labels, int(active.sum())
+
+
+def resolve_flats(filled, indptr, indices, epsilon, tol):
+    """Replace the flood-order gradient on each flat with Garbrecht & Martz.
+
+    Priority-Flood + epsilon leaves a surface that descends along the order the
+    flood reached each cell, so flow on a filled flat radiates from the spill
+    point in bands: the geometric artefact. Garbrecht & Martz (1997) instead
+    combine two distance fields over the flat,
+
+    * ``d_low``  hops to the nearest outlet (a cell touching lower ground),
+    * ``d_high`` hops from the nearest inlet (a cell touching higher ground),
+
+    and drain the flat down `d_low` while tilting away from the high rim, which
+    is what turns a fan into convergent, channel-like drainage.
+
+    The away-from-the-rim term is deliberately kept **fractional**, i.e. below
+    one `d_low` step, which makes the construction provably sink-free: any cell
+    with ``d_low > 0`` has a neighbour one hop closer to the outlet, and the
+    increment there is lower by ``1 + (frac difference) > 0``. Descent is
+    strictly monotone in a scalar field, so no cycle can form either.
+
+    The per-flat rise is additionally capped at half the drop to the flat's
+    lowest outside neighbour, so resolving a flat can never invert the step
+    into whatever it drains into, however tight that step is.
+
+    :return: (surface, nflats, nresolved)
+    """
+    labels, nflats = flat_labels(filled, indptr, indices, tol)
+    if nflats == 0:
+        return filled, 0, 0
+
+    npoints = len(filled)
+    level = np.round(filled / tol) * tol
+    rows = np.repeat(np.arange(npoints), np.diff(indptr))
+    inflat = labels >= 0
+    edge = inflat[rows] & (labels[indices] != labels[rows])
+
+    # Seeds: flat cells touching lower ground (outlets) and higher ground
+    # (inlets). These tests use the EXACT surface, not the rounded level that
+    # groups the flat: a spill that drops less than one rounding quantum is
+    # invisible to the rounded test, which left the flat looking outlet-less
+    # and so unresolved, i.e. still perfectly flat and still a sink (67 of them
+    # on the first run here). `np.logical_or.at` is the scatter-OR over the
+    # edge list.
+    low_seed = np.zeros(npoints, dtype=bool)
+    high_seed = np.zeros(npoints, dtype=bool)
+    np.logical_or.at(low_seed, rows[edge], filled[indices][edge] < filled[rows][edge])
+    np.logical_or.at(high_seed, rows[edge], filled[indices][edge] > filled[rows][edge])
+
+    d_low = multi_source_bfs(low_seed, labels, indptr, indices)
+    d_high = multi_source_bfs(high_seed, labels, indptr, indices)
+
+    # Per-flat normalisation of the away-from-the-rim term, and the headroom
+    # available above the flat before it would collide with what it drains to.
+    lab = labels[inflat]
+    hi = np.where(d_high[inflat] < 0, 0, d_high[inflat]).astype(float)
+    hmax = np.zeros(nflats)
+    np.maximum.at(hmax, lab, hi)
+
+    # Headroom. The cap has to be SYMMETRIC: bounding a flat's rise by its own
+    # drop protects the step down to whatever it drains into, but says nothing
+    # about a flat that is itself the LOWER member of a stacked pair, which can
+    # climb into the cell above it (19 new sinks on the first run here, all of
+    # that shape: the cell never moved, its lower neighbour in the next flat
+    # rose past it). So take the smallest level gap across ANY boundary edge of
+    # the flat, in either direction, and let each side use at most half of it:
+    # two adjacent flats then each rise by <= g/2 and the ordering survives.
+    gap = np.full(nflats, np.inf)
+    diff = np.abs(filled[rows[edge]] - filled[indices[edge]])
+    nz = diff > 0.0
+    if nz.any():
+        np.minimum.at(gap, labels[rows[edge][nz]], diff[nz])
+
+    # Flats with no outlet at all (a depression kept by a --max-* limit) keep
+    # the surface they have: there is nothing to drain them towards.
+    resolvable = np.bincount(lab, weights=(d_low[inflat] >= 0).astype(float),
+                             minlength=nflats) > 0
+
+    inc = np.zeros(npoints)
+    ok = inflat & (d_low >= 0)
+    ok[ok] = resolvable[labels[ok]]
+    away = np.where(d_high[ok] < 0, 0.0, hmax[labels[ok]] - d_high[ok])
+    inc[ok] = d_low[ok] + away / (hmax[labels[ok]] + 1.0)
+
+    imax = np.zeros(nflats)
+    np.maximum.at(imax, labels[ok], inc[ok])
+    scale = np.minimum(epsilon, 0.5 * gap / np.maximum(imax, 1.0))
+
+    # ADD the gradient to the filled surface rather than rebuilding it from the
+    # flat's level: `level` is rounded to `tol`, so rebuilding could drop a cell
+    # by up to `tol` below its input elevation (it did: 600 cells on the first
+    # run here). Adding a non-negative increment cannot lower anything, and any
+    # residual ULP-scale variation left by the fortran fill is ~9 orders of
+    # magnitude under the gradient being laid on top, so the ordering is set
+    # entirely by `inc`.
+    surface = filled.copy()
+    surface[ok] += scale[labels[ok]] * inc[ok]
+    return surface, nflats, int(ok.sum())
 
 
 def vertex_areas(coords, cells):
@@ -359,6 +543,22 @@ def main(argv=None):
         "(default: %(default)s)",
     )
     parser.add_argument(
+        "--flat-resolve",
+        action="store_true",
+        help="shape the gradient across each filled flat with Garbrecht & "
+        "Martz (away from the high rim, towards the outlet) instead of the "
+        "flood order, which drains a flat in geometric bands radiating from "
+        "its spill point. Implies a zero-increment fill; --epsilon then sets "
+        "the resolved gradient",
+    )
+    parser.add_argument(
+        "--flat-tol",
+        type=float,
+        default=1.0e-6,
+        help="elevations within this are one flat (default: %(default)s m, "
+        "which absorbs the fortran fill's ULP increments)",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="count the interior sinks (cells with no strictly lower "
@@ -458,8 +658,29 @@ def main(argv=None):
         filled = fill_fortran(elev, cells, outlets, base_level, absorbing)
         print("backend: fortran epsfill (increment = 1 ULP)")
     else:
-        filled = fill_python(elev, indptr, indices, outlets, args.epsilon, absorbing)
-        print("backend: python priority-flood (increment = %g m)" % args.epsilon)
+        # Flat resolution replaces the in-flat gradient wholesale, so the fill
+        # must not lay a full-size one down first: a per-cell `--epsilon` would
+        # split every flat into single-cell levels and leave nothing to
+        # resolve. But it must not be ZERO either. With a zero increment a
+        # filled basin can come out exactly level with the ground it drains
+        # through, so no cell of the flat has a lower neighbour and the outlet
+        # direction is simply not recoverable from the surface (67 flats stayed
+        # unresolved, and so stayed sinks, when this was 0.0). The flood order
+        # is what encodes the way out, so keep a token increment: far below
+        # `--flat-tol`, hence invisible to the grouping, but enough to mark the
+        # cell each flat was entered from. This is what the fortran backend
+        # gets for free from `nearest()`.
+        fill_eps = args.flat_tol * 1.0e-3 if args.flat_resolve else args.epsilon
+        filled = fill_python(elev, indptr, indices, outlets, fill_eps, absorbing)
+        print("backend: python priority-flood (increment = %g m)" % fill_eps)
+
+    if args.flat_resolve:
+        filled, nflats, nresolved = resolve_flats(
+            filled, indptr, indices, args.epsilon, args.flat_tol
+        )
+        print("flat resolution: %d flat(s), %d cell(s) re-graded "
+              "(Garbrecht & Martz, up to %g m per cell)"
+              % (nflats, nresolved, args.epsilon))
 
     if (filled < elev).any():
         raise SystemExit("internal error: the fill lowered %d node(s)"

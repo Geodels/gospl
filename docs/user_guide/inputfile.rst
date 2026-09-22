@@ -182,6 +182,56 @@ point of keeping them.
   builds internally; on a near-uniform Delaunay mesh the two agree to within a
   few percent, well inside what a volume threshold needs.
 
+Geometric drainage on a filled flat
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Flow accumulation computed over a filled flat often shows obviously artificial
+patterns: parallel bands, or a fan radiating from one point. That is inherent
+to Priority-Flood + :math:`\mathrm{\epsilon}`. The increment is applied in the
+order the flood reached each cell, so the resulting surface descends along the
+flood tree, which spreads outward from the flat's spill point and has nothing
+to do with the surrounding terrain.
+
+**Changing** ``--epsilon`` **does not help.** It rescales that gradient without
+reshaping it, so the flow directions are unchanged: measured over four orders
+of magnitude (:math:`\mathrm{10^{-6}}` to :math:`\mathrm{10^{-2}}` m), every
+flow direction on a test flat was identical and the fill surfaces correlated to
+1.000000.
+
+``--flat-resolve`` replaces the flood-order gradient with Garbrecht & Martz
+(1997), which combines two distance fields across each flat, one measured from
+the cells where water enters (touching higher ground) and one to the cells
+where it leaves (touching lower ground). The flat then drains toward its outlet
+while tilting away from its inflow rim, so the pattern is set by the terrain
+around the flat rather than by the flood order::
+
+    python scripts/fill_mesh_pits.py mesh.npz -o mesh_filled.npz \
+        --sea-level 0. --flat-resolve --epsilon 1.e-4 --check
+
+``--epsilon`` then sets the resolved gradient rather than the flood increment,
+and ``--flat-tol`` (default :math:`\mathrm{10^{-6}}` m) is the elevation window
+within which cells count as one flat.
+
+Be clear about what this buys. It removes the *geometric* signature and orients
+the flow using real information, and on a large flat it also concentrates the
+drainage into channels (peak drainage area rose 73 % on a 610-cell test flat).
+On a small flat it mostly just changes which cells carry the flow. It cannot
+invent real drainage: on a flat that exists only because the source data was
+clipped or NODATA-filled, every pattern is fabricated, and fixing the source
+data beats any flat-resolution algorithm.
+
+.. note::
+
+  Two properties are guaranteed and regression-tested
+  (``test_flat_resolve_is_sink_free_and_reshapes_drainage``): resolution never
+  lowers a cell, and it never leaves a cell without a lower neighbour. The
+  second is easy to lose. A flat's rise is capped at half the smallest
+  elevation gap to *any* neighbouring flat, in both directions, so that two
+  stacked flats cannot climb into each other; and the fill underneath keeps a
+  token increment, because on an exactly-zero-increment fill a basin can come
+  out precisely level with the ground it drains through, leaving the way out
+  unrecoverable from the surface.
+
 A priority-flood needs outlets, and the three ways of declaring them are:
 
 - ``--sea-level Z``: every node strictly below ``Z`` is an outlet. This is the
