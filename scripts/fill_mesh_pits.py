@@ -211,6 +211,30 @@ def parse_outlets(spec, npoints):
     return mask
 
 
+def normalise_numeric_argv(argv):
+    """Make ``--sea-level -50.`` parse.
+
+    argparse only accepts a leading-``-`` token as a value when it matches its
+    negative-number pattern (``-50`` or ``-50.0``); the trailing-dot spelling
+    goSPL uses everywhere else (``-50.``) misses it and is read as an unknown
+    option, which fails with a confusing "expected one argument". Rewrite that
+    one shape into an equivalent argparse does accept. The ``--sea-level=-50.``
+    form is a single token and was never affected.
+    """
+    numeric = ("--sea-level", "--epsilon")
+    out = []
+    expects_value = False
+    for token in argv:
+        if expects_value and token.startswith("-"):
+            try:
+                token = repr(float(token))
+            except ValueError:
+                pass
+        expects_value = token in numeric
+        out.append(token)
+    return out
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -261,7 +285,12 @@ def main(argv=None):
         help="report the remaining interior sinks before and after (O(n), slow "
         "on a large mesh)",
     )
-    args = parser.parse_args(argv)
+    if argv is None:
+        argv = sys.argv[1:]
+    args = parser.parse_args(normalise_numeric_argv(argv))
+
+    if args.epsilon < 0.0:
+        raise SystemExit("--epsilon must be >= 0 (got %g)" % args.epsilon)
 
     arrays, _coords, cells, elev = read_mesh(
         args.npz, args.coords_key, args.cells_key, args.elev_key
@@ -287,6 +316,11 @@ def main(argv=None):
         raise SystemExit(
             "no outlet node selected (%s) — the flood would have no seed and "
             "the mesh would come back unchanged" % seeding
+        )
+    if outlets.all():
+        raise SystemExit(
+            "every node is an outlet (%s) — outlets are never raised, so there "
+            "is nothing left to fill" % seeding
         )
     absorbing = args.outlet_mode == "absorbing"
     print("outlets: %d node(s) (%s, %s)" % (outlets.sum(), seeding, args.outlet_mode))
