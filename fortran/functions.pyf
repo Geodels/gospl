@@ -276,9 +276,10 @@ python module _fortran
             integer, optional,check(len(pitnb)>=n),depend(pitnb) :: n=len(pitnb)
         end subroutine pits_cons
 
-        subroutine globalngbhs(nt, cells, n)
+        subroutine globalngbhs(nt, cells, nover, n)
             integer intent(in) :: nt
             integer dimension(n,3),intent(in) :: cells
+            integer intent(out) :: nover
             integer, optional,check(shape(cells,0)==n),depend(cells) :: n=shape(cells,0)
         end subroutine globalngbhs
 

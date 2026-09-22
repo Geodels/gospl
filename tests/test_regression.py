@@ -7247,3 +7247,64 @@ def test_dh_flexure_grid_placed_at_mesh_radius():
         "eigenvalues are physical and MUST scale as 1/radius**4 — only the "
         "interpolation geometry should follow the mesh."
     )
+
+
+def _fan_mesh(degree):
+    """A single central vertex of the requested degree, ringed by triangles."""
+    angle = np.linspace(0.0, 2.0 * np.pi, degree, endpoint=False)
+    coords = np.zeros((degree + 1, 3), dtype=np.float64)
+    coords[1:, 0] = np.cos(angle)
+    coords[1:, 1] = np.sin(angle)
+    cells = np.array(
+        [[0, 1 + i, 1 + (i + 1) % degree] for i in range(degree)], dtype=np.int32
+    )
+    return coords, cells
+
+
+def test_globalngbhs_reports_over_degree_vertices():
+    """
+    Protects: `globalngbhs` must NOT write past the fixed 12-slot global
+    neighbour table `FVgnID(nt, 12)`, and must tell the caller when a vertex
+    could not be stored in full.
+
+    Silent failure prevented: the routine used to append with
+    `nb = FVgnNb(n) + 1; FVgnID(n, nb) = ...` and no bound check, so a vertex
+    of degree > 12 wrote outside the array. That is the `faceVel` bug class
+    (see AGENTS.md > Intentional surprises): a heap overflow that macOS
+    tolerates silently and glibc turns into a wandering SIGABRT at the next
+    malloc, nowhere near the real culprit. goSPL's own meshes are degree <= 8,
+    so only an externally generated or locally refined input mesh triggers it.
+
+    The contract now: the excess connections are dropped rather than written,
+    `nover` counts the vertices that overflowed, `FVgnNb` is clamped to 12 so
+    a caller that ignores `nover` still cannot walk the table out of bounds,
+    and `UnstMesh._buildMesh` raises on `nover > 0`.
+    """
+    fortran = pytest.importorskip(
+        "gospl._fortran", reason="goSPL Fortran extension not built"
+    )
+
+    for degree in (6, 12):
+        coords, cells = _fan_mesh(degree)
+        assert fortran.globalngbhs(len(coords), cells) == 0, (
+            f"a degree-{degree} vertex fits in the 12-slot table and must not "
+            f"be reported as an overflow."
+        )
+
+    for degree in (13, 20):
+        coords, cells = _fan_mesh(degree)
+        nover = fortran.globalngbhs(len(coords), cells)
+        assert nover == 1, (
+            f"a degree-{degree} vertex overflows the 12-slot table; expected "
+            f"exactly 1 over-degree vertex, got {nover}."
+        )
+        # The table must still be walkable: epsfill loops `k = 1, FVgnNb(i)`
+        # and indexes FVgnID(i, k), so an unclamped count would read out of
+        # bounds here. Elevations are strictly increasing away from the centre,
+        # so the fill is a no-op and only the traversal is under test.
+        elev = np.zeros(len(coords), dtype=np.float64)
+        elev[0] = -1.0
+        elev[1:] = 1.0 + 0.1 * np.arange(degree)
+        filled = fortran.epsfill(elev.min() + 0.01, elev)
+        assert np.isfinite(filled).all()
+        assert (filled >= elev).all()

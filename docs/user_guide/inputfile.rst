@@ -36,7 +36,7 @@ Initial mesh definition and simulation declaration
 
         The following parameters are **required**:
 
-        a. the initial spherical or 2D surface mesh ``npdata`` (**.npz** file). This file contains the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells.
+        a. the initial spherical or 2D surface mesh ``npdata`` (**.npz** file). This file contains the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells. **No vertex may have more than 12 neighbours**: goSPL's finite-volume neighbour tables are fixed at 12 slots per vertex, and a mesh that exceeds it is rejected at start-up with an explicit error rather than being silently truncated. Near-uniform Delaunay meshes (icosahedral refinement, `jigsaw`, `stripy`) stay well under that limit; a strongly refined or hand-edited triangulation may not.
         b. the flow direction method to be used ``flowdir`` that takes an integer value between 1 (for SFD) and 6 (for MFD)
 
         The planet geometry defaults to **Earth** but can be overridden to model another body (both optional): ``radius`` is the planet radius in metres (default ``6378137.0``) used for the spherical-mesh geometry, and ``gravity`` is the surface gravity in m/s\ :sup:`2` (default ``9.81``) used by the flexural-isostasy solver. For example a Mars run would set ``radius: 3389500.0`` and ``gravity: 3.71``.
@@ -104,6 +104,71 @@ Initial mesh definition and simulation declaration
   dedicated, infinite bedrock reservoir (composition ``bedrock_coarse_frac``)
   *beneath* these finite layers, so erosion that exhumes the whole initial pile
   then taps bedrock rather than the deepest supplied layer.
+
+
+.. _fillpits:
+
+Conditioning the initial topography (optional)
+-----------------------------------------------
+
+goSPL does **not** need a depression-free input mesh: it fills depressions
+internally at every step (see :ref:`dep`) and deliberately keeps the *unfilled*
+surface as the real elevation, so lakes and endorheic basins are physical
+features of the run rather than defects. Pre-filling the input is therefore an
+explicit change of initial condition, not a fix, and it is worth doing only when
+you actually want a drainage-consistent starting DEM, for instance to remove the
+interpolation artefacts of a resampled global dataset, or to clear a wide,
+nearly flat pocket that would otherwise pond for the whole simulation (the
+``[flow] downstream cascade stalled …`` case discussed in :ref:`flow`).
+
+The helper ``scripts/fill_mesh_pits.py`` does this on the ``npdata`` file
+directly, using the same priority-flood + :math:`\mathrm{\epsilon}` kernel the
+model runs internally::
+
+    # global mesh, ocean as the base level
+    python scripts/fill_mesh_pits.py input/mesh.npz -o input/mesh_filled.npz \
+        --sea-level 0. --check
+
+    # planar mesh, domain edges as outlets, with a physical increment
+    python scripts/fill_mesh_pits.py input/flat.npz -o input/flat_filled.npz \
+        --borders --backend python --epsilon 1.e-4 --check
+
+It reports how many nodes were raised, the maximum fill thickness and (with
+``--check``) the number of interior sinks before and after, then writes a new
+**.npz** with every other array preserved. Use ``--out-key zfill`` to add the
+filled field alongside the original elevation instead of replacing it.
+
+A priority-flood needs outlets, and the three ways of declaring them are:
+
+- ``--sea-level Z``: every node strictly below ``Z`` is an outlet. This is the
+  model's own seeding (it uses ``sealevel + oFill`` for the marine routing
+  surface).
+- ``--borders``: the mesh hull nodes, detected as the edges that belong to a
+  single triangle. The natural choice for a planar mesh.
+- ``--outlets IDS``: explicit node indices, from a ``.npy`` file or a comma
+  separated list.
+
+Outlets are never raised, whichever mode is used, so a closed basin that dips
+below ``--sea-level`` remains a sink by construction. ``--outlet-mode`` then
+sets what an outlet means to the cells above it: ``elevation`` (default) seeds
+the flood at each outlet's own height, the classic DEM convention in which an
+interior cell must be raised over the rim before it can drain; ``absorbing``
+treats outlets as bottomless, which is what goSPL itself does on a planar mesh
+because flow leaves an open or fixed edge regardless of its elevation.
+
+.. warning::
+
+  **Choose the increment to match how the result is stored.** The default
+  ``fortran`` backend is the model's own kernel and raises each cell by one
+  floating-point ULP, which is about :math:`\mathrm{10^{-13}}` m at an
+  elevation of 1000 m. That is enough to order a descent inside a double
+  precision calculation, which is all the model needs, but it does **not**
+  survive being written at lower precision: rounding a ULP-filled surface to
+  float32 restores essentially every depression it removed. When the filled
+  elevation is written to disk and read back, use ``--backend python`` with a
+  physical ``--epsilon`` (``1.e-4`` m is ample), and keep the array in
+  ``float64``. The two backends agree on which cells are depressions; they
+  differ only in the size of the increment.
 
 
 Setting model temporal evolution

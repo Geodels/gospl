@@ -294,9 +294,24 @@ class UnstMesh(object):
         gZ = loadData[self.infoElev]
         mCells = loadData[self.infoCells].astype(int)
 
-        # Get global mesh vertex neighbors
+        # Get global mesh vertex neighbors (rank 0 owns the table; `epsfill` is
+        # serial). `nover` is the number of vertices whose degree exceeds the 12
+        # slots the Fortran table provides: their extra connections are dropped,
+        # which silently breaks the marine routing surface, so treat it as a
+        # fatal input-mesh error. The count is bcast (collective on every rank)
+        # so every rank raises the same error instead of rank 0 raising alone.
+        nover = 0
         if MPIrank == 0:
-            globalngbhs(self.mpoints, mCells)
+            nover = globalngbhs(self.mpoints, mCells)
+        nover = MPI.COMM_WORLD.bcast(nover, root=0)
+        if nover > 0:
+            raise ValueError(
+                "Input mesh '%s' has %d vertices with more than 12 neighbours. "
+                "goSPL's finite-volume neighbour tables are fixed at 12 slots "
+                "per vertex, so those connections cannot be stored; "
+                "re-generate the mesh with a lower maximum vertex degree."
+                % (self.meshFile, nover)
+            )
         mCells = None
         self.vtkMesh = None
         self.flatModel = False

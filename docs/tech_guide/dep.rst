@@ -32,6 +32,10 @@ The approach proposed in goSPL is more general than the one in the initial paper
 
   The priority-flood algorithm returns the **flooded elevation** and for each depression its **volume**, its **spill over node**  and a **basin unique identifier** assigned to each of the nodes belonging to the depression.
 
+.. note::
+
+  All of this happens **at runtime, on a working copy**: the depressions are filled to route the flow, and the elevation goSPL evolves and writes out remains the unfilled one, so lakes and endorheic basins are simulated rather than removed. If you do want the *initial* mesh itself to be depression-free, fill it beforehand with ``scripts/fill_mesh_pits.py`` (see :ref:`fillpits`), which applies the same priority-flood + :math:`\mathrm{\epsilon}` to the ``npdata`` file.
+
 Parallel implementation
 ---------------------------------
 

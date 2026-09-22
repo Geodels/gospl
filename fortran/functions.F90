@@ -2536,7 +2536,16 @@ end subroutine sort_ids
 !!                                                  !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine globalngbhs(nt, cells, n)
+subroutine globalngbhs(nt, cells, nover, n)
+!*****************************************************************************
+! Build the global vertex-neighbour table (FVgnNb/FVgnID) walked by epsfill.
+!
+! The table is fixed at maxngbhs slots per vertex, so a vertex of higher degree
+! cannot be stored. The excess connections are DROPPED (never written past the
+! end of FVgnID, which used to corrupt the heap) and `nover` returns how many
+! vertices overflowed; the caller is expected to treat nover > 0 as a fatal
+! input-mesh error. FVgnNb is clamped to maxngbhs on exit so a caller that
+! ignores nover still cannot walk FVgnID out of bounds.
 
   use meshparams
   implicit none
@@ -2544,91 +2553,63 @@ subroutine globalngbhs(nt, cells, n)
   integer :: n
   integer, intent(in) :: nt
   integer, intent(in) :: cells(n, 3)
+  ! Number of vertices whose degree exceeds the maxngbhs slots available
+  integer, intent(out) :: nover
 
-  integer :: i, k, nb, n1, n2, n3
-  integer :: nc11, nc12, nc21, nc22, nc31, nc32
+  integer, parameter :: maxngbhs = 12
+
+  integer :: i, j, q, k, nb, nid, ngb
   integer :: nc(3)
 
-  logical :: in11, in12, in21, in22, in31, in32
+  logical :: newngb
 
   ! Define mesh parameters
   if(allocated(FVgnID)) deallocate(FVgnID)
   if(allocated(FVgnNb)) deallocate(FVgnNb)
-  allocate(FVgnID(nt,12))
+  allocate(FVgnID(nt,maxngbhs))
   allocate(FVgnNb(nt))
 
   FVgnID = -1
   FVgnNb = 0
+  nover = 0
 
   ! Find all cells surrounding a given vertice
   do i = 1, n
     nc = cells(i,1:3)+1
 
-    n1 = nc(1)
-    nc11 = nc(2)
-    nc12 = nc(3)
-    n2 = nc(2)
-    nc21 = nc(1)
-    nc22 = nc(3)
-    n3 = nc(3)
-    nc31 = nc(1)
-    nc32 = nc(2)
+    ! Each of the 3 vertices of the triangle gets the other 2 as neighbours;
+    ! the (j, q/=j) order matches the former unrolled form exactly, so the
+    ! stored neighbour order is unchanged.
+    do j = 1, 3
+      nid = nc(j)
+      do q = 1, 3
+        if(q == j) cycle
+        ngb = nc(q)
 
-    in11 = .True.
-    in12 = .True.
-    in21 = .True.
-    in22 = .True.
-    in31 = .True.
-    in32 = .True.
-    do k = 1, 12
-      if(FVgnID(n1,k)==nc11) in11 = .False.
-      if(FVgnID(n1,k)==nc12) in12 = .False.
-      if(FVgnID(n2,k)==nc21) in21 = .False.
-      if(FVgnID(n2,k)==nc22) in22 = .False.
-      if(FVgnID(n3,k)==nc31) in31 = .False.
-      if(FVgnID(n3,k)==nc32) in32 = .False.
+        newngb = .True.
+        do k = 1, min(FVgnNb(nid), maxngbhs)
+          if(FVgnID(nid,k) == ngb) newngb = .False.
+        enddo
+
+        if(newngb)then
+          nb = FVgnNb(nid) + 1
+          FVgnNb(nid) = nb
+          ! Out of slots: drop the connection rather than writing past the end
+          ! of FVgnID. The count still grows so the overflow can be reported.
+          if(nb <= maxngbhs) FVgnID(nid, nb) = ngb
+        endif
+
+      enddo
     enddo
-
-    if(in11)then
-      nb = FVgnNb(n1) + 1
-      FVgnNb(n1) = nb
-      FVgnID(n1, nb) = nc11
-    endif
-
-    if(in12)then
-      nb = FVgnNb(n1) + 1
-      FVgnNb(n1) = nb
-      FVgnID(n1, nb) = nc12
-    endif
-
-    if(in21)then
-      nb = FVgnNb(n2) + 1
-      FVgnNb(n2) = nb
-      FVgnID(n2, nb) = nc21
-    endif
-
-    if(in22)then
-      nb = FVgnNb(n2) + 1
-      FVgnNb(n2) = nb
-      FVgnID(n2, nb) = nc22
-    endif
-
-    if(in31)then
-      nb = FVgnNb(n3) + 1
-      FVgnNb(n3) = nb
-      FVgnID(n3, nb) = nc31
-    endif
-
-    if(in32)then
-      nb = FVgnNb(n3) + 1
-      FVgnNb(n3) = nb
-      FVgnID(n3, nb) = nc32
-    endif
   enddo
+
+  ! Report the over-degree vertices, then clamp the counts back into the table
+  nover = count(FVgnNb > maxngbhs)
+  FVgnNb = min(FVgnNb, maxngbhs)
 
   return
 
-end subroutine globalngbhs 
+end subroutine globalngbhs
 
 subroutine epsfill(sl, elev, fillz, nb)
 !*****************************************************************************

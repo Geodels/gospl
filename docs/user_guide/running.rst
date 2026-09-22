@@ -282,6 +282,23 @@ Then list the output in the ``ice.glaciers`` time series (``hela: ['glaciers_0Ma
 'hela']`` etc.; see :ref:`surfproc`). ``--reference surface|sealevel`` selects
 whether the temperature map is at the surface or reduced to sea level.
 
+Depression-filling the input mesh (``scripts/fill_mesh_pits.py``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Another **pre-processing** helper, run from the repository rather than as a
+console command. It applies the model's own priority-flood +
+:math:`\mathrm{\epsilon}` to the ``npdata`` mesh, so the simulation starts from
+a drainage-consistent surface::
+
+    python scripts/fill_mesh_pits.py input/mesh.npz -o input/mesh_filled.npz \
+        --sea-level 0. --check
+
+goSPL fills depressions internally anyway, so this is an initial-condition
+change and not a prerequisite. :ref:`fillpits` covers when it is worth doing,
+how to declare the outlets (``--sea-level`` / ``--borders`` / ``--outlets``,
+plus ``--outlet-mode``) and why a filled surface that will be written to disk
+needs ``--backend python --epsilon`` rather than the default ULP increment.
+
 .. note::
 
    The console commands (``gospl``, ``gospl-strata-volume``, ``gospl-section``,
@@ -289,7 +306,9 @@ whether the temperature map is at the surface or reduced to sea level.
    appear after installing
    goSPL. Until then, use the equivalent ``python -m gospl.<module>`` form. The
    analysis tools need the optional extras: ``pip install gospl[analysis]``
-   (numba, geopandas, netCDF4, matplotlib).
+   (numba, geopandas, netCDF4, matplotlib). ``scripts/fill_mesh_pits.py`` is
+   deliberately not a console script: it is a one-off mesh-conditioning step
+   that needs only ``numpy`` and the compiled goSPL extension.
 
 From a Jupyter notebook (import the API)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
