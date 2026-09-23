@@ -6859,6 +6859,63 @@ def test_flat_resolve_is_sink_free_and_reshapes_drainage():
     )
 
 
+def test_fill_mesh_pits_flow_accumulation():
+    """
+    Protects: `scripts/fill_mesh_pits.py --flow-accum`, the QC view used to
+    check a conditioned mesh before it is handed to a simulation.
+
+    Three properties, each of which a broken sweep would violate silently and
+    a plot would not reveal: every cell is counted exactly once at exactly one
+    terminal (so the totals over terminals equal the mesh size), accumulation
+    never decreases downstream, and the Numba and pure-Python kernels agree
+    (they are the same source compiled two ways, the `auto` contract the
+    analysis tools use, so a divergence means the njit path is wrong).
+    """
+    pytest.importorskip("scipy", reason="needs scipy for the test mesh")
+    from scipy.spatial import Delaunay
+
+    fmp = _load_fill_mesh_pits()
+
+    n = 30
+    gx, gy = np.meshgrid(np.arange(n, dtype=float), np.arange(n, dtype=float))
+    pts = np.column_stack([gx.ravel(), gy.ravel()])
+    cells = Delaunay(pts).simplices.astype(np.int32)
+    elev = 100.0 + 0.5 * pts[:, 0] + 0.2 * pts[:, 1]
+    elev[np.hypot(pts[:, 0] - 15, pts[:, 1] - 15) < 6] = 97.0
+    npoints = len(elev)
+
+    indptr, indices = fmp.neighbour_csr(npoints, cells)
+    outlets = np.zeros(npoints, dtype=bool)
+    outlets[fmp.hull_nodes(cells)] = True
+    filled = fmp.fill_python(elev, indptr, indices, outlets, 1.0e-4, False)
+
+    accum, receiver = fmp.flow_accumulation(
+        filled, indptr, indices, outlets, method="python"
+    )
+
+    terminal = receiver < 0
+    assert accum[terminal].sum() == npoints, (
+        f"accumulation over the terminal cells is {accum[terminal].sum():.0f}, "
+        f"not the {npoints} cells of the mesh: flow is being lost or "
+        f"double-counted."
+    )
+    assert (accum >= 1.0).all(), "a cell accumulates less than its own area."
+    downstream = receiver >= 0
+    assert (accum[receiver[downstream]] >= accum[downstream]).all(), (
+        "accumulation decreases downstream, so the sweep is not running in "
+        "topological order."
+    )
+
+    numba = pytest.importorskip("numba", reason="njit path needs numba")
+    del numba
+    fast, _ = fmp.flow_accumulation(
+        filled, indptr, indices, outlets, method="numba"
+    )
+    assert np.array_equal(fast, accum), (
+        "the numba and python accumulation kernels disagree."
+    )
+
+
 def test_undrained_cap_env_override(minimal_model):
     """
     Protects: `GOSPL_UNDRAINED_CAP` resolves the un-drained-region cap

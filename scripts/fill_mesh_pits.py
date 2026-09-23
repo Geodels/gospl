@@ -73,6 +73,7 @@ initial topography".
 import argparse
 import heapq
 import sys
+import time
 
 import numpy as np
 
@@ -301,6 +302,71 @@ def resolve_flats(filled, indptr, indices, epsilon, tol):
     surface = filled.copy()
     surface[ok] += scale[labels[ok]] * inc[ok]
     return surface, nflats, int(ok.sum())
+
+
+def _accumulate_impl(order, receiver, area):  # pragma: no cover - see _get_sweep
+    """Push each cell's area down its receiver chain, highest cell first.
+
+    Kept as a plain loop with no numpy fancy-indexing so Numba can compile it
+    unchanged; it is also the pure-Python reference. Same contract as
+    `gospl.analyse.provenance._sweep_impl`.
+    """
+    for k in range(len(order)):
+        node = order[k]
+        down = receiver[node]
+        if down >= 0:
+            area[down] += area[node]
+    return area
+
+
+def _get_sweep(method):
+    """Resolve the accumulation kernel: Numba when available, else Python."""
+    if method == "python":
+        return _accumulate_impl
+    try:
+        import numba
+    except ImportError:
+        if method == "numba":
+            raise SystemExit("--flow-accum-method numba needs numba installed")
+        return _accumulate_impl
+    if not hasattr(_get_sweep, "_njit"):
+        _get_sweep._njit = numba.njit(cache=True)(_accumulate_impl)
+    return _get_sweep._njit
+
+
+def flow_accumulation(surface, indptr, indices, outlets, method="auto", areas=None):
+    """Upstream cell count (or area) over the steepest-descent network.
+
+    Single-flow-direction on purpose. goSPL routes multiple directions, so this
+    is not a preview of the model's discharge; it is a QC view, and SFD is the
+    better one for that because it concentrates the flow into single threads
+    and so makes a flat's drainage pattern obvious rather than smeared.
+
+    :return: (accumulated, receiver) with receiver -1 at a terminal cell.
+    """
+    npoints = len(surface)
+    receiver = np.full(npoints, -1, dtype=np.int64)
+
+    # Steepest lower neighbour of every cell, one direction sweep at a time so
+    # nothing of shape (npoints, max_degree) is ever materialised.
+    best = np.full(npoints, np.inf)
+    counts = np.diff(indptr)
+    for slot in range(int(counts.max())):
+        has = counts > slot
+        nodes = np.flatnonzero(has)
+        nbr = indices[indptr[nodes] + slot]
+        better = surface[nbr] < best[nodes]
+        take = nodes[better]
+        best[take] = surface[nbr[better]]
+        receiver[take] = nbr[better]
+    receiver[best >= surface] = -1          # no strictly lower neighbour
+    receiver[outlets] = -1                  # water leaves the domain here
+
+    accumulated = np.ones(npoints) if areas is None else areas.astype(float).copy()
+    order = np.argsort(surface, kind="stable")[::-1].astype(np.int64)
+    sweep = _get_sweep(method)
+    accumulated = sweep(np.ascontiguousarray(order), receiver, accumulated)
+    return accumulated, receiver
 
 
 def vertex_areas(coords, cells):
@@ -559,6 +625,29 @@ def main(argv=None):
         "which absorbs the fortran fill's ULP increments)",
     )
     parser.add_argument(
+        "--flow-accum",
+        action="store_true",
+        help="compute steepest-descent flow accumulation (upstream cell count) "
+        "on the filled surface and store it in the output npz — the quick way "
+        "to see whether the drainage across a filled flat looks sane",
+    )
+    parser.add_argument(
+        "--flow-accum-key",
+        default="flowacc",
+        help="npz key for the accumulation (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--flow-accum-area",
+        action="store_true",
+        help="accumulate cell AREA in m^2 instead of a cell count",
+    )
+    parser.add_argument(
+        "--flow-accum-method",
+        choices=("auto", "numba", "python"),
+        default="auto",
+        help="accumulation kernel (default: %(default)s)",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="count the interior sinks (cells with no strictly lower "
@@ -722,6 +811,20 @@ def main(argv=None):
     if args.check:
         print("interior sinks after: %d"
               % count_sinks(filled, indptr, indices, outlets, absorbing))
+
+    if args.flow_accum:
+        t0 = time.time()
+        accum, receiver = flow_accumulation(
+            filled, indptr, indices, outlets, args.flow_accum_method,
+            areas=vertex_areas(_coords, cells) if args.flow_accum_area else None,
+        )
+        arrays[args.flow_accum_key] = accum
+        unit = "m2" if args.flow_accum_area else "cells"
+        share = 100.0 * np.count_nonzero(accum > 0.001 * accum.max()) / npoints
+        print("flow accumulation: max %.4g %s, %d terminal cell(s), %.2f%% of "
+              "cells carry >0.1%% of the peak (%.1f s)"
+              % (accum.max(), unit, int((receiver < 0).sum()), share,
+                 time.time() - t0))
 
     out_key = args.out_key or args.elev_key
     arrays[out_key] = filled
