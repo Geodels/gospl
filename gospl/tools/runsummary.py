@@ -117,6 +117,9 @@ class RunSummary(object):
                     "nranks": MPI.COMM_WORLD.Get_size(),
                     "mpoints": int(getattr(model, "mpoints", 0)),
                     "flat": bool(getattr(model, "flatModel", False)),
+                    # closed = no drainable outlet (a sphere, an all-wall box):
+                    # only then must the per-step volume budget close to ~0.
+                    "closed": not bool(getattr(model, "_domainHasOutlet", True)),
                     "tStart": float(getattr(model, "tStart", 0.0)),
                     "tEnd": float(getattr(model, "tEnd", 0.0)),
                     "dt": float(getattr(model, "dt", 0.0)),

@@ -1,0 +1,93 @@
+name: examples-smoke
+
+# Nightly smoke run of the goSPL-examples inputs against goSPL `dev`.
+#
+# The examples repository (Geodels/goSPL-examples) is how most users meet the
+# model, and it has broken several times on model changes it was never run
+# against (the NESW `bc` order, the soil-solver default, open-edge draining).
+# This checks out both repositories and runs every LOCAL example input for two
+# time steps at np=2 (scripts/examples_smoke.py), with the per-step run summary
+# on, so a crash, a NaN or a solver failure in an example surfaces the morning
+# after the change that caused it. Global examples are left to manual dispatch
+# (`only: Global-examples`): they need large meshes and many ranks.
+#
+# "missing-data" results (an input whose data is produced by a notebook or by
+# another example) are reported but do not fail the job.
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "substring filter on example paths"
+        default: "Local-examples"
+      steps:
+        description: "time steps per example"
+        default: "2"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: examples-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: examples / ubuntu / py3.11
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout goSPL
+        uses: actions/checkout@v5
+
+      - name: Checkout goSPL-examples
+        uses: actions/checkout@v5
+        with:
+          repository: Geodels/goSPL-examples
+          path: goSPL-examples
+
+      - name: Cache conda environment
+        # Same key as tests-pr / tests-slow, so the env built there is reused.
+        id: cache-env
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/miniconda3/envs/gospl
+          key: conda-${{ runner.os }}-${{ runner.arch }}-py3.11-v3-${{ hashFiles('environment.yml') }}
+          restore-keys: |
+            conda-${{ runner.os }}-${{ runner.arch }}-py3.11-v3-
+
+      - name: Set up conda env from environment.yml
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          channel-priority: strict
+          conda-remove-defaults: true
+          environment-file: environment.yml
+          activate-environment: gospl
+          python-version: '3.11'
+
+      - name: Install goSPL (editable, builds Fortran extension)
+        run: pip install --no-deps --no-build-isolation -e . -v
+
+      - name: Smoke-run the examples
+        run: |
+          python scripts/examples_smoke.py goSPL-examples \
+            --only "${{ github.event.inputs.only || 'Local-examples' }}" \
+            --steps "${{ github.event.inputs.steps || '2' }}" \
+            --np 2 --timeout 1200 --json smoke-report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: examples-smoke-report
+          path: smoke-report.json
+          if-no-files-found: ignore

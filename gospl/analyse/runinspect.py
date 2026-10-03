@@ -248,7 +248,7 @@ def compare(a, b, step):
     return res
 
 
-def inspect_summary(path, jump=0.1):
+def inspect_summary(path, jump=0.25):
     """Anomalies in a `gospl --summary` JSON-Lines file."""
     recs = [json.loads(l) for l in open(path) if l.strip()]
     head = next((r for r in recs if r.get("start")), {})
@@ -267,22 +267,32 @@ def inspect_summary(path, jump=0.1):
                                "detail": s})
         for e in r.get("events", []):
             kind = e.get("kind")
+            # "benign" = a small isolated pocket left to pond: the documented,
+            # expected outcome (AGENTS.md > Flow accumulation), not an issue.
+            if kind == "flow_ksp_fallback_failed" and e.get("outcome") == "benign":
+                continue
             if kind == "flow_ksp_fallback_failed" or kind == "soil_substep" or \
                kind.endswith("_failed") or (kind == "flow_cascade" and
                                             e.get("outcome") in ("stall", "max_steps")):
                 issues.append({"t": t, "issue": kind, "detail": e})
         if prev is not None:
-            span = max(abs(prev["elev"]["max"]), abs(prev["elev"]["min"]), 1.0)
+            # A needle moves an EXTREME far more than the mean; uniform uplift
+            # or subsidence moves both. Flag the former only.
+            rng = max(prev["elev"]["max"] - prev["elev"]["min"], 1.0)
             dz = max(abs(r["elev"]["max"] - prev["elev"]["max"]),
                      abs(r["elev"]["min"] - prev["elev"]["min"]))
-            if dz > jump * span:
+            dmean = abs(r["elev"]["mean"] - prev["elev"]["mean"])
+            if dz > jump * rng and dz > 5.0 * dmean:
                 issues.append({"t": t, "issue": "elev_extreme_jump",
                                "detail": {"before": prev["elev"], "after": r["elev"]}})
         vol = r.get("volume", {})
         act = vol.get("deposited", 0.0) - vol.get("eroded", 0.0)
-        if act > 0 and abs(vol.get("net", 0.0)) / act > 0.05:
+        # Only a CLOSED domain must balance; on an open one a negative net is
+        # sediment leaving through the boundary. A gain is never physical.
+        net_rel = vol.get("net", 0.0) / act if act > 0 else 0.0
+        if act > 0 and (net_rel > 0.05 or (head.get("closed") and abs(net_rel) > 0.05)):
             issues.append({"t": t, "issue": "volume_imbalance",
-                           "detail": {**vol, "net_rel": vol["net"] / act}})
+                           "detail": {**vol, "net_rel": net_rel}})
         prev = r
     wall = [r["wall_s"] for r in steps]
     phase_tot = {}
