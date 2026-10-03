@@ -33,13 +33,14 @@ on the raw orographic term ``q_s / tau_f`` (``_oroQs``), which isolates the
 discretisation error from the post-processing.
 
 Mesh: flat hexagonal lattice (rows offset by dx/2) built at runtime in
-``tmp_path``. Only the central rows are compared: every domain edge is a zero
-Dirichlet row for q_c and q_s (``advectBorders``), and on a hexagonal lattice the
-faces at +-60 deg to the wind let the zero lateral (wind-parallel) edges bleed
-into the first few km of rows next to them (measured: ~36% RMSE on the edge
-row, decaying to the 0.4% interior level ~3 km in). Upstream of the coast the
-zero inflow edge is exact (no forcing there), and the outflow edge does not
-feed back under upwinding, so only the wind-parallel edges matter.
+``tmp_path``. The central rows carry the main comparison; the lateral
+(wind-parallel) EDGE rows are checked separately. Until 2026-10 every domain
+edge was a zero Dirichlet row for q_c and q_s (``advectBorders``), and on a
+hexagonal lattice the faces at +-60 deg to the wind let those zero lateral edges
+bleed into the rows next to them (34% RMSE on the edge row, decaying over
+~3 km). Only the INFLOW edge is a boundary condition for upwind advection, so
+now only it is pinned (``_oroInflowBorders``) and the edge rows match the
+interior (0.5%).
 """
 from pathlib import Path
 
@@ -187,6 +188,23 @@ def _compare(r, dx):
     )
 
 
+def _edge_rows(r, c):
+    """P_oro RMSE (relative to the peak) on the two lattice rows nearest each
+    wind-parallel edge, away from the inflow/outflow ends."""
+    x, y = r["x"], r["y"]
+    ref = c["ref_oro"]
+    pk = np.abs(ref[c["band"]]).max()
+    row = np.round((y - y.min()) / r["dy"]).astype(int)
+    inner = r["own"] & (x > 2 * DX) & (x < LX - 2 * DX)
+    out = {}
+    for k in (0, 1, row.max() - 1, row.max()):
+        m = inner & (row == k)
+        if m.any():
+            e = r["p_oro"][m] - ref[m]
+            out[int(k)] = float(np.sqrt(np.mean(e ** 2)) / pk)
+    return out
+
+
 def _figure(request, name, r, c, title):
     import matplotlib
     matplotlib.use("Agg")
@@ -256,6 +274,10 @@ def test_orography_ridge_exact(wind_dir, tmp_path, monkeypatch, request):
     # Sea-level clamp: upwind of the coast (submarine slope) there is no
     # orographic forcing at all, so the rain is exactly the background.
     assert c["n_windward"] > 0 and c["windward_err"] < 1e-9
+    # Wind-parallel edges are not a boundary condition: the edge row and its
+    # neighbour match the interior accuracy (34% / 27% before the fix).
+    for k, rm in _edge_rows(r, c).items():
+        assert rm < 0.015, f"edge row {k}: P_oro RMSE {100 * rm:.2f}%"
 
 
 @pytest.mark.benchmark

@@ -707,9 +707,9 @@ class GridProcess(object):
 
         :arg diag: diagonal entries (length ``lpoints``)
         :arg offcoeff: off-diagonal coefficients, shape ``(lpoints, maxnb)``
-        :arg dirichlet: when True, the (non-cyclic) domain edge rows are replaced
-            by an identity row so the precipitation tracers are pinned to zero
-            there (clean inflow / zero-padding equivalent).
+        :arg dirichlet: when True, the INFLOW domain-edge rows
+            (``self._oroInflow``) are replaced by an identity row so the
+            precipitation tracers are pinned to zero there (clean inflow).
 
         :return: assembled PETSc matrix
         """
@@ -717,8 +717,8 @@ class GridProcess(object):
         d = diag.copy()
         off = offcoeff.copy()
         if dirichlet:
-            d[self.advectBorders] = 1.0
-            off[self.advectBorders, :] = 0.0
+            d[self._oroInflow] = 1.0
+            off[self._oroInflow, :] = 0.0
 
         # Single-pass CSR assembly (col 0 = diagonal, cols 1..maxnb = the
         # FVmesh_ngbID neighbour entries) via the shared `_assembleDiffMatCSR`
@@ -761,6 +761,50 @@ class GridProcess(object):
         safe_garbage_cleanup()
 
         return sol
+
+    def _oroInflowBorders(self, u0, v0, grazing=0.05):
+        """
+        Domain-edge nodes where the wind ENTERS the domain: the only edge nodes
+        whose upwind stencil reaches outside the mesh, and therefore the only
+        ones that need a boundary condition (clean, zero-tracer inflow).
+
+        The outward edge normal at a border node is estimated from the mesh as
+        the direction from the mean of its neighbours to the node (the
+        neighbours of an edge node all lie inside the domain), so this works on
+        any domain shape. A node is inflow when the wind blows into the domain
+        through it, ``v̂·n̂ < -grazing``. Wind-parallel (``|v̂·n̂| <= grazing``)
+        and outflow edges are left free: under upwinding their stencil only
+        uses upstream nodes, which exist, so pinning them was what forced the
+        rain to zero along a wind-parallel edge (~36% error on the edge row of a
+        non-aligned mesh, decaying over 2-3 km). Cyclic seams are never in
+        ``advectBorders``.
+
+        Rank-local and partition-invariant for owned nodes (their neighbour
+        lists are complete); ghost rows are dropped at assembly.
+
+        :arg u0, v0: uniform wind components (m/s)
+        :arg grazing: |cos| below which an edge counts as wind-parallel
+
+        :return: local indices of the inflow border nodes
+        """
+
+        b = np.asarray(self.advectBorders, dtype=np.int64)
+        speed = np.hypot(u0, v0)
+        if b.size == 0 or speed == 0.0:
+            return b[:0]
+        ngb = self.FVmesh_ngbID[b]
+        valid = ngb >= 0
+        xy = self.lcoords[:, :2]
+        cnt = np.maximum(valid.sum(axis=1), 1)
+        cx = np.where(valid, xy[np.maximum(ngb, 0), 0], 0.0).sum(axis=1) / cnt
+        cy = np.where(valid, xy[np.maximum(ngb, 0), 1], 0.0).sum(axis=1) / cnt
+        nx = xy[b, 0] - cx
+        ny = xy[b, 1] - cy
+        nrm = np.hypot(nx, ny)
+        ok = nrm > 0.0
+        cosv = np.zeros(b.size)
+        cosv[ok] = (u0 * nx[ok] + v0 * ny[ok]) / (speed * nrm[ok])
+        return b[cosv < -grazing]
 
     def _windVector(self):
         """
@@ -842,6 +886,9 @@ class GridProcess(object):
             nodeVel[:, 0] = u0
             nodeVel[:, 1] = v0
             getfacevelocity(self.lpoints, nodeVel)
+            # Only the inflow edge is a boundary condition for the upwind
+            # advection (see _oroInflowBorders).
+            self._oroInflow = self._oroInflowBorders(u0, v0)
 
             # advecupwind(dt=1) returns (I + L) where L is the upwind FV operator
             # for v·∇. So L has diagonal lcoeff[:,0]-1 and off-diagonals lcoeff[:,1:].
@@ -849,7 +896,7 @@ class GridProcess(object):
             self._oroAdvDiag = lcoeff[:, 0] - 1.0
             self._oroLcoeff = lcoeff[:, 1:].copy()
             # Cloud-water (v·∇ + 1/τc) and hydrometeor (v·∇ + 1/τf) operators with
-            # zero-Dirichlet domain edges.
+            # zero-Dirichlet INFLOW edges.
             self._oroAc = self._buildOroMat(
                 self._oroAdvDiag + 1.0 / self.oro_conv_time,
                 self._oroLcoeff, dirichlet=True,
@@ -874,7 +921,7 @@ class GridProcess(object):
         for k in range(0, self.maxnb):
             src = src + self._oroLcoeff[:, k] * hL[self.FVmesh_ngbID[:, k]]
         src *= self.oro_cw
-        src[self.advectBorders] = 0.0
+        src[self._oroInflow] = 0.0
         self.tmpL.setArray(src)
         self.dm.localToGlobal(self.tmpL, self.tmp)
 
@@ -886,7 +933,7 @@ class GridProcess(object):
         self.tmp1.scale(1.0 / self.oro_conv_time)
         self.dm.globalToLocal(self.tmp1, self.tmpL)
         arr = self.tmpL.getArray()
-        arr[self.advectBorders] = 0.0
+        arr[self._oroInflow] = 0.0
         self.tmpL.setArray(arr)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
         self._oroSolve(self._oroAf, self.tmp1, self._oroQs)
