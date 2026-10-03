@@ -16,7 +16,9 @@ Usage::
     python scripts/ab_partition.py input.yml -n 4 --field iceHL --field soilH --json
     python scripts/ab_partition.py input.yml -n 4 --keep ab_out   # keep the npz dumps
 
-``--steps K`` runs only the first K time steps (default: 1). Each run executes
+``--steps K`` runs only the first K time steps (default: 1). With ``--keep``
+each npz also holds ``_rank``, the owning rank of every node, so differences
+can be tested for alignment with the partition seams. Each run executes
 in its own scratch directory whose entries are symlinks to the input's
 directory, so model output never lands next to your input. The comparison
 ignores nodes on the domain boundary only if ``--interior`` is given.
@@ -89,6 +91,12 @@ try:
     if comm.rank == 0:
         n = model.mpoints
         res = {"_coords": np.asarray(model.mCoords)}
+        # Owning rank of every node (input-mesh order): lets a comparison test
+        # whether differences sit on the partition seams.
+        own_rank = np.full(n, -1, dtype=np.int32)
+        for r_, (g, _f) in enumerate(parts):
+            own_rank[g] = r_
+        res["_rank"] = own_rank
         names = set().union(*(p[1].keys() for p in parts))
         for name in names:
             arr = np.full(n, np.nan)
