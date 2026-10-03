@@ -223,8 +223,11 @@ def main(argv=None) -> int:
         if args.interior:
             c = a["_coords"]
             lo, hi = c.min(0), c.max(0)
-            span = np.maximum(hi - lo, 1e-12)
-            interior = np.all((c - lo > 1e-6 * span) & (hi - c > 1e-6 * span), axis=1)[:]
+            axes = (hi - lo) > 0.0            # a flat mesh has a constant z
+            span = (hi - lo)[axes]
+            cc = c[:, axes]
+            interior = np.all((cc - lo[axes] > 1e-6 * span)
+                              & (hi[axes] - cc > 1e-6 * span), axis=1)
         report = compare(a, b, args.rtol, args.atol, interior)
         if args.keep:
             args.keep.mkdir(parents=True, exist_ok=True)

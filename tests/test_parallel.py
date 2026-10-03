@@ -1082,3 +1082,46 @@ def test_parallel_cached_diffusion_rebuild(tmp_path):
         f"(rc={result.returncode}).\n"
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
+
+
+@pytest.mark.slow
+def test_iioe2_partition_invariant_interior(tmp_path):
+    """IIOE2 advection must not depend on the decomposition inside the domain.
+
+    An owned row's inflow weight is the GHOST neighbour's outflow weight, which
+    used to be computed from the ghost's truncated local stencil (its Fortran
+    FVarea, neighbourhood range and outflow count). Fixed 2026-10 by passing
+    owner-synced area / vmin / vmax / nbout into `adveciioe2`. On the
+    flat_advect ridge, np=1 vs np=3 after 3 steps, interior (>= 600 m from the
+    edge) elevation differed by 1.8 m; now 3.8e-3 m (solver tolerance). The
+    edge zone is excluded: a separate edge-reset difference shared with IIOE1.
+    np=3 (not 2): the 2-way cut on this fixture does not exercise the limiter.
+    """
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import numpy as np
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
+    for f in ("flat_advect.yml", "flat_advect.npz"):
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    keep = tmp_path / "ab"
+    res = subprocess.run(
+        [sys.executable, str(tool), "flat_advect.yml", "-n", "3", "--steps", "3",
+         "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+        timeout=3 * MPI_TIMEOUT)
+    a, b = keep / "ab_np1.npz", keep / "ab_np3.npz"
+    assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
+    a, b = np.load(a), np.load(b)
+    c = a["_coords"]
+    lo, hi = c[:, :2].min(0), c[:, :2].max(0)
+    dist = np.minimum(c[:, :2] - lo, hi - c[:, :2]).min(axis=1)
+    interior = dist >= 600.0
+    d = np.abs(a["elev"] - b["elev"])[interior]
+    assert np.isfinite(d).all()
+    assert d.max() < 0.05, f"IIOE2 interior partition difference {d.max():.3e} m"

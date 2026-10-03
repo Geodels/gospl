@@ -1206,11 +1206,20 @@ subroutine adveciioe(nb, dt, nbout, lcoeff, rcoeff)
 
 end subroutine adveciioe
 
-subroutine adveciioe2(nb, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
+subroutine adveciioe2(nb, dt, nbout, var, vmin, vmax, area, lcoeff, rcoeff)
 !*****************************************************************************
 ! Define advection coefficients based on a finite volume spatial
 ! discretisation using the Inflow Implicit and Outflow Explicit scheme (I2EO).
 ! The approach is based on https://www.sciencedirect.com/science/article/pii/S0168927414001032
+!
+! Partition invariance: an owned row's inflow weight thetain(k,p) is taken
+! from its neighbour's outflow weight thetaout(n,q), and n may be a GHOST.
+! thetaout(n,q) depends on the cell area, the neighbourhood bounds vmin/vmax
+! and the outflow-face count nbout AT n; computed from a ghost's truncated
+! local stencil they differ from the owner's values. The caller therefore
+! passes owner-synced `area`, `vmin`, `vmax` and `nbout` (halo-exchanged),
+! and this routine uses `area` instead of the module's local FVarea. The face
+! geometry n-k itself is complete locally whenever k is owned.
 
   use meshparams
   implicit none
@@ -1222,6 +1231,7 @@ subroutine adveciioe2(nb, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
   double precision, intent(in) :: var(nb)
   double precision, intent(in) :: vmin(nb)
   double precision, intent(in) :: vmax(nb)
+  double precision, intent(in) :: area(nb)
   double precision, intent(out) :: lcoeff(nb,13)
   double precision, intent(out) :: rcoeff(nb,13)
 
@@ -1236,17 +1246,17 @@ subroutine adveciioe2(nb, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
   ! Weighting parameter for flux-corrected transport for the stabilized IIOE scheme
   thetaout = 0.5
   do k = 1, nb
-    if(FVarea(k)>0)then
+    if(area(k)>0)then
       do p = 1, FVnNb(k)
         n = FVnID(k,p)+1
         dotv = -faceVel(k,p)
         aout = min(dotv, 0.) * FVvDist(k,p) 
         if(aout*(var(n) - var(k))>0)then
-          val = FVarea(k) * (vmax(k) - var(k))
+          val = area(k) * (vmax(k) - var(k))
           val = val / (aout * dt * nbout(k) * (var(n) - var(k)))
           thetaout(k,p) = min(0.5, val)
         elseif(aout*(var(n) - var(k))<0)then
-          val = FVarea(k) * (vmin(k) - var(k))
+          val = area(k) * (vmin(k) - var(k))
           val = val / (dt * aout * nbout(k) * (var(n) - var(k)))
           thetaout(k,p) = min(0.5, val)
         else
@@ -1258,7 +1268,7 @@ subroutine adveciioe2(nb, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
 
   thetain = 0.5
   do k = 1, nb
-    if(FVarea(k)>0)then
+    if(area(k)>0)then
       do p = 1, FVnNb(k)
         n = FVnID(k,p)+1
         q = FVnIDfNb(k,p)
@@ -1269,15 +1279,15 @@ subroutine adveciioe2(nb, dt, nbout, var, vmin, vmax, lcoeff, rcoeff)
 
   ! Inflow-Implicit/Outflow-Explicit Scheme for Solving Advection Equations
   do k = 1, nb
-    if(FVarea(k)>0)then
+    if(area(k)>0)then
       do p = 1, FVnNb(k)
         if(FVvDist(k,p)>0.)then
           ! Defining the inward flux (inverse of the dot product btw face normal and velocity) 
           dotv = -faceVel(k,p)
 
           ! Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
-          fluxin = dt * thetain(k,p) * max(dotv, 0.) * FVvDist(k,p) / FVarea(k)
-          fluxout = dt * thetaout(k,p) * min(dotv, 0.) * FVvDist(k,p) / FVarea(k)
+          fluxin = dt * thetain(k,p) * max(dotv, 0.) * FVvDist(k,p) / area(k)
+          fluxout = dt * thetaout(k,p) * min(dotv, 0.) * FVvDist(k,p) / area(k)
 
           ! Left-hand side matrix coefficients (implicit solution)
           lcoeff(k,1) = lcoeff(k,1) + fluxin

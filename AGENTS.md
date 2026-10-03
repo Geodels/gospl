@@ -273,7 +273,7 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 
 ## Known bugs (fix before refactoring)
 Open issues found by the 2026-10 analytical benchmarks. Each is pinned by a benchmark at the CURRENT behaviour (tolerances say so in a comment); tighten the benchmark when you fix it.
-- **IIOE2 advection is partition-dependent** (`tectonics._advectorIIOE2` / `adveciioe2`). On `tests/fixtures/flat_advect.yml`, np=1 vs np=4 after 3 steps, elevation differs by up to 8.8 m (rel L2 1.4e-3; IIOE1 is ~0.1%). Cause (partly confirmed): an owned row's `thetain(k,p) = 1 - thetaout(n,q)` reads the neighbour's `thetaout`, and for a GHOST neighbour `n` that is computed from rank-local `vmin`/`vmax`/`nbout` over an incomplete neighbourhood. Halo-syncing those three arrays from their owners halves the difference (8.8 → 5.0 m) but does not remove it; the rest is likely the ghost cell's partial FV geometry (`FVarea`/faces) or values two rings out. A full fix computes `thetaout` on owners and exchanges it per face. `test_advection_parallel`'s tolerance passes either way. Find it with `python scripts/ab_partition.py tests/fixtures/flat_advect.yml -n 4 --steps 3`.
+- **Advected elevation near open domain edges depends on the partition (both IIOE schemes).** On `tests/fixtures/flat_advect.yml`, np=1 vs np=4 after 3 steps, nodes within ~600 m of an edge differ by up to 2-3 m for IIOE1 AND IIOE2, while the interior agrees to solver tolerance (~3e-3 m). Not investigated yet; suspects are the post-advection edge reset (`_resetEdges`: sentinel + `fitedges`) and `_drainOpenEdges`. Measure with `python scripts/ab_partition.py tests/fixtures/flat_advect.yml -n 4 --steps 3 --keep out` and split the difference by distance to the edge.
 
 ## Lessons from fixed bugs (full list: `docs/dev/FIXED_BUGS.md`)
 - Any `Vec`/`Mat` reduction, scatter or `Allreduce` under `if MPIrank == 0` or a rank-local `.any()` deadlocks at np>1, and serial always passes.
@@ -283,6 +283,7 @@ Open issues found by the 2026-10 analytical benchmarks. Each is pinned by a benc
 - A fatal solve distinguishes a genuinely broken state (large or non-finite: abort) from a knife-edge local singularity (small and finite: pond and continue).
 - A serial rank-0 step inside `Model.__init__` presents as a hang at np>1 if it is slow (the `domain: radius` DH-grid query).
 - A linearly-implicit integrator (Rosenbrock `rosw`) needs each stage SOLVED; `ksp preonly` turns it into an inexact, partition-dependent scheme its error estimator cannot see.
+- A ghost node's Fortran `FVarea` (and any stencil quantity computed over its truncated local neighbourhood: range, outflow count) is NOT the owner's. Harmless while ghost rows are dropped at assembly; wrong as soon as an owned row reads a ghost's derived value (the IIOE2 `thetain = 1 - thetaout(ghost)` bug). Pass halo-synced inputs.
 - A regression guard must fail without its fix. Verify that before committing.
 
 ## Intentional surprises (do NOT "fix")

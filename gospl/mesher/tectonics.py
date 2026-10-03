@@ -266,7 +266,10 @@ class Tectonics(object):
         excess = self.tmp1.sum()
 
         if excess > 0.:
-            lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, vL, vmin, vmax)
+            # Owner-synced area (self.larea, halo-exchanged at mesh build) for
+            # the same reason as vmin/vmax/nbOut: see adveciioe2's header.
+            lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, vL, vmin,
+                                          vmax, self.larea)
             advMat_left2, advMat_right2 = self._buildAdvecMat(True, lCoeffs, rCoeffs)
             advMat_right2.mult(gvec, self.tmp1)
             self._solve_KSP(True, advMat_left2, self.tmp1, self.tmp)
@@ -275,6 +278,19 @@ class Tectonics(object):
             self._iioe2MassNeutral(newv, vmin, vmax)
 
         return
+
+    def _iioe2Halo(self, arr):
+        """
+        Replace the ghost entries of a local per-node array with their owners'
+        values (local -> global -> local). COLLECTIVE.
+
+        Scratch Vecs: ``self.tmpL`` and ``self.tmp1`` (left holding ``arr``'s
+        synced copy); callers must not have live data in them.
+        """
+        self.tmpL.setArray(arr)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return self.tmpL.getArray().copy()
 
     def _iioe2MassNeutral(self, newv, vmin, vmax, maxit=4):
         r"""
@@ -379,6 +395,13 @@ class Tectonics(object):
                 self._advMatRight = None
             if iioe:
                 self._advNbOut, lCoeffs, rCoeffs = adveciioe(self.lpoints, self.dt)
+                if self.advscheme == 3:
+                    # IIOE2 reads a GHOST neighbour's outflow-face count when it
+                    # builds an owned row (thetain = 1 - thetaout of the
+                    # neighbour); a ghost's local count is truncated, so take
+                    # the owner's. Collective; the branch is config-global.
+                    self._advNbOut = np.rint(self._iioe2Halo(
+                        self._advNbOut.astype(np.float64))).astype(self._advNbOut.dtype)
                 self._advMatLeft, self._advMatRight = self._buildAdvecMat(
                     True, lCoeffs, rCoeffs
                 )
@@ -452,6 +475,12 @@ class Tectonics(object):
             self.dm.globalToLocal(gvec, self.tmpL)
             fL = self.tmpL.getArray().copy()
             fmin, fmax = getrange(self.lpoints, fL)
+            # A ghost node's neighbourhood range is computed over its truncated
+            # local stencil; IIOE2 reads it for owned rows (via the ghost's
+            # thetaout), so replace it with the owner's value. Collective
+            # (reached by every rank: advscheme is a config scalar).
+            fmin = self._iioe2Halo(fmin)
+            fmax = self._iioe2Halo(fmax)
 
         gvec.copy(result=self.tmp)            # warm-start guess
         if iioe:

@@ -78,13 +78,14 @@ python module _fortran
             double precision dimension(nb,13),intent(out),depend(nb) :: rcoeff
         end subroutine adveciioe
 
-        subroutine adveciioe2(nb,dt,nbout,var,vmin,vmax,lcoeff,rcoeff)
+        subroutine adveciioe2(nb,dt,nbout,var,vmin,vmax,area,lcoeff,rcoeff)
             integer :: nb
             double precision, intent(in) :: dt
             integer dimension(nb),intent(in),depend(nb) :: nbout
             double precision dimension(nb),intent(in),depend(nb) :: var
             double precision dimension(nb),intent(in),depend(nb) :: vmin
             double precision dimension(nb),intent(in),depend(nb) :: vmax
+            double precision dimension(nb),intent(in),depend(nb) :: area
             double precision dimension(nb,13),intent(out),depend(nb) :: lcoeff
             double precision dimension(nb,13),intent(out),depend(nb) :: rcoeff
         end subroutine adveciioe2
