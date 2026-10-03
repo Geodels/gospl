@@ -326,7 +326,7 @@ class SEDMesh(object):
         self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
         self._routedProv = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
         # In case there is still remaining sediment flux to distribute downstream
-        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (sediment-routing convergence threshold); do not replace
+        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (sediment-routing convergence threshold); do not replace  # mpi-lint: ok eV = inV - pitVol is global (inV Allreduced, pitVol from pitParams)
             # Only rebuild the flow direction matrix when the topography has
             # actually changed (a pit saturated this iteration), or on the
             # very first iteration when no matrix exists yet, or on the
@@ -605,7 +605,7 @@ class SEDMesh(object):
         # local-only, so ranks with zero locally-selected cells would skip
         # the Allreduce inside _spillCoords and the per-pit reduce while
         # other ranks wait, causing a hang.
-        if not pit_select.any():
+        if not pit_select.any():  # mpi-lint: ok pit_select is global (pitParams / pitVol)
             return delta
 
         active_pit = np.where(pit_select)[0]
@@ -702,7 +702,7 @@ class SEDMesh(object):
 
         num_pits = len(self.pitParams)
         active = np.where(pit_select & (depo > 0))[0]
-        if active.size == 0:
+        if active.size == 0:  # mpi-lint: ok active = pit_select & depo, both global per-pit
             return np.zeros(self.lpoints, dtype=np.float64)
 
         # Build node-level mask for selected pits
@@ -724,7 +724,7 @@ class SEDMesh(object):
         # (rare; can happen for orphan basins with all-flat boundaries) fall
         # back to the highest in-pit cell as a one-cell pile.
         no_inlet = active[inlet_count[active] == 0]
-        if no_inlet.size > 0:
+        if no_inlet.size > 0:  # mpi-lint: ok no_inlet from active and the Allreduced inlet_count
             # Batched two-step reduction so the cost is independent of
             # len(no_inlet). Step 1 finds the global max elevation per pit;
             # step 2 finds which rank held that max (lowest rank wins ties).

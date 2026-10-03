@@ -833,7 +833,7 @@ class FAMesh(object):
             self.waterFilled[mask] = node_lvl[mask]
 
         # In case there is still remaining water flux to distribute downstream
-        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (water-routing convergence threshold); do not replace
+        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (water-routing convergence threshold); do not replace  # mpi-lint: ok eV = inV - pitVol is global (inV Allreduced, pitVol from pitParams)
             if step == 100:
                 self.fMat.destroy()
                 self._buildFlowDirection(self.lFill)
@@ -1097,7 +1097,7 @@ class FAMesh(object):
         # Volume of water flowing downstream
         self.profiler.start("flow_dist")
         self.waterFilled = hl.copy()
-        if (pitVol > 0.0).any():
+        if (pitVol > 0.0).any():  # mpi-lint: ok pitVol is global (per-pit, from pitParams)
             FA = self.FAL.getArray().copy() * self.dt
             excess = True
             step = 0

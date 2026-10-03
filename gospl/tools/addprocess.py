@@ -573,7 +573,7 @@ class GridProcess(object):
             (self.northPts, self.flex_bcN),
             (self.westPts, self.flex_bcW),
         )
-        if any(bc == "0Displacement0Slope" for _, bc in sides):
+        if any(bc == "0Displacement0Slope" for _, bc in sides):  # mpi-lint: ok flex_bc* are config scalars, identical on every rank
             dbc = [
                 pts for pts, bc in sides
                 if bc == "0Displacement0Slope" and pts is not None and len(pts) > 0

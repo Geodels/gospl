@@ -98,13 +98,17 @@ jobs:
         # checkout.
         run: pip install --no-deps --no-build-isolation -e . -v
 
-      - name: Run regression tests (all 13 — fast parser + slow Model tier)
-        # No marker filter — runs every test in tests/ on every PR + push
-        # to master/release-candidate. Benchmark tests live in
-        # `benchmarks/` (not picked up by `pytest tests/`) and stay
-        # restricted to `tests-slow.yml`. PR wall-clock goes from ~17s
-        # (fast tier only) to ~5-10 min (all 13) — acceptable because
-        # the env cache amortises the heavy phase across runs.
+      - name: Lint MPI collectives under rank-local guards
+        # AGENTS.md > MPI contract, the #1 parallel deadlock class. Fast and
+        # pure Python; runs first so a deadlock-shaped change fails with a
+        # file:line pointer instead of a hung mpirun test. (Also asserted by
+        # tests/test_lint_mpi.py::test_codebase_is_clean.)
+        run: python scripts/lint_mpi_collectives.py
+
+      - name: Run regression tests (whole tests/ tree)
+        # No marker filter — runs every test in tests/ (one module per
+        # subsystem, tests/README.md). Benchmarks live in `benchmarks/` (not
+        # picked up by `pytest tests/`) and stay in `tests-slow.yml`.
         run: pytest tests/ -v --tb=short
 
       - name: Show pytest summary on failure
