@@ -8,8 +8,12 @@ name: examples-smoke
 # This checks out both repositories and runs every LOCAL example input for two
 # time steps at np=2 (scripts/examples_smoke.py), with the per-step run summary
 # on, so a crash, a NaN or a solver failure in an example surfaces the morning
-# after the change that caused it. Global examples are left to manual dispatch
-# (`only: Global-examples`): they need large meshes and many ranks.
+# after the change that caused it. Global examples CANNOT run here: their meshes
+# and forcing files are produced by notebooks and are gitignored in
+# goSPL-examples, so a fresh checkout has none of them (a dispatch with
+# `only: Global-examples` skips all four as missing-data, and the script now
+# exits non-zero when nothing ran). Run them locally where the data exists:
+#   python scripts/examples_smoke.py <goSPL-examples> --only Global-examples
 #
 # "missing-data" results (an input whose data is produced by a notebook or by
 # another example) are reported but do not fail the job.

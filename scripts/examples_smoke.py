@@ -69,12 +69,27 @@ def _child_env():
 
 
 def prepare(yml: Path, scratch: Path, steps: int) -> Path:
-    """Mirror the example dir into `scratch` and write a shortened input."""
+    """Mirror the example dir into `scratch` and write a shortened input.
+
+    The mirror sits at ``scratch/<example dir name>`` and ``scratch`` also links
+    the example directory's SIBLINGS, so an input that reaches into a
+    neighbouring example (``npdata: ['../continental_flux/...']``, e.g.
+    Global-examples continental_geochem) resolves as it does in place. Returns
+    the shortened input, inside the mirror (run it from its parent).
+    """
     from ruamel.yaml import YAML
 
     yaml = YAML()                              # round-trip: keeps comments/order
     data = yaml.load(yml.read_text())
     outdir = str((data.get("output") or {}).get("dir", "output"))
+    for sib in yml.parent.parent.iterdir():
+        if sib.name != yml.parent.name:
+            try:
+                (scratch / sib.name).symlink_to(sib.resolve())
+            except OSError:
+                pass
+    scratch = scratch / yml.parent.name
+    scratch.mkdir()
     for entry in yml.parent.iterdir():
         if entry.name == outdir or entry.name.startswith(outdir + "_") or \
                 (entry.is_dir() and (entry / "h5").is_dir()):
@@ -114,7 +129,7 @@ def run_one(yml: Path, root: Path, args) -> dict:
                           "--summary", str(summary)]
         t0 = time.time()
         try:
-            res = subprocess.run(cmd, cwd=scratch, env=_child_env(), capture_output=True,
+            res = subprocess.run(cmd, cwd=smoke.parent, env=_child_env(), capture_output=True,
                                  text=True, timeout=args.timeout)
             rc, out = res.returncode, res.stdout + res.stderr
         except subprocess.TimeoutExpired as exc:
@@ -189,7 +204,15 @@ def main(argv=None) -> int:
     if args.json:
         args.json.write_text(json.dumps({"np": args.np, "steps": args.steps,
                                          "results": report}, indent=1))
-    return 1 if n["FAILED"] else 0
+    if n["FAILED"]:
+        return 1
+    if not n["passed"]:
+        # Every input was skipped: nothing was tested, which must not read as
+        # a pass (e.g. the Global-examples inputs are notebook products that
+        # are gitignored, so a fresh checkout has none of their data).
+        print("nothing ran: every input is missing its data", flush=True)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
