@@ -249,6 +249,9 @@ class Tectonics(object):
         :arg nbOut: outflow-neighbour count from ``adveciioe``.
         """
 
+        # `newv` is a view into `self.tmpL`, which is reused below: keep a copy
+        # of the Scheme-1 result for the mass-neutral correction.
+        newv = np.array(newv, copy=True)
         diffmax = newv - vmax
         diffmax[diffmax < 0] = 0.
         diffmin = newv - vmin
@@ -269,6 +272,69 @@ class Tectonics(object):
             self._solve_KSP(True, advMat_left2, self.tmp1, self.tmp)
             advMat_left2.destroy()
             advMat_right2.destroy()
+            self._iioe2MassNeutral(newv, vmin, vmax)
+
+        return
+
+    def _iioe2MassNeutral(self, newv, vmin, vmax, maxit=4):
+        r"""
+        Make the IIOE2 correction mass-neutral with respect to Scheme 1.
+
+        The IIOE schemes are written in difference form with the inflow side of
+        each face implicit and the outflow side explicit. Summed over the mesh,
+        the face terms leave a telescoping boundary flux plus
+        :math:`-\sum_f (\theta^{out}_f - \tfrac12)(\Delta_f^{n+1} - \Delta_f^n)`.
+        With the uniform :math:`\theta = \tfrac12` of Scheme 1 that term
+        vanishes, so Scheme 1 conserves the field's volume; Scheme 2's limiter
+        moves :math:`\theta^{out}_f` away from 1/2 wherever it acts, and the
+        term does not (measured: 7.5e-4 of the volume lost on a 20 km
+        translation, vs 1e-5 for Scheme 1).
+
+        Scheme 2 is a limited anti-diffusive correction of Scheme 1, so, as in
+        flux-corrected transport, the correction ``u2 - u1`` should only
+        REDISTRIBUTE the field. This removes its net volume ``D``, spreading
+        ``-D`` over the cells the correction changed in proportion to
+        ``|u2 - u1|`` (local, no effect where the limiter did not act), and
+        clips to the neighbourhood bounds ``[vmin, vmax]`` so no new extrema
+        appear; what clipping removes is redistributed again (``maxit``
+        passes).
+
+        COLLECTIVE: the volume sums are global ``allreduce``s reached on every
+        rank (the loop trip count depends only on those global sums).
+
+        Scratch Vecs: reads the IIOE2 result from ``self.tmp`` and writes the
+        corrected result back to it; uses ``self.tmpL`` as the local view.
+
+        :arg newv: Scheme-1 advected local array (``u1``)
+        :arg vmin, vmax: local neighbourhood bounds of the pre-advection field
+        :arg maxit: redistribution passes after clipping
+        """
+
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        u2 = self.tmpL.getArray().copy()
+        own = self.inIDs == 1
+        area = self.larea
+        # Bounds the corrected field must respect: the limiter's target range,
+        # widened to include the Scheme-1 value (Scheme 1 itself may lie
+        # slightly outside it, and u1 is always an admissible value).
+        lo = np.minimum(vmin, newv)
+        hi = np.maximum(vmax, newv)
+        u1mass = MPI.COMM_WORLD.allreduce(float(np.sum(area[own] * newv[own])),
+                                          op=MPI.SUM)
+        for _ in range(maxit):
+            corr = u2 - newv
+            D = MPI.COMM_WORLD.allreduce(float(np.sum(area[own] * u2[own])),
+                                         op=MPI.SUM) - u1mass
+            w = np.abs(corr)
+            W = MPI.COMM_WORLD.allreduce(float(np.sum(area[own] * w[own])),
+                                         op=MPI.SUM)
+            # Global quantities: every rank takes the same branch.
+            if W <= 0.0 or abs(D) <= 1.0e-12 * max(abs(u1mass), 1.0e-300):
+                break
+            u2 = np.clip(u2 - D * w / W, lo, hi)
+
+        self.tmpL.setArray(u2)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
 
         return
 

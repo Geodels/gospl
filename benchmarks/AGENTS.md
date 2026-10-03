@@ -31,7 +31,7 @@ Mesh `.npz` files under each benchmark's `boundary_condition[s]/` subfolder are 
 | `test_knickpoint.py` | Knickpoint propagation | `c=K·A^m`; Royden & Perron 2013; Tucker & Whipple 2002 | 4/4 sub-tests |
 | `test_flexure.py` | Flat FEM + global flexure | cosine modes `w=q/(Dk⁴+Δρg)` (exact for the 5-point stencil); infinite-plate line load with image loads; degree-l spherical-harmonic response `q/(Δρg+D·P_l)` + flat-plate limit | FEM: discrete round-off, continuum <1%, 2nd-order convergence; line load RMSE <0.5%; global spectral 1e-9, mesh pipeline RMSE <1% |
 | `test_orography.py` | Orographic rain (Smith-Barstad, no mountain wave) | `P̂ = Cw·iku·ĥ/((1+ikuτc)(1+ikuτf))` on a 1-D ridge, with the background/floor clip reproduced | central-row RMSE <1% of peak; first-order convergence |
-| `test_advection.py` | Horizontal advection (upwind / iioe1 / iioe2) | translated Gaussian; uniform field (iioe2 zero-excess path) | mass, centroid, peak and RMSE per scheme; uniform field preserved |
+| `test_advection.py` | Horizontal advection (upwind / iioe1 / iioe2) | translated Gaussian; uniform field (iioe2 zero-excess path) | mass < 1e-4 for every scheme (iioe2 mass-neutral since 2026-10), centroid, peak, RMSE; uniform field preserved |
 | `test_marine_diffusion.py` | Marine diffusion (`ts` and `picard`) | 2-D heat kernel on a constant-`Cd` deposit | volume 1e-12; D err, peak law, RMSE < 2e-3 for both solvers (the `ts` stage-solve fix, 2026-10) |
 | `test_geochem_balance.py` | Level-B geochemistry | per-step `dissolved = precipitated + exported`; 1-D strip `c=D0/(R+p)·(Ls/u)^(1+p/R)` | closure ~1e-15; strip vs exact discrete 2e-5 |
 

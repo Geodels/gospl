@@ -221,9 +221,13 @@ TOL = {
     # second order: tiny undershoots, almost no amplitude loss
     "iioe1": dict(mass=1e-4, centroid=0.5 * DX, peak=(0.98, 1.0 + 1e-9),
                   hmin=-1e-4, rmse=0.005),
-    # limited second order: bounded, some extremum clipping
-    "iioe2": dict(mass=2e-3, centroid=1.0 * DX, peak=(0.93, 1.0 + 1e-9),
-                  hmin=-1e-10, rmse=0.006),
+    # limited second order: bounded (no undershoot), mass-neutral correction.
+    # Until 2026-10 iioe2 lost 7.5e-4 of the volume here (field-dependent
+    # theta breaks the IIOE telescoping) with peak 0.969; the correction is now
+    # made mass-neutral w.r.t. Scheme 1 (tectonics._iioe2MassNeutral):
+    # measured mass 1.1e-5, peak 0.997, rmse 0.0020.
+    "iioe2": dict(mass=1e-4, centroid=1.0 * DX, peak=(0.98, 1.0 + 1e-9),
+                  hmin=-1e-10, rmse=0.005),
 }
 
 
