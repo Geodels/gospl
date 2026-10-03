@@ -1208,7 +1208,7 @@ class UnstMesh(object):
             "_snes_soil", "_snes_soil_f", "_snes_soil_x",
             "_snes_soil_fb", "_snes_soil_fb_f",
             "_snes_hill", "_snes_hill_f", "_snes_hill_x",
-            "_ts_marine", "_ts_marine_x",
+            "_ts_marine", "_ts_marine_x", "_ts_marine_atol",
             "_smoothMat", "_ksp_smooth",
             "_hillMat", "_ksp_hill_lin",
             "_ksp_picard", "_ksp_provdiff",

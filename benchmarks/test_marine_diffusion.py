@@ -88,14 +88,14 @@ TOL_D = {"ts": 2.0e-3, "picard": 2.0e-3}         # moment-derived D, relative
 TOL_RMSE = {"ts": 2.0e-3, "picard": 2.0e-3}      # RMSE / exact peak
 
 
-def _write_mesh(path):
+def _write_mesh(path, bed=None):
     xs = np.arange(NX) * DX
     ys = np.arange(NY) * DX
     X, Y = np.meshgrid(xs, ys)
     x, y = X.ravel(), Y.ravel()
     v = np.column_stack([x, y, np.zeros_like(x)])
     cells = Delaunay(np.column_stack([x, y])).simplices.astype(np.int64)
-    z = np.full(x.shape, BED, dtype=np.float64)
+    z = np.full(x.shape, BED if bed is None else bed, dtype=np.float64)
     np.savez(path, v=v, c=cells, z=z)
 
 
@@ -178,6 +178,10 @@ def _run_solver(tmp_path, solver):
             out["maxerr"].append(_gmax(np.abs(err).max()) / ex[owned].max())
         out["wall"] = time.perf_counter() - wall
         out["mass0"] = mass0
+        out["final"] = g.copy()
+        out["owned"] = owned
+        out["ts_steps"] = (m._ts_marine.getStepNumber()
+                           if getattr(m, "_ts_marine", None) is not None else 0)
         # Centre-line profile (y == YC) for the figure, serial only.
         line = owned & (np.abs(y - YC) < 0.5 * DX)
         order = np.argsort(x[line])
@@ -261,3 +265,25 @@ def test_marine_diffusion_heat_kernel(tmp_path, monkeypatch, request):
         assert rmse < TOL_RMSE[solver], (
             f"{solver}: profile RMSE/peak {rmse:.2e} > {TOL_RMSE[solver]:.0e}"
         )
+
+
+@pytest.mark.benchmark
+@pytest.mark.slow
+def test_marine_diffusion_depth_invariance(tmp_path, monkeypatch):
+    """The same deposit on a 500 m and a 5000 m deep seafloor must diffuse
+    identically: the TS error control acts on the deposit, not on the absolute
+    surface `bed + deposit` (until 2026-10 a scalar rtol on |bed + deposit|
+    loosened the tolerance tenfold at 5000 m: 1.6e-4 of the peak apart)."""
+    finals = {}
+    for bed in (-500.0, -5000.0):
+        sub = tmp_path / f"bed{int(-bed)}"
+        sub.mkdir()
+        monkeypatch.chdir(sub)
+        _write_mesh(sub / "marine_mesh.npz", bed=bed)
+        res = _run_solver(sub, "ts")
+        finals[bed] = (res["final"], res["owned"])
+    (a, own), (b, _) = finals[-500.0], finals[-5000.0]
+    dev = _gmax(np.abs(a - b)[own].max()) / _gmax(a[own].max())
+    if PETSc.COMM_WORLD.getRank() == 0:
+        print(f"\n[marine-diffusion depth invariance] max|d|/peak = {dev:.2e}")
+    assert dev < 1.0e-9, f"deposit depends on water depth ({dev:.2e} of peak)"

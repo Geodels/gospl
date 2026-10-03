@@ -975,6 +975,7 @@ class hillSLP(object):
             ts.setFromOptions()
             self._ts_marine = ts
             self._ts_marine_x = self.tmp1.duplicate()
+            self._ts_marine_atol = self.tmp1.duplicate()
 
         ts = self._ts_marine
         x = self._ts_marine_x
@@ -983,13 +984,19 @@ class hillSLP(object):
         # at TS creation), causing PCSetUp_GASM to fail with PETSc error 56
         # on the next solve. The TS internal state is fine to reuse across
         # calls; setTime / setTimeStep below override the previous timing.
-        # Per-step error bound = min(atol, rtol*|x|). For marine sediment
-        # thicknesses we already drop sub-mm deposits as numerical noise
-        # elsewhere in the pipeline, so a 1 cm absolute floor is physically
-        # adequate. rtol=1e-4 (0.01 %) is loose enough for the controller to
-        # take large steps but tight enough to suppress the "peak" overshoot
-        # artefacts seen with 1e-3/1e-3.
-        ts.setTolerances(atol=5.0e-3, rtol=1.0e-4)
+        # Per-node error tolerance on the DEPOSIT, not the surface: the TS
+        # state is the absolute surface `bed + deposit`, so a scalar rtol acts
+        # on |bed + deposit| and lets the allowed error grow with water depth
+        # (0.5 m per step for a deposit at 5000 m depth vs 5 mm near the
+        # coast). Instead tol_i = 5e-3 m + 1e-4 * |deposit_i| as a vector atol
+        # with rtol = 0, so the error control is independent of bathymetry: the
+        # 5 mm floor matches the sub-mm deposits dropped as noise elsewhere, and
+        # the 0.01 % relative part (deposit-relative now) keeps the "peak"
+        # overshoot artefacts seen with 1e-3/1e-3 suppressed. Guard:
+        # benchmarks/test_marine_diffusion.py (depth invariance).
+        self.tmpL.setArray(5.0e-3 + 1.0e-4 * np.abs(dh))
+        self.dm.localToGlobal(self.tmpL, self._ts_marine_atol)
+        ts.setTolerances(rtol=0.0, atol=self._ts_marine_atol)
         ts.setTime(0.0)
         # Reset the step COUNTER too (setTime only resets the clock). The TS is
         # cached and reused, and getStepNumber() is NOT reset by setTime, so
