@@ -721,6 +721,24 @@ class FAMesh(object):
         ksp.setOperators(matrix, matrix)
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
+        if r >= 0:
+            # Accept a rescue only if the TRUE residual is small. On a
+            # genuinely singular block (a closed 2-cycle, an inconsistent
+            # right-hand side) a Krylov method can stop with a "converged"
+            # reason (e.g. a happy breakdown) without solving anything; the
+            # sticky switch would then lock in a wrong answer for the rest of
+            # the run (seen on ubuntu CI, not on macOS). Collective.
+            work = getattr(self, "_kspWork", None)
+            if work is None or work.getSize() != vector1.getSize():
+                if work is not None:
+                    work.destroy()
+                work = vector1.duplicate()
+                self._kspWork = work
+            matrix.mult(vector2, work)
+            work.aypx(-1.0, vector1)                 # b - A x
+            rnorm, bnorm = work.norm(), vector1.norm()
+            if not np.isfinite(rnorm) or rnorm > 1.0e2 * self.rtol * max(bnorm, 1e-300):
+                r = -100                             # not actually solved
         _rs.count_ksp(self, key + "_exact", ksp.getIterationNumber(), r)
         if r < 0:
             # Leave a clean, bounded guess for the fallback.

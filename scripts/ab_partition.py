@@ -122,6 +122,10 @@ def _child_env():
         env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
     env.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
     env.setdefault("OMP_NUM_THREADS", "1")
+    # GitHub's ubuntu runners have 4 vCPUs but 2 physical cores, and OpenMPI
+    # gives one slot per physical core: `mpirun -n 3` is refused there. Allow
+    # oversubscription (ignored by MPICH).
+    env["OMPI_MCA_rmaps_base_oversubscribe"] = "1"
     return env
 
 

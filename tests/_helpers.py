@@ -108,4 +108,7 @@ def mpi_child_env():
     }
     if "OPAL_PREFIX" in os.environ:
         env["OPAL_PREFIX"] = os.environ["OPAL_PREFIX"]
+    # GitHub's ubuntu runners: 4 vCPUs, 2 physical cores, one OpenMPI slot per
+    # physical core; allow oversubscription so np>2 tests can launch.
+    env["OMPI_MCA_rmaps_base_oversubscribe"] = "1"
     return env
