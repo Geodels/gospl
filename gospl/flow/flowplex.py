@@ -588,6 +588,15 @@ class FAMesh(object):
             # (hillslope/SPL/tectonics/ice) where b is not a valid lower bound.
             if seed and vector2.norm() == 0.0:
                 vector1.copy(vector2)
+            # Guard against a stale warm-start guess. Several callers pass a
+            # scratch Vec (`tmp`, `tmp1`) as the solution and so start from
+            # whatever the last kernel left in it. A guess whose residual is
+            # larger than a zero guess's (||b - A x0|| > ||b||) can only hurt:
+            # with a big enough one the KSP declares DIVERGED_DTOL before its
+            # first iteration (_glacialMeltwater did, every first step). Reset
+            # it to the lower bound b for (I - W^T) routing solves, else to 0.
+            # Collective (every rank calls _solve_KSP); one matvec per call.
+            self._warmStartGuard(matrix, vector1, vector2, seed)
         # Cap the iteration budget per call: the fatal flow-accumulation solve
         # keeps the full primary budget (it must converge); the non-fatal IDA
         # cascade solves (seed=True) are capped so a near-singular cell can't
@@ -648,6 +657,30 @@ class FAMesh(object):
         safe_garbage_cleanup()
 
         return vector2
+
+    def _warmStartGuard(self, matrix, vector1, vector2, seed):
+        """
+        Reset ``vector2`` if, as a starting guess, it is worse than zero:
+        ``||b - A x0|| > ||b||``. Collective. Uses a cached work Vec (rebuilt
+        when the system size changes).
+        """
+        work = getattr(self, "_kspWork", None)
+        if work is None or work.getSize() != vector1.getSize():
+            if work is not None:
+                work.destroy()
+            work = vector1.duplicate()
+            self._kspWork = work
+        matrix.mult(vector2, work)
+        work.aypx(-1.0, vector1)                     # b - A x0
+        bnorm = vector1.norm()
+        rnorm = work.norm()
+        if not np.isfinite(rnorm) or rnorm > bnorm:
+            if seed:
+                vector1.copy(vector2)
+            else:
+                vector2.set(0.0)
+            _rs.record(self, "ksp_stale_guess_reset", seed=bool(seed),
+                       ratio=float(rnorm / bnorm) if bnorm > 0 else -1.0)
 
     def _solveIDAExact(self, matrix, vector1, vector2, key):
         """

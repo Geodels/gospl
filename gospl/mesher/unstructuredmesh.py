@@ -1201,7 +1201,7 @@ class UnstMesh(object):
 
         # Cached KSP/SNES/TS helpers (created lazily on first use)
         for name in (
-            "_ksp_main", "_ksp_fallback", "_ksp_exact",
+            "_ksp_main", "_ksp_fallback", "_ksp_exact", "_kspWork",
             "_snes_ed", "_snes_ed_f", "_snes_ed_x",
             "_snes_ed_fb", "_snes_ed_fb_f",
             "_snes_nl", "_snes_nl_f", "_snes_nl_x", "_snes_nl_J",

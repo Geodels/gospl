@@ -773,3 +773,38 @@ def test_singular_routing_solve_still_falls_back(minimal_model):
         assert np.all(np.isfinite(x.getArray()))
     finally:
         A.destroy(); b.destroy(); x.destroy()
+
+
+def test_stale_warm_start_guess_is_reset(minimal_model):
+    """
+    Protects: flowplex._warmStartGuard. Callers that pass a scratch Vec as
+    the solution start from whatever the last kernel left in it. On the first
+    step of goSPL-examples glacial_erosion, _glacialMeltwater's tmp1 held a
+    guess so far off that the KSP declared DIVERGED_DTOL before its first
+    iteration (the system was the identity: no ice yet). A guess worse than
+    zero (||b - A x0|| > ||b||) must be reset, and the solve must converge.
+    """
+    import petsc4py
+    PETSc = petsc4py.PETSc
+    m = minimal_model
+    _fresh_flow_ksps(m)
+    n = 2000
+    A = PETSc.Mat().createAIJ([n, n], nnz=1, comm=PETSc.COMM_WORLD)
+    lo, hi = A.getOwnershipRange()
+    for i in range(lo, hi):
+        A.setValue(i, i, 1.0)
+    A.assemble()
+    b = A.createVecLeft()
+    b.set(3.0)
+    for seed in (False, True):
+        x = b.duplicate()
+        x.set(1.0e15)                     # stale scratch content
+        try:
+            m._solve_KSP(True, A, b, x, fatal=False, seed=seed)
+            assert m._ksp_main.getConvergedReason() > 0, (
+                "seed=%s: stale guess not reset (reason %d)"
+                % (seed, m._ksp_main.getConvergedReason()))
+            assert np.allclose(x.getArray(), 3.0)
+        finally:
+            x.destroy()
+    A.destroy(); b.destroy()

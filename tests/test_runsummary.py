@@ -74,6 +74,7 @@ def test_summary_records_every_step(tmp_path):
         assert r["ksp"]["fatal"]["solves"] >= 1
         assert {e["kind"] for e in r["events"]} <= {
             "flow_cascade", "flow_ksp_fallback_failed", "flow_ksp_exact_rescue",
+            "ksp_stale_guess_reset",
             "soil_snes_fallback",
             "soil_substep", "nlspl_snes_fallback", "nlspl_snes_failed"}
 

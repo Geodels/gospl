@@ -278,7 +278,7 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 
 ## Lessons from fixed bugs (full list: `docs/dev/FIXED_BUGS.md`)
 - Any `Vec`/`Mat` reduction, scatter or `Allreduce` under `if MPIrank == 0` or a rank-local `.any()` deadlocks at np>1, and serial always passes.
-- A scratch Vec that holds a result you keep must not be reused for an intermediate reduction on the skip path (IIOE2 zeroed fields this way).
+- A scratch Vec that holds a result you keep must not be reused for an intermediate reduction on the skip path (IIOE2 zeroed fields this way). The converse holds too: a scratch Vec passed as a KSP solution with `guess=True` is a STALE starting guess; `_solve_KSP` now resets one that is worse than zero, but seed routing solves explicitly (`b`, `seed=True`).
 - A diffusion on absolute elevation that clamps its increment to one sign is not conservative on relief: rescale the increment to the input volume.
 - One YAML key must have one meaning at every site that reads it (`oFill`).
 - A fatal solve distinguishes a genuinely broken state (large or non-finite: abort) from a knife-edge local singularity (small and finite: pond and continue).

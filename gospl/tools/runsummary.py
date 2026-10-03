@@ -27,7 +27,8 @@ up to solver round-off):
   failures;
 * ``events``: notable solver outcomes (fallback failures with the un-drained
   cell count and whether they ponded or aborted, ``flow_ksp_exact_rescue``
-  when the exact block solver recovered a routing solve, cascade stop reasons
+  when the exact block solver recovered a routing solve,
+  ``ksp_stale_guess_reset`` when a warm-start guess was worse than zero, cascade stop reasons
   and pass counts, SNES fallbacks and soil sub-stepping).
 
 A final ``{"end": true, ...}`` record carries the total wall time.

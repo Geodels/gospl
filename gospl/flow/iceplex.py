@@ -713,7 +713,12 @@ class IceMesh(object):
 
         self.tmpL.setArray(A)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(True, mat, self.tmp, self.tmp1)
+        # Transport-with-loss is an (I - W^T) routing system: the source is a
+        # valid lower bound (L = A + W^T(1-f) L >= A), so seed with it. tmp1 is
+        # a scratch Vec and held a previous kernel's values, which made the
+        # solve diverge before its first iteration on the first step.
+        self.tmp.copy(result=self.tmp1)
+        self._solve_KSP(True, mat, self.tmp, self.tmp1, seed=True)
         mat.destroy()
         self.dm.globalToLocal(self.tmp1, self.tmpL)
         L = self.tmpL.getArray().copy()                    # ice flux through each cell
@@ -813,7 +818,10 @@ class IceMesh(object):
 
         self.tmpL.setArray(Vero)
         self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(True, mat, self.tmp, self.tmp1)
+        # Same (I - W^T) transport-with-loss structure as _glacialMeltwater:
+        # seed with the source instead of whatever the scratch tmp1 holds.
+        self.tmp.copy(result=self.tmp1)
+        self._solve_KSP(True, mat, self.tmp, self.tmp1, seed=True)
         mat.destroy()
         self.dm.globalToLocal(self.tmp1, self.tmpL)
         L = self.tmpL.getArray().copy()
