@@ -55,6 +55,17 @@ jobs:
         with:
           lfs: true
 
+      - name: Pin the x86_64 microarchitecture level (Linux)
+        # conda-forge ships per-CPU-level builds of some packages (ducc0,
+        # pulled in by pyshtools, has an AVX-512 `_x86_64-microarch-level
+        # >=4` build). The solver picks the highest level the CURRENT host
+        # supports, but the env is cached and restored onto whatever runner
+        # comes next: an env solved on an AVX-512 host crashed with SIGILL
+        # (PETSc reports it as exit 59) on AMD EPYC 7763 runners (AVX2
+        # only). x86_64_v3 (AVX2) is supported by every hosted x86 runner.
+        if: runner.os == 'Linux'
+        run: echo "CONDA_OVERRIDE_ARCHSPEC=x86_64_v3" >> "$GITHUB_ENV"
+
       - name: Cache conda environment
         # First run for a given (OS, arch, python, env-file-hash) tuple is
         # the full env build (~5-10 min on macOS-arm64; sometimes much
@@ -73,9 +84,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.os == 'Linux' && '/home/runner/miniconda3/envs/gospl' || '/Users/runner/miniconda3/envs/gospl' }}
-          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v3-${{ hashFiles('environment.yml') }}
+          key: conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v4-${{ hashFiles('environment.yml') }}
           restore-keys: |
-            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v3-
+            conda-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-v4-
 
       - name: Set up conda env from environment.yml
         # `use-mamba: true` removed: miniforge-version: latest already

@@ -174,7 +174,6 @@ installed `gospl.__version__` equals `GOSPL_VERSION`, so the build arg and
 3. `OMP_NUM_THREADS=1` / `OPENBLAS_NUM_THREADS=1` are exported in both job
    scripts.
 4. The `.sif` filename includes the version tag (e.g. `gospl-hpc-v2026.7.14.sif`).
-5. Update the `## Milestones` table in this file with the new tag and `.sif`
-   publication date.
+5. Record the new tag and `.sif` publication date in `docs/dev/CHANGELOG_DEV.md`.
 6. The `docker/slurm/gadi.pbs` and `docker/slurm/setonix.slurm` `CONTAINER=`
    paths reference the new `.sif` filename.
