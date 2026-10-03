@@ -55,6 +55,25 @@ class Tectonics(object):
         self._advDt = None
         self._advRebuild = True
 
+        # Domain-edge nodes for the post-advection edge reset, INCLUDING ghost
+        # copies. `advectBorders` (from `idBorders`) lists owned nodes only, so
+        # at a partition seam along the domain edge an owned edge node's ghost
+        # edge neighbour was not marked, kept its un-reset advected value, and
+        # was averaged into the node's reset by `fitedges` -- a partition-
+        # dependent edge (up to ~100 m at np=4 on flat_advect). Sync the owned
+        # flag to the ghosts once (collective, flat models only: the condition
+        # is mesh-global).
+        self._advEdgeHalo = None
+        if self.flatModel:
+            flag = np.zeros(self.lpoints)
+            flag[self.advectBorders] = 1.0
+            self.tmpL.setArray(flag)
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            self._advEdgeHalo = np.where(self.tmpL.getArray() > 0.5)[0]
+            self.tmpL.set(0.0)
+            self.tmp1.set(0.0)
+
         return
 
     def getTectonics(self):
@@ -498,9 +517,12 @@ class Tectonics(object):
 
     def _resetEdges(self, lvec, gvec, sentinel):
         """
-        Flat-model only: mark the (non-periodic) domain-edge nodes with
-        ``sentinel`` and re-extrapolate them from their interior neighbours with
-        ``fitedges``, then sync the global Vec. No-op on a global/sphere mesh.
+        Flat-model only: mark the (non-periodic) domain-edge nodes, owned AND
+        ghost (``_advEdgeHalo``), with ``sentinel`` and re-extrapolate them from
+        their interior neighbours with ``fitedges``, then sync the global Vec.
+        No-op on a global/sphere mesh.
+
+        Scratch Vecs: none (works on ``lvec``/``gvec``).
 
         :arg lvec: local Vec of the field (read + rewritten).
         :arg gvec: matching global Vec (rewritten from ``lvec``).
@@ -512,7 +534,9 @@ class Tectonics(object):
             return
 
         arr = lvec.getArray().copy()
-        arr[self.advectBorders] = sentinel
+        # Mark ghost edge nodes too (see `_advEdgeHalo` in __init__), so an
+        # owned edge node never averages a ghost edge neighbour's raw value.
+        arr[self._advEdgeHalo] = sentinel
         arr = fitedges(arr)
         lvec.setArray(arr)
         self.dm.localToGlobal(lvec, gvec)

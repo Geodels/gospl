@@ -272,8 +272,8 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 - **The model aborted on a large un-drained region:** first run `scripts/fill_mesh_pits.py --check` on the input mesh. A topography problem is not a solver problem; `GOSPL_FLOW_KSP=richardson` does not fix a singular block.
 
 ## Known bugs (fix before refactoring)
-Open issues found by the 2026-10 analytical benchmarks. Each is pinned by a benchmark at the CURRENT behaviour (tolerances say so in a comment); tighten the benchmark when you fix it.
-- **Advected elevation near open domain edges depends on the partition (both IIOE schemes).** On `tests/fixtures/flat_advect.yml`, np=1 vs np=4 after 3 steps, nodes within ~600 m of an edge differ by up to 2-3 m for IIOE1 AND IIOE2, while the interior agrees to solver tolerance (~3e-3 m). Not investigated yet; suspects are the post-advection edge reset (`_resetEdges`: sentinel + `fitedges`) and `_drainOpenEdges`. Measure with `python scripts/ab_partition.py tests/fixtures/flat_advect.yml -n 4 --steps 3 --keep out` and split the difference by distance to the edge.
+All issues found by the 2026-10 analytical benchmarks and partition checks are fixed (see `docs/dev/FIXED_BUGS.md`). When you find one, record it here with how to reproduce it, and pin it with a benchmark or test at the current behaviour.
+- _(none currently open)_
 
 ## Lessons from fixed bugs (full list: `docs/dev/FIXED_BUGS.md`)
 - Any `Vec`/`Mat` reduction, scatter or `Allreduce` under `if MPIrank == 0` or a rank-local `.any()` deadlocks at np>1, and serial always passes.
@@ -284,6 +284,7 @@ Open issues found by the 2026-10 analytical benchmarks. Each is pinned by a benc
 - A serial rank-0 step inside `Model.__init__` presents as a hang at np>1 if it is slow (the `domain: radius` DH-grid query).
 - A linearly-implicit integrator (Rosenbrock `rosw`) needs each stage SOLVED; `ksp preonly` turns it into an inexact, partition-dependent scheme its error estimator cannot see.
 - A ghost node's Fortran `FVarea` (and any stencil quantity computed over its truncated local neighbourhood: range, outflow count) is NOT the owner's. Harmless while ghost rows are dropped at assembly; wrong as soon as an owned row reads a ghost's derived value (the IIOE2 `thetain = 1 - thetaout(ghost)` bug). Pass halo-synced inputs.
+- `idBorders`, `outletIDs` and `advectBorders` list OWNED nodes only (ghost copies of edge nodes are not in them), while `northPts`/`southPts`/`eastPts`/`westPts` are geometric and include ghosts. Used as an exclusion mask for a neighbour average/min, an owned-only set lets a ghost edge neighbour's raw value in, which is partition-dependent (the advection edge-reset bug). Sync the flag to the ghosts first (see `tectonics._advEdgeHalo`).
 - A regression guard must fail without its fix. Verify that before committing.
 
 ## Intentional surprises (do NOT "fix")

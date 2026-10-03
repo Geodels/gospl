@@ -1085,16 +1085,21 @@ def test_parallel_cached_diffusion_rebuild(tmp_path):
 
 
 @pytest.mark.slow
-def test_iioe2_partition_invariant_interior(tmp_path):
-    """IIOE2 advection must not depend on the decomposition inside the domain.
+def test_advection_partition_invariant(tmp_path):
+    """IIOE2 advection + edge reset must not depend on the decomposition.
 
-    An owned row's inflow weight is the GHOST neighbour's outflow weight, which
-    used to be computed from the ghost's truncated local stencil (its Fortran
-    FVarea, neighbourhood range and outflow count). Fixed 2026-10 by passing
-    owner-synced area / vmin / vmax / nbout into `adveciioe2`. On the
-    flat_advect ridge, np=1 vs np=3 after 3 steps, interior (>= 600 m from the
-    edge) elevation differed by 1.8 m; now 3.8e-3 m (solver tolerance). The
-    edge zone is excluded: a separate edge-reset difference shared with IIOE1.
+    Two partition bugs, both fixed 2026-10 and both guarded here (flat_advect
+    ridge, np=1 vs np=3, 3 steps, whole domain):
+
+    * interior: an owned row's inflow weight is the GHOST neighbour's outflow
+      weight, computed from the ghost's truncated local stencil (Fortran FVarea,
+      range, outflow count); `adveciioe2` now takes owner-synced inputs.
+      Interior difference 1.8 m -> 3.8e-3 m;
+    * edges: the post-advection edge reset (`_resetEdges`) marked only OWNED
+      edge nodes, so `fitedges` averaged a ghost edge neighbour's raw value into
+      an owned edge node; it now marks ghosts too (`_advEdgeHalo`). Edge-zone
+      difference ~2-3 m (both IIOE schemes) -> ~1e-5 m.
+
     np=3 (not 2): the 2-way cut on this fixture does not exercise the limiter.
     """
     import shutil
@@ -1121,7 +1126,8 @@ def test_iioe2_partition_invariant_interior(tmp_path):
     c = a["_coords"]
     lo, hi = c[:, :2].min(0), c[:, :2].max(0)
     dist = np.minimum(c[:, :2] - lo, hi - c[:, :2]).min(axis=1)
-    interior = dist >= 600.0
-    d = np.abs(a["elev"] - b["elev"])[interior]
+    d = np.abs(a["elev"] - b["elev"])
     assert np.isfinite(d).all()
-    assert d.max() < 0.05, f"IIOE2 interior partition difference {d.max():.3e} m"
+    edge, interior = dist < 600.0, dist >= 600.0
+    assert d[interior].max() < 0.01, f"interior difference {d[interior].max():.3e} m"
+    assert d[edge].max() < 0.01, f"edge-zone difference {d[edge].max():.3e} m"
