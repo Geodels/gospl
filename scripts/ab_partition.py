@@ -26,17 +26,22 @@ ignores nodes on the domain boundary only if ``--interior`` is given.
 Exit status: 0 if every field agrees within ``--rtol``/``--atol``, 1 otherwise,
 so it can gate a script. A difference is a lead, not a verdict. The default
 tolerances are strict on purpose, and a healthy model does NOT pass them
-node-by-node: KSP round-off flips near-tie flow routing at partition seams.
-Reference baseline (tests/fixtures/minimal.yml, np=1 vs np=2, 2 steps, macOS):
+node-by-node: KSP round-off is amplified by near-tie flow routing.
+Reference baseline (tests/fixtures/minimal.yml, np=1 vs np=2, 2 steps, after
+the 2026-10 mfdreceivers fix; it was ~1e-6 on elevation before):
 
-    elev    max rel 4e-6   rel L2 8e-7      (round-off level: healthy)
-    FA      max rel 0.3    rel L2 8e-2      (near-tie re-routing at ~175 nodes)
-    cumED   max rel 3e-2   rel L2 2e-2
+    elev    max rel ~6e-9   (round-off level: healthy)
+    sedLoad max rel ~4e-5
 
-What signals a real partition bug is a jump well above such a baseline (orders
-of magnitude, or a localised spike along the partition boundary), a non-finite
-count that differs between the runs, or a difference that GROWS with --steps.
-Measure the baseline for your input first, then compare against it.
+The decisive comparison is NOT a fixed threshold but the same input's own
+round-off sensitivity: run np=1 against np=1 with the initial elevation
+perturbed by 1e-12 relative (the parallel-invariance audit's
+perturb_control.py does this; see gospl/flow/AGENTS.md > Measuring partition
+dependence). Many inputs amplify that perturbation to 1e-3..1e-1 within a few
+steps. A partition bug is a difference that EXCEEDS that control, or that
+appears after a single process already at O(1e-6+) while the inputs to that
+process agree to round-off; a non-finite count that differs between the runs
+is always a bug.
 """
 
 from __future__ import annotations
@@ -130,8 +135,22 @@ def _output_dir_name(yml: Path) -> str | None:
 
 
 def _scratch_copy(yml: Path, root: Path, tag: str) -> Path:
-    """A directory mirroring the input's directory through symlinks."""
-    d = root / tag
+    """A directory mirroring the input's directory through symlinks.
+
+    The mirror sits at ``root/tag/<input dir name>`` and ``root/tag`` also
+    links the input directory's SIBLINGS, so an input that reaches into a
+    neighbouring example (``npdata: ['../other_example/mesh', ...]``, e.g.
+    goSPL-examples continental_geochem) resolves the same way it would in place.
+    """
+    base = root / tag
+    base.mkdir()
+    for sib in yml.parent.parent.iterdir():
+        if sib.name != yml.parent.name:
+            try:
+                (base / sib.name).symlink_to(sib.resolve())
+            except OSError:
+                pass
+    d = base / yml.parent.name
     d.mkdir()
     outdir = _output_dir_name(yml)
     for entry in yml.parent.iterdir():
