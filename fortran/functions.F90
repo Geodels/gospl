@@ -1593,7 +1593,7 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, gid, rcv, dist, wgt, nb)
   integer :: k, n, p, kk
   double precision :: slp(12),dst(12),val,slope(12)
   double precision :: e, fexp
-  integer :: id(12)
+  integer :: id(12), pos(12)
 
   rcv = -1
   dist = 0.
@@ -1658,15 +1658,24 @@ subroutine mfdreceivers(nRcv, exp, elev, sl, gid, rcv, dist, wgt, nb)
         enddo
       else
         rcv(k,1:nRcv) = k-1
-        call quicksort(slp,1,kk,id)
+        ! Sort the slopes carrying the ORIGINAL SLOT of each neighbour, then
+        ! read both the receiver id and its edge length through it. Sorting
+        ! `id` alone (as before 2026-10) left `dst` in FVnID order, so each
+        ! receiver got the distance of whichever neighbour sat in that slot
+        ! (sometimes not a receiver): a wrong slope in every SPL eroder,
+        ! partition-dependent because FVnID order is per-rank.
+        do p = 1, kk
+          pos(p) = p
+        enddo
+        call quicksort(slp,1,kk,pos)
         n = 0
         val = 0.
         slope = 0.
         do p = kk,kk-nRcv+1,-1
           n = n + 1
           slope(n) = slp(p)
-          rcv(k,n) = id(p)
-          dist(k,n) = dst(p)
+          rcv(k,n) = id(pos(p))
+          dist(k,n) = dst(pos(p))
           val = val + slp(p)
         enddo
         do p = 1, nRcv
@@ -1716,7 +1725,7 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, gid, rcv, dist, wgt, nb)
 
   integer :: k, n, p, kk, ngbs
   double precision :: fexp,slp(12),dst(12),val,slope(12)
-  integer :: id(12)
+  integer :: id(12), pos(12)
 
   rcv = -1
   dist = 0.
@@ -1768,15 +1777,19 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, gid, rcv, dist, wgt, nb)
       enddo
     else
       rcv(k,1:ngbs) = k-1
-      call quicksort(slp,1,kk,id)
+      ! Same receiver-distance alignment as mfdreceivers.
+      do p = 1, kk
+        pos(p) = p
+      enddo
+      call quicksort(slp,1,kk,pos)
       n = 0
       val = 0.
       slope = 0.
       do p = kk,kk-ngbs+1,-1
         n = n + 1
         slope(n) = slp(p)
-        rcv(k,n) = id(p)
-        dist(k,n) = dst(p)
+        rcv(k,n) = id(pos(p))
+        dist(k,n) = dst(pos(p))
         val = val + slp(p)
       enddo
       ! For marine deposition we don't scale the flow direction distribution

@@ -808,3 +808,33 @@ def test_stale_warm_start_guess_is_reset(minimal_model):
         finally:
             x.destroy()
     A.destroy(); b.destroy()
+
+
+def test_receiver_distances_match_their_receivers(incising_model):
+    """
+    Protects: fortran mfdreceivers (and mfdrcvrs). When a node has more
+    downslope neighbours than flow directions, the slopes are quicksorted with
+    the neighbour ids carried along, but the edge lengths `dst` were NOT, so
+    `dist(k, n)` was the length of whichever neighbour sat in that slot of the
+    (partition-dependent) FVnID order, sometimes not a receiver at all. The
+    receivers and weights were right; the distances fed the wrong slope into
+    every SPL eroder (distRcvi). Found by the 2026-10 parallel-invariance
+    audit (glacial_erosion, flow_direction/input-mfd).
+
+    On a flat mesh every stored receiver distance must equal the Euclidean
+    distance from the node to that receiver.
+    """
+    m = incising_model
+    assert m.flatModel
+    xy = m.lcoords
+    rcv, w, d = m.rcvIDi, m.wghtVali, m.distRcvi
+    k = np.repeat(np.arange(m.lpoints)[:, None], rcv.shape[1], axis=1)
+    use = (w > 0) & (rcv != k) & (m.inIDs == 1)[:, None]
+    assert use.any()
+    # the sort branch must be exercised: nodes using every flow direction
+    assert ((w > 0).sum(axis=1) == rcv.shape[1]).any()
+    true = np.linalg.norm(xy[k[use]] - xy[rcv[use]], axis=1)
+    bad = ~np.isclose(d[use], true, rtol=1e-9, atol=1e-9)
+    assert not bad.any(), (
+        "%d of %d receiver distances do not match their receiver (max rel err %.2e)"
+        % (bad.sum(), use.sum(), np.max(np.abs(d[use] - true) / true)))
