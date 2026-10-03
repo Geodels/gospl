@@ -73,24 +73,19 @@ DT = 1000.0              # model step (yr)
 N_STEPS = 5              # -> sigma grows 5 km -> ~11.2 km
 PICARD_SUB = 50          # backward-Euler sub-steps per dt (Picard)
 
-# Tolerances. Measured (serial, this configuration):
-#   picard: D err 1.4e-4, peak-law dev 6.4e-3, RMSE/peak 5.1e-4
-#   ts:     D err 4.9e-2, peak-law dev 3.4e-2, RMSE/peak 5.1e-3
-# The TS tolerances are deliberately looser: the cached marine TS
-# (`_diffuseImplicit`) uses `ksp_type preonly` + `pc gasm`, i.e. ONE application
-# of the (ILU) preconditioner per Rosenbrock stage instead of an exact stage
-# solve. With the large steps the adaptive controller takes (D*dt/dx^2 ~ 1e3-1e4)
-# that inexact stage solve systematically UNDER-DIFFUSES (volume is still exact):
-# measured D_eff/D = 1.000 at dt=100 yr, 0.973 at dt=1000 yr, 0.868 at
-# dt=5000 yr for a single step, vs 1.000 at every dt with `-ksp_type gmres
-# -ksp_rtol 1e-12`. The deficit is also PARTITION-DEPENDENT (GASM blocks):
-# under `mpirun -n 2` this benchmark measures TS D err 0.26 (fails) while
-# Picard stays at 5e-4. Tolerances are calibrated for the serial CI run.
-# Tighten TS to the Picard values once that is addressed.
+# Tolerances. Measured (this configuration; identical at np=1, 2 and 4):
+#   picard: D err 1.3e-4, peak-law dev 6.4e-3, RMSE/peak 5.1e-4
+#   ts:     D err 3.3e-5, peak-law dev 1.2e-3, RMSE/peak 1.5e-4
+# History: until 2026-10 the cached marine TS (`_diffuseImplicit`) used
+# `ksp_type preonly` + `pc gasm`, i.e. ONE preconditioner application per
+# Rosenbrock stage instead of a stage solve. It under-diffused (D err 4.9e-2
+# here; D_eff/D = 0.973 / 0.868 for single steps of 1e3 / 5e3 yr) and depended
+# on the partition (D err 0.26 at np=2). The stage system is now Krylov-solved
+# (gmres + gasm, rtol 1e-8), and both solvers share the same tolerances.
 TOL_VOLUME = 1.0e-8
-TOL_PEAK_LAW = {"ts": 6.0e-2, "picard": 1.0e-2}  # max dev of peak*(t+t0)
-TOL_D = {"ts": 8.0e-2, "picard": 2.0e-3}         # moment-derived D, relative
-TOL_RMSE = {"ts": 1.0e-2, "picard": 2.0e-3}      # RMSE / exact peak
+TOL_PEAK_LAW = {"ts": 1.0e-2, "picard": 1.0e-2}  # max dev of peak*(t+t0)
+TOL_D = {"ts": 2.0e-3, "picard": 2.0e-3}         # moment-derived D, relative
+TOL_RMSE = {"ts": 2.0e-3, "picard": 2.0e-3}      # RMSE / exact peak
 
 
 def _write_mesh(path):

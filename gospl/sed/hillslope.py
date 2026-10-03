@@ -956,8 +956,20 @@ class hillSLP(object):
             ts.setMaxSNESFailures(-1)
             snes = ts.getSNES()
             snes.setTolerances(max_it=10)
+            # rosw is a linearly-implicit Rosenbrock-W method: each stage is ONE
+            # linear solve with no Newton correction afterwards, so the stage
+            # system must actually be solved. It used to be `preonly` + gasm,
+            # i.e. a single preconditioner application per stage: an inexact
+            # solve the TS error estimator cannot see. That under-diffused
+            # (effective D 0.97 / 0.87 of the true value at dt = 1e3 / 5e3 yr)
+            # and, because the GASM blocks follow the partition, gave a
+            # different answer at each rank count (D error 0.26 at np=2).
+            # Krylov-converge it instead (same GASM as preconditioner);
+            # rtol 1e-8 sits well below the TS's own error tolerances.
+            # Guard: benchmarks/test_marine_diffusion.py.
             ksp = snes.getKSP()
-            ksp.setType("preonly")
+            ksp.setType("gmres")
+            ksp.setTolerances(rtol=1.0e-8, atol=1.0e-12, max_it=1000)
             pc = ksp.getPC()
             pc.setType("gasm")
             ts.setFromOptions()
