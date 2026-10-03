@@ -12,6 +12,9 @@ on:
     branches: [master, release-candidate]
   push:
     branches: [master, release-candidate]
+  # Manual runs, e.g. the full suite + MPI lint on `dev`, which has no push
+  # trigger here (the nightly tests-slow covers only the `slow` subset).
+  workflow_dispatch:
 
 # Opt the existing v3/v4 actions into the Node.js 24 runtime, matching the
 # style of conda-build.yml so all workflows behave identically once Node 24
