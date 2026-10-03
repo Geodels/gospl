@@ -1,11 +1,8 @@
 name: tests-pr
 
-# Fast-tier regression tests (parser-only). Runs on every PR and on every
-# push to a tracked branch. The fast tier exercises tests/test_regression.py
-# tests marked `not slow` — TEST 1 (uniform sedfactor populates sUni) and
-# TEST 2 (forcing DataFrame column order contract). These tests bypass the
-# full Model() init and need no mesh fixtures, so they catch parser-class
-# bugs cheaply (target wall-clock < 60s including the env build).
+# Regression tests on every PR and every push to a tracked branch: the
+# whole of tests/ (one module per subsystem, see tests/README.md), plus the
+# MPI-collective lint (scripts/lint_mpi_collectives.py).
 #
 # The slow tier (Model instantiation + sediment/erosion physics) runs from
 # tests-slow.yml on a nightly schedule and before release tags.

@@ -3,11 +3,14 @@ Tests for the ``gospl`` command-line entry point (:mod:`gospl.cli`).
 """
 
 import os
-from pathlib import Path
 
 import pytest
 
-FIXTURES = Path(__file__).parent / "fixtures"
+from _helpers import FIXTURES_DIR
+
+pytestmark = pytest.mark.cli
+
+FIXTURES = FIXTURES_DIR
 
 
 def test_cli_parse_aliases():

@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.analyse
+
 
 def _write_dataset(tmp_path, nparts=2):
     """

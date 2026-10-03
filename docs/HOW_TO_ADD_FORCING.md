@@ -25,7 +25,7 @@ gospl/mesher/unstructuredmesh.py  — _updateXxx (per-step DataFrame → fields)
                                      applyForces (dispatcher), destroy_DMPlex
                                      (if you allocate any new Vec)
 AGENTS.md                          — Forcing DataFrame layout contract table
-tests/test_regression.py          — column-order regression guard
+tests/test_parser.py              — column-order regression guard
 ```
 
 `unstructuredmesh.py` is **HIGH-RISK** per AGENTS.md > High-risk modules. Run the full regression suite (`pytest tests/`) after editing it.
@@ -314,7 +314,7 @@ The 2026-06 cached-KSP/SNES/TS attributes are destroyed by the second loop (`for
 
 ## Step 6: Write the regression test
 
-`tests/test_regression.py::test_forcing_column_order` (around line 116) protects the column-name contract. **Add a block for your new forcing** following the existing four:
+`tests/test_parser.py::test_forcing_column_order` protects the column-name contract. **Add a block for your new forcing** following the existing four:
 
 ```python
 # ---- yfdata: built via _readYourForcing (uniform-only path) ----
@@ -330,7 +330,7 @@ assert list(parser.yfdata.columns) == [
 ```
 
 This block:
-- Uses the `_bare_parser()` fixture (defined at the top of `test_regression.py`) which bypasses `ReadYaml.__init__` and only injects the attributes needed by the forcing parsers.
+- Uses the `_bare_parser()` fixture (defined at the top of `tests/test_parser.py`) which bypasses `ReadYaml.__init__` and only injects the attributes needed by the forcing parsers.
 - Runs in the fast tier — no real mesh, no PETSc DMPlex. The test should complete in milliseconds.
 - Catches three classes of regression: column-name typo (e.g. the rUni/sUni bug), column-order change, removal of a column the contract guarantees.
 
@@ -490,7 +490,7 @@ The SPL kernels can then read `self.eroFactor` as a per-node multiplier (similar
 
 ### Step 6: regression test
 
-In `tests/test_regression.py::test_forcing_column_order`, add:
+In `tests/test_parser.py::test_forcing_column_order`, add:
 
 ```python
 # ---- eData: built via _readErodibility (uniform-only path) ----

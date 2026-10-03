@@ -149,7 +149,7 @@ the spatial/time-varying ELA syntax used by global models.
 
 ## Validation
 
-Regression tests guard the model (`tests/test_regression.py`,
+Regression tests guard the model (`tests/test_ice.py`,
 `tests/fixtures/minimal_ice_*.yml`): ice off/on parsing; end-to-end run
 invariants (H ≥ 0, finite, no ice below terminus/ELA, valid basal velocity);
 glacial-abrasion sign (`E_g = Kg·u_b`) and no-op when `Kg=0`; bulk till

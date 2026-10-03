@@ -37,7 +37,15 @@ from pathlib import Path
 
 import pytest
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Make `from _helpers import ...` work in every test module, including under
+# `--import-mode=importlib` (used by the conda smoke test in AGENTS.md), which
+# does NOT put the test directory on sys.path the way the default mode does.
+_TESTS_DIR = str(Path(__file__).parent)
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
+
+from _helpers import FIXTURES_DIR  # noqa: E402  (per-process copy of the inputs)
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +78,10 @@ def _release_petsc_after_test():
 
 def pytest_configure(config):
     """Register the `slow` and `benchmark` markers so the pytest
-    `-m 'not slow'` and `-m 'not benchmark'` selectors work."""
+    `-m 'not slow'` and `-m 'not benchmark'` selectors work.
+
+    The subsystem markers (`flow`, `sediment`, `mpi`, ...) are registered in
+    pyproject.toml only, which is authoritative; see tests/README.md."""
     config.addinivalue_line(
         "markers",
         "slow: requires a full goSPL Model instantiation "

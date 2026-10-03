@@ -7,6 +7,8 @@ adjacency / receiver / downhill-edge helpers. Pure NumPy — no GIS/HDF5 needed.
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.analyse
+
 prov = pytest.importorskip("gospl.analyse.provenance")
 
 

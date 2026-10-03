@@ -13,6 +13,8 @@ import os
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.analyse
+
 
 def _synthetic_run(tmp_path, nx=10, ny=8, dx=1000.0):
     """Lattice mesh tilted down toward x=0; flow drains west."""

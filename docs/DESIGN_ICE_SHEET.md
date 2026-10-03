@@ -159,7 +159,7 @@ paleo-climate temperature history by lapse-rate inversion (it sets the ELA
 
 ## 8. Validation
 
-Regression tests (`tests/test_regression.py`, `tests/fixtures/minimal_ice_*.yml`):
+Regression tests (`tests/test_ice.py`, `tests/fixtures/minimal_ice_*.yml`):
 ice off/on parsing; end-to-end run invariants (H ≥ 0, finite, no ice below
 terminus/ELA, valid basal velocity); glacial-abrasion sign (`E_g = Kg·u_b`) and
 no-op when `Kg=0`; bulk till conservation (eroded == deposited, net bed-volume

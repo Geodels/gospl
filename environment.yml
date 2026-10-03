@@ -25,6 +25,12 @@ dependencies:
   - cxx-compiler
   - fortran-compiler
   - pytest
+  # pytest-xdist: `pytest -n 4` (tests/ is xdist-safe, each worker gets a
+  # private fixture copy). pytest-timeout: the per-test hang backstop set in
+  # pyproject.toml. pyflakes: scripts/lint_mpi_collectives.py's companion lint.
+  - pytest-xdist
+  - pytest-timeout
+  - pyflakes
 # goSPL itself is installed by `pip install --no-deps --no-build-isolation -e .`
 # in the workflow (and the equivalent command for local dev). Don't add it
 # here — having conda's pip-subsection clone+build goSPL during env creation

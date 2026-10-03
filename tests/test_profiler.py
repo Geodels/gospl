@@ -14,6 +14,8 @@ import pytest
 
 from gospl.tools.profiler import Profiler
 
+pytestmark = pytest.mark.tools
+
 
 def test_disabled_is_noop(tmp_path):
     """A disabled profiler records nothing and never communicates."""

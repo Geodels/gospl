@@ -64,7 +64,7 @@ packages = [
 ]
 
 [project.optional-dependencies]
-dev = ["pip-tools", "pytest"]
+dev = ["pip-tools", "pytest", "pytest-xdist", "pytest-timeout", "pyflakes"]
 # Post-processing analysis tools (gospl.analyse). numba accelerates the
 # sediment-provenance routing sweep; geopandas assigns source/sink classes from
 # shapefiles; netCDF4 backs the gridexport NetCDF writer; matplotlib draws the
@@ -85,12 +85,41 @@ gospl-section = "gospl.analyse.stratasection:main"
 gospl-ela = "gospl.tools.ela_from_temperature:main"
 
 [tool.pytest.ini_options]
+# Per-test hang backstop (pytest-timeout; ignored with a warning when the plugin
+# is absent). Deliberately generous so the analytical benchmarks (minutes each
+# on CI) never trip it: its job is to turn an in-process deadlock into a
+# failure instead of a job that hangs to the CI limit. The nested-`mpirun`
+# tests have their own tighter budget (tests/_helpers.MPI_TIMEOUT). For a quick
+# local loop pass a tighter one: `pytest tests/ -m "not mpi" --timeout 120`.
+timeout = 1800
 # Marker registry — discovered no matter which directory pytest is
 # invoked from (tests/ or benchmarks/). Mirrored in tests/conftest.py
 # for backward compatibility but pyproject is the authoritative source.
 markers = [
     "slow: requires a full goSPL Model instantiation (mesh + PETSc DMPlex + MPI). Skipped when fixture inputs are absent.",
     "benchmark: analytical benchmark against exact solutions — requires scipy, matplotlib, pandas; skipped automatically if dependencies unavailable.",
+    # Subsystem markers: one per tests/test_<group>.py module (set via
+    # `pytestmark`), so an agent or developer can run only the tests for the
+    # code they touched, e.g. `pytest tests/ -m flow`. See tests/README.md.
+    "mpi: spawns `mpirun` subprocesses (np=1 vs np=2). The slowest tier; deselect with `-m 'not mpi'` for a quick loop.",
+    "parser: input-parser tests (no mesh, no PETSc DMPlex).",
+    "contracts: cross-module data contracts (rcvIDi snapshot, scratch Vecs, Eb sign).",
+    "flow: flow routing, flow-accumulation KSP, pit graph, cascade, evaporation, fill_mesh_pits.",
+    "sediment: sediment routing, marine deposition and diffusion, mass conservation.",
+    "boundaries: flat-model boundary conditions (o/f/w/c) and closed-sink deposition.",
+    "advection: horizontal advection schemes.",
+    "flexure: flexural isostasy (flat FEM, global).",
+    "orography: orographic precipitation.",
+    "ice: diagnostic glacial model.",
+    "soil: soil / regolith model.",
+    "groundwater: water table, recharge, baseflow, duricrust.",
+    "geochem: Level-B groundwater geochemistry.",
+    "strata: stratigraphy and dual lithology.",
+    "provenance: in-model provenance tracers.",
+    "parallel: multi-rank correctness and deadlock guards (always also `mpi`).",
+    "analyse: standalone post-processing tools (gospl.analyse, gospl-* commands).",
+    "cli: the `gospl` run command.",
+    "tools: gospl.tools utilities (profiler, ela_from_temperature).",
 ]
 
 [project.urls]

@@ -58,7 +58,7 @@ gospl/tools/outmesh.py         — add field write in _outputMesh
                                   (optional) add restart-read block in readData
 gospl/mesher/unstructuredmesh.py — destroy_DMPlex (ONLY if you allocate a new
                                   persistent Vec — see Step 2)
-tests/test_regression.py       — (recommended) a slow-tier test asserting
+tests/test_<subsystem>.py      — (recommended) a test asserting
                                   the field exists with correct shape
 ```
 
@@ -296,7 +296,7 @@ The `"/myField" in hf` guard makes restart files written by older code (without 
 
 ## Step 6: Write a regression test (recommended)
 
-Add to `tests/test_regression.py`:
+Add to the test module for your subsystem (`tests/test_<subsystem>.py`, see `tests/README.md`):
 
 ```python
 @pytest.mark.slow
@@ -460,4 +460,4 @@ If Paraview renders your field as garbled or wraps incorrectly across cells, sus
 - AGENTS.md > Scratch vector contract — when reuse is safe vs. when to allocate
 - AGENTS.md > High-risk modules — destroy_DMPlex ownership of every persistent Vec
 - [HOW_TO_ADD_FORCING.md](HOW_TO_ADD_FORCING.md) — sister runbook for the input side
-- `tests/test_regression.py::test_mass_conservation` — closes the loop on the output path (reads `cumEDLocal` after a run)
+- `tests/test_sediment.py::test_mass_conservation` — closes the loop on the output path (reads `cumEDLocal` after a run)

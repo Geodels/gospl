@@ -10,6 +10,8 @@ without a model run.
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.analyse
+
 
 def _write_grid(path, names, basin, fa, sed, lon, lat):
     """Write a gridded NetCDF using the given (lon, lat, fa, sed, basin) names."""

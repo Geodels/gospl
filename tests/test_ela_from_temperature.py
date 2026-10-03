@@ -9,6 +9,8 @@ import os
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.tools
+
 def _load_helper():
     return pytest.importorskip("gospl.tools.ela_from_temperature")
 

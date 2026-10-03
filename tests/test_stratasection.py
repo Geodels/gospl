@@ -10,6 +10,8 @@ colour fields and the four plot products are exercised without a model run.
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.analyse
+
 
 @pytest.fixture(autouse=True)
 def _close_figures():
