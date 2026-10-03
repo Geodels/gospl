@@ -133,3 +133,17 @@ MARINE_SMOOTH_N_SEA = 5.0
 # flow/iceplex.py (_glacialMeltwater / _routeTill), which carries a distinct role
 # there. Used by eroder/soilSPL.py::_iceFrozenMask. See AGENTS.md > Magic numbers.
 ICE_COVER_MIN = 1.0e-2
+
+# Relative floor (fraction of the domain's maximum smoothed ice discharge) below
+# which the smoothed discharge in IceMesh._iceFlowMFD is treated as zero before
+# the Bahr thickness H = icewe*icewf*Q^0.3. The smoothing is one implicit
+# diffusion solve, which gives the discharge an exponentially decaying tail over
+# every cell, and the power 0.3 inflates it (Q ~ 1e-3 m3/yr becomes 10 cm of
+# ice); below ~100x the flow solver's relative tolerance (rtol 1e-8) the tail is
+# not resolved by the solve, so whether a fringe cell got ice depended on solver
+# noise and hence on the partition. Every cell this removes lies in the pure
+# smoothing tail (zero routed discharge); on goSPL-examples glacial_erosion it
+# removes 0.7% of the ice volume, all fringe thinner than ~2 m. See AGENTS.md >
+# Magic numbers.
+ICE_DISCHARGE_REL_FLOOR = 1.0e-6
+

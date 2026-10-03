@@ -6,6 +6,8 @@ import numpy as np
 from mpi4py import MPI
 from time import process_time
 
+from gospl.tools.constants import ICE_DISCHARGE_REL_FLOOR
+
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import ice_velocity
     from gospl._fortran import ice_lateral_erosion
@@ -288,6 +290,16 @@ class IceMesh(object):
         smth[smth < 0.0] = 0.0
         self.iceFAL.setArray(smth)
         self.dm.localToGlobal(self.iceFAL, self.iceFAG)
+        # Drop the unresolved smoothing tail (see ICE_DISCHARGE_REL_FLOOR): the
+        # implicit smoothing leaves a decaying tail on every cell, Q^0.3 turns
+        # it into a thin ice fringe, and below ~100x the solve's tolerance that
+        # fringe was set by solver noise, i.e. by the partition. The maximum is
+        # a collective Vec reduction, reached on every rank.
+        qmax = self.iceFAG.max()[1]
+        if qmax > 0.0:
+            smth[smth < ICE_DISCHARGE_REL_FLOOR * qmax] = 0.0
+            self.iceFAL.setArray(smth)
+            self.dm.localToGlobal(self.iceFAL, self.iceFAG)
 
         # (3) Ice thickness: Bahr width–area scaling of the discharge.
         H = self.icewe * self.icewf * np.power(smth, 0.3)

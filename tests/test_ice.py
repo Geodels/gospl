@@ -747,3 +747,31 @@ def test_ice_flexure_loading(minimal_ice_flex_model):
         with h5py.File(files[-1], "r") as hf:
             for field in ("iceH", "iceUb", "iceMelt", "iceAbr"):
                 assert field in hf, f"ice output field {field} not in output"
+
+
+def test_ice_discharge_tail_floored(minimal_ice_model):
+    """
+    Protects: ICE_DISCHARGE_REL_FLOOR in IceMesh._iceFlowMFD. The discharge is
+    smoothed by one implicit diffusion solve, which leaves an exponentially
+    decaying tail on every cell; the Bahr thickness H ~ Q^0.3 inflated that
+    tail into a thin ice fringe (1e-3 m3/yr -> 10 cm of ice), and below ~100x
+    the solve's tolerance the tail was solver noise, so the fringe changed with
+    the partition (goSPL-examples glacial_erosion: 0.11 m of ice and 0.27 m of
+    elevation apart between np=1 and np=2 after one step; 9e-7 m after).
+    After the update no cell may carry a smoothed discharge below the floor,
+    and no ice may sit on such a cell.
+    """
+    from mpi4py import MPI
+    from gospl.flow.iceplex import IceMesh
+    from gospl.tools.constants import ICE_DISCHARGE_REL_FLOOR
+
+    m = minimal_ice_model
+    m.tNow = m.tStart
+    IceMesh.iceAccumulation(m)
+    fa = m.iceFAL.getArray()
+    H = m.iceHL.getArray()
+    qmax = MPI.COMM_WORLD.allreduce(float(fa.max()), op=MPI.MAX)
+    assert qmax > 0.0, "fixture formed no ice"
+    tail = (fa > 0.0) & (fa < ICE_DISCHARGE_REL_FLOOR * qmax)
+    assert MPI.COMM_WORLD.allreduce(int(tail.sum()), op=MPI.SUM) == 0
+    assert np.all(H[fa <= 0.0] == 0.0)
