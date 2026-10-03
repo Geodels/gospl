@@ -28,6 +28,12 @@ Options:
   first line reports the goSPL version.
 - ``--log`` — write the PETSc solver log summary.
 - ``--profile`` — record a per-phase wall-clock profile (``profile.json``).
+- ``--summary FILE`` — write one machine-readable JSON record per time step to
+  ``FILE`` (JSON Lines): elevation range, NaN/inf counts, the step's eroded /
+  deposited volume, per-phase wall time, flow-solver iteration counts and
+  notable solver events (ponded un-drained regions, stalled cascades, SNES
+  fallbacks). Read it with ``gospl-inspect --summary FILE``. The same option is
+  ``Model(..., summary="run.jsonl")`` from Python.
 - ``--version`` — print the goSPL version and exit.
 
 ``--i`` / ``--v`` are accepted as aliases of ``--input`` / ``--verbose``. The
@@ -271,6 +277,25 @@ reference, which gives the same answer. The cache lives in the instance, so unde
 than one step at a time, or the setup is paid per step anyway. Memory scales
 with the number of workers (the node-to-triangle adjacency alone is ~284 MB for
 an 11.8 M-triangle mesh), so on a large mesh fewer workers is often faster.
+
+Checking a run — ``gospl-inspect``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A quick health check of an output directory, without a notebook. It
+reassembles the partitioned HDF5 output onto the input mesh (found through the
+YAML goSPL copies into the output directory, or ``--mesh``) and prints the
+fields' ranges and NaN/inf counts, the eroded / deposited / net volume between
+consecutive outputs, and the largest elevation change between outputs with its
+node id and coordinates (the usual first sign of a spike)::
+
+    gospl-inspect outdir                      # overview, budget, spikes
+    gospl-inspect outdir --step 12 --json     # one JSON object
+    gospl-inspect outdir --compare other_dir  # field-by-field differences
+    gospl-inspect --summary run.jsonl         # anomalies in a --summary file
+
+The budget here uses float32 outputs and barycentric cell areas, so a closed
+domain closes to about 1e-3; the exact per-step budget is in the ``--summary``
+file. ``scripts/budget.py outdir`` prints the budget table only.
 
 Per-basin outflow fluxes — ``gospl-catchment``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

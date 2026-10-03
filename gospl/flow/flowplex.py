@@ -3,6 +3,7 @@ import gc
 import sys
 import petsc4py
 from gospl.tools.petscgc import safe_garbage_cleanup
+from gospl.tools import runsummary as _rs
 import numpy as np
 import numpy_indexed as npi
 
@@ -351,6 +352,23 @@ class FAMesh(object):
                 resid.destroy()
             except Exception:
                 pass
+            # Map the worst node's PETSc global index (partition-dependent) to
+            # its INPUT-MESH id (`locIDs`, what an npz row / ParaView shows) and
+            # coordinates. Only its owner rank can, so reduce: the allreduce is
+            # OUTSIDE any try/guard and every rank reaches it (`r < 0` is global).
+            where = np.full(4, -np.inf)
+            try:
+                hit = np.where((self.lgmap_col.indices == worst_id)
+                               & (self.inIDs == 1))[0]
+                if hit.size:
+                    k = hit[0]
+                    where[0] = float(self.locIDs[k])
+                    where[1:] = self.lcoords[k]
+            except Exception:
+                pass
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, where, op=MPI.MAX)
+            worst_mesh_id = int(where[0]) if np.isfinite(where[0]) else -1
+            worst_xyz = where[1:] if worst_mesh_id >= 0 else None
             # A TINY un-drained region on a non-fatal (I - W^T) solve is the
             # benign isolated-pocket / micro-cycle case (the cells just pond;
             # discharge there is clamped >=0, mass conserved) -- expected and
@@ -398,6 +416,15 @@ class FAMesh(object):
                 and 0 <= nbad <= self._undrained_benign_cap
                 and bad_mask_local is not None
             )
+            _rs.record(
+                self, "flow_ksp_fallback_failed", fatal=bool(fatal), nbad=nbad,
+                cap=int(self._undrained_benign_cap), its=its,
+                worst_mesh_id=worst_mesh_id,
+                worst_xyz=None if worst_xyz is None else [float(v) for v in worst_xyz],
+                outcome=("benign" if benign else "ponded" if pond_fatal
+                         else "abort" if fatal else "zeroed"),
+                rhs_finite=rhs_finite, mat_finite=mat_finite,
+            )
             if MPIrank == 0:
                 if benign:
                     print(
@@ -424,13 +451,15 @@ class FAMesh(object):
                     )
                     if nbad >= 0:
                         print(
-                            "  [flowKSP] worst residual %.3e at global node %d "
-                            "(PETSc global numbering, partition-dependent); "
+                            "  [flowKSP] worst residual %.3e at input-mesh node "
+                            "%d (xyz %s; PETSc global row %d); "
                             "%d nodes exceed 1e-3*||b|| (the un-drained region) "
                             "vs a benign cap of %d — raise it with "
                             "GOSPL_UNDRAINED_CAP to pond this region instead"
-                            % (worst_val, worst_id, nbad,
-                               self._undrained_benign_cap),
+                            % (worst_val, worst_mesh_id,
+                               "n/a" if worst_xyz is None else
+                               "(%.6g, %.6g, %.6g)" % tuple(worst_xyz),
+                               worst_id, nbad, self._undrained_benign_cap),
                             flush=True,
                         )
             if fatal and not pond_fatal:
@@ -563,6 +592,8 @@ class FAMesh(object):
         ksp.setOperators(matrix, matrix)
         ksp.solve(vector1, vector2)
         r = ksp.getConvergedReason()
+        _rs.count_ksp(self, "fatal" if fatal else ("cascade" if seed else "other"),
+                      ksp.getIterationNumber(), r)
         if r < 0:
             # The primary failed (max_it on a near-singular sub-region, or a
             # genuine breakdown). Do NOT accept the iterate: on a near-singular
@@ -1166,6 +1197,15 @@ class FAMesh(object):
                     "closed basins (un-drainable on this partition)." % why,
                     flush=True,
                 )
+
+            _rs.record(
+                self, "flow_cascade", passes=step,
+                outcome=("floor" if floored else "stall" if stalled
+                         else "max_steps" if excess else "drained"),
+                resid=float(self._cascade_resid or 0.0)
+                if getattr(self, "_cascade_resid", None) is not None else 0.0,
+                resid0=float(self._cascade_resid0 or 0.0),
+            )
 
             # Get overall water flowing donwstream accounting for filled depressions
             FA = self.FAL.getArray().copy()

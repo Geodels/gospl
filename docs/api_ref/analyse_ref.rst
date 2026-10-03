@@ -37,6 +37,36 @@ Regular-grid NetCDF + river profiles — ``gospl-grid``
 .. autofunction:: analyse.gridexport.plot_basin_map
 
 
+Output and run-summary inspection — ``gospl-inspect``
+-----------------------------------------------------
+
+.. automodule:: analyse.runinspect
+
+.. rubric:: Functions
+
+.. autofunction:: analyse.runinspect.field_stats
+.. autofunction:: analyse.runinspect.budget
+.. autofunction:: analyse.runinspect.spikes
+.. autofunction:: analyse.runinspect.compare
+.. autofunction:: analyse.runinspect.inspect_summary
+
+.. rubric:: Classes
+
+.. autoclass:: analyse.runinspect.Output
+   :members:
+
+Per-step run summary (``gospl --summary``)
+------------------------------------------
+
+.. automodule:: tools.runsummary
+
+.. autoclass:: tools.runsummary.RunSummary
+   :members:
+
+.. autofunction:: tools.runsummary.record
+.. autofunction:: tools.runsummary.count_ksp
+
+
 Per-basin outflow fluxes — ``gospl-catchment``
 ----------------------------------------------
 

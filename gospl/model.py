@@ -25,6 +25,7 @@ if "READTHEDOCS" not in os.environ:
     from .tools import Profiler as _Profiler
     from .tools import probeZ as _probeZ
     from .tools import resetZ as _resetZ
+    from .tools.runsummary import RunSummary as _RunSummary
 
 else:
 
@@ -220,11 +221,15 @@ class Model(
     :arg filename: YAML input file
     :arg verbose: output flag for model main functions
     :arg showlog: output flag for PETSC logging file
+    :arg profile: print the cross-rank wall-clock phase profile at the end
+    :arg summary: path of a JSON-Lines file receiving one machine-readable
+        record per time step (see ``gospl/tools/runsummary.py``); ``None`` = off
 
     """
 
     def __init__(
-        self, filename, verbose=True, showlog=False, profile=False, *args, **kwargs
+        self, filename, verbose=True, showlog=False, profile=False, *args,
+        summary=None, **kwargs
     ):
 
         self.showlog = showlog
@@ -250,7 +255,11 @@ class Model(
         # YAML `output: profile: true` flag (parsed in _readOut). When off it
         # is a zero-overhead no-op. See gospl/tools/profiler.py.
         prof_on = profile or bool(getattr(self, "profileFlag", False))
-        self.profiler = _Profiler(enabled=prof_on)
+        # The per-step run summary reads the phase timers, so it switches the
+        # (cheap) timers on; the end-of-run profile report stays tied to
+        # `profile` / `output: profile`.
+        self.profiler = _Profiler(enabled=prof_on or bool(summary))
+        self._profileReport = prof_on
 
         # Stratigraphy initialisation
         _STRAMesh.__init__(self)
@@ -312,6 +321,10 @@ class Model(
         if not self.fast:
             # Compute flow accumulation
             _FAMesh.flowAccumulation(self)
+
+        # Per-step JSON-Lines run summary (opt-in). Created after the mesh and
+        # the first flow accumulation so its baseline cumED is in place.
+        self._summary = _RunSummary(self, summary) if summary else None
 
         if MPIrank == 0:
             print(
@@ -387,6 +400,8 @@ class Model(
                 _WriteMesh.visModel(self)
             if self.tNow == self.tEnd:
                 break
+            if self._summary is not None:
+                self._summary.step_begin(self)
 
             # Create new stratal layer
             newLayer = self.tNow >= self.saveStrat
@@ -486,6 +501,10 @@ class Model(
                 with self.profiler.phase("forcing"), self._phase("forcing"):
                     _UnstMesh.applyForces(self)
 
+            # Per-step run summary (collective: every rank reaches this).
+            if self._summary is not None:
+                self._summary.step_end(self)
+
             # Advance time
             self.tNow += self.dt
 
@@ -498,7 +517,10 @@ class Model(
 
         # Cross-rank wall-clock profile + machine-readable profile.json
         # (collective; a no-op when profiling is disabled).
-        self.profiler.report(self.outputDir, total_wall=MPI.Wtime() - runStart)
+        if self._profileReport:
+            self.profiler.report(self.outputDir, total_wall=MPI.Wtime() - runStart)
+        if self._summary is not None:
+            self._summary.finish(self)
 
         return
 

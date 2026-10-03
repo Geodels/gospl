@@ -3,6 +3,7 @@ import gc
 import sys
 import petsc4py
 from gospl.tools.petscgc import safe_garbage_cleanup
+from gospl.tools import runsummary as _rs
 import numpy as np
 import numpy_indexed as npi
 
@@ -296,6 +297,9 @@ class nlSPL(object):
             self.hGlobal.copy(result=x)
             fb.solve(None, x)
             r = fb.getConvergedReason()
+            _rs.record(self, "nlspl_snes_fallback", primary_reason=int(r0),
+                       primary_its=int(it0), reason=int(r),
+                       its=int(fb.getIterationNumber()))
             if MPIrank == 0:
                 if r >= 0:
                     print(
@@ -382,6 +386,9 @@ class nlSPL(object):
         self.hGlobal.copy(result=x)
         snes.solve(None, x)
         r = snes.getConvergedReason()
+        if r < 0:
+            _rs.record(self, "nlspl_snes_failed", reason=int(r),
+                       its=int(snes.getIterationNumber()))
         if r < 0 and MPIrank == 0:
             print(
                 "Non-linear SPL SNES failed to converge after %d iterations (reason %d)"

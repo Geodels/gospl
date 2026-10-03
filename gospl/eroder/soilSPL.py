@@ -3,6 +3,7 @@ import gc
 import sys
 import petsc4py
 from gospl.tools.petscgc import safe_garbage_cleanup
+from gospl.tools import runsummary as _rs
 import numpy as np
 import numpy_indexed as npi
 
@@ -328,6 +329,9 @@ class soilSPL(object):
             guess.copy(result=x)
             self._snes_soil_fb.solve(None, x)
             r = self._snes_soil_fb.getConvergedReason()
+            _rs.record(self, "soil_snes_fallback", primary_reason=int(r0),
+                       primary_its=int(it0), reason=int(r),
+                       its=int(self._snes_soil_fb.getIterationNumber()))
             if MPIrank == 0 and r >= 0:
                 pn = self.soil_solver
                 fn = "ngmres" if self.soil_solver == "qn" else "qn"
@@ -395,6 +399,7 @@ class soilSPL(object):
         # Rebuild nsoilH / _soilDepoGrowth (Kbr-independent) at the final
         # elevation with the full-Δt production convention.
         self._form_residual_soil(self._snes_soil, x, self.tmp)
+        _rs.record(self, "soil_substep", converged=bool(converged), substeps=int(used))
         if MPIrank == 0:
             if converged:
                 print(

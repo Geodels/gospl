@@ -38,6 +38,9 @@ def _parse_args(argv=None):
                         help="write the PETSc solver log summary (showlog)")
     parser.add_argument("--profile", action="store_true",
                         help="record per-phase wall-clock profiling (profile.json)")
+    parser.add_argument("--summary", metavar="FILE", default=None,
+                        help="write one JSON record per time step to FILE "
+                             "(JSON Lines; read it with `gospl-inspect --summary`)")
     from gospl import __version__
     parser.add_argument("--version", action="version",
                         version="goSPL %s" % __version__)
@@ -53,7 +56,8 @@ def main(argv=None):
     from gospl.model import Model
 
     model = Model(
-        args.input, verbose=args.verbose, showlog=args.log, profile=args.profile
+        args.input, verbose=args.verbose, showlog=args.log, profile=args.profile,
+        summary=args.summary,
     )
     model.runProcesses()
     model.destroy()
