@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest *)",
+      "Bash(pytest *)",
+      "Bash(python scripts/lint_mpi_collectives.py*)",
+      "Bash(python scripts/ab_partition.py *)",
+      "Bash(python scripts/budget.py *)",
+      "Bash(python scripts/fill_mesh_pits.py --check *)",
+      "Bash(scripts/fcheck.sh*)",
+      "Bash(gospl-inspect *)",
+      "Bash(python -m gospl.analyse.runinspect *)",
+      "Bash(python -m pyflakes *)",
+      "Bash(ninja -C build/*)",
+      "Bash(meson introspect *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_edit.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
