@@ -59,7 +59,9 @@ subsystem split and is not applied consistently; prefer the subsystem markers.
   `GOSPL_TEST_FIXTURES_INPLACE=1` to run in `tests/fixtures/` when you want to
   inspect a test's model output afterwards.
 * Multi-rank tests: build the child environment with `_helpers.mpi_child_env()`
-  (scrubs the OpenMPI variables that make a nested `mpirun` refuse to launch)
+  (scrubs the OpenMPI variables that make a nested `mpirun` refuse to launch,
+  and sets `OMPI_MCA_rmaps_base_oversubscribe=1`: GitHub's ubuntu runners have
+  4 vCPUs but 2 physical cores, and OpenMPI refuses np=3 without it)
   and pass `timeout=MPI_TIMEOUT`. A run past the timeout is almost always a
   deadlock (AGENTS.md > MPI contract). Raise it on a slow machine with
   `GOSPL_TEST_MPI_TIMEOUT=<seconds>`.

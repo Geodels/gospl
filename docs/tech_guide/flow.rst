@@ -130,6 +130,13 @@ Iterative methods allow for an initial guess to be provided. When this initial g
 
   The flow routing approach and corresponding flow CSR matrix (**W**) is also used in the sediment routing algorithm.
 
+Long drainage chains
+--------------------
+
+A failed routing solve does not always mean the cells cannot drain. On a wide, gently sloping surface routed with a single flow direction, water can travel through single-file chains of several hundred cells to reach an outlet. The system is then perfectly well posed, but the default iterative solver moves information only a few cells per iteration and runs out of iterations first. Because such a drainage network has no cycle, its matrix on each processor is a reordered triangular matrix, which an exact factorisation solves directly.
+
+goSPL therefore retries a failed routing solve with exact factorisations of each processor's block before treating any cell as un-drained. If that retry succeeds, later routing solves in the run go straight to it, since the terrain that needed it does not change quickly. The retry is accepted only when the actual residual of the solution is small, so a genuinely singular region still fails it and is handled as described in the next section. On terrain routed in many directions with short paths the retry never triggers and nothing changes. The ``GOSPL_FLOW_IDA_EXACT`` environment variable forces the exact solve on (``1``) or disables the retry (``0``), see :ref:`running`.
+
 When cells cannot be drained at all
 ------------------------------------
 

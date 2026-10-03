@@ -102,6 +102,11 @@ unless a run has actually failed or slowed in the way described.
    * - ``GOSPL_FLOW_PC``
      - ``bjacobi``
      - Preconditioner for the same system.
+   * - ``GOSPL_FLOW_IDA_EXACT``
+     - unset
+     - Exact-factorisation retry of a failed routing solve (long single-file
+       drainage chains, see :ref:`flow`). Unset: tried after a failure and kept
+       once it succeeds. ``1`` uses it from the first solve, ``0`` disables it.
    * - ``GOSPL_CASCADE_REL_FLOOR``
      - ``1.e-3``
      - Fraction of the first pass's residual flux at which the downstream
