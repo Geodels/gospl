@@ -14,7 +14,7 @@ import os
 import numpy as np
 import pytest
 
-from _helpers import _strata_parser
+from _helpers import FIXTURES_DIR, _strata_parser
 
 # Skip the whole module (rather than erroring at collection) when the
 # goSPL runtime stack is not installed.
@@ -1175,3 +1175,59 @@ def test_stratigraphy_deposition_and_compaction():
             "bedrock indices."
         ),
     )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("fixture", ["minimal_strat", "minimal_dual", "minimal_prov"])
+def test_transport_limited_strata_conserve_volume(fixture, tmp_path):
+    """
+    Protects: STRAMesh._netRoutedSource. With stratigraphy on, the sediment
+    routed downstream is built from erodeStrat's eroded thickness. With
+    transport-limited SPL (`spl: G > 0`) the eroder ALSO deposits part of that
+    sediment in place (deposeStrat), and the gross erosion used to be routed,
+    so the in-place deposit was laid down a second time downstream: a volume
+    GAIN (goSPL-examples stratigraphic_record/input-stratiG, G = 3: 38% more
+    sediment into the sea than eroded). Every strata fixture has G = 0, which
+    is why nothing caught it.
+
+    On the closed sphere (no outlet, so net volume must be ~0) with G = 1:
+    +9.0e-4 of the activity before the fix (+9.4e-4 dual, +9.0e-4 prov),
+    -5e-5 after (the documented DEPOSIT_FLOOR / pit-residue floor).
+    """
+    import json
+    import os
+    import re
+    import shutil
+
+    from gospl.model import Model
+
+    for f in FIXTURES_DIR.iterdir():
+        if f.is_file():
+            shutil.copy(f, tmp_path / f.name)
+    yml = (tmp_path / f"{fixture}.yml").read_text()
+    yml, n = re.subn(r"(\n\s*G:\s*)0\.", r"\g<1>1.", yml)
+    assert n == 1, "fixture no longer sets spl: G: 0."
+    (tmp_path / "g.yml").write_text(yml)
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model("g.yml", verbose=False, showlog=False,
+                  summary=str(tmp_path / "s.jsonl"))
+        try:
+            m.runProcesses()
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+
+    recs = [json.loads(line) for line in open(tmp_path / "s.jsonl")]
+    assert recs[0]["closed"], "minimal fixtures are a closed sphere"
+    steps = recs[1:-1]
+    ero = sum(r["volume"]["eroded"] for r in steps)
+    dep = sum(r["volume"]["deposited"] for r in steps)
+    assert dep > 0 and ero < 0
+    net_rel = (ero + dep) / (dep - ero)
+    assert abs(net_rel) < 2.0e-4, (
+        f"{fixture} with G=1: net volume {net_rel:+.2e} of activity "
+        "(in-place SPL deposit routed downstream too?)")

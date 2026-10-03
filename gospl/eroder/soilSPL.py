@@ -677,6 +677,9 @@ class soilSPL(object):
         if self.stratNb > 0:
             self.erodeStrat()
             self.deposeStrat()
+            # Route only the NET eroded sediment (gross erosion minus what was
+            # just deposited in place); see STRAMesh._netRoutedSource.
+            self._netRoutedSource()
 
         # Update erosion/deposition rates
         self.dm.globalToLocal(self.tmp, self.tmpL)

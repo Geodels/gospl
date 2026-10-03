@@ -286,6 +286,7 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - A linearly-implicit integrator (Rosenbrock `rosw`) needs each stage SOLVED; `ksp preonly` turns it into an inexact, partition-dependent scheme its error estimator cannot see.
 - A ghost node's Fortran `FVarea` (and any stencil quantity computed over its truncated local neighbourhood: range, outflow count) is NOT the owner's. Harmless while ghost rows are dropped at assembly; wrong as soon as an owned row reads a ghost's derived value (the IIOE2 `thetain = 1 - thetaout(ghost)` bug). Pass halo-synced inputs.
 - `idBorders`, `outletIDs` and `advectBorders` list OWNED nodes only (ghost copies of edge nodes are not in them), while `northPts`/`southPts`/`eastPts`/`westPts` are geometric and include ghosts. Used as an exclusion mask for a neighbour average/min, an owned-only set lets a ghost edge neighbour's raw value in, which is partition-dependent (the advection edge-reset bug). Sync the flag to the ghosts first (see `tectonics._advEdgeHalo`).
+- Test the parameter regimes the fixtures do not: every stratigraphy fixture had `G: 0`, which hid a transport-limited double count for months. When a code path branches on a parameter, a guard needs a fixture on each side.
 - A regression guard must fail without its fix. Verify that before committing.
 
 ## Intentional surprises (do NOT "fix")

@@ -692,6 +692,8 @@ class STRAMesh(object):
                 fsum = frac.sum(axis=1)
             good = fsum > 0.0
             frac[good] /= fsum[good, None]
+            # The composition actually laid down, for _netRoutedSource.
+            self._lastDepoProvFrac = frac
             provDepo = depo[:, None] * frac
             self.stratP[:, self.stratStep, :] += provDepo
             self._provDeposited += np.sum(
@@ -714,6 +716,55 @@ class STRAMesh(object):
         if self.memclear:
             del depo, ids
             gc.collect()
+
+        return
+
+    def _netRoutedSource(self):
+        """
+        Turn the eroded-sediment source produced by ``erodeStrat`` into the
+        NET source that must be routed downstream, by subtracting what the
+        same eroder just deposited in place. Call right after the eroder's
+        ``erodeStrat`` + ``deposeStrat`` pair (SPL, nlSPL, soilSPL).
+
+        Why: ``erodeStrat`` turns only the INCISING part of the step's signed
+        thickness change (``self.tmp`` = ``Eb*dt``) into ``thCoarse`` /
+        ``thFine`` / ``provEro``, while ``deposeStrat`` lays the DEPOSITING
+        part (transport-limited SPL, ``spl: G > 0``) into the pile.
+        ``sedplex._getSedFlux`` then routed the gross erosion, so the in-place
+        deposit was sent downstream as well and laid down a second time, in a
+        pit or the sea. Without stratigraphy ``_getSedFlux`` routes ``-Eb`` (the
+        net rate) and was always right; with it, ``stratigraphic_record``'s
+        ``input-stratiG`` (``G = 3``) put 38% more sediment into the sea than
+        it eroded. The subtraction uses the full ``max(Eb*dt, 0)`` (what changed
+        the elevation, including deposits below ``deposeStrat``'s 0.1 mm
+        stratigraphic floor), split by the composition ``deposeStrat`` used:
+        ``depoFineFrac`` per fraction, ``_lastDepoProvFrac`` per class (the
+        bedrock ``source_class`` where none was recorded). The sources become
+        negative at depositing nodes, exactly as ``-Eb`` is.
+
+        Rank-local (no collective). Scratch Vecs: reads ``self.tmp`` through
+        ``self.tmpL``.
+        """
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        dep = np.maximum(self.tmpL.getArray(), 0.0) / self.dt
+        if not np.any(dep > 0.0):
+            return
+        if self.stratLith:
+            ff = np.clip(self.depoFineFrac, 0.0, 1.0)
+            self.thFine = self.thFine - dep * ff
+            self.thCoarse = self.thCoarse - dep * (1.0 - ff)
+        else:
+            self.thCoarse = self.thCoarse - dep
+        if getattr(self, "provOn", False):
+            pf = getattr(self, "_lastDepoProvFrac", None)
+            if pf is None or pf.shape != (self.lpoints, self.provNb):
+                pf = np.zeros((self.lpoints, self.provNb))
+            pf = pf.copy()
+            none = (dep > 0.0) & (pf.sum(axis=1) < 1.0e-6)
+            if none.any():
+                pf[none, :] = 0.0
+                pf[none, self.source_class[none]] = 1.0
+            self.provEro = self.provEro - dep[:, None] * pf
 
         return
 
