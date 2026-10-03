@@ -73,7 +73,8 @@ def test_summary_records_every_step(tmp_path):
         # the main discharge solve runs every step and is counted
         assert r["ksp"]["fatal"]["solves"] >= 1
         assert {e["kind"] for e in r["events"]} <= {
-            "flow_cascade", "flow_ksp_fallback_failed", "soil_snes_fallback",
+            "flow_cascade", "flow_ksp_fallback_failed", "flow_ksp_exact_rescue",
+            "soil_snes_fallback",
             "soil_substep", "nlspl_snes_fallback", "nlspl_snes_failed"}
 
     # minimal.yml is a closed sphere: the per-step budget closes to the

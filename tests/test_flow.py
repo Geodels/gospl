@@ -687,3 +687,89 @@ def test_globalngbhs_reports_over_degree_vertices():
         filled = fortran.epsfill(elev.min() + 0.01, elev)
         assert np.isfinite(filled).all()
         assert (filled >= elev).all()
+
+
+def _chain_flow_system(n, seed=7):
+    """A well-posed but long SFD routing system: one drainage chain of `n`
+    cells to an outlet, with the cell order randomly permuted (as mesh order is
+    relative to drainage order). (I - W^T) is non-singular and its solution is
+    the accumulated runoff along the chain, but ILU(0) in this ordering is
+    inexact and fgmres(30) needs ~n iterations: the implicit_timestepping
+    plateau failure (733-cell chains)."""
+    import petsc4py
+    PETSc = petsc4py.PETSc
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n)            # perm[k] = matrix index of chain cell k
+    A = PETSc.Mat().createAIJ([n, n], nnz=2, comm=PETSc.COMM_WORLD)
+    for k in range(n):
+        A.setValue(perm[k], perm[k], 1.0)
+        if k > 0:                        # cell k-1 drains into cell k
+            A.setValue(perm[k], perm[k - 1], -1.0)
+    A.assemble()
+    b = A.createVecLeft()
+    b.set(1.0)                           # unit runoff everywhere
+    x = b.duplicate()
+    b.copy(result=x)
+    exact = np.empty(n)
+    exact[perm] = np.arange(1, n + 1, dtype=float)
+    return A, b, x, exact
+
+
+def _fresh_flow_ksps(m):
+    """The cached flow KSPs were set up on the model's mesh-sized matrix; a
+    standalone system of another size needs fresh ones (destroy_DMPlex skips
+    the None attributes at teardown)."""
+    for name in ("_ksp_main", "_ksp_fallback", "_ksp_exact"):
+        k = getattr(m, name, None)
+        if k is not None:
+            k.destroy()
+        setattr(m, name, None)
+
+
+def test_long_chain_routing_solve_rescued_exactly(minimal_model):
+    """
+    Protects: flowplex._solveIDAExact. A long, well-posed routing chain that
+    the primary fgmres+ILU cannot converge within the cascade cap used to be
+    ZEROED by the bounded fallback (implicit_timestepping: 1949 cells' routed
+    water dropped each step). The exact block-factor rescue must solve it, set
+    the sticky switch, and solve the next one directly.
+    """
+    from mpi4py import MPI
+
+    if MPI.COMM_WORLD.Get_size() > 1:
+        pytest.skip("serial standalone matrix")
+    m = minimal_model
+    assert m._ida_exact is False, "fresh model must start on the primary solver"
+    _fresh_flow_ksps(m)
+    A, b, x, exact = _chain_flow_system(3000)
+    try:
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        got = x.getArray()
+        assert np.allclose(got, exact, rtol=1e-6), (
+            "routing solve not recovered: max |err| %.3e" % np.abs(got - exact).max())
+        assert m._ida_exact is True, "a successful rescue must switch to exact"
+        # Next routing solve goes straight to the exact solver.
+        x.set(0.0)
+        b.copy(result=x)
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        assert np.allclose(x.getArray(), exact, rtol=1e-6)
+        assert m._ksp_exact.getIterationNumber() <= 2
+    finally:
+        A.destroy(); b.destroy(); x.destroy()
+
+
+def test_singular_routing_solve_still_falls_back(minimal_model):
+    """
+    A genuinely singular region (2-cycles) must NOT be "rescued": the exact
+    solver fails too, the sticky switch stays off, and the bounded fallback
+    zeroes the non-fatal solve as before.
+    """
+    m = minimal_model
+    _fresh_flow_ksps(m)
+    A, b, x = _singular_flow_system(ncycles=20, rhs_all=True)
+    try:
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        assert m._ida_exact is False
+        assert np.all(np.isfinite(x.getArray()))
+    finally:
+        A.destroy(); b.destroy(); x.destroy()

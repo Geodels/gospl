@@ -26,8 +26,9 @@ up to solver round-off):
   ``_solve_KSP``): number of solves, total and max iterations, primary
   failures;
 * ``events``: notable solver outcomes (fallback failures with the un-drained
-  cell count and whether they ponded or aborted, cascade stop reasons and pass
-  counts, SNES fallbacks and soil sub-stepping).
+  cell count and whether they ponded or aborted, ``flow_ksp_exact_rescue``
+  when the exact block solver recovered a routing solve, cascade stop reasons
+  and pass counts, SNES fallbacks and soil sub-stepping).
 
 A final ``{"end": true, ...}`` record carries the total wall time.
 

@@ -44,6 +44,15 @@ class FAMesh(object):
         # rebuilds the preconditioner factor when necessary.
         self._ksp_main = None
         self._ksp_fallback = None
+        # Exact-block rescue solver for the (I - W^T) routing systems and its
+        # sticky switch (see _solveIDAExact). Off until a primary IDA solve
+        # fails and the rescue converges; the decision is global (KSP reasons
+        # are identical on every rank), so every rank switches together.
+        # GOSPL_FLOW_IDA_EXACT=1 forces it on from the start, =0 disables it.
+        self._ksp_exact = None
+        _ex = os.environ.get("GOSPL_FLOW_IDA_EXACT", "")
+        self._ida_exact = _ex == "1"
+        self._ida_exact_allowed = _ex != "0"
 
         # An (I - W^T) solve that fails to converge on only a SMALL fraction of
         # rows is the benign isolated-pocket / micro-cycle case (genuinely
@@ -590,10 +599,37 @@ class FAMesh(object):
                     else self._primary_max_it),
         )
         ksp.setOperators(matrix, matrix)
-        ksp.solve(vector1, vector2)
-        r = ksp.getConvergedReason()
-        _rs.count_ksp(self, "fatal" if fatal else ("cascade" if seed else "other"),
-                      ksp.getIterationNumber(), r)
+        key = "fatal" if fatal else ("cascade" if seed else "other")
+        if seed and self._ida_exact:
+            # Sticky: an earlier routing solve in this run needed the exact
+            # rescue, so go straight to it (the primary would grind first).
+            r = self._solveIDAExact(matrix, vector1, vector2, key)
+        else:
+            ksp.solve(vector1, vector2)
+            r = ksp.getConvergedReason()
+            _rs.count_ksp(self, key, ksp.getIterationNumber(), r)
+            if r < 0 and seed and self._ida_exact_allowed:
+                # Rescue a failed ROUTING solve exactly before treating it as
+                # un-drainable. On a long single-file drainage chain (a wide
+                # plateau: 733 cells to the outlet on implicit_timestepping)
+                # the system is perfectly well posed, but fgmres(30) + ILU in
+                # mesh order needs ~a path length of iterations and runs out;
+                # the bounded fallback then ZEROED the solve. Exact local
+                # factors solve the DAG-structured blocks directly.
+                vector1.copy(vector2)                 # clean lower-bound guess
+                r = self._solveIDAExact(matrix, vector1, vector2, key)
+                if r >= 0:
+                    self._ida_exact = True
+                    _rs.record(self, "flow_ksp_exact_rescue", solve=key,
+                               its=int(self._ksp_exact.getIterationNumber()))
+                    if MPIrank == 0 and self.verbose:
+                        print(
+                            "[flow] routing solve did not converge with the "
+                            "primary KSP; solved with exact block factors "
+                            "(%d its). Using them for the rest of the run."
+                            % self._ksp_exact.getIterationNumber(),
+                            flush=True,
+                        )
         if r < 0:
             # The primary failed (max_it on a near-singular sub-region, or a
             # genuine breakdown). Do NOT accept the iterate: on a near-singular
@@ -612,6 +648,51 @@ class FAMesh(object):
         safe_garbage_cleanup()
 
         return vector2
+
+    def _solveIDAExact(self, matrix, vector1, vector2, key):
+        """
+        Solve an ``(I - W^T)`` routing system with EXACT per-rank block
+        factors: ``fgmres`` + ``bjacobi`` with an ``lu`` sub-solver
+        (``flowaccx_`` prefix, cached as ``self._ksp_exact``).
+
+        Why it works where the primary does not: with the drainage graph
+        acyclic, each rank's diagonal block is a permuted triangular matrix, so
+        its LU factors are cheap (little fill) and exact, and the Krylov method
+        only has to propagate information across PARTITION seams: 1 iteration
+        serially, O(10) at np=4, against roughly one iteration per cell along
+        the longest flow path for ILU in mesh order. It costs more than ILU
+        when paths are short (multi-direction routing on rough terrain), which
+        is why it is a rescue + sticky switch rather than the default.
+
+        A genuinely singular region (a cycle or closed pocket) still fails here
+        and continues to the bounded fallback (`_solve_KSP2`), which ponds or
+        zeroes it as before.
+
+        Collective. Returns the converged reason (global).
+        """
+        if self._ksp_exact is None:
+            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+            ksp.setType("fgmres")
+            ksp.getPC().setType("bjacobi")
+            ksp.setOptionsPrefix("flowaccx_")
+            opts = petsc4py.PETSc.Options()
+            if not opts.hasName("flowaccx_sub_pc_type"):
+                opts["flowaccx_sub_pc_type"] = "lu"
+            if not opts.hasName("flowaccx_sub_pc_factor_shift_type"):
+                opts["flowaccx_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setTolerances(rtol=self.rtol, max_it=self._cascade_max_it)
+            ksp.setFromOptions()
+            self._ksp_exact = ksp
+        ksp = self._ksp_exact
+        ksp.setInitialGuessNonzero(True)
+        ksp.setOperators(matrix, matrix)
+        ksp.solve(vector1, vector2)
+        r = ksp.getConvergedReason()
+        _rs.count_ksp(self, key + "_exact", ksp.getIterationNumber(), r)
+        if r < 0:
+            # Leave a clean, bounded guess for the fallback.
+            vector1.copy(vector2)
+        return r
 
     def matrixFlow(self, flowdir, dep=None):
         """

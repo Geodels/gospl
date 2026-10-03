@@ -94,12 +94,13 @@ Rule: use `MPI.COMM_WORLD` for raw collectives (Allreduce/bcast/Allgatherv); use
 ## KSP / SNES / TS lifecycle contract
 PETSc solvers follow two intentional patterns. **Use the right one for new code.** Full per-solver notes (prefixes, why each PC, failure modes) are in the subsystem files.
 
-### CACHED — hot-path solvers (13 sites)
+### CACHED — hot-path solvers (14 sites)
 Created lazily on first use, stored as `self._X`, reused for the whole run (avoids ~5–10 ms create/destroy per call).
 
 | File | Method | Cached attribute | Solver |
 |---|---|---|---|
 | `flow/flowplex.py` | `_solve_KSP` | `_ksp_main` | KSP `fgmres`+`bjacobi` (`flowacc_`); fatal solve full budget, cascade capped |
+| `flow/flowplex.py` | `_solveIDAExact` | `_ksp_exact` | KSP `fgmres`+`bjacobi`/exact `lu` (`flowaccx_`); routing-solve rescue, sticky |
 | `flow/flowplex.py` | `_solve_KSP2` | `_ksp_fallback` | KSP `richardson`+`none` bounded fallback (`flowaccfb_`) |
 | `flow/gwplex.py` | `_solveHead` | `_ksp_gw` | KSP `fgmres`+hypre BoomerAMG (`gw_`); AMG is required |
 | `eroder/nlSPL.py` | `_solveNL_ed` | `_snes_ed` (+`_fb`) | SNES `qn`, `ngmres` fallback |
@@ -145,7 +146,7 @@ If a future contributor wants to convert one of these to CACHED, the obstacle is
 - Positional (`KSP().create(PETSc.COMM_WORLD)`) vs keyword (`SNES().create(comm=PETSc.COMM_WORLD)`) is purely cosmetic; both work identically.
 
 ## Flow accumulation (summary)
-The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment cascade. Its non-convergence is the most common symptom of trouble at scale. Know before touching it: the primary is `fgmres` (stationary Richardson diverges partition-dependently); the main discharge solve is `fatal=True` but **ponds** a small finite un-drained region instead of aborting (cap `GOSPL_UNDRAINED_CAP`); a failed iterate is never accepted; the outer cascade loop is bounded (stagnation break, relative floor, `_cascade_max_steps`); a reachability pin was tried and rejected. All of it, with the reasons: `gospl/flow/AGENTS.md`.
+The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment cascade. Its non-convergence is the most common symptom of trouble at scale. Know before touching it: the primary is `fgmres` (stationary Richardson diverges partition-dependently); a failed routing solve is first retried with exact block factors (`_solveIDAExact`, sticky once it works: long drainage chains are well posed, just beyond ILU/Richardson); the main discharge solve is `fatal=True` but **ponds** a small finite un-drained region instead of aborting (cap `GOSPL_UNDRAINED_CAP`); a failed iterate is never accepted; the outer cascade loop is bounded (stagnation break, relative floor, `_cascade_max_steps`); a reachability pin was tried and rejected. All of it, with the reasons: `gospl/flow/AGENTS.md`.
 
 ## The Model god-class
 `gospl/model.py` declares `Model` (`class Model(`) as multi-inheritance of 17 mixins. `Model.__init__` calls each parent's `__init__` **by name, not via `super()`**. The init order is load-bearing and differs from the MRO declaration order — adding `super().__init__()` will break the chain. Line numbers below are as of 2026-10-03; search for the call if they have drifted.

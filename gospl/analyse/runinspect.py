@@ -261,8 +261,12 @@ def inspect_summary(path, jump=0.25):
         nf = r.get("nonfinite", {})
         if any(v > 0 for v in nf.values()):
             issues.append({"t": t, "issue": "nonfinite", "detail": nf})
+        rescued = {e.get("solve") for e in r.get("events", [])
+                   if e.get("kind") == "flow_ksp_exact_rescue"}
         for k, s in r.get("ksp", {}).items():
-            if s.get("fails"):
+            # A primary failure the exact block solver then recovered is the
+            # designed long-drainage-chain path, not an issue.
+            if s.get("fails") and k not in rescued and not k.endswith("_exact"):
                 issues.append({"t": t, "issue": "ksp_primary_failed", "solver": k,
                                "detail": s})
         for e in r.get("events", []):
