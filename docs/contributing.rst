@@ -183,13 +183,18 @@ with ``mpirun -n 2`` (the regression suite includes ``mpirun``-based parallel
 tests). The maintainer notes in ``AGENTS.md`` (section *MPI contract*) document
 this rule and the recurring cases in detail.
 
-7. Submitting a Pull Request
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+## 7. Submitting a Pull Request
 
-Once you've made changes and pushed them to your forked repository, you then
-submit a pull request to have them integrated into the goSPL code base.
+Once you've made changes and pushed them to your forked repository, you then submit a pull request to have them integrated into the goSPL code base.
 
-You can find a pull request (or PR) tutorial in the `GitHub's Help Docs <https://help.github.com/articles/using-pull-requests/>`_.
+Open the pull request against the `dev` branch and fill in the template that appears. Before submitting, please check that:
+
+- the test suite passes (`pytest tests/ -n 4`),
+- new features are opt-in and leave results unchanged when switched off,
+- changes touching MPI, solvers or Fortran have passed the extra checks listed in the template, and
+- documentation and tests are updated alongside the code.
+
+A maintainer will review your pull request and may ask for changes. Please keep the discussion on the pull request itself so the development history stays transparent. Questions are welcome: if you are unsure about anything, open an issue or a draft pull request early.
 
 .. _sphinx: https://www.sphinx-doc.org/
 
