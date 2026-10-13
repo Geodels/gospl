@@ -183,7 +183,8 @@ with ``mpirun -n 2`` (the regression suite includes ``mpirun``-based parallel
 tests). The maintainer notes in ``AGENTS.md`` (section *MPI contract*) document
 this rule and the recurring cases in detail.
 
-## 7. Submitting a Pull Request
+7. Submitting a Pull Request
+^^^^^^^^^^^^^^^^^^^^^^
 
 Once you've made changes and pushed them to your forked repository, you then submit a pull request to have them integrated into the goSPL code base.
 
