@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a crash, wrong result or unexpected behaviour
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For questions or usage help, please open a regular issue instead. Security problems should go through the [security policy](https://github.com/Geodels/gospl/security/policy).
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: goSPL version
+      description: Output of `python -c "import gospl; print(gospl.__version__)"`
+      placeholder: "2026.7.14"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - conda / mamba
+        - pip (PyPI)
+        - Docker
+        - Built from source (dev or master)
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, PETSc/petsc4py and MPI versions, and whether this is a laptop or HPC
+      placeholder: "Ubuntu 24.04, Python 3.12, PETSc 3.22, OpenMPI 5.0, HPC"
+    validations:
+      required: true
+
+  - type: input
+    id: ranks
+    attributes:
+      label: Number of MPI ranks
+      description: Does the problem also occur on a single rank (np=1)?
+      placeholder: "np=4; np=1 runs fine"
+
+  - type: textarea
+    id: input
+    attributes:
+      label: Input file
+      description: Minimal YAML input that reproduces the problem, ideally on a small mesh. Attach large meshes or forcing files rather than pasting them.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or traceback
+      description: Run with `-v` if possible, and include the `--summary` output if you used it.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Which options are enabled (groundwater, duricrust, geochemistry, ...), when it first appeared, and what you already tried.

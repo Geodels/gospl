@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a new process, option, output or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do?
+      description: Describe the science or workflow problem first, not the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Governing equations, references, or an analytical limit the feature should satisfy. Sketch the YAML input you would expect.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Surface processes (erosion, deposition, hillslope)
+        - Flow routing / hydrology
+        - Climate, sea level or tectonic forcing
+        - Stratigraphy / compaction
+        - Geochemistry
+        - Solvers / performance / MPI
+        - Input / output
+        - Documentation / examples
+        - Other
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing options or workarounds you tried.
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to contribute this?
+      options:
+        - Yes, I can open a pull request
+        - I can help test it
+        - No, requesting only

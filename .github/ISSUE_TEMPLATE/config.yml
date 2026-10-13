@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Geodels/gospl/security/policy
+    about: Please report security issues privately, not as a public issue.
+  - name: Documentation
+    url: https://gospl.readthedocs.io/en/latest/
+    about: Installation, user guide and API reference.
