@@ -55,3 +55,7 @@ gw_river_out
 gw_geochemlitho2_out
 gw_geochemsurface_out
 gw_river2_out
+
+# Claude Code: personal settings and worktrees stay local (the rest of .claude/ is shared)
+.claude/settings.local.json
+.claude/worktrees/
