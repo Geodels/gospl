@@ -1098,6 +1098,19 @@ class FAMesh(object):
 
         return None
 
+    def _runoffWork(self):
+        """
+        Cached local/global Vec pair holding the net runoff source of the
+        discharge solve (``bL`` after evaporation, the ice precipitation split
+        and meltwater). Kept apart from ``bL``/``bG`` so the per-step forcing is
+        never overwritten by a ``flowAccumulation`` call. Created on first use
+        (collective: every rank calls ``flowAccumulation``).
+        """
+        if getattr(self, "_srcL", None) is None:
+            self._srcL = self.bL.duplicate()
+            self._srcG = self.bG.duplicate()
+        return self._srcL, self._srcG
+
     def _losingStreamSolve(self, rainA):
         r"""
         "Losing stream" flow accumulation: evaporation is debited from the
@@ -1129,12 +1142,13 @@ class FAMesh(object):
         q = rainA.copy()
         prev = None
         converged = False
+        srcL, srcG = self._runoffWork()
         for it in range(maxit):
-            self.bL.setArray(rainA - s)
-            self.dm.localToGlobal(self.bL, self.bG)
+            srcL.setArray(rainA - s)
+            self.dm.localToGlobal(srcL, srcG)
             # First pass MUST converge (fatal); the refinement passes degrade
             # gracefully on the bounded fallback if a near-singular cell stalls.
-            self._solve_KSP(True, self.fMat, self.bG, self.FAG,
+            self._solve_KSP(True, self.fMat, srcG, self.FAG,
                             fatal=(it == 0), seed=True)
             self.dm.globalToLocal(self.FAG, self.FAL)
             q = self.FAL.getArray().copy()
@@ -1203,7 +1217,18 @@ class FAMesh(object):
         self.fMati = self.fMat.copy()
         self.lsinki = self.lsink.copy()
 
-        # Get amount of water or ice
+        # Evaporation bookkeeping: flowAccumulation runs twice per step (before
+        # SPL and before sedChange), and each call recomputes the same step's
+        # channel + lake evaporation from the unchanged forcing `bL`. Only the
+        # latest call counts, so drop the previous call's contribution (reset to
+        # 0 by applyForces at each new step) before this call adds its own.
+        self.evapLoss -= getattr(self, "_evapPassLoss", 0.0)
+        evapLoss0 = self.evapLoss
+
+        # Get amount of water or ice. `bL` is the per-step forcing built once by
+        # applyForces; it is READ here and never written back (the net source
+        # goes to `_srcL`/`_srcG`), so the evaporation debit and the ice
+        # precipitation split below are applied exactly once per call.
         rainA = self.bL.getArray().copy()
         rainA[self.seaID] = 0.
         # Channel evaporation (DESIGN_EVAPORATION.md §2.1). evapVal is m/yr,
@@ -1246,14 +1271,15 @@ class FAMesh(object):
             # "Losing stream": evaporate from the accumulated discharge.
             self._losingStreamSolve(rainA)
         else:
-            self.bL.setArray(rainA)
-            self.dm.localToGlobal(self.bL, self.bG)
+            srcL, srcG = self._runoffWork()
+            srcL.setArray(rainA)
+            self.dm.localToGlobal(srcL, srcG)
             # seed=True: cold-start the discharge from the runoff vector b (valid
             # lower bound on the (I - W^T) system) so init does not blow past
             # max_it -> DIVERGED_MAX_IT. fatal=True: a failed discharge solve
             # here would silently zero all rivers and feed a degenerate state
             # into erosion/sediment, so abort instead.
-            self._solve_KSP(True, self.fMat, self.bG, self.FAG, fatal=True, seed=True)
+            self._solve_KSP(True, self.fMat, srcG, self.FAG, fatal=True, seed=True)
             self.dm.globalToLocal(self.FAG, self.FAL)
         self.profiler.stop("flow_ksp")
 
@@ -1371,6 +1397,9 @@ class FAMesh(object):
         # Get water level
         self.waterFilled -= hl
         self.profiler.stop("flow_dist")
+
+        # This call's channel + lake evaporation (see the bookkeeping note above).
+        self._evapPassLoss = self.evapLoss - evapLoss0
 
         if MPIrank == 0 and self.verbose:
             print(

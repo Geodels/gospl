@@ -354,6 +354,63 @@ def test_evap_losing_stream(minimal_model):
     assert fa_los < fa_src < fa_base
 
 
+@pytest.mark.slow
+@pytest.mark.parametrize("mode", ["channel", "losing", "ice"])
+def test_runoff_source_applied_once_per_step(
+    mode, minimal_model, minimal_ice_model
+):
+    """
+    Protects: the per-step runoff forcing `bL` is READ by `flowAccumulation`,
+    never written back (the net source goes to `_srcL`/`_srcG`).
+
+    `Model.runProcesses` calls `flowAccumulation` twice per step (before SPL
+    and before sedChange). It used to write the evaporated runoff (source-side
+    channel evap, or the losing-stream `rainA - s`) and the ice precipitation
+    split + meltwater back into `bL`, so the second call evaporated the water
+    again (FA x0.67 with evap = 25 % of rain) and re-applied the ice split.
+    The second call's FA is what is written to disk. Also checks that
+    `evapLoss` counts one call's evaporation per step, not both.
+    """
+    from mpi4py import MPI
+
+    m = minimal_ice_model if mode == "ice" else minimal_model
+    rUni = m.raindata.at[0, "rUni"]
+    if pd.isnull(rUni):
+        pytest.skip("fixture rain is not uniform")
+    if mode != "ice":
+        m.evapdata = pd.DataFrame(
+            [{"start": 0.0, "eUni": 0.25 * float(rUni),
+              "eMap": None, "eKey": None}]
+        )
+        m.evapNb = -1
+        m.evapVal = None
+        m.evapMesh = None
+        m.evapStream = mode == "losing"
+    m.evapLoss = 0.0
+    m.applyForces()
+    if mode == "ice":
+        m.iceAccumulation()
+
+    def gsum(arr):
+        return MPI.COMM_WORLD.allreduce(float(arr[m.inIDs == 1].sum()), op=MPI.SUM)
+
+    b0 = gsum(m.bL.getArray())
+    m.flowAccumulation()
+    fa1 = m.FAL.getArray().copy()
+    loss1 = MPI.COMM_WORLD.allreduce(float(m.evapLoss), op=MPI.SUM)
+    m.flowAccumulation()
+    fa2 = m.FAL.getArray().copy()
+    loss2 = MPI.COMM_WORLD.allreduce(float(m.evapLoss), op=MPI.SUM)
+
+    assert gsum(m.bL.getArray()) == b0, "flowAccumulation modified bL"
+    np.testing.assert_allclose(fa2, fa1, rtol=1e-8, atol=1e-6 * fa1.max())
+    if mode != "ice":
+        assert loss1 > 0.0
+        assert loss2 == pytest.approx(loss1, rel=1e-12), (
+            "evapLoss counted the second flowAccumulation call again"
+        )
+
+
 def _singular_flow_system(ncycles, rhs_all=False):
     """Build a standalone singular `(I - W^T)`-like system for the fatal-solve
     recovery test. N=1000 identity matrix with `ncycles` disjoint 2-cycles

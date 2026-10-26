@@ -779,6 +779,9 @@ class UnstMesh(object):
         # populates self.evapVal which the flow solver consumes downstream).
         if self.evapdata is not None:
             self._updateEvap()
+        # New step's forcing: the next flowAccumulation call starts a new
+        # evaporation budget (see the bookkeeping note in flowAccumulation).
+        self._evapPassLoss = 0.0
 
         # Erodibility factor information
         if self.sedfacdata is not None:
@@ -982,6 +985,18 @@ class UnstMesh(object):
             self.rainVal = tmp  * self.rainA + self.rainB
             self.rainVal[self.rainVal < 0] = 0.0
 
+        self._setRunoffSource()
+
+        return
+
+    def _setRunoffSource(self):
+        """
+        Builds the per-step runoff source ``bL``/``bG`` (m³/yr) from
+        ``self.rainVal``. The single place ``bL`` is written, shared by the
+        rain-table path (`_updateRain`) and orographic rain
+        (`cptOrography`), so both get the groundwater recharge/baseflow
+        adjustment. `flowAccumulation` only reads ``bL``.
+        """
         src = self.rainVal * self.larea                         # runoff source (m³/yr)
         if getattr(self, "gwOn", False) and getattr(self, "gwConserveBaseflow", False):
             # Groundwater baseflow re-injection (DESIGN_WATERTABLE_DURICRUST.md §3
@@ -1202,6 +1217,7 @@ class UnstMesh(object):
         # Cached KSP/SNES/TS helpers (created lazily on first use)
         for name in (
             "_ksp_main", "_ksp_fallback", "_ksp_exact", "_kspWork",
+            "_srcL", "_srcG",
             "_snes_ed", "_snes_ed_f", "_snes_ed_x",
             "_snes_ed_fb", "_snes_ed_fb_f",
             "_snes_nl", "_snes_nl_f", "_snes_nl_x", "_snes_nl_J",

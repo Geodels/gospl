@@ -109,3 +109,35 @@ def test_orography_wind_direction_convention(oro_hill_model):
             f"wind_dir={d} (comes-from) should blow toward "
             f"({ex:+.0f},{ey:+.0f})*speed; got ({u/speed:+.3f},{v/speed:+.3f})*speed"
         )
+
+
+def test_orography_runoff_gets_baseflow_adjustment(oro_hill_model):
+    """
+    Protects: `cptOrography` builds the runoff source through the shared
+    `_setRunoffSource`, so groundwater recharge leaves the surface runoff and
+    baseflow returns to it (`gwConserveBaseflow`) exactly as on the rain-table
+    path. It used to write `bL = P·area` directly and skip the adjustment.
+    """
+    model = oro_hill_model
+    rech = model.hLocal.duplicate()
+    base = model.hLocal.duplicate()
+    try:
+        n = model.lpoints
+        r = np.full(n, 0.1 * float(np.mean(model.rainVal)))   # m/yr
+        bf = np.linspace(0.0, 1.0e3, n)
+        rech.setArray(r)
+        base.setArray(bf)
+        model.gwOn = True
+        model.gwConserveBaseflow = True
+        model.rechargeL = rech
+        model.baseflowL = base
+        model.cptOrography()
+        expected = np.maximum(model.rainVal * model.larea - r * model.larea, 0.0) + bf
+        np.testing.assert_allclose(model.bL.getArray(), expected, rtol=1e-12)
+    finally:
+        model.gwOn = False
+        model.gwConserveBaseflow = False
+        model.rechargeL = None
+        model.baseflowL = None
+        rech.destroy()
+        base.destroy()

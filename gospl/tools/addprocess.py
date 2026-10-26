@@ -950,8 +950,9 @@ class GridProcess(object):
         P *= 0.366 * self.rainfall_frequency
 
         self.rainVal = P
-        self.bL.setArray(self.rainVal * self.larea)
-        self.dm.localToGlobal(self.bL, self.bG)
+        # Same runoff build as the rain-table path (incl. the groundwater
+        # recharge/baseflow adjustment, which this path used to skip).
+        self._setRunoffSource()
 
         if MPIrank == 0 and self.verbose:
             print(
