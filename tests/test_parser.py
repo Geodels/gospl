@@ -223,3 +223,57 @@ def test_evap_parser_opt_in():
     assert parser.evapdata.at[0, "eUni"] == 0.3, (
         "evap_uniform value not propagated into eUni column"
     )
+
+
+# ---------------------------------------------------------------------------
+# TEST 2c - mixed climate events starting after tStart: no pandas warning
+# ---------------------------------------------------------------------------
+
+
+def test_rain_events_prepend_without_futurewarning(tmp_path):
+    """
+    Protects: the forcing-DataFrame row assembly (`ReadYaml._concatRows`).
+
+    Silent failure prevented: building `raindata` with `pd.concat` from
+    events whose columns are all-None (a `map` event has no `rzA`/`rzB`,
+    the zero-rain row prepended before a late first event has no map)
+    makes pandas 2.x emit a FutureWarning about empty/all-NA columns,
+    once per MPI rank (hundreds of lines in a Gadi job log), and a future
+    pandas may change the resulting dtypes. pandas 3 no longer warns, so
+    on pandas 3 this test checks only the values.
+
+    Invariant: map + uniform + zscale events, all after tStart, parse
+    without a FutureWarning, a zero-rain row is prepended at tStart, and
+    each row carries exactly its own fields.
+    """
+    import warnings
+
+    import numpy as np
+
+    np.savez(tmp_path / "rain.npz", r=np.ones(4))
+    parser = _bare_parser(t_start=0.0)
+    parser.input = {
+        "climate": [
+            {"start": 500.0, "map": [str(tmp_path / "rain"), "r"]},
+            {"start": 800.0, "uniform": 1.5},
+            {"start": 900.0, "zscale": [2.0, 3.0]},
+        ]
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        parser._readRain()
+
+    rd = parser.raindata
+    assert list(rd.columns) == ["start", "rUni", "rzA", "rzB", "rMap", "rKey"]
+    assert rd["start"].tolist() == [0.0, 500.0, 800.0, 900.0]
+    # prepended zero-rain row
+    assert rd.at[0, "rUni"] == 0.0 and pd.isnull(rd.at[0, "rMap"])
+    # map row
+    assert rd.at[1, "rMap"] == str(tmp_path / "rain") + ".npz"
+    assert rd.at[1, "rKey"] == "r"
+    assert pd.isnull(rd.at[1, "rUni"]) and pd.isnull(rd.at[1, "rzA"])
+    # uniform row
+    assert rd.at[2, "rUni"] == 1.5 and pd.isnull(rd.at[2, "rMap"])
+    # zscale row (unstructuredmesh._updateRain branches on pd.isnull(rzA))
+    assert rd.at[3, "rzA"] == 2.0 and rd.at[3, "rzB"] == 3.0
+    assert pd.isnull(rd.at[3, "rMap"])

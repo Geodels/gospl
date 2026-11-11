@@ -87,6 +87,27 @@ class ReadYaml(object):
 
         return
 
+    @staticmethod
+    def _concatRows(df, rows, columns, prepend=False):
+        """
+        Add event rows to a forcing DataFrame (``tecdata``, ``raindata``,
+        ``evapdata``, ``sedfacdata``, ``tedata``).
+
+        Rebuilds the frame from records instead of calling ``pd.concat``:
+        these frames have columns that are all-None for some events (e.g.
+        ``rzA``/``rzB`` for a rain map), and pandas 2.x emits a
+        FutureWarning, once per MPI rank, when concatenating those. Same
+        values, same column names, fresh 0..n-1 index.
+
+        :arg df: existing DataFrame
+        :arg rows: list of dicts (one per new row)
+        :arg columns: column names (part of the forcing API)
+        :arg prepend: put ``rows`` before ``df`` instead of after
+        :return: new DataFrame
+        """
+        old = df.to_dict("records")
+        return pd.DataFrame(rows + old if prepend else old + rows, columns=columns)
+
     def _get_param(self, *keys, default=None):
         """
         Safe traversal into ``self.input``.
@@ -862,10 +883,7 @@ class ReadYaml(object):
         if k == 0:
             tecdata = pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"])
         else:
-            tecdata = pd.concat(
-                [tecdata, pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"])],
-                ignore_index=True,
-            )
+            tecdata = self._concatRows(tecdata, tmpTec, ["start", "end", "tMap", "zMap", "hMap"])
 
         return tecdata
 
@@ -931,10 +949,7 @@ class ReadYaml(object):
                 tmpTec.insert(
                     0, {"start": self.tStart, "end": tecdata["start"][0], "tMap": "empty", "zMap": "empty", "hMap": "empty"}
                 )
-                tecdata = pd.concat(
-                    [pd.DataFrame(tmpTec, columns=["start", "end", "tMap", "zMap", "hMap"]), tecdata],
-                    ignore_index=True,
-                )
+                tecdata = self._concatRows(tecdata, tmpTec, ["start", "end", "tMap", "zMap", "hMap"], prepend=True)
             self.tecdata = tecdata[tecdata["start"] >= self.tStart]
 
             if self.rStep > 0:
@@ -997,13 +1012,7 @@ class ReadYaml(object):
         if k == 0:
             sedfacdata = pd.DataFrame(tmpErof, columns=["start", "sUni", "sMap", "sKey"])
         else:
-            sedfacdata = pd.concat(
-                [
-                    sedfacdata,
-                    pd.DataFrame(tmpErof, columns=["start", "sUni", "sMap", "sKey"]),
-                ],
-                ignore_index=True,
-            )
+            sedfacdata = self._concatRows(sedfacdata, tmpErof, ["start", "sUni", "sMap", "sKey"])
 
         return sedfacdata
 
@@ -1080,15 +1089,7 @@ class ReadYaml(object):
                 tmpSedF.insert(
                     0, {"start": self.tStart, "sUni": 1.0, "sMap": None, "sKey": None}
                 )
-                sedfacdata = pd.concat(
-                    [
-                        pd.DataFrame(
-                            tmpSedF, columns=["start", "sUni", "sMap", "sKey"]
-                        ),
-                        sedfacdata,
-                    ],
-                    ignore_index=True,
-                )
+                sedfacdata = self._concatRows(sedfacdata, tmpSedF, ["start", "sUni", "sMap", "sKey"], prepend=True)
             self.sedfacdata = sedfacdata.copy()
             self.sedfacdata.reset_index(drop=True, inplace=True)
             self.sedfactNb = len(self.sedfacdata)
@@ -1144,13 +1145,7 @@ class ReadYaml(object):
         if k == 0:
             tedata = pd.DataFrame(tmpTe, columns=["start", "tUni", "tMap", "tKey"])
         else:
-            tedata = pd.concat(
-                [
-                    tedata,
-                    pd.DataFrame(tmpTe, columns=["start", "tUni", "tMap", "tKey"]),
-                ],
-                ignore_index=True,
-            )
+            tedata = self._concatRows(tedata, tmpTe, ["start", "tUni", "tMap", "tKey"])
 
         return tedata
 
@@ -1230,15 +1225,7 @@ class ReadYaml(object):
                 tmpT.insert(
                     0, {"start": self.tStart, "tUni": 0.0, "tMap": None, "tKey": None}
                 )
-                tedata = pd.concat(
-                    [
-                        pd.DataFrame(
-                            tmpT, columns=["start", "tUni", "tMap", "tKey"]
-                        ),
-                        tedata,
-                    ],
-                    ignore_index=True,
-                )
+                tedata = self._concatRows(tedata, tmpT, ["start", "tUni", "tMap", "tKey"], prepend=True)
             self.tedata = tedata.copy()
             self.tedata.reset_index(drop=True, inplace=True)
             self.teNb = len(self.tedata)
@@ -1301,13 +1288,7 @@ class ReadYaml(object):
         if k == 0:
             raindata = pd.DataFrame(tmpRain, columns=["start", "rUni", "rzA", "rzB", "rMap", "rKey"])
         else:
-            raindata = pd.concat(
-                [
-                    raindata,
-                    pd.DataFrame(tmpRain, columns=["start", "rUni", "rzA", "rzB", "rMap", "rKey"]),
-                ],
-                ignore_index=True,
-            )
+            raindata = self._concatRows(raindata, tmpRain, ["start", "rUni", "rzA", "rzB", "rMap", "rKey"])
 
         return raindata
 
@@ -1350,13 +1331,7 @@ class ReadYaml(object):
         if evapdata is None:
             evapdata = pd.DataFrame(tmpEvap, columns=["start", "eUni", "eMap", "eKey"])
         else:
-            evapdata = pd.concat(
-                [
-                    evapdata,
-                    pd.DataFrame(tmpEvap, columns=["start", "eUni", "eMap", "eKey"]),
-                ],
-                ignore_index=True,
-            )
+            evapdata = self._concatRows(evapdata, tmpEvap, ["start", "eUni", "eMap", "eKey"])
 
         return evapdata
 
@@ -1489,15 +1464,7 @@ class ReadYaml(object):
                 tmpRain.insert(
                     0, {"start": self.tStart, "rUni": 0.0, "rzA":None, "rzB":None, "rMap": None, "rKey": None}
                 )
-                raindata = pd.concat(
-                    [
-                        pd.DataFrame(
-                            tmpRain, columns=["start", "rUni", "rzA", "rzB", "rMap", "rKey"]
-                        ),
-                        raindata,
-                    ],
-                    ignore_index=True,
-                )
+                raindata = self._concatRows(raindata, tmpRain, ["start", "rUni", "rzA", "rzB", "rMap", "rKey"], prepend=True)
             self.raindata = raindata.copy()  # [raindata["start"] >= self.tStart]
             self.raindata.reset_index(drop=True, inplace=True)
             self.rainNb = len(self.raindata)
@@ -1509,15 +1476,7 @@ class ReadYaml(object):
                     tmpEvap = [
                         {"start": self.tStart, "eUni": 0.0, "eMap": None, "eKey": None}
                     ]
-                    evapdata = pd.concat(
-                        [
-                            pd.DataFrame(
-                                tmpEvap, columns=["start", "eUni", "eMap", "eKey"]
-                            ),
-                            evapdata,
-                        ],
-                        ignore_index=True,
-                    )
+                    evapdata = self._concatRows(evapdata, tmpEvap, ["start", "eUni", "eMap", "eKey"], prepend=True)
                 self.evapdata = evapdata.copy()
                 self.evapdata.reset_index(drop=True, inplace=True)
             else:
