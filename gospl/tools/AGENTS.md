@@ -44,6 +44,10 @@ All 33 such sites carry a `# TODO-REFACTOR: complex except, needs manual review`
 ## Forcing DataFrame layout contract
 Consumers use `df.at[nb, col]` named access. **Column names are part of the API.** New columns may be appended in any order; existing consumers reference columns by name, not position, so adding a column no longer breaks anything silently.
 
+**Build and extend these DataFrames with `ReadYaml._concatRows(df, rows, columns, prepend=False)`, never `pd.concat`.** Event rows have all-None columns (a map event has no `rzA`/`rzB`, the zero row prepended before a late first event has no map), and pandas 2.x warns on concatenating those, once per MPI rank (192 lines in a Gadi log); `_concatRows` rebuilds the frame from records (same values, columns, 0..n-1 index). Guard: `test_rain_events_prepend_without_futurewarning`.
+
+**Per-node forcing maps are LOCAL.** When an event switches, index the loaded map by `locIDs` right away and keep only that slice (`rainMesh`, `evapMesh`, `sedFacMesh`, `elaMesh`/`iceMesh`/`termMesh` are `lpoints` long); hand consumers a `.copy()`. Never store an `mpoints` array per rank (root `AGENTS.md` > No whole-mesh arrays on every rank).
+
 | DataFrame | Built in | Columns | Consumers |
 |---|---|---|---|
 | `self.tecdata` | `_storeTectonics` (inputparser.py) | `start, end, tMap, zMap, hMap` | tectonics.py |
