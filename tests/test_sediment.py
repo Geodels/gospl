@@ -546,12 +546,18 @@ def test_ofill_is_relative_to_sea_level(minimal_model):
     perfectly reasonable-looking YAML: `sea: position: -2200` with
     `oFill: -1500` gave a cut-off of -1500 m, i.e. 700 m ABOVE sea level.
 
-    The `minimal` fixture is a global sphere with `sea: position: -100.` and the
-    default `oFill: -6000.`, deep enough (zmin ~ -16 km) that the `minh` floor
-    does not mask the difference: the correct cut-off is -6100 m, the old
-    absolute reading gave -6000 m.
+    The `minimal` fixture is a global sphere with `sea: position: -100.`; the
+    test sets `oFill: -5000.` so it decides the cut-off (above the smoothed
+    minimum floor, -5653 m): the correct cut-off is -5100 m, the old absolute
+    reading gave -5000 m.
     """
     model = minimal_model
+    # Since 2026-11-12 the global cut-off floor is the SMOOTHED surface's
+    # minimum + 0.1 (-5653 m on this fixture, whose raw -16 km needle smoothing
+    # raises), so the default oFill (-6000 -> -6100) no longer decides it. Use
+    # an oFill that does: sealevel + oFill = -5100 m (relative, correct) vs
+    # -5000 m (absolute reading, the old bug).
+    model.oFill = -5000.0
     # `_matOcean` runs inside `seaChange`, so the marine path has to execute
     # once. The minimal fixture is a short global-sphere run with deposition on.
     model.runProcesses()
@@ -562,8 +568,8 @@ def test_ofill_is_relative_to_sea_level(minimal_model):
         "contract is then untestable from here — re-add it or update this test."
     )
 
-    minh = model.hGlobal.min()[1] + 0.1
-    expected = max(minh, model.sealevel + model.oFill)
+    expected = model.sealevel + model.oFill
+    assert expected > -5653.0, "oFill must dominate the smoothed-minimum floor here"
     assert level == pytest.approx(expected), (
         f"marine eps-fill cut-off is {level} m but `sealevel + oFill` gives "
         f"{expected} m (sealevel={model.sealevel}, oFill={model.oFill})."
@@ -574,7 +580,120 @@ def test_ofill_is_relative_to_sea_level(minimal_model):
         "this fixture must keep a non-zero sea level or the test cannot "
         "distinguish the relative reading from the absolute one."
     )
-    assert level != pytest.approx(max(minh, model.oFill)), (
+    assert level != pytest.approx(model.oFill), (
         "the marine eps-fill cut-off equals the raw `oFill`, i.e. it is being "
         "read as an absolute elevation again (the pre-fix behaviour)."
     )
+
+
+def _icosphere(level, radius):
+    """Regular icosphere (no degenerate cells), unit triangles scaled to radius."""
+    t = (1 + 5 ** 0.5) / 2
+    v = [np.array(p, float) for p in (
+        [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t],
+        [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1])]
+    v = [p / np.linalg.norm(p) for p in v]
+    f = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4],
+         [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8],
+         [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]]
+    for _ in range(level):
+        cache, nf = {}, []
+
+        def mid(a, b):
+            key = (min(a, b), max(a, b))
+            if key not in cache:
+                p = v[a] + v[b]
+                v.append(p / np.linalg.norm(p))
+                cache[key] = len(v) - 1
+            return cache[key]
+        for a, b, c in f:
+            ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+            nf += [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]]
+        f = nf
+    return np.array(v) * radius, np.array(f, dtype=np.int32)
+
+
+def test_marine_epsfill_seeded_on_global_mesh(tmp_path):
+    """
+    Protects: on a global mesh `seaplex._matOcean` takes the eps-fill cut-off
+    from the SMOOTHED surface it fills (`_hillSlope(smooth=2)`).
+
+    Silent failure prevented: the cut-off was `hGlobal.min() + 0.1` (raw
+    elevation). Smoothing raises the deepest cell by more than 0.1 m whenever
+    it is a sharp low, so no cell seeded `epsfill`, which then returned the
+    surface unchanged: the marine routing ran on unfilled bathymetry with
+    hundreds of terminal sinks, and river loads were force-deposited km-thick
+    in the first shallow pit (a 23.6M-node Earth run; fixed 2026-11-12,
+    docs/dev/FIXED_BUGS.md).
+
+    Invariant: a sphere whose deepest point is a one-cell low, under shallow
+    pits: epsfill is seeded (some cell is below the cut-off), it changes the
+    surface, and at most a handful of terminal sinks remain.
+    """
+    import os
+
+    from gospl.model import Model
+    from gospl.sed import seaplex
+
+    R = 6378137.0
+    v, c = _icosphere(4, R)                      # 2562 nodes
+    lat = np.arcsin(v[:, 2] / R)
+    lon = np.arctan2(v[:, 1], v[:, 0])
+    z = -3000.0 + 2500.0 * np.cos(lat) * np.cos(lon)          # a continent around lon 0
+    rng = np.random.default_rng(3)
+    ocean = np.where(z < -500.0)[0]
+    pits = rng.choice(ocean, 40, replace=False)
+    z[pits] -= 300.0                                          # shallow closed pockets
+    deep = ocean[np.argmin(z[ocean])]
+    z[deep] -= 1500.0                                         # sharp one-cell deepest point
+    np.savez(tmp_path / "sph.npz", v=v, c=c, z=z)
+    (tmp_path / "sph.yml").write_text("""name: marine epsfill seeding
+domain:
+    npdata: ['sph','v','c','z']
+    flowdir: 5
+    seadepo: True
+time:
+    start: 0.
+    end: 1000.
+    tout: 1000.
+    dt: 1000.
+spl:
+    K: 1.e-6
+    d: 0.
+    m: 0.5
+diffusion:
+    hillslopeKa: 0.1
+    hillslopeKm: 1.0
+sea:
+    position: 0.
+climate:
+  - start: 0.
+    uniform: 1.
+output:
+    dir: 'out'
+""")
+    seen = {}
+    orig = seaplex.epsfill
+
+    def spy(minh, elev):
+        out = orig(minh, elev)
+        seen["seeds"] = int((np.asarray(elev) < minh).sum())
+        seen["changed"] = int((np.asarray(out) != np.asarray(elev)).sum())
+        return out
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    seaplex.epsfill = spy
+    model = None
+    try:
+        model = Model("sph.yml", verbose=False)
+        model.runProcesses()
+        nsink = int((model.is_sink_local & (model.inIDs == 1)).sum())
+    finally:
+        seaplex.epsfill = orig
+        if model is not None:
+            model.destroy()
+        os.chdir(cwd)
+    assert seen.get("seeds", 0) > 0, "epsfill got no seed below its cut-off (no fill at all)"
+    assert seen["changed"] > 0, "epsfill left the marine routing surface unchanged"
+    assert nsink <= 5, f"{nsink} terminal sinks left on the marine routing surface"

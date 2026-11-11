@@ -1434,3 +1434,61 @@ def test_plate_strata_partition_invariant(tmp_path, scheme):
             tol = 1e-12 * max(1.0, np.abs(a1).max())
             assert diff <= tol, f"{k}: np=1 vs np=2 differ by {diff:.3g} (> {tol:.3g})"
     assert any(k.startswith("probe_") for k in res[1])
+
+
+_ZPROBE_SCRIPT = '''\
+"""Child for test_zprobe_reports_input_mesh_node (mpirun -n 2)."""
+import json, sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+from gospl.tools.zprobe import probeZ
+
+m = Model(sys.argv[1], verbose=True)
+probeZ(m, "test")
+node = int(m._zprobe_node)
+with np.load(m.meshFile) as d:
+    expected = int(np.argmax(d[m.infoElev]))
+m.destroy()
+if MPI.COMM_WORLD.rank == 0:
+    with open(sys.argv[2], "w") as f:
+        json.dump({"node": node, "expected": expected}, f)
+'''
+
+
+def test_zprobe_reports_input_mesh_node(tmp_path):
+    """
+    Protects: `zprobe.probeZ` reports the INPUT-MESH id of the highest node.
+
+    Silent failure prevented: it printed `hGlobal.max()`'s PETSc global row,
+    which depends on the partition; on a 23.6M-node run the reported "node"
+    was a -712 m cell of the input mesh, so the spike could not be located
+    (fixed 2026-11-12).
+
+    Invariant: at np=2, right after init (elevation == input z), the reported
+    node is the argmax of the input elevation.
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    for f in ("minimal.yml", "mesh.npz"):
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    child = tmp_path / "_zprobe.py"
+    child.write_text(_ZPROBE_SCRIPT)
+    out = tmp_path / "out.json"
+    r = subprocess.run(
+        ["mpirun", "-n", "2", sys.executable, str(child), "minimal.yml", str(out)],
+        cwd=tmp_path, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+        env=mpi_child_env(),
+    )
+    if r.returncode != 0 or not out.exists():
+        pytest.fail(f"`mpirun -n 2` subprocess failed (rc={r.returncode}).\n"
+                    f"stderr:\n{r.stderr[-2000:]}")
+    res = json.loads(out.read_text())
+    assert res["node"] == res["expected"], res
