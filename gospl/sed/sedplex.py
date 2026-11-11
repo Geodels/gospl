@@ -130,7 +130,7 @@ class SEDMesh(object):
 
         # Get the volume of sediment transported in m3/yr
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-        self._solve_KSP(False, self.fMati, self.tmp, self.vSed)
+        self._solve_KSP(False, self.fMati, self.tmp, self.vSed, route=True)
 
         # Dual lithology: route the fine sub-flux through the SAME operator
         # (linear, so this is exact), then snapshot the per-node fine fraction
@@ -140,7 +140,7 @@ class SEDMesh(object):
             self.tmpL.setArray(self.thFine)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-            self._solve_KSP(False, self.fMati, self.tmp, self.vSedF)
+            self._solve_KSP(False, self.fMati, self.tmp, self.vSedF, route=True)
             self.dm.globalToLocal(self.vSed, self.vSedLocal)
             self.dm.globalToLocal(self.vSedF, self.vSedFLocal)
             vtot = self.vSedLocal.getArray()
@@ -166,7 +166,7 @@ class SEDMesh(object):
                 self.tmpL.setArray(self.provEro[:, c])
                 self.dm.localToGlobal(self.tmpL, self.tmp)
                 self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
-                self._solve_KSP(False, self.fMati, self.tmp, self.vSedP[c])
+                self._solve_KSP(False, self.fMati, self.tmp, self.vSedP[c], route=True)
                 self.dm.globalToLocal(self.vSedP[c], self.vSedPLocal)
                 self.provFrac[:, c] = np.divide(
                     self.vSedPLocal.getArray(), vtot,

@@ -436,9 +436,14 @@ class FAMesh(object):
             )
             if MPIrank == 0:
                 if benign:
+                    # Say what actually happens: a non-fatal solve's result is
+                    # DISCARDED (zeroed below), not ponded. Until 2026-11 this
+                    # read "left as local sinks (benign: they pond, mass
+                    # conserved)", which hid a sediment flux zeroed every step.
                     print(
-                        "[flow] %d isolated un-drained cell(s) left as local "
-                        "sinks (benign: they pond, mass conserved)" % nbad,
+                        "[flow] non-fatal routing solve did not converge "
+                        "(%d un-drained cell(s) localised): its result is "
+                        "discarded (zeroed) this time step" % nbad,
                         flush=True,
                     )
                 elif pond_fatal:
@@ -514,7 +519,8 @@ class FAMesh(object):
 
         return vector2
 
-    def _solve_KSP(self, guess, matrix, vector1, vector2, fatal=False, seed=False):
+    def _solve_KSP(self, guess, matrix, vector1, vector2, fatal=False, seed=False,
+                   route=None):
         """
         PETSc *scalable linear equations solvers* (**KSP**) component provides Krylov subspace iterative method and a preconditioner. Here, flow accumulation solution is obtained using PETSc Richardson solver (`richardson`) with block Jacobian preconditioning (`bjacobi`).
 
@@ -528,9 +534,21 @@ class FAMesh(object):
         :arg matrix: PETSc sparse matrix used by the KSP solver composed of diagonal terms set to unity (identity matrix) and off-diagonal terms (weights between 0 and 1). The weights are calculated based on the number of downslope neighbours (based on the chosen number of flow direction directions) and are proportional to the slope.
         :arg vector1: PETSc vector corresponding to the local volume of water available for runoff during a given time step (*e.g.* voronoi area times local precipitation rate).
         :arg vector2: PETSc vector corresponding to the unknown flow discharge values.
+        :arg route: the system is an ``(I - W^T)`` ROUTING solve, so a failed
+            primary may be rescued with exact block factors (`_solveIDAExact`,
+            sticky for the rest of the run) before the bounded fallback.
+            Defaults to ``seed`` (every seeded solve is a routing solve). The
+            upstream-integration sediment solves (`sedplex._getSedFlux`) pass
+            ``route=True`` without a seed: until 2026-11 they had no rescue, so
+            on a fine global mesh (long drainage chains) the primary failed, the
+            500-iteration fallback could not reach the chain ends, and the
+            whole sediment flux was zeroed every step (no sediment load, no
+            deposition).
 
         :return: vector2 PETSc vector of the new flow discharge values
         """
+
+        routing = seed if route is None else bool(route)
 
         if self._ksp_main is None:
             ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
@@ -608,8 +626,8 @@ class FAMesh(object):
                     else self._primary_max_it),
         )
         ksp.setOperators(matrix, matrix)
-        key = "fatal" if fatal else ("cascade" if seed else "other")
-        if seed and self._ida_exact:
+        key = "fatal" if fatal else ("cascade" if seed else ("route" if routing else "other"))
+        if routing and self._ida_exact:
             # Sticky: an earlier routing solve in this run needed the exact
             # rescue, so go straight to it (the primary would grind first).
             r = self._solveIDAExact(matrix, vector1, vector2, key)
@@ -617,7 +635,7 @@ class FAMesh(object):
             ksp.solve(vector1, vector2)
             r = ksp.getConvergedReason()
             _rs.count_ksp(self, key, ksp.getIterationNumber(), r)
-            if r < 0 and seed and self._ida_exact_allowed:
+            if r < 0 and routing and self._ida_exact_allowed:
                 # Rescue a failed ROUTING solve exactly before treating it as
                 # un-drainable. On a long single-file drainage chain (a wide
                 # plateau: 733 cells to the outlet on implicit_timestepping)
@@ -649,7 +667,7 @@ class FAMesh(object):
             # seed lower-bound b for seeded solves, else a finite warm iterate
             # (drop a non-finite one) -- and let the bounded fallback finish (it
             # zeroes a non-convergent solve, keeping everything finite).
-            if seed:
+            if seed or routing:
                 vector1.copy(vector2)
             elif not np.isfinite(vector2.norm()):
                 vector2.set(0.0)
