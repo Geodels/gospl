@@ -1226,3 +1226,95 @@ def test_mesh_not_replicated_per_rank(tmp_path):
         assert s["glbids_ok"], f"rank {r}: glbIDs != locIDs[glIDs]"
         assert s["elev_ok"], f"rank {r}: initial elevation != input z[locIDs]"
         assert s["lazy_ok"], f"rank {r}: lazy mCoords != file coordinates"
+
+
+_PLATE_INTERP_SCRIPT = '''\
+"""Child for test_plate_interp_tables_local (mpirun -n N)."""
+import json, sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False)
+m.runProcesses()
+s = {
+    "tec_local": bool(m.tec_IDs.shape[0] == m.lpoints
+                      and m.tec_weights.shape[0] == m.lpoints
+                      and m.tec_sumw.shape[0] == m.lpoints
+                      and (m.tec_onIDs.size == 0 or m.tec_onIDs.max() < m.lpoints)),
+    "mcoords_held": vars(m).get("_mCoords") is not None,
+}
+own = m.glIDs
+g = MPI.COMM_WORLD.gather((m.locIDs[own], m.hLocal.getArray()[own].copy(), s), root=0)
+m.destroy()
+if MPI.COMM_WORLD.rank == 0:
+    ids = np.concatenate([a for a, _, _ in g]); h = np.concatenate([b for _, b, _ in g])
+    out = np.empty_like(h); out[ids] = h
+    with open(sys.argv[2], "w") as f:
+        json.dump({"h": out.tolist(), "ranks": [c for _, _, c in g]}, f)
+'''
+
+
+def test_plate_interp_tables_local(tmp_path):
+    """
+    Protects: plate-interpolation advection (`advect: interp` + `hdisp`)
+    keeps only LOCAL interpolation tables (2026-11 memory fix).
+
+    Silent failure prevented: `_readAdvectionData` used to query and keep
+    `tec_IDs`/`tec_weights`/`tec_sumw`/`tec_onIDs` for the WHOLE mesh on
+    every rank (~80 B per mesh node per rank, plus a cached copy of the
+    mesh coordinates). Results are unchanged by the fix, so only a shape
+    check notices a regression; the np=1 vs np=2 elevation comparison
+    guards the new owned-row scatter in `_advectPlates`.
+
+    Invariant: after a run with one plate update, on every rank the tec
+    tables have `lpoints` rows, no whole-mesh `mCoords` is cached, and the
+    final elevation matches the np=1 run (max diff < 1e-9 m; ~2e-13 seen).
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    needed = ["flat_advect.yml", "flat_advect.npz"]
+    if not all((FIXTURES_DIR / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+
+    yml = (FIXTURES_DIR / "flat_advect.yml").read_text()
+    yml = yml.replace("advect: 'iioe2'", "advect: 'interp'")
+    old_tec = "      end: 1.e4\n      hdisp: ['flat_advect','uv']"
+    assert old_tec in yml
+    # one plate event ending mid-run (the plate update fires at its end),
+    # then a map-free event
+    yml = yml.replace(old_tec, "      end: 5.e3\n      hdisp: ['flat_advect','uv']\n"
+                               "    - start: 5.e3\n      end: 1.e4")
+    child = tmp_path / "_plate.py"
+    child.write_text(_PLATE_INTERP_SCRIPT)
+    res = {}
+    for n in (1, 2):
+        run = tmp_path / f"n{n}"
+        run.mkdir()
+        shutil.copy(FIXTURES_DIR / "flat_advect.npz", run / "flat_advect.npz")
+        (run / "plate.yml").write_text(yml)
+        out = run / "out.json"
+        r = subprocess.run(
+            ["mpirun", "-n", str(n), sys.executable, str(child), "plate.yml", str(out)],
+            cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+            env=mpi_child_env(),
+        )
+        if r.returncode != 0 or not out.exists():
+            pytest.fail(f"`mpirun -n {n}` subprocess failed (rc={r.returncode}).\n"
+                        f"stderr:\n{r.stderr[-2000:]}")
+        with open(out) as f:
+            res[n] = json.load(f)
+    for r, s in enumerate(res[2]["ranks"]):
+        assert s["tec_local"], f"rank {r}: plate-interpolation tables are not local"
+        assert not s["mcoords_held"], f"rank {r} keeps a whole-mesh mCoords copy"
+    import numpy as np
+    h1, h2 = np.array(res[1]["h"]), np.array(res[2]["h"])
+    assert np.abs(h1 - h2).max() < 1.0e-9, (
+        f"plate advection np=1 vs np=2 differ by {np.abs(h1 - h2).max():.3g} m")

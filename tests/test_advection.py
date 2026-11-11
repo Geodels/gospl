@@ -123,3 +123,41 @@ def test_plate_advection_with_strata_known_bug(tmp_path):
         if model is not None:
             model.destroy()
         os.chdir(cwd)
+
+
+def test_tectonic_event_without_maps_runs(tmp_path):
+    """
+    Protects: `Tectonics.getTectonics` with an event that carries no map
+    (only `start`/`end`, e.g. to stop the motion), which the parser accepts
+    (`_defineTectonics` fills "empty").
+
+    Silent failure prevented: the method ended with `del mdata`, a name only
+    bound when the event loads a map, so such an event crashed the run with
+    `UnboundLocalError: cannot access local variable 'mdata'` (fixed
+    2026-11-11; docs/dev/FIXED_BUGS.md).
+
+    Invariant: `minimal.yml` with a map-free tectonics event runs to the end
+    and leaves no horizontal/vertical forcing set.
+    """
+    import shutil
+
+    from gospl.model import Model
+
+    for f in ("minimal.yml", "mesh.npz"):
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    yml = (tmp_path / "minimal.yml").read_text()
+    yml += "\ntectonics:\n  - start: 0.\n    end: 100.\n"
+    (tmp_path / "notec.yml").write_text(yml)
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    model = None
+    try:
+        model = Model("notec.yml", verbose=False)
+        model.runProcesses()
+        assert model.tNow == model.tEnd
+        assert model.hdisp is None and model.upsub is None
+    finally:
+        if model is not None:
+            model.destroy()
+        os.chdir(cwd)

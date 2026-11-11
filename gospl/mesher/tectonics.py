@@ -99,6 +99,9 @@ class Tectonics(object):
                 nb = 0
 
             self.tecNb = nb
+            # An event may carry no map at all (only start/end, e.g. to stop
+            # the motion): `mdata` must exist for the `del` below.
+            mdata = None
             if nb < len(self.tecdata.index) - 1:
                 timer = self.tecdata.at[nb, "end"] - self.tecdata.at[nb, "start"]
             else:
@@ -111,10 +114,13 @@ class Tectonics(object):
                 fname = self.tecdata.at[nb, "hMap"][0] + ".npz"
                 mdata = np.load(fname)
                 key = self.tecdata.at[nb, "hMap"][1]
-                self.hdisp = mdata[key][self.locIDs, :]
+                # Read the whole-mesh map once (each npz access re-reads it)
+                # and keep only this rank's rows.
+                hfull = mdata[key]
+                self.hdisp = hfull[self.locIDs, :]
                 # In case of advection based on interpolation from plate position
                 if self.advscheme == 0:
-                    self._readAdvectionData(mdata[key], timer)
+                    self._readAdvectionData(hfull, timer)
                     self.plateStep = True
                     self.plateTimer = self.tecdata.at[nb, "end"]
                 else:
@@ -138,6 +144,7 @@ class Tectonics(object):
                     # changed, so the cached advection operator must be rebuilt.
                     getfacevelocity(self.lpoints, nodeVel)
                     self._advRebuild = True
+                del hfull
             else:
                 self.hdisp = None
 
@@ -557,13 +564,22 @@ class Tectonics(object):
         """
 
         t0 = process_time()
+        # The advected positions of the WHOLE mesh are needed (a local node's
+        # three nearest advected nodes can come from anywhere), but only the
+        # rows of this rank's nodes are queried and kept: the `tec_*` tables
+        # are LOCAL (lpoints rows, local `tec_onIDs`), and the whole-mesh
+        # coordinates are released afterwards (mCoords reloads on demand).
+        # Until 2026-11 every rank kept whole-mesh tables (~80 B per mesh node).
         XYZ = self.mCoords + hdisp * timer
+        self._mCoords = None
 
         # Build a tree with the advected nodes
         tree = spatial.cKDTree(XYZ, leafsize=10)
+        del XYZ
 
-        # Query the distances from unstructured nodes
-        distances, self.tec_IDs = tree.query(self.mCoords, k=3)
+        # Query the distances from this rank's unstructured nodes (lcoords
+        # are the input coordinates of locIDs, bit for bit).
+        distances, self.tec_IDs = tree.query(self.lcoords, k=3)
 
         # Inverse weighting distance...
         self.tec_weights = np.divide(
@@ -654,19 +670,21 @@ class Tectonics(object):
                 flush=True,
             )
 
-        self.hGlobal.setArray(nelev[self.glbIDs])
+        # nelev/nerodep/nfi/nsoil are LOCAL (one row per local node, see
+        # _readAdvectionData): owned rows feed the global vectors.
+        self.hGlobal.setArray(nelev[self.glIDs])
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        self.cumED.setArray(nerodep[self.glbIDs])
+        self.cumED.setArray(nerodep[self.glIDs])
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
 
         if self.flexOn:
-            self.localFlex = nfi[self.locIDs].copy()
+            self.localFlex = nfi.copy()
 
         if self.cptSoil:
             nsoil[nsoil < 0.] = 0.
             nsoil[nsoil > self.soil_transition] = self.soil_transition
-            self.Gsoil.setArray(nsoil[self.glbIDs])
+            self.Gsoil.setArray(nsoil[self.glIDs])
             self.dm.globalToLocal(self.Gsoil, self.Lsoil)
 
         # Update stratigraphic record
@@ -712,17 +730,14 @@ class Tectonics(object):
 
         # Transfer the variables accordingly and perform operation
         t0 = process_time()
-        nghs = self.tec_IDs[self.locIDs]
-        wgts = self.tec_weights[self.locIDs, :, None]
-        sumw = self.tec_sumw[self.locIDs, :, None]
-        # onID = self.tec_onIDs[self.locIDs]
-        # tec_onIDs holds global-mesh indices where the advected node
-        # coincides exactly. Remap to local-mesh indices and keep only
-        # entries this rank owns.
-        g2l = np.full(self.mpoints, -1, dtype=int)
-        g2l[self.locIDs] = np.arange(len(self.locIDs))
-        onID = g2l[self.tec_onIDs]
-        onID = onID[onID >= 0]
+        # The tec_* tables are already local (one row per local node) and
+        # tec_onIDs holds local indices. NOTE (known bug, AGENTS.md): this
+        # path is unreachable today (`_findPts2Reduce` raises first), and
+        # `tec_sumw` is 1-D, so the `[:, :, None]` below would also raise.
+        nghs = self.tec_IDs
+        wgts = self.tec_weights[:, :, None]
+        sumw = self.tec_sumw[:, :, None]
+        onID = self.tec_onIDs
 
         self.stratH[:, : self.stratStep] = self._updateStratInfo(
             redIDs, self.stratH[:, : self.stratStep], sumw, onID, wgts, nghs
