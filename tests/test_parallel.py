@@ -1372,7 +1372,8 @@ def test_plate_strata_partition_invariant(tmp_path, scheme):
 
     Invariant: one stratigraphy move applied to identical input (each layer
     field set from the input-mesh id) gives bitwise-equal fields at np=1 and
-    np=2 for both schemes; for `interp` the whole run is bitwise equal too.
+    np=2 for both schemes; for `interp` the whole run agrees to 1e-12 of each
+    field's magnitude (round-off from the solves; bitwise on macOS).
     """
     import shutil
     import subprocess
@@ -1418,12 +1419,18 @@ def test_plate_strata_partition_invariant(tmp_path, scheme):
         res[n] = dict(np.load(out))
     assert res[1]["stratStep"] > 0, "no layer recorded before the plate update"
     # The move itself (probe: identical input on every partition) is bitwise
-    # partition-invariant for both schemes. Whole-run fields are bitwise only
-    # for interp: with iioe2 the SURFACE advection is a KSP solve whose
-    # round-off depends on the partition (~5e-5 m here, already on dev), and
-    # layers recorded from that surface inherit it.
+    # partition-invariant for both schemes. Whole-run fields still go through
+    # solves whose round-off can depend on the partition and the platform:
+    # for interp they agree to a few ULPs (1 ULP of the 1e6 bedrock layer on
+    # the CI runners, exact on macOS locally); with iioe2 the SURFACE
+    # advection is a KSP solve (~5e-5 m here, already on dev) whose
+    # round-off the recorded layers inherit, so it is not compared.
     for k in res[1]:
-        if scheme == "interp" or k.startswith("probe_"):
-            diff = np.abs(np.asarray(res[1][k], float) - np.asarray(res[2][k], float)).max()
+        a1 = np.asarray(res[1][k], float)
+        diff = np.abs(a1 - np.asarray(res[2][k], float)).max()
+        if k.startswith("probe_"):
             assert diff == 0.0, f"{k}: np=1 vs np=2 differ by {diff:.3g}"
+        elif scheme == "interp":
+            tol = 1e-12 * max(1.0, np.abs(a1).max())
+            assert diff <= tol, f"{k}: np=1 vs np=2 differ by {diff:.3g} (> {tol:.3g})"
     assert any(k.startswith("probe_") for k in res[1])
