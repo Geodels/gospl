@@ -1,21 +1,71 @@
 #!/bin/bash
-#PBS -l ncpus=48
-#PBS -l mem=60GB
-#PBS -l jobfs=10GB
-#PBS -q normal
-#PBS -P q97
+###############################################################################
+# NCI Gadi: check a native (venv) goSPL install.
+#
+# Runs the regression-suite fixture tests/fixtures/minimal.yml (3766-node flat
+# mesh, 10 steps, <1 s) on 4 MPI ranks in a scratch copy, then checks that
+# every rank wrote its output. Usage:
+#
+#   qsub -v GOSPL_SRC=$HOME/codes/gospl nciRun.pbs
+#
+#   GOSPL_SRC   your goSPL clone (default: $HOME/codes/gospl)
+#   GOSPL_VENV  venv activate script (default: $HOME/envi_gospl/bin/activate)
+#
+# PRJ is a placeholder: edit the #PBS -P and -l storage lines, or override
+# them at submission (command-line options win over #PBS lines):
+#
+#   qsub -P ab12 -l storage=gdata/ab12+scratch/ab12 -v GOSPL_SRC=... nciRun.pbs
+###############################################################################
+#PBS -P PRJ
+#PBS -q express
+#PBS -l ncpus=4
+#PBS -l mem=8GB
+#PBS -l jobfs=1GB
 #PBS -l walltime=00:10:00
-#PBS -l storage=gdata/q97+scratch/q97
+#PBS -l storage=gdata/PRJ+scratch/PRJ
 #PBS -l wd
+#PBS -j oe
+#PBS -N gospl_check
+
+set -euo pipefail
+
+# One thread per MPI rank.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+# Ignore ~/.local site-packages: a --system-site-packages venv also sees the
+# user site, and a stale editable goSPL install there shadows the venv copy.
+export PYTHONNOUSERSITE=1
 
 # Load required modules
 module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
-export PYTHONPATH=$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH 
+export PYTHONPATH="${PYTHONPATH:-}:/apps/petsc/3.21.3/lib/mpich/Intel"
 
 # Activate the virtual environment
-source /home/XXX/USERXXX/envi_gospl/bin/activate
+source "${GOSPL_VENV:-$HOME/envi_gospl/bin/activate}"
 
-# Simulation run
-mpirun -np $PBS_NCPUS python3 runModel.py -i input-file-name.yml
+GOSPL_SRC="${GOSPL_SRC:-$HOME/codes/gospl}"
+NP=4
+
+# 1. Which goSPL is imported (must be the venv, not ~/.local or the clone).
+python3 -c "import gospl; print('goSPL', gospl.__version__, 'from', gospl.__file__)"
+
+# 2. Run the minimal fixture in a scratch copy (keeps the clone clean).
+WORK="${PBS_JOBFS:-$PWD}/gospl_check"
+rm -rf "$WORK" && mkdir -p "$WORK"
+cp "$GOSPL_SRC/tests/fixtures/minimal.yml" "$GOSPL_SRC/tests/fixtures/mesh.npz" "$WORK/"
+cd "$WORK"
+
+mpirun -np "$NP" python3 -m gospl -i minimal.yml
+
+# 3. Every rank must have written the last output (step 2 = 100 yr).
+for r in $(seq 0 $((NP - 1))); do
+    test -s "minimal/h5/gospl.2.p${r}.h5" || { echo "FAILED: rank $r wrote no output"; exit 1; }
+done
+echo "goSPL install OK ($NP ranks)"
+
+# A production run uses the same environment:
+#   mpirun -np $PBS_NCPUS python3 -m gospl -i input-file-name.yml
 
 deactivate

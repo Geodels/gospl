@@ -28,13 +28,13 @@
 #
 # Edit the #PBS -P project code and -l storage before submitting.
 ###############################################################################
-#PBS -P do20
+#PBS -P PRJ
 #PBS -q normal
 #PBS -l ncpus=48
 #PBS -l mem=190GB
 #PBS -l walltime=02:00:00
 #PBS -l wd
-#PBS -l storage=scratch/d20+gdata/d20
+#PBS -l storage=scratch/PRJ+gdata/PRJ
 #PBS -N gospl_scaling
 #
 # NOTE: the ncpus=/mem= values above are just a default for standalone
@@ -62,6 +62,11 @@ DRIVER="${DRIVER:-$(dirname "$0")/run_scaling.py}"
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
+
+# Ignore ~/.local site-packages: a --system-site-packages venv also sees the
+# user site, and a stale editable goSPL install there shadows the venv copy
+# (fails with "No such file or directory: .../build/cp311").
+export PYTHONNOUSERSITE=1
 
 cd "$(dirname "$INPUT")"
 INPUT_BASE="$(basename "$INPUT")"

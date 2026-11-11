@@ -31,7 +31,7 @@ Native virtual-environment install (Gadi)
 .. code-block:: bash
 
     # Load system modules
-    module load intel-mpi/2021.13.1 hdf5/1.12.1p petsc/3.21.3 \
+    module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 \
                 netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
 
     # Expose the system mpi4py linked against Intel MPI
@@ -71,36 +71,58 @@ Native virtual-environment install (Gadi)
 Testing the installation (Gadi)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Download the archived HPC test example::
+First check that Python imports goSPL from the virtual environment (not from
+``~/.local`` or from your clone)::
 
-    wget https://raw.githubusercontent.com/Geodels/goSPL-examples/main/hpc-setup/gospl_NCI.tar
+    export PYTHONNOUSERSITE=1
+    python3 -c "import gospl; print(gospl.__version__, gospl.__file__)"
 
-Set up a PBS job script (replace ``PRJ`` with your NCI project code and
-``input-file-name.yml`` with your goSPL input file):
+The printed path must be under ``~/envi_gospl/lib/python3.11/site-packages/``.
+
+.. important::
+
+    A venv created with ``--system-site-packages`` also sees your user
+    site-packages (``~/.local/lib/python3.11/site-packages``). An old goSPL
+    install there, in particular an editable one whose ``build/`` directory has
+    since been deleted, shadows the venv copy and fails with
+    ``FileNotFoundError: ... build/cp311``. Remove it with
+    ``python3 -m pip uninstall gospl`` (run outside the venv), and keep
+    ``export PYTHONNOUSERSITE=1`` in your shell and job scripts.
+
+Then run the job script ``hpc_setup/nciRun.pbs`` from the goSPL repository.
+It runs the regression-suite fixture ``tests/fixtures/minimal.yml`` (a small
+flat mesh, 10 steps, a few seconds) on 4 MPI ranks in a scratch directory and
+checks that every rank wrote its output. Edit the ``#PBS -P`` project code and
+``-l storage`` line, then submit::
+
+    qsub -v GOSPL_SRC=$HOME/codes/gospl nciRun.pbs
+
+The job log ends with ``goSPL install OK (4 ranks)``. A production run uses the
+same modules and environment:
 
 .. code-block:: bash
 
     #!/bin/bash
     #PBS -l ncpus=48
-    #PBS -l mem=60GB
-    #PBS -l jobfs=10GB
+    #PBS -l mem=190GB
     #PBS -q normal
     #PBS -P PRJ
-    #PBS -l walltime=00:10:00
+    #PBS -l walltime=10:00:00
     #PBS -l storage=gdata/PRJ+scratch/PRJ
     #PBS -l wd
 
-    module load intel-mpi/2021.13.1 hdf5/1.12.1p petsc/3.21.3 \
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export PYTHONNOUSERSITE=1
+
+    module load intel-mpi/2021.13.0 hdf5/1.12.1p petsc/3.21.3 \
                 netcdf/4.9.2p intel-mkl/2023.2.0 python3/3.11.7
     export PYTHONPATH=$PETSC_BASE/lib/mpich/Intel:$PYTHONPATH
 
     source ~/envi_gospl/bin/activate
 
-    export OMP_NUM_THREADS=1
-    export OPENBLAS_NUM_THREADS=1
-    export MKL_NUM_THREADS=1
-
-    mpirun -np $PBS_NCPUS python3 runModel.py -i input-file-name.yml
+    mpirun -np $PBS_NCPUS python3 -m gospl -i input-file-name.yml
 
     deactivate
 
@@ -197,7 +219,7 @@ Example PBS job script:
 
     module purge
     module load singularity
-    module load intel-mpi/2021.13.1
+    module load intel-mpi/2021.13.0
 
     export OMP_NUM_THREADS=1
     export OPENBLAS_NUM_THREADS=1

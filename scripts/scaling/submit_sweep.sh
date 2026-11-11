@@ -10,14 +10,14 @@
 #   ./submit_sweep.sh /path/to/input.yml [ranks...]
 #
 # Examples:
-#   ./submit_sweep.sh /scratch/q97/me/run/input_30km.yml                 # 1 2 4 8 16 24 48
-#   ./submit_sweep.sh /scratch/q97/me/run/input_15km.yml 2 4 8 16 96     # custom set, multi-node ok
-#   RES=10km ./submit_sweep.sh /scratch/q97/me/run/input.yml 48 96 192   # explicit resolution tag
+#   ./submit_sweep.sh /scratch/PRJ/me/run/input_30km.yml                 # 1 2 4 8 16 24 48
+#   ./submit_sweep.sh /scratch/PRJ/me/run/input_15km.yml 2 4 8 16 96     # custom set, multi-node ok
+#   RES=10km ./submit_sweep.sh /scratch/PRJ/me/run/input.yml 48 96 192   # explicit resolution tag
 #
 #
 # WALLTIME=02:00:00 \
 # WALLTIME_MAP="4=03:00:00,8=02:30:00,96=01:30:00,144=01:00:00,192=00:45:00" \
-# PROJECT=do20 GOSPL_VENV=$HOME/gospl-smoke/bin/activate RES=10km \
+# PROJECT=PRJ GOSPL_VENV=$HOME/gospl-smoke/bin/activate RES=10km \
 #     ./submit_sweep.sh input_10km.yml 4 8 16 24 48 96 144 192
 #
 #
@@ -37,7 +37,8 @@
 #               WALLTIME_MAP="4=02:00:00,8=01:30:00,96=00:20:00,192=00:15:00"
 #             Rank counts not listed fall back to WALLTIME.
 #   CONTAINER  .sif path (MODE=container)
-#   PROJECT  NCI project code for -P (default: from the .pbs file)
+#   PROJECT  NCI project code for -P and -l storage=scratch/P+gdata/P
+#            (default: from the .pbs file, where it is the placeholder PRJ)
 #   QUEUE    PBS queue (default normal)
 #   DEPEND   if set to 1, chain jobs so only one runs at a time (cleaner timing)
 ###############################################################################
@@ -124,7 +125,7 @@ for n in "${RANKS[@]}"; do
 
     qsub_args=(-q "$QUEUE" "${l_args[@]}"
                -l "walltime=$job_walltime" -v "$vargs" -N "gospl_${RES_TAG}_p${n}")
-    [ -n "${PROJECT:-}" ] && qsub_args+=(-P "$PROJECT")
+    [ -n "${PROJECT:-}" ] && qsub_args+=(-P "$PROJECT" -l "storage=scratch/$PROJECT+gdata/$PROJECT")
     if [ "${DEPEND:-0}" = "1" ] && [ -n "$prev_job" ]; then
         qsub_args+=(-W "depend=afterany:$prev_job")
     fi

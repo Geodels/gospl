@@ -61,12 +61,12 @@ mpirun -n 1 python scripts/scaling/run_scaling.py \
 
    ```bash
    # native build (mirrors hpc_setup/nciRun.pbs modules)
-   PROJECT=q97 GOSPL_VENV=$HOME/envi_gospl/bin/activate \
-     ./submit_sweep.sh /scratch/q97/$USER/run/input.yml 1 2 4 8 16 24 48
+   PROJECT=PRJ GOSPL_VENV=$HOME/envi_gospl/bin/activate \
+     ./submit_sweep.sh /scratch/PRJ/$USER/run/input.yml 1 2 4 8 16 24 48
 
    # or the Singularity container
-   PROJECT=q97 MODE=container CONTAINER=/scratch/q97/$USER/gospl-hpc-v2026.6.13.sif \
-     ./submit_sweep.sh /scratch/q97/$USER/run/input.yml 1 2 4 8 16 24 48
+   PROJECT=PRJ MODE=container CONTAINER=/scratch/PRJ/$USER/gospl-hpc-v2026.6.13.sif \
+     ./submit_sweep.sh /scratch/PRJ/$USER/run/input.yml 1 2 4 8 16 24 48
    ```
 
    Each rank count is a separate job sized `mem = ranks × MEM_PER_CPU_GB`
@@ -80,7 +80,7 @@ mpirun -n 1 python scripts/scaling/run_scaling.py \
 3. After they finish:
 
    ```bash
-   python analyze_scaling.py /scratch/q97/$USER/run/scaling_results -o results/scaling
+   python analyze_scaling.py /scratch/PRJ/$USER/run/scaling_results -o results/scaling
    ```
 
    → console table, `results/scaling/scaling_summary.{csv,md}`, and
