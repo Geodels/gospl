@@ -184,6 +184,35 @@ class Tectonics(object):
 
         return
 
+    def _cylinderDisplace(self, coords, hdisp, t):
+        """
+        Move points on the cylinder of a cyclic (periodic) 2D model by a flat
+        ``(vx, vy)`` displacement rate over time ``t``, EXACTLY: the periodic
+        component turns the point around the cylinder axis by ``v*t/r``, the
+        other one shifts it along the axis. This is the flat translation in the
+        unwrapped frame, wrapped across the seam; a straight step along the
+        tangent (`_cylinderVelocity` * t) would leave the surface by ~(v t)^2/2r.
+        Same axis conventions as `_cylinderVelocity`.
+
+        :arg coords: (n, 3) points on the cylinder
+        :arg hdisp: (n, >=2) flat displacement rates (vx, vy)
+        :arg t: time (negative for a departure point)
+        :return: (n, 3) displaced points
+        """
+
+        out = np.array(coords, dtype=np.float64, copy=True)
+        if self.east == 2 or self.west == 2:
+            a, b, ax, va, vax = 0, 2, 1, hdisp[:, 0], hdisp[:, 1]
+        else:
+            a, b, ax, va, vax = 1, 2, 0, hdisp[:, 1], hdisp[:, 0]
+        rad = np.sqrt(out[:, a] ** 2 + out[:, b] ** 2)
+        safe = np.where(rad > 0.0, rad, 1.0)
+        ang = np.arctan2(out[:, b], out[:, a]) + va * t / safe
+        out[:, a] = rad * np.cos(ang)
+        out[:, b] = rad * np.sin(ang)
+        out[:, ax] += vax * t
+        return out
+
     def _cylinderVelocity(self, hdisp):
         """
         Map a flat ``(vx, vy)`` horizontal displacement onto the tangent of the
@@ -584,7 +613,11 @@ class Tectonics(object):
         # are LOCAL (lpoints rows, local `tec_onIDs`), and the whole-mesh
         # coordinates are released afterwards (mCoords reloads on demand).
         # Until 2026-11 every rank kept whole-mesh tables (~80 B per mesh node).
-        XYZ = self.mCoords + hdisp * timer
+        if self.cyclicBC:
+            # flat-frame rates on a cylinder: rotate around the axis, exactly
+            XYZ = self._cylinderDisplace(self.mCoords, hdisp, timer)
+        else:
+            XYZ = self.mCoords + hdisp * timer
         self._mCoords = None
 
         # Build a tree with the advected nodes
@@ -604,6 +637,14 @@ class Tectonics(object):
 
         del tree, distances
 
+        # Fetch plan shared by `_advectPlates` and `_advectStrati`: the input
+        # ids this rank's interpolation reads, each local row's position in
+        # that list, and their PETSc indices (collective: every rank reaches
+        # this at the same tectonic event).
+        self._tecNeeded = np.unique(self.tec_IDs)
+        self._tecRows = np.searchsorted(self._tecNeeded, self.tec_IDs)
+        self._tecWant = self._ownerPetscIndex(self._tecNeeded)
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Read advection data (%0.02f seconds)"
@@ -619,38 +660,29 @@ class Tectonics(object):
 
         .. important::
 
-            The interpolated values are the elevation,  cumulative erosion deposition, flexural response and soil production. The interpolation is done on the spherical mesh on a single processor. In case the stratigraphic information is also recorded then this is also interpolated.
+            The interpolated values are the elevation,  cumulative erosion deposition, flexural response and soil production, then (if recorded) the stratigraphy. Each rank interpolates its own nodes from values fetched from the owners of the source nodes (`_fetchOwnerRows`, plan cached by `_readAdvectionData`); no whole-mesh field is assembled. Collective.
         """
 
-        # Send local elevation globally
+        # Fetch, from their owners, the surface values at the nodes this
+        # rank's interpolation reads (partition-scale; until 2026-11 each field
+        # was a whole-mesh array Allreduced on every rank).
         t0 = process_time()
-        hl = self.hLocal.getArray().copy()
-        gZ = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
-        gZ[self.locIDs] = hl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
-
-        # Send local erosion deposition globally
-        edl = self.cumEDLocal.getArray().copy()
-        gED = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
-        gED[self.locIDs] = edl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
-
-        # Send local flexural isostasy globally
+        fields = {"z": self.hLocal.getArray().copy(),
+                  "ed": self.cumEDLocal.getArray().copy()}
         if self.flexOn:
-            gFI = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
-            gFI[self.locIDs] = self.localFlex
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gFI, op=MPI.MAX)
-
-        # Send local soil thickness globally
+            fields["fi"] = self.localFlex
         if self.cptSoil:
-            lsoil = self.Lsoil.getArray().copy()
-            gSL = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
-            gSL[self.locIDs] = lsoil
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gSL, op=MPI.MAX)
+            fields["sl"] = self.Lsoil.getArray().copy()
+        src = self._fetchOwnerRows(self._tecNeeded, fields, want=self._tecWant)
+        gZ, gED = src["z"], src["ed"]
+        if self.flexOn:
+            gFI = src["fi"]
+        if self.cptSoil:
+            gSL = src["sl"]
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Transfer local elevation, erosion deposition, soil and flexural information globally (%0.02f seconds)"
+                "Transfer elevation, erosion deposition, soil and flexural information from owners (%0.02f seconds)"
                 % (process_time() - t0),
                 flush=True,
             )
@@ -658,24 +690,24 @@ class Tectonics(object):
         # Perform interpolation
         t0 = process_time()
 
-        tmp = np.sum(self.tec_weights * gZ[self.tec_IDs], axis=1)
+        tmp = np.sum(self.tec_weights * gZ[self._tecRows], axis=1)
         nelev = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
-        tmp = np.sum(self.tec_weights * gED[self.tec_IDs], axis=1)
+        tmp = np.sum(self.tec_weights * gED[self._tecRows], axis=1)
         nerodep = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
         if self.flexOn:
-            tmp = np.sum(self.tec_weights * gFI[self.tec_IDs], axis=1)
+            tmp = np.sum(self.tec_weights * gFI[self._tecRows], axis=1)
             nfi = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
         if self.cptSoil:
-            tmp = np.sum(self.tec_weights * gSL[self.tec_IDs], axis=1)
+            tmp = np.sum(self.tec_weights * gSL[self._tecRows], axis=1)
             nsoil = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
 
         if len(self.tec_onIDs) > 0:
-            nelev[self.tec_onIDs] = gZ[self.tec_IDs[self.tec_onIDs, 0]]
-            nerodep[self.tec_onIDs] = gED[self.tec_IDs[self.tec_onIDs, 0]]
+            nelev[self.tec_onIDs] = gZ[self._tecRows[self.tec_onIDs, 0]]
+            nerodep[self.tec_onIDs] = gED[self._tecRows[self.tec_onIDs, 0]]
             if self.flexOn:
-                nfi[self.tec_onIDs] = gFI[self.tec_IDs[self.tec_onIDs, 0]]
+                nfi[self.tec_onIDs] = gFI[self._tecRows[self.tec_onIDs, 0]]
             if self.cptSoil:
-                nsoil[self.tec_onIDs] = gSL[self.tec_IDs[self.tec_onIDs, 0]]
+                nsoil[self.tec_onIDs] = gSL[self._tecRows[self.tec_onIDs, 0]]
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -727,8 +759,8 @@ class Tectonics(object):
         """
 
         t0 = process_time()
-        needed = np.unique(self.tec_IDs)
-        source = self._fetchOwnerRows(needed, self._stratFields())
+        source = self._fetchOwnerRows(self._tecNeeded, self._stratFields(),
+                                      want=self._tecWant)
         if MPIrank == 0 and self.verbose:
             print(
                 "Send stratigraphy information to local partition (%0.02f seconds)"
@@ -737,8 +769,8 @@ class Tectonics(object):
             )
 
         t0 = process_time()
-        rows = np.searchsorted(needed, self.tec_IDs)
-        self.stratalRecord(rows, self.tec_weights, self.tec_onIDs, source=source)
+        self.stratalRecord(self._tecRows, self.tec_weights, self.tec_onIDs,
+                           source=source)
         if MPIrank == 0 and self.verbose:
             print(
                 "Define local stratigraphy variables after advection (%0.02f seconds)"
@@ -772,7 +804,11 @@ class Tectonics(object):
         t0 = process_time()
         adv = self._stratAdv
         if adv is None or adv["dt"] != self.dt:
-            dep = self.lcoords - self._stratVel * self.dt
+            if self.cyclicBC:
+                # exact departure point on the cylinder (hdisp: flat frame)
+                dep = self._cylinderDisplace(self.lcoords, self.hdisp, -self.dt)
+            else:
+                dep = self.lcoords - self._stratVel * self.dt
             tree = spatial.cKDTree(self.mCoords, leafsize=10)
             self._mCoords = None
             dist, ids = tree.query(dep, k=3)

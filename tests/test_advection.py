@@ -277,3 +277,225 @@ output:
             model.destroy()
         os.chdir(cwd)
     assert checks and max(checks) >= 2, checks
+
+
+def _cyclic_strata_model(tmp_path, scheme, speed):
+    """minimal cyclic-cylinder model with strata recorded every step."""
+    import shutil
+
+    shutil.copy(FIXTURES_DIR / "cyclic_cyl_advect.npz", tmp_path / "cyl.npz")
+    with np.load(tmp_path / "cyl.npz") as d:
+        data = {k: d[k] for k in d.files}
+    data["uv"] = np.zeros_like(data["uv"])
+    data["uv"][:, 0] = speed
+    np.savez(tmp_path / "cyl.npz", **data)
+    yml = (FIXTURES_DIR / "cyclic_cyl_advect.yml").read_text()
+    yml = yml.replace("cyclic_cyl_advect','v'", "cyl','v'").replace(
+        "['cyclic_cyl_advect','uv']", "['cyl','uv']")
+    yml = yml.replace("advect: 'iioe2'", f"advect: '{scheme}'")
+    yml = yml.replace("    dt: 2.5e3\n", "    dt: 2.5e3\n    strat: 2.5e3\n")
+    assert "strat: 2.5e3" in yml and "['cyl','uv']" in yml
+    (tmp_path / "cyl.yml").write_text(yml)
+    return "cyl.yml"
+
+
+@pytest.mark.parametrize("scheme", ["upwind", "iioe2"])
+def test_cyclic_scheme_advection_moves_stratigraphy_across_seam(tmp_path, scheme):
+    """
+    Protects: on a cyclic (cylinder) model the semi-Lagrangian stratigraphy
+    move (`_advectStratiScheme`) uses the cylinder-TANGENT node velocity
+    (`_cylinderVelocity`), so layers wrap across the periodic seam instead of
+    being pushed radially off the surface or stopped at the seam.
+
+    Invariant: the cylinder fixture has 48 angular columns 250 m apart; at
+    0.1 m/yr and dt=2500 yr the record moves one column per step. A marker
+    set in the seam column ends up, in every row, in the next column across
+    the seam (>= 99% of its value: the departure point is computed exactly on
+    the cylinder, `_cylinderDisplace`), and the seam column is emptied.
+    """
+    from gospl.model import Model
+
+    yml = _cyclic_strata_model(tmp_path, scheme, 0.1)
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    model = None
+    seen = []
+    try:
+        model = Model(yml, verbose=False)
+        assert model.cyclicBC
+        th = np.mod(np.arctan2(model.lcoords[:, 2], model.lcoords[:, 0]), 2 * np.pi)
+        col = np.mod(np.rint(th / (2 * np.pi / 48)).astype(int), 48)
+        row = np.rint(model.lcoords[:, 1] / 300.0).astype(int)
+        seam_col = np.bincount(col[model.cyclicPts]).argmax()
+        orig = model._advectStratiScheme
+
+        def checked():
+            marker = (col == seam_col).astype(float)
+            model.stratZ[:, : model.stratStep] = marker[:, None]
+            orig()
+            z = model.stratZ[:, 0]
+            nxt = (seam_col + 1) % 48
+            for r in np.unique(row):
+                in_row = row == r
+                best = col[in_row][np.argmax(z[in_row])]
+                assert best == nxt, f"row {r}: marker at column {best}, expected {nxt}"
+                assert z[in_row & (col == nxt)].min() > 0.99
+                assert z[in_row & (col == seam_col)].max() < 0.01
+            seen.append(model.stratStep)
+
+        model._advectStratiScheme = checked
+        model.runProcesses()
+    finally:
+        if model is not None:
+            model.destroy()
+        os.chdir(cwd)
+    assert seen, "no stratigraphy move happened"
+
+
+def test_sphere_scheme_advection_moves_stratigraphy(tmp_path):
+    """
+    Protects: the semi-Lagrangian stratigraphy move on a global (spherical)
+    mesh, where the departure point ``x - v*dt`` of a rotation lies slightly
+    off the sphere; the 3-D nearest-node lookup must still pick the upstream
+    nodes.
+
+    Invariant: under a rigid rotation about the z axis (iioe2), a Gaussian
+    bump of a layer field centred on the equator moves its centroid by
+    omega*dt in longitude (within 15%), and a uniform field stays uniform.
+    """
+    from scipy.spatial import ConvexHull
+
+    from gospl.model import Model
+
+    n, R = 6000, 6378137.0
+    k = np.arange(n) + 0.5
+    phi = np.arccos(1 - 2 * k / n)
+    th = np.pi * (1 + 5 ** 0.5) * k
+    v = R * np.c_[np.cos(th) * np.sin(phi), np.sin(th) * np.sin(phi), np.cos(phi)]
+    cells = ConvexHull(v).simplices.astype(np.int32)
+    dt = 1.0e4
+    spacing = np.sqrt(4 * np.pi / n) * R               # ~ mean node spacing
+    omega = spacing / R / dt                           # ~ one node spacing per step
+    vel = np.c_[-omega * v[:, 1], omega * v[:, 0], np.zeros(n)]
+    np.savez(tmp_path / "sph.npz", v=v, c=cells, z=np.full(n, 500.0), uv=vel)
+    (tmp_path / "sph.yml").write_text(f"""name: sphere strata advection
+domain:
+    npdata: ['sph','v','c','z']
+    flowdir: 5
+    advect: 'iioe2'
+time:
+    start: 0.
+    end: {3 * dt}
+    tout: {3 * dt}
+    dt: {dt}
+    strat: {dt}
+spl:
+    K: 0.
+    d: 0.
+    m: 0.5
+sea:
+    position: -1000.
+climate:
+  - start: 0.
+    uniform: 1.
+tectonics:
+    - start: 0.
+      end: {3 * dt}
+      hdisp: ['sph','uv']
+output:
+    dir: 'out'
+""")
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    model = None
+    shifts = []
+    try:
+        model = Model("sph.yml", verbose=False)
+        lc = model.lcoords
+        lon = np.arctan2(lc[:, 1], lc[:, 0])
+        lat = np.arcsin(np.clip(lc[:, 2] / R, -1, 1))
+        width = 6 * spacing / R
+        orig = model._advectStratiScheme
+
+        def checked():
+            bump = np.exp(-((lon / width) ** 2 + (lat / width) ** 2))
+            model.stratZ[:, : model.stratStep] = bump[:, None]
+            model.phiS[:, : model.stratStep] = 0.3
+            orig()
+            z = model.stratZ[:, 0]
+            near = np.abs(lon) < 0.5
+            shifts.append(np.sum(z[near] * lon[near]) / np.sum(z[near])
+                          - np.sum(bump[near] * lon[near]) / np.sum(bump[near]))
+            assert np.allclose(model.phiS[:, : model.stratStep], 0.3, rtol=0, atol=1e-12)
+
+        model._advectStratiScheme = checked
+        model.runProcesses()
+    finally:
+        if model is not None:
+            model.destroy()
+        os.chdir(cwd)
+    assert shifts, "no stratigraphy move happened"
+    for s in shifts:
+        assert abs(s - omega * dt) < 0.15 * omega * dt, (s, omega * dt)
+
+
+def test_cyclic_plate_advection_wraps_across_seam(tmp_path):
+    """
+    Protects: plate-interpolation advection (`advect: interp`) on a cyclic
+    (cylinder) model displaces the nodes AROUND the cylinder
+    (`_cylinderDisplace`) when building the interpolation tables.
+
+    Silent failure prevented: `_readAdvectionData` displaced the 3-D cylinder
+    nodes along the flat-frame `hdisp` (a straight x shift), so the surface
+    and the stratigraphy were smeared in place instead of moving around the
+    seam (fixed 2026-11-11; docs/dev/FIXED_BUGS.md).
+
+    Invariant: one plate stage moving 250 m (one of the 48 columns) carries a
+    marker in the seam column, in BOTH the elevation and a layer field, to the
+    next column across the seam in every row (>= 99%).
+    """
+    from gospl.model import Model
+
+    yml = _cyclic_strata_model(tmp_path, "interp", 0.05)      # 250 m over 5 kyr
+    text = (tmp_path / yml).read_text()
+    old = "    - start: 0.\n      end: 1.e4\n      hdisp: ['cyl','uv']"
+    assert old in text
+    (tmp_path / yml).write_text(text.replace(
+        old, "    - start: 0.\n      end: 5.e3\n      hdisp: ['cyl','uv']\n"
+             "    - start: 5.e3\n      end: 1.e4"))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    model = None
+    seen = []
+    try:
+        model = Model(yml, verbose=False)
+        th = np.mod(np.arctan2(model.lcoords[:, 2], model.lcoords[:, 0]), 2 * np.pi)
+        col = np.mod(np.rint(th / (2 * np.pi / 48)).astype(int), 48)
+        row = np.rint(model.lcoords[:, 1] / 300.0).astype(int)
+        seam_col = np.bincount(col[model.cyclicPts]).argmax()
+        nxt = (seam_col + 1) % 48
+        orig = model._advectPlates
+
+        def checked():
+            marker = (col == seam_col).astype(float)
+            model.hLocal.setArray(100.0 + 50.0 * marker)
+            model.dm.localToGlobal(model.hLocal, model.hGlobal)
+            model.stratZ[:, : model.stratStep] = marker[:, None]
+            orig()
+            h = (model.hLocal.getArray() - 100.0) / 50.0
+            z = model.stratZ[:, 0]
+            for fld, name in ((h, "elevation"), (z, "stratZ")):
+                for r in np.unique(row):
+                    in_row = row == r
+                    best = col[in_row][np.argmax(fld[in_row])]
+                    assert best == nxt, f"{name} row {r}: marker at column {best}, expected {nxt}"
+                    assert fld[in_row & (col == nxt)].min() > 0.99, name
+            seen.append(True)
+
+        model._advectPlates = checked
+        model.runProcesses()
+    finally:
+        if model is not None:
+            model.destroy()
+        os.chdir(cwd)
+    assert seen, "no plate update happened"
