@@ -242,20 +242,21 @@ def _updateYourForcing(self):
 
         if pd.isnull(self.yfdata["yUni"][nb]):
             # Map branch: load the NPZ archive and extract the named field.
+            # Keep only this rank's rows: never store a whole-mesh (mpoints)
+            # array on every rank (AGENTS.md > No whole-mesh arrays on every rank).
             loadData = np.load(self.yfdata.at[nb, "yMap"])
-            yVal = loadData[self.yfdata.at[nb, "yKey"]]
+            yVal = loadData[self.yfdata.at[nb, "yKey"]][self.locIDs]
             del loadData
         else:
-            # Uniform branch: broadcast the scalar across all mesh nodes.
-            yVal = np.full(self.mpoints, self.yfdata.at[nb, "yUni"])
+            # Uniform branch: broadcast the scalar across this rank's nodes.
+            yVal = np.full(self.lpoints, self.yfdata.at[nb, "yUni"])
 
-        # Optional: clip to physical bounds, store globally for restart
+        # Optional: clip to physical bounds; yfMesh is the LOCAL slice
         yVal[yVal < 0] = 0.0
         self.yfMesh = yVal
 
-    # Slice to the local partition of this rank. Always do this even when
-    # nb didn't change — keeps self.yfVal in sync with self.locIDs.
-    self.yfVal = self.yfMesh[self.locIDs]
+    # Fresh copy each step (consumers may modify self.yfVal in place).
+    self.yfVal = self.yfMesh.copy()
     return
 ```
 
@@ -461,16 +462,16 @@ def _updateErodibility(self):
 
         if pd.isnull(self.eData["eUni"][nb]):
             loadData = np.load(self.eData.at[nb, "eMap"])
-            eVal = loadData[self.eData.at[nb, "eKey"]]
+            eVal = loadData[self.eData.at[nb, "eKey"]][self.locIDs]
             del loadData
         else:
-            eVal = np.full(self.mpoints, self.eData.at[nb, "eUni"])
+            eVal = np.full(self.lpoints, self.eData.at[nb, "eUni"])
 
         # Floor at small positive to avoid divide-by-zero in downstream SPL.
         eVal[eVal < 0.01] = 0.01
-        self.eroMesh = eVal
+        self.eroMesh = eVal          # local slice
 
-    self.eroFactor = self.eroMesh[self.locIDs]
+    self.eroFactor = self.eroMesh.copy()
     return
 ```
 
@@ -486,7 +487,7 @@ The SPL kernels can then read `self.eroFactor` as a per-node multiplier (similar
 
 ### Step 5: no new Vecs
 
-`self.eroFactor` is a per-rank numpy array (lpoints,) — no PETSc Vec, no entry in `destroy_DMPlex`. The `self.eroMesh` global array is GC'd with the Model. Skip Step 5.
+`self.eroFactor` is a per-rank numpy array (lpoints,) — no PETSc Vec, no entry in `destroy_DMPlex`. `self.eroMesh` (also a local `lpoints` slice) is GC'd with the Model. Skip Step 5.
 
 ### Step 6: regression test
 

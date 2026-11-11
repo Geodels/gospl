@@ -23,6 +23,10 @@ When stratigrapht is activated in goSPL, the erosion, transport and deposition a
 
 Inland deposits thicknesses and composition are then updated and recorded in the top stratigraphic layer and the porosities are set to the uncompacted sediment value.
 
+.. note::
+
+  **Horizontal motion.** When horizontal displacements are applied (tectonics ``hdisp``), the stratigraphic record moves with the surface: every layer property (thickness, elevation at deposition, porosity, ``stratK`` and, when enabled, the dual-lithology, provenance and duricrust records) is interpolated onto the fixed mesh from the three nearest source nodes. With the ``interp`` scheme this happens at each plate update; with the ``upwind`` / ``iioe1`` / ``iioe2`` schemes it happens at every time step (semi-Lagrangian). The interpolation is not mass conservative on its own; see :ref:`horizontal advection <tecto>` for details and limitations.
+
 
 Porosity and compaction
 -------------------------

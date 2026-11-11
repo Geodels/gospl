@@ -345,9 +345,9 @@ class IceMesh(object):
         # Resolve the glacier-geometry altitudes: per-vertex map where supplied
         # (spatial ELA for global tropical-vs-polar runs), otherwise the uniform
         # time-varying scalar. `spatial` flags that any field is a map.
-        iceH = self.iceMesh[self.locIDs] if self.iceMesh is not None else self.iceH(self.tNow)
-        elaH = self.elaMesh[self.locIDs] if self.elaMesh is not None else self.elaH(self.tNow)
-        iceT = self.termMesh[self.locIDs] if self.termMesh is not None else self.iceT(self.tNow)
+        iceH = self.iceMesh.copy() if self.iceMesh is not None else self.iceH(self.tNow)
+        elaH = self.elaMesh.copy() if self.elaMesh is not None else self.elaH(self.tNow)
+        iceT = self.termMesh.copy() if self.termMesh is not None else self.iceT(self.tNow)
         spatial = (
             self.iceMesh is not None
             or self.elaMesh is not None

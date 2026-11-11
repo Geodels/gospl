@@ -130,6 +130,18 @@ Submit with ``qsub <script>.pbs``.
 
 .. note::
 
+    **Choosing the memory request.** On Gadi's ``normal`` queue a node has 48
+    cores and about 190 GB, and ``mem`` is the total over all nodes of the job.
+    Requesting a node's full memory with all its cores costs no extra service
+    units, so for full nodes ask for ``mem = 190GB x nodes`` (e.g.
+    ``ncpus=192, mem=760GB``). If a job is still killed for exceeding its
+    memory, the per-rank footprint is too large for 48 ranks per node: either
+    run fewer ranks per node (e.g. ``mpirun -np 96`` on ``ncpus=192``) or use
+    the ``hugemem`` queue. Rank 0 needs more than the others (it builds the
+    serial mesh structure), roughly 1.8 kB per mesh node on top of its share.
+
+.. note::
+
     For an interactive session on Gadi::
 
         qsub -I -P PRJ -q express -l ncpus=4,mem=16GB,walltime=1:00:00,storage=scratch/PRJ

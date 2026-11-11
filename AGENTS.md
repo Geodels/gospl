@@ -6,7 +6,7 @@ of the tree. Update the relevant file when an invariant changes. Long-form ratio
 `REFACTOR_AUDIT.md`; past bugs and their guards: `docs/dev/FIXED_BUGS.md`; per-change
 history: `docs/dev/CHANGELOG_DEV.md`.
 
-Last reviewed 2026-10-03 against `dev` (after `v2026.7.14`). In October 2026 this file
+Last reviewed 2026-11-11 against `feat/mesh-memory` (after `v2026.7.14`). In October 2026 this file
 was split: it keeps only the rules that apply everywhere, and the subsystem detail
 moved verbatim into the files below.
 
@@ -36,7 +36,7 @@ agent.
 
 | Task | Command |
 |---|---|
-| Quick check (187 of 196 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
+| Quick check (201 of 214 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
 | One subsystem | `pytest tests/ -m flow` (markers: `tests/README.md`) |
 | Multi-rank guards (~70 s) | `pytest tests/ -m mpi` |
 | Full suite before a commit | `pytest tests/ -n 4` (CI runs it serially) |
@@ -44,6 +44,7 @@ agent.
 | Collective-under-rank-guard lint | `python scripts/lint_mpi_collectives.py` (CI runs it) |
 | np=1 vs np=N field comparison | `python scripts/ab_partition.py <input.yml> -n 4` |
 | Mass budget of a run | `python scripts/budget.py <output-dir>` |
+| Per-rank memory by setup stage / step phase (rank 0 vs others) | `mpirun -n N python scripts/mem_profile.py <input.yml> [--json out.json]` |
 | Machine-readable per-step summary | `gospl -i input.yml --summary run.jsonl` |
 | Inspect / compare output | `gospl-inspect <output-dir> [--step N] [--compare <other-dir>] [--json]` (or `python -m gospl.analyse.runinspect` before a `pip install -e .` registers the command) |
 | Fortran bounds-checked suite | `scripts/fcheck.sh` |
@@ -56,11 +57,30 @@ goSPL is a parallel landscape-evolution model that integrates the stream-power l
 ## The numpy ↔ PETSc boundary
 Every state field exists in two parallel representations.
 
-**Numpy land** (raw arrays indexed by local node ID, dimensional, no halo): `self.lcoords` (m), `self.mCoords` (m), `self.larea` (m²), `self.rainVal` (m/yr), `self.upsub` (m/yr), `self.stratH/stratZ/phiS/stratK`, `self.stratHf/phiF` (dual-lithology fine pile — see `## Dual lithology`), `self.fineFrac/depoFineFrac` (dual), `self.pitParams`, `self.pitIDs`, `self.lFill`, `self.localFlex`, plus any `vec.getArray().copy()` view.
+**Numpy land** (raw arrays indexed by local node ID, dimensional, no halo): `self.lcoords` (m), `self.mCoords` (m; whole input mesh, a lazily loaded property: see below), `self.larea` (m²), `self.rainVal` (m/yr), `self.upsub` (m/yr), `self.stratH/stratZ/phiS/stratK`, `self.stratHf/phiF` (dual-lithology fine pile — see `## Dual lithology`), `self.fineFrac/depoFineFrac` (dual), `self.pitParams`, `self.pitIDs`, `self.lFill`, `self.localFlex`, plus any `vec.getArray().copy()` view.
 
 **PETSc land** (parallel Vec with halo, mutated via `setArray`/`getArray`/`localToGlobal`): `self.hLocal`/`self.hGlobal`, `self.cumED`/`self.cumEDLocal`, `self.FAL`/`self.FAG`, `self.fillFAL`, `self.Eb`/`self.EbLocal`, `self.bL`/`self.bG`, `self.areaLocal`/`self.areaGlobal`, `self.iceHL`/`self.iceMeltL`/`self.iceUbL`/`self.iceAbrL`/`self.iceFlex` (diagnostic glacial model — see `## Ice sheet`), `self.Lsoil`/`self.Gsoil`, `self.lHbed`/`self.gHbed`, `self.vSed`/`self.vSedLocal`, `self.vSedF`/`self.vSedFLocal` (dual-lithology fine flux), `self.fiso`.
 
 Both sides hold physical units; the boundary is about **who owns halo synchronisation**, not units. Cross only via `self.dm.localToGlobal(local, global)`, `self.dm.globalToLocal(global, local)`, `vec.getArray()`, `vec.setArray(arr)`. After mutating a `*Local` array view, you MUST `localToGlobal` before the next collective solve, or ranks see stale halos.
+
+**No whole-mesh arrays on every rank.** Memory per rank must scale with the partition (`lpoints`), not the mesh (`mpoints`): at 192 ranks a per-rank whole-mesh copy costs more than the rank's own data, and 48 ranks share a node. What holds this (2026-11):
+- **Mesh build (`_buildMesh`).** Only rank 0 reads the input mesh. Every rank gets its vertices' input ids (`locIDs`, exact: `distributeField` of an index field, no KDTree) and elevations through the DMPlex distribution; `glbIDs == locIDs[glIDs]` (checked collectively). `self.mCoords` is a property that loads the whole-mesh coordinates on first use: only the global-flexure DH grid (rank 0) and plate advection read it, and the latter releases it. `VoroBuild.releaseVoronoi()` frees the Voronoi intermediates after `_meshStructure`.
+- **Forcing maps** (`rainMesh`, `evapMesh`, `sedFacMesh`, `elaMesh`/`iceMesh`/`termMesh`) are local slices (`[locIDs]` at load). Follow `docs/HOW_TO_ADD_FORCING.md` for new ones.
+- **Plate interpolation** (`advect: interp`) builds the KDTree on the whole advected mesh once per plate event, then drops it; it keeps only local `tec_*` rows (local `tec_onIDs`) plus a cached owner-fetch plan (`_tecNeeded`/`_tecRows`/`_tecWant`). `_advectPlates` fetches the surface fields at the source nodes from their owners (no whole-mesh `Allreduce`) and scatters owned rows with `[glIDs]`; `_advectStrati` fetches the layer rows the same way (`_fetchOwnerRows`: memory-scalable AO + one blocked scatter) and applies `stratalRecord`.
+- **Advection schemes** (`upwind`/`iioe1`/`iioe2`) move the stratigraphy semi-Lagrangian (`_advectStratiScheme`: departure point `x - v*dt`, tables built once per tectonic event, then `_fetchOwnerRows` + `stratalRecord` every step; ~3% of run time with a layer every step on 1M nodes). On a cyclic model plate interpolation and the departure points displace nodes exactly around the cylinder (`_cylinderDisplace`).
+- **Guards:** `test_mesh_not_replicated_per_rank`, `test_plate_interp_tables_local`, `test_plate_strata_partition_invariant` (interp + iioe2), `test_scheme_advection_moves_stratigraphy`, the cyclic/sphere advection tests.
+
+**Memory benchmark** (`scripts/mem_profile.py`, flat synthetic meshes, macOS, peak RSS in MB, `dev` @ `3e17a13` vs this branch):
+
+| mesh, ranks | other ranks, init | other ranks, run | rank 0, run |
+|---|---|---|---|
+| 1M, np=4 | 1475 → 1414 | 2754 → 2494 (−9%) | 3334 → 3150 (−6%) |
+| 2M, np=16 | 1288 → 1096 (−15%) | 1670 → 1527 (−9%) | 3839 → 3822 |
+
+Read it as: the import baseline is ~0.55 GB/rank; the per-rank local cost is ~5–8 kB per local node; the removed whole-mesh part was ~100 B per MESH node per rank at the setup peak (+~30 B held all run), so the saving grows with mesh size and rank count. RSS rarely drops after a free, so attribute memory by per-stage growth, not absolute values. **Rank 0 is now the hotspot:** it builds the serial DMPlex (`createFromCellList` + `distribute`, ~1.8 kB per mesh node; 3.8 GB at 2M) and holds `FVgnID` (`epsfill`) and the pit-spillover graph. Two ways to shrink it were measured:
+- *Parallel construction* via PETSc's HDF5 load (`dm.load` of a `dmplex_storage_version` 3.0.0 file, each rank reading a chunk, then `interpolate()` and a ParMETIS repartition; petsc4py 3.21 does not wrap `DMPlexCreateFromCellListParallelPetsc`): it loads correctly, but every rank pays ~190 B per mesh node during the load (4M nodes: 3.9/2.1/1.5 GB per rank at np=2/4/8 vs 2.3 GB on rank 0 alone serially), i.e. worse per node, and the local conda PETSc cannot ParMETIS-repartition a distributed graph (fails even on a known-good mesh; PT-Scotch shim). Not adopted.
+- *Uninterpolated serial build + parallel interpolate* (`createFromCellList(interpolate=False)`, distribute, then `dm.interpolate()` per partition; vertex points and coordinate order are preserved): rank 0 run peak 3822 → 2881 MB (−25%) at 2M/np=16, others unchanged, partition quality equal (balance, ghost counts). **Rejected (2026-11-11, maintainer decision):** ParMETIS gets a different cell graph, so on irregular meshes the partition differs from `dev` and np>1 results are no longer bitwise equal to earlier runs (np=1 is); bitwise reproducibility with existing runs was preferred over the rank-0 saving. Do not re-propose without that trade-off.
+
 
 ## MPI contract
 **Collective** (every rank must call, in the same order): `self.dm.localToGlobal`, `self.dm.globalToLocal`, `MPI.COMM_WORLD.Allreduce/Bcast/bcast/Allgatherv/Reduce/Barrier`, `ksp.solve`, `snes.solve`, `ts.solve`, `vec.sum/max/min/norm/dot`, `mat.norm`, `vec.assemblyBegin/End`, `mat.assemblyBegin/End`, `vec.duplicate/destroy`, `mat.destroy`, `dm.distribute`, `petsc4py.PETSc.garbage_cleanup`. **Rank-local**: `vec.getArray()`, `vec.setArray()`, all numpy ops, anything inside `if MPIrank == 0:`.
@@ -156,7 +176,7 @@ The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment ca
 | 1 | `_ReadYaml(filename)` :247 | — | `self.input`, every YAML attr, `self.tNow` |
 | 2 | `_STRAMesh()` :256 | ReadYaml (`strataFile`) | `stratH/stratZ/phiS/stratK = None` |
 | 3 | `_VoroBuild()` :259 | — | Voronoi cache attrs reset |
-| 4 | `_UnstMesh()` :262 | ReadYaml + STRAMesh | `dm`, `hLocal`, `hGlobal`, `locIDs`, `glbIDs`, `lpoints`, `mpoints`, `lcoords`, `mCoords`, `larea`, `FVmesh_ngbID`, `lgmap_*`, `idBorders/idLBounds/ghostIDs`, `bL/bG`, calls `readStratLayers` |
+| 4 | `_UnstMesh()` :262 | ReadYaml + STRAMesh | `dm` (built on rank 0, distributed), `hLocal`, `hGlobal`, `locIDs`/`glbIDs` and the initial elevation (delivered by `distributeField`, not a KDTree), `lpoints`, `mpoints` (bcast), `lcoords`, `larea`, `FVmesh_ngbID`, `lgmap_*`, `idBorders/idLBounds/ghostIDs`, `bL/bG`, calls `readStratLayers`. `mCoords` is a lazy property (whole mesh, loaded on first use) |
 | 5 | `_WriteMesh()` :265 | UnstMesh | `step`, `outputDir`, `upsG/upsL` |
 | 6 | `_FAMesh()` :268 | UnstMesh | `iMat`, `fillFAL`, `FAG`, `FAL`, `rtol`; defines `_matrix_build`, `_matrix_build_diag`, `_solve_KSP*` for every downstream class |
 | 7 | `_IceMesh()` :271 | FAMesh | `iceHL/iceMeltL/iceMeltRiverL/iceUbL/iceAbrL/iceFAL/iceFAG/iceFlex` + cached `iceMat` (only if `iceOn`) |
@@ -271,6 +291,7 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 - **A result that changes with rank count, or a hang at np>1:** follow the `parallel-check` skill (`scripts/lint_mpi_collectives.py`, `scripts/ab_partition.py`).
 - **A wandering `SIGABRT` on Linux that macOS does not reproduce:** a Fortran out-of-bounds write. Run `scripts/fcheck.sh`. Detail: `fortran/AGENTS.md`.
 - **A mass imbalance:** `scripts/budget.py <output-dir>`, or `--summary run.jsonl` for per-step budgets.
+- **A job killed for memory (OOM, `SIGKILL`, "exceeded memory allocation"):** run `scripts/mem_profile.py` at two rank counts; a stage whose peak on the non-root ranks does not shrink with more ranks holds a whole-mesh array per rank (see the memory rule above). On Gadi request full-node memory (`docs/getting_started/installHPC.rst`).
 - **The model aborted on a large un-drained region:** first run `scripts/fill_mesh_pits.py --check` on the input mesh. A topography problem is not a solver problem; `GOSPL_FLOW_KSP=richardson` does not fix a singular block.
 
 ## Known bugs (fix before refactoring)
@@ -289,6 +310,10 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - `idBorders`, `outletIDs` and `advectBorders` list OWNED nodes only (ghost copies of edge nodes are not in them), while `northPts`/`southPts`/`eastPts`/`westPts` are geometric and include ghosts. Used as an exclusion mask for a neighbour average/min, an owned-only set lets a ghost edge neighbour's raw value in, which is partition-dependent (the advection edge-reset bug). Sync the flag to the ghosts first (see `tectonics._advEdgeHalo`).
 - Test the parameter regimes the fixtures do not: every stratigraphy fixture had `G: 0`, which hid a transport-limited double count for months. When a code path branches on a parameter, a guard needs a fixture on each side.
 - A regression guard must fail without its fix. Verify that before committing.
+- A code path with no test rots silently: plate advection with stratigraphy crashed on an attribute removed in a 2024 refactor (`idNbghs`) for two years, and hid a second fault behind it. Give every configurable path at least one smoke run.
+- A function whose only caller is a serial test hides np>1 bugs (`stratalRecord` set full local columns into a global scratch Vec: right only at np=1). Any helper that touches a global Vec needs an np>1 guard.
+- A cyclic model's mesh is 3-D (a cylinder) but its inputs are in the flat frame: any geometric operation (displacement, departure point) must map through `_cylinderVelocity`/`_cylinderDisplace`, never add the flat vector to the 3-D coordinates.
+- Memory that scales with the MESH on every rank is invisible at low rank counts (local data dominates) and decisive at high ones; measure the non-root ranks at two rank counts.
 - `flowAccumulation` runs twice per step, so it must not overwrite the per-step forcing it reads: `bL`/`bG` are read-only there and the net source (evaporation, ice split) goes to `_srcL`/`_srcG`. Writing it back evaporated the runoff twice (2026-10-27). `UnstMesh._setRunoffSource` is the only writer of `bL` (rain and orographic paths alike).
 
 ## Intentional surprises (do NOT "fix")
@@ -298,7 +323,7 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - **Fortran `meshparams` allocatables** must be freed per mesh in `definetin`; see `fortran/AGENTS.md`.
 
 ## CI contract (summary)
-- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (40 of 196 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
+- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (43 of 214 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
 - `tests-slow.yml`: slow tier nightly/tags/dispatch, benchmarks on `master`/`release-candidate` pushes. `examples-smoke.yml`: every local goSPL-examples input for 2 steps at np=2 (`scripts/examples_smoke.py`), nightly + dispatch. The Global-examples inputs are notebook products, gitignored in goSPL-examples, so CI cannot run them (a dispatch skips them all, and the script exits 2 when nothing ran): run `python scripts/examples_smoke.py <goSPL-examples> --only Global-examples` locally.
 - On a `v*` tag, `conda-build`, `pypi-publish` and `docker-build` each `needs:` the `_release-gate.yml` tests job, so nothing publishes unless the suite passes.
 - Matrix: `ubuntu-latest + macos-15 × Python 3.11 + 3.12`. macOS is pinned (not `macos-latest`) because the osx-arm64 OpenMPI 4.x / petsc4py 3.21 stack is validated per image.

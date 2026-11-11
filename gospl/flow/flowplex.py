@@ -1248,8 +1248,8 @@ class FAMesh(object):
             # time-series mode, otherwise the uniform time scalars. The
             # accumulation ramp is hardened against degenerate (iceH <= elaH)
             # cells so the precipitation split never divides by zero.
-            elaH = self.elaMesh[self.locIDs] if self.elaMesh is not None else self.elaH(self.tNow)
-            iceH = self.iceMesh[self.locIDs] if self.iceMesh is not None else self.iceH(self.tNow)
+            elaH = self.elaMesh.copy() if self.elaMesh is not None else self.elaH(self.tNow)
+            iceH = self.iceMesh.copy() if self.iceMesh is not None else self.iceH(self.tNow)
             denom = iceH - elaH
             safe = np.where(denom > 0.0, denom, 1.0)
             tmp = np.where(denom > 0.0, (hl - elaH) / safe, 0.0)

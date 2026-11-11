@@ -40,6 +40,12 @@ class Tectonics(object):
         self.tecNb = -1
         self.paleoZ = None
         self.plateStep = False
+        # Advection-scheme stratigraphy move (semi-Lagrangian, see
+        # `_advectStratiScheme`): this rank's node velocities for the current
+        # tectonic event and the cached departure-point tables (rebuilt per
+        # event or when dt changes).
+        self._stratVel = None
+        self._stratAdv = None
 
         self.fiso = self.hGlobal.duplicate()
 
@@ -99,6 +105,9 @@ class Tectonics(object):
                 nb = 0
 
             self.tecNb = nb
+            # An event may carry no map at all (only start/end, e.g. to stop
+            # the motion): `mdata` must exist for the `del` below.
+            mdata = None
             if nb < len(self.tecdata.index) - 1:
                 timer = self.tecdata.at[nb, "end"] - self.tecdata.at[nb, "start"]
             else:
@@ -111,10 +120,13 @@ class Tectonics(object):
                 fname = self.tecdata.at[nb, "hMap"][0] + ".npz"
                 mdata = np.load(fname)
                 key = self.tecdata.at[nb, "hMap"][1]
-                self.hdisp = mdata[key][self.locIDs, :]
+                # Read the whole-mesh map once (each npz access re-reads it)
+                # and keep only this rank's rows.
+                hfull = mdata[key]
+                self.hdisp = hfull[self.locIDs, :]
                 # In case of advection based on interpolation from plate position
                 if self.advscheme == 0:
-                    self._readAdvectionData(mdata[key], timer)
+                    self._readAdvectionData(hfull, timer)
                     self.plateStep = True
                     self.plateTimer = self.tecdata.at[nb, "end"]
                 else:
@@ -138,6 +150,10 @@ class Tectonics(object):
                     # changed, so the cached advection operator must be rebuilt.
                     getfacevelocity(self.lpoints, nodeVel)
                     self._advRebuild = True
+                    # The stratigraphy moves with the same node velocity.
+                    self._stratVel = nodeVel.copy()
+                    self._stratAdv = None
+                del hfull
             else:
                 self.hdisp = None
 
@@ -167,6 +183,35 @@ class Tectonics(object):
             self._varAdvector()
 
         return
+
+    def _cylinderDisplace(self, coords, hdisp, t):
+        """
+        Move points on the cylinder of a cyclic (periodic) 2D model by a flat
+        ``(vx, vy)`` displacement rate over time ``t``, EXACTLY: the periodic
+        component turns the point around the cylinder axis by ``v*t/r``, the
+        other one shifts it along the axis. This is the flat translation in the
+        unwrapped frame, wrapped across the seam; a straight step along the
+        tangent (`_cylinderVelocity` * t) would leave the surface by ~(v t)^2/2r.
+        Same axis conventions as `_cylinderVelocity`.
+
+        :arg coords: (n, 3) points on the cylinder
+        :arg hdisp: (n, >=2) flat displacement rates (vx, vy)
+        :arg t: time (negative for a departure point)
+        :return: (n, 3) displaced points
+        """
+
+        out = np.array(coords, dtype=np.float64, copy=True)
+        if self.east == 2 or self.west == 2:
+            a, b, ax, va, vax = 0, 2, 1, hdisp[:, 0], hdisp[:, 1]
+        else:
+            a, b, ax, va, vax = 1, 2, 0, hdisp[:, 1], hdisp[:, 0]
+        rad = np.sqrt(out[:, a] ** 2 + out[:, b] ** 2)
+        safe = np.where(rad > 0.0, rad, 1.0)
+        ang = np.arctan2(out[:, b], out[:, a]) + va * t / safe
+        out[:, a] = rad * np.cos(ang)
+        out[:, b] = rad * np.sin(ang)
+        out[:, ax] += vax * t
+        return out
 
     def _cylinderVelocity(self, hdisp):
         """
@@ -465,6 +510,11 @@ class Tectonics(object):
             self.Lsoil.setArray(lsoil)
             self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
+        # Stratigraphic record (moved semi-Lagrangian, after the surface).
+        # stratNb/stratStep are identical on every rank: collective-safe.
+        if self.stratNb > 0 and self.stratStep > 0:
+            self._advectStratiScheme()
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Advection Processes (%0.02f seconds)" % (process_time() - t0),
@@ -557,13 +607,26 @@ class Tectonics(object):
         """
 
         t0 = process_time()
-        XYZ = self.mCoords + hdisp * timer
+        # The advected positions of the WHOLE mesh are needed (a local node's
+        # three nearest advected nodes can come from anywhere), but only the
+        # rows of this rank's nodes are queried and kept: the `tec_*` tables
+        # are LOCAL (lpoints rows, local `tec_onIDs`), and the whole-mesh
+        # coordinates are released afterwards (mCoords reloads on demand).
+        # Until 2026-11 every rank kept whole-mesh tables (~80 B per mesh node).
+        if self.cyclicBC:
+            # flat-frame rates on a cylinder: rotate around the axis, exactly
+            XYZ = self._cylinderDisplace(self.mCoords, hdisp, timer)
+        else:
+            XYZ = self.mCoords + hdisp * timer
+        self._mCoords = None
 
         # Build a tree with the advected nodes
         tree = spatial.cKDTree(XYZ, leafsize=10)
+        del XYZ
 
-        # Query the distances from unstructured nodes
-        distances, self.tec_IDs = tree.query(self.mCoords, k=3)
+        # Query the distances from this rank's unstructured nodes (lcoords
+        # are the input coordinates of locIDs, bit for bit).
+        distances, self.tec_IDs = tree.query(self.lcoords, k=3)
 
         # Inverse weighting distance...
         self.tec_weights = np.divide(
@@ -573,6 +636,14 @@ class Tectonics(object):
         self.tec_sumw = np.sum(self.tec_weights, axis=1)
 
         del tree, distances
+
+        # Fetch plan shared by `_advectPlates` and `_advectStrati`: the input
+        # ids this rank's interpolation reads, each local row's position in
+        # that list, and their PETSc indices (collective: every rank reaches
+        # this at the same tectonic event).
+        self._tecNeeded = np.unique(self.tec_IDs)
+        self._tecRows = np.searchsorted(self._tecNeeded, self.tec_IDs)
+        self._tecWant = self._ownerPetscIndex(self._tecNeeded)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -589,38 +660,29 @@ class Tectonics(object):
 
         .. important::
 
-            The interpolated values are the elevation,  cumulative erosion deposition, flexural response and soil production. The interpolation is done on the spherical mesh on a single processor. In case the stratigraphic information is also recorded then this is also interpolated.
+            The interpolated values are the elevation,  cumulative erosion deposition, flexural response and soil production, then (if recorded) the stratigraphy. Each rank interpolates its own nodes from values fetched from the owners of the source nodes (`_fetchOwnerRows`, plan cached by `_readAdvectionData`); no whole-mesh field is assembled. Collective.
         """
 
-        # Send local elevation globally
+        # Fetch, from their owners, the surface values at the nodes this
+        # rank's interpolation reads (partition-scale; until 2026-11 each field
+        # was a whole-mesh array Allreduced on every rank).
         t0 = process_time()
-        hl = self.hLocal.getArray().copy()
-        gZ = np.zeros(self.mpoints, dtype=np.float64) + MISSING_DATA_SENTINEL
-        gZ[self.locIDs] = hl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gZ, op=MPI.MAX)
-
-        # Send local erosion deposition globally
-        edl = self.cumEDLocal.getArray().copy()
-        gED = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
-        gED[self.locIDs] = edl
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
-
-        # Send local flexural isostasy globally
+        fields = {"z": self.hLocal.getArray().copy(),
+                  "ed": self.cumEDLocal.getArray().copy()}
         if self.flexOn:
-            gFI = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
-            gFI[self.locIDs] = self.localFlex
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gFI, op=MPI.MAX)
-
-        # Send local soil thickness globally
+            fields["fi"] = self.localFlex
         if self.cptSoil:
-            lsoil = self.Lsoil.getArray().copy()
-            gSL = np.zeros(self.mpoints, dtype=np.float64) + MISSING_LARGE_SENTINEL
-            gSL[self.locIDs] = lsoil
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gSL, op=MPI.MAX)
+            fields["sl"] = self.Lsoil.getArray().copy()
+        src = self._fetchOwnerRows(self._tecNeeded, fields, want=self._tecWant)
+        gZ, gED = src["z"], src["ed"]
+        if self.flexOn:
+            gFI = src["fi"]
+        if self.cptSoil:
+            gSL = src["sl"]
 
         if MPIrank == 0 and self.verbose:
             print(
-                "Transfer local elevation, erosion deposition, soil and flexural information globally (%0.02f seconds)"
+                "Transfer elevation, erosion deposition, soil and flexural information from owners (%0.02f seconds)"
                 % (process_time() - t0),
                 flush=True,
             )
@@ -628,24 +690,24 @@ class Tectonics(object):
         # Perform interpolation
         t0 = process_time()
 
-        tmp = np.sum(self.tec_weights * gZ[self.tec_IDs], axis=1)
+        tmp = np.sum(self.tec_weights * gZ[self._tecRows], axis=1)
         nelev = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
-        tmp = np.sum(self.tec_weights * gED[self.tec_IDs], axis=1)
+        tmp = np.sum(self.tec_weights * gED[self._tecRows], axis=1)
         nerodep = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
         if self.flexOn:
-            tmp = np.sum(self.tec_weights * gFI[self.tec_IDs], axis=1)
+            tmp = np.sum(self.tec_weights * gFI[self._tecRows], axis=1)
             nfi = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
         if self.cptSoil:
-            tmp = np.sum(self.tec_weights * gSL[self.tec_IDs], axis=1)
+            tmp = np.sum(self.tec_weights * gSL[self._tecRows], axis=1)
             nsoil = np.divide(tmp, self.tec_sumw, out=np.zeros_like(self.tec_sumw), where=self.tec_sumw != 0)
 
         if len(self.tec_onIDs) > 0:
-            nelev[self.tec_onIDs] = gZ[self.tec_IDs[self.tec_onIDs, 0]]
-            nerodep[self.tec_onIDs] = gED[self.tec_IDs[self.tec_onIDs, 0]]
+            nelev[self.tec_onIDs] = gZ[self._tecRows[self.tec_onIDs, 0]]
+            nerodep[self.tec_onIDs] = gED[self._tecRows[self.tec_onIDs, 0]]
             if self.flexOn:
-                nfi[self.tec_onIDs] = gFI[self.tec_IDs[self.tec_onIDs, 0]]
+                nfi[self.tec_onIDs] = gFI[self._tecRows[self.tec_onIDs, 0]]
             if self.cptSoil:
-                nsoil[self.tec_onIDs] = gSL[self.tec_IDs[self.tec_onIDs, 0]]
+                nsoil[self.tec_onIDs] = gSL[self._tecRows[self.tec_onIDs, 0]]
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -654,19 +716,21 @@ class Tectonics(object):
                 flush=True,
             )
 
-        self.hGlobal.setArray(nelev[self.glbIDs])
+        # nelev/nerodep/nfi/nsoil are LOCAL (one row per local node, see
+        # _readAdvectionData): owned rows feed the global vectors.
+        self.hGlobal.setArray(nelev[self.glIDs])
         self.dm.globalToLocal(self.hGlobal, self.hLocal)
 
-        self.cumED.setArray(nerodep[self.glbIDs])
+        self.cumED.setArray(nerodep[self.glIDs])
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
 
         if self.flexOn:
-            self.localFlex = nfi[self.locIDs].copy()
+            self.localFlex = nfi.copy()
 
         if self.cptSoil:
             nsoil[nsoil < 0.] = 0.
             nsoil[nsoil > self.soil_transition] = self.soil_transition
-            self.Gsoil.setArray(nsoil[self.glbIDs])
+            self.Gsoil.setArray(nsoil[self.glIDs])
             self.dm.globalToLocal(self.Gsoil, self.Lsoil)
 
         # Update stratigraphic record
@@ -675,34 +739,28 @@ class Tectonics(object):
 
         return
 
-    def _findPts2Reduce(self):
-        """
-        Finds the nodes part of another partition that are required for interpolation.
-
-        :return: Indices of needed nodes present in other partitions
-        """
-
-        # Global neighbours for each local partition
-        lgNghbs = self.idNbghs[self.locIDs, :].flatten()
-
-        # Global IDs required locally but part of another partition
-        gids = lgNghbs[~np.isin(lgNghbs, self.locIDs)]
-
-        # Get all points that have to be transferred
-        vals = np.zeros(self.mpoints, dtype=int)
-        vals[gids] = 1
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, vals, op=MPI.MAX)
-
-        return np.where(vals > 0)[0]
-
     def _advectStrati(self):
         """
-        From advected stratigraphic information, retrieve points that are part of another partition and perform the interpolation.
+        Move the stratigraphic record with the plates: each local node takes
+        the inverse-distance mix of the layers of its three nearest advected
+        nodes (the same `tec_*` tables as elevation, see
+        `_readAdvectionData`), for every per-layer field (`STRAMesh._stratFields`).
+
+        Those source nodes can sit on any rank, so only the rows this rank's
+        interpolation reads are fetched, from their owners, in one blocked
+        PETSc scatter (input-mesh id -> PETSc index through a memory-scalable
+        AO); memory scales with the partition. Then `stratalRecord` does the
+        interpolation and the halo sync.
+
+        Collective: every rank calls it (gated on `stratNb`/`stratStep`/the
+        plate timer, all identical on every rank).
+
+        Scratch used: ``self.tmp`` / ``self.tmpL`` (through `stratalRecord`).
         """
 
-        # Get lobal point IDs that will need to be transferred globally
         t0 = process_time()
-        redIDs = self._findPts2Reduce()
+        source = self._fetchOwnerRows(self._tecNeeded, self._stratFields(),
+                                      want=self._tecWant)
         if MPIrank == 0 and self.verbose:
             print(
                 "Send stratigraphy information to local partition (%0.02f seconds)"
@@ -710,67 +768,135 @@ class Tectonics(object):
                 flush=True,
             )
 
-        # Transfer the variables accordingly and perform operation
         t0 = process_time()
-        nghs = self.tec_IDs[self.locIDs]
-        wgts = self.tec_weights[self.locIDs, :, None]
-        sumw = self.tec_sumw[self.locIDs, :, None]
-        # onID = self.tec_onIDs[self.locIDs]
-        # tec_onIDs holds global-mesh indices where the advected node
-        # coincides exactly. Remap to local-mesh indices and keep only
-        # entries this rank owns.
-        g2l = np.full(self.mpoints, -1, dtype=int)
-        g2l[self.locIDs] = np.arange(len(self.locIDs))
-        onID = g2l[self.tec_onIDs]
-        onID = onID[onID >= 0]
-
-        self.stratH[:, : self.stratStep] = self._updateStratInfo(
-            redIDs, self.stratH[:, : self.stratStep], sumw, onID, wgts, nghs
-        )
-        self.stratZ[:, : self.stratStep] = self._updateStratInfo(
-            redIDs, self.stratZ[:, : self.stratStep], sumw, onID, wgts, nghs
-        )
-        self.phiS[:, : self.stratStep] = self._updateStratInfo(
-            redIDs, self.phiS[:, : self.stratStep], sumw, onID, wgts, nghs
-        )
+        self.stratalRecord(self._tecRows, self.tec_weights, self.tec_onIDs,
+                           source=source)
         if MPIrank == 0 and self.verbose:
             print(
                 "Define local stratigraphy variables after advection (%0.02f seconds)"
                 % (process_time() - t0),
                 flush=True,
             )
-        del nghs, wgts, sumw, onID
 
         return
 
-    def _updateStratInfo(self, reduceIDs, variable, sumw, onIDs, weights, nghs):
+    def _advectStratiScheme(self):
         """
-        Update stratigraphic variables based on interpolated values.
+        Move the stratigraphic record with the advection schemes
+        (`advect: upwind|iioe1|iioe2`), semi-Lagrangian: each local node takes
+        the inverse-distance mix of the layers at the three mesh nodes nearest
+        to its departure point ``x - v*dt`` (same weights and copy-on-coincide
+        rule as plate advection), through `stratalRecord`.
 
-        :arg reduceIDs: indices of nodes information that need to be available globally
-        :arg variable: stratigraphic variable to interpolate
-        :arg sumw: sum of weights for interpolation
-        :arg onIDs: nodes that remain fixed
-        :arg weights: weights for interpolation
-        :arg nghs: neighbours for interpolation
+        Within a tectonic event the node velocity and `dt` are fixed, so the
+        departure tables are built once (one whole-mesh KDTree, then dropped)
+        and reused every step; only the owner-row fetch and the
+        interpolation run per step. IDW is not mass-conservative on its own,
+        exactly as for plate advection, and the surface itself is advected by
+        the selected scheme.
 
-        :return: nvar interpolated stratigraphic variable
+        Collective (owner fetch, halo sync): gated on stratNb/stratStep and
+        the event's hdisp, identical on every rank.
+
+        Scratch used: ``self.tmp`` / ``self.tmpL`` (through `stratalRecord`).
         """
 
-        # Reduce variable so that all values that need to be read from another partition can be
-        vals = np.zeros((self.mpoints, self.stratStep), dtype=np.float64) + MISSING_DATA_SENTINEL
-        vals[self.locIDs, :] = variable
-        redVals = vals[reduceIDs, :]
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, redVals, op=MPI.MAX)
-        vals[reduceIDs, :] = redVals
+        t0 = process_time()
+        adv = self._stratAdv
+        if adv is None or adv["dt"] != self.dt:
+            if self.cyclicBC:
+                # exact departure point on the cylinder (hdisp: flat frame)
+                dep = self._cylinderDisplace(self.lcoords, self.hdisp, -self.dt)
+            else:
+                dep = self.lcoords - self._stratVel * self.dt
+            tree = spatial.cKDTree(self.mCoords, leafsize=10)
+            self._mCoords = None
+            dist, ids = tree.query(dep, k=3)
+            del tree, dep
+            w = np.divide(1.0, dist, out=np.zeros_like(dist), where=dist != 0)
+            needed = np.unique(ids)
+            adv = {
+                "dt": self.dt,
+                "rows": np.searchsorted(needed, ids),
+                "w": w,
+                "on": np.where(dist[:, 0] == 0)[0],
+                "needed": needed,
+                "want": self._ownerPetscIndex(needed),
+            }
+            self._stratAdv = adv
 
-        # Inverse weighting distance...
-        tmp = np.sum(weights * vals[nghs, :], axis=1)
-        nvar = np.divide(tmp, sumw, where=sumw != 0, out=np.zeros_like(tmp))
-        if len(onIDs) > 0:
-            nvar[onIDs, :] = vals[nghs[onIDs, 0], :]
+        source = self._fetchOwnerRows(adv["needed"], self._stratFields(), want=adv["want"])
+        self.stratalRecord(adv["rows"], adv["w"], adv["on"], source=source)
 
-        return nvar
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Advect stratigraphic record (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        return
+
+    def _ownerPetscIndex(self, ids):
+        """
+        PETSc global indices of the vertices with input-mesh ids ``ids``
+        (memory-scalable AO; owned node i has PETSc index rstart + i because
+        the global vector holds the owned nodes in local order,
+        gcoords == lcoords[glIDs]). Collective.
+        """
+
+        PETSc = petsc4py.PETSc
+        own = self.glIDs
+        rstart = self.hGlobal.getOwnershipRange()[0]
+        app = self.locIDs[own].astype(PETSc.IntType)
+        pidx = np.arange(rstart, rstart + len(own), dtype=PETSc.IntType)
+        ao = PETSc.AO().createMemoryScalable(app, pidx, comm=PETSc.COMM_WORLD)
+        want = ao.app2petsc(np.asarray(ids, dtype=PETSc.IntType).copy())
+        ao.destroy()
+        return want
+
+    def _fetchOwnerRows(self, ids, fields, want=None):
+        """
+        Collect, for a sorted array of input-mesh ids, the rows of local
+        per-node arrays held by the ranks that OWN those nodes.
+
+        :arg ids: sorted unique input-mesh ids wanted on this rank
+        :arg fields: dict ``name -> local array`` (first axis ``lpoints``)
+        :arg want: optional precomputed `_ownerPetscIndex(ids)` (reused when
+            the same ids are fetched every step)
+        :return: dict ``name -> array`` with first axis ``len(ids)``, rows in
+            the order of ``ids``, other axes unchanged
+
+        Collective (AO lookup and the scatter): every rank must call it.
+        """
+
+        PETSc = petsc4py.PETSc
+        comm = PETSc.COMM_WORLD
+        names = list(fields)
+        flat = [np.asarray(fields[n]).reshape(self.lpoints, -1) for n in names]
+        widths = [f.shape[1] for f in flat]
+        ncols = int(sum(widths))
+        own = self.glIDs
+        nown = len(own)
+        if want is None:
+            want = self._ownerPetscIndex(ids)
+
+        gvec = PETSc.Vec().createMPI((nown * ncols, PETSc.DECIDE), bsize=ncols, comm=comm)
+        gvec.setArray(np.hstack(flat)[own].ravel())
+        isf = PETSc.IS().createBlock(ncols, want, comm=PETSc.COMM_SELF)
+        lvec = PETSc.Vec().createSeq(len(ids) * ncols, bsize=ncols, comm=PETSc.COMM_SELF)
+        sct = PETSc.Scatter().create(gvec, isf, lvec, None)
+        sct.scatter(gvec, lvec, addv=PETSc.InsertMode.INSERT,
+                    mode=PETSc.ScatterMode.FORWARD)
+        got = lvec.getArray().reshape(len(ids), ncols).copy()
+        for obj in (sct, lvec, isf, gvec):
+            obj.destroy()
+
+        out, c0 = {}, 0
+        for n, w in zip(names, widths):
+            shape = (len(ids),) + np.asarray(fields[n]).shape[1:]
+            out[n] = np.ascontiguousarray(got[:, c0:c0 + w]).reshape(shape)
+            c0 += w
+        return out
 
     def updatePaleoZ(self):
         """

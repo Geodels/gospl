@@ -20,6 +20,12 @@ Class UnstMesh
       ~UnstMesh.applyTectonics
       ~UnstMesh.destroy_DMPlex
 
+   .. rubric:: Properties
+
+   .. autosummary::
+
+      ~UnstMesh.mCoords
+
    .. rubric:: Private Methods
 
    .. autosummary::
@@ -45,6 +51,11 @@ Public functions
 .. automethod:: mesher.unstructuredmesh.UnstMesh.applyTectonics
 .. automethod:: mesher.unstructuredmesh.UnstMesh.destroy_DMPlex
 
+
+Properties
+---------------------
+
+.. autoattribute:: mesher.unstructuredmesh.UnstMesh.mCoords
 
 Private functions
 ---------------------

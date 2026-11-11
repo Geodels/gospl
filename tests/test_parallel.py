@@ -1131,3 +1131,306 @@ def test_advection_partition_invariant(tmp_path):
     edge, interior = dist < 600.0, dist >= 600.0
     assert d[interior].max() < 0.01, f"interior difference {d[interior].max():.3e} m"
     assert d[edge].max() < 0.01, f"edge-zone difference {d[edge].max():.3e} m"
+
+
+# ---------------------------------------------------------------------------
+# Mesh distribution: no whole-mesh copies on the ranks
+# ---------------------------------------------------------------------------
+
+_MESH_MEMORY_SCRIPT = '''\
+"""Child for test_mesh_not_replicated_per_rank (mpirun -n 2)."""
+import json, sys
+import numpy as np
+from scipy import spatial
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False)
+s = {}
+# 1. No rank keeps a whole-mesh coordinate copy after init (it is loaded
+#    lazily, only by global flexure / plate advection).
+s["mcoords_held"] = (vars(m).get("mCoords") is not None
+                     or vars(m).get("_mCoords") is not None)
+# 2. Forcing maps are stored as local slices.
+s["rain_len_ok"] = bool(m.rainMesh.shape[0] == m.lpoints)
+# 3. locIDs delivered by the distribution == nearest input vertex of each
+#    local coordinate (the KDTree mapping it replaced); glbIDs == owned ids.
+with np.load(m.meshFile) as d:
+    v = d[m.infoCoords]; z = d[m.infoElev]
+_, kd = spatial.cKDTree(v).query(m.lcoords, k=1)
+s["locids_ok"] = bool(np.array_equal(kd, m.locIDs))
+s["glbids_ok"] = bool(np.array_equal(m.glbIDs, m.locIDs[m.glIDs]))
+s["elev_ok"] = bool(np.array_equal(m.hLocal.getArray(), z[m.locIDs]))
+# 4. The lazy property returns the file coordinates.
+s["lazy_ok"] = bool(np.array_equal(m.mCoords, v))
+allok = MPI.COMM_WORLD.gather(s, root=0)
+m.destroy()
+if MPI.COMM_WORLD.rank == 0:
+    with open(sys.argv[2], "w") as f:
+        json.dump(allok, f)
+'''
+
+
+def test_mesh_not_replicated_per_rank(tmp_path):
+    """
+    Protects: `UnstMesh._buildMesh` reads the input mesh on rank 0 only and
+    hands every rank its own vertices' input ids and elevations through the
+    DMPlex distribution (2026-11 memory fix).
+
+    Silent failure prevented: every rank loading the whole mesh, building a
+    whole-mesh KDTree and keeping full-mesh `mCoords`/forcing-map copies.
+    That costs ~100 B per MESH node on EVERY rank, so at high rank counts it
+    dominates per-rank memory (a 192-rank Gadi job was OOM-killed). It does
+    not change results, so no output-based test would notice a regression.
+
+    Invariant (np=2, every rank): `_mCoords` is not held after init,
+    `rainMesh` is local-sized, `locIDs` equals the nearest-input-vertex
+    (KDTree) mapping it replaced, `glbIDs == locIDs[glIDs]`, the initial
+    elevation equals the input `z[locIDs]`, and the lazy `mCoords` equals
+    the file's coordinates.
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    needed = ["minimal.yml", "mesh.npz"]
+    if not all((FIXTURES_DIR / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+
+    child = tmp_path / "_mesh_mem.py"
+    child.write_text(_MESH_MEMORY_SCRIPT)
+    run = tmp_path / "n2"
+    run.mkdir()
+    for f in needed:
+        shutil.copy(FIXTURES_DIR / f, run / f)
+    out = run / "stats.json"
+    result = subprocess.run(
+        ["mpirun", "-n", "2", sys.executable, str(child), "minimal.yml", str(out)],
+        cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+        env=mpi_child_env(),
+    )
+    if result.returncode != 0 or not out.exists():
+        pytest.fail(f"`mpirun -n 2` subprocess failed (rc={result.returncode}).\n"
+                    f"stderr:\n{result.stderr[-2000:]}")
+    with open(out) as f:
+        per_rank = json.load(f)
+    for r, s in enumerate(per_rank):
+        assert not s["mcoords_held"], f"rank {r} keeps a whole-mesh mCoords copy"
+        assert s["rain_len_ok"], f"rank {r}: rainMesh is not a local slice"
+        assert s["locids_ok"], f"rank {r}: locIDs differ from the input-mesh mapping"
+        assert s["glbids_ok"], f"rank {r}: glbIDs != locIDs[glIDs]"
+        assert s["elev_ok"], f"rank {r}: initial elevation != input z[locIDs]"
+        assert s["lazy_ok"], f"rank {r}: lazy mCoords != file coordinates"
+
+
+_PLATE_INTERP_SCRIPT = '''\
+"""Child for test_plate_interp_tables_local (mpirun -n N)."""
+import json, sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False)
+m.runProcesses()
+s = {
+    "tec_local": bool(m.tec_IDs.shape[0] == m.lpoints
+                      and m.tec_weights.shape[0] == m.lpoints
+                      and m.tec_sumw.shape[0] == m.lpoints
+                      and (m.tec_onIDs.size == 0 or m.tec_onIDs.max() < m.lpoints)),
+    "mcoords_held": vars(m).get("_mCoords") is not None,
+}
+own = m.glIDs
+g = MPI.COMM_WORLD.gather((m.locIDs[own], m.hLocal.getArray()[own].copy(), s), root=0)
+m.destroy()
+if MPI.COMM_WORLD.rank == 0:
+    ids = np.concatenate([a for a, _, _ in g]); h = np.concatenate([b for _, b, _ in g])
+    out = np.empty_like(h); out[ids] = h
+    with open(sys.argv[2], "w") as f:
+        json.dump({"h": out.tolist(), "ranks": [c for _, _, c in g]}, f)
+'''
+
+
+def test_plate_interp_tables_local(tmp_path):
+    """
+    Protects: plate-interpolation advection (`advect: interp` + `hdisp`)
+    keeps only LOCAL interpolation tables (2026-11 memory fix).
+
+    Silent failure prevented: `_readAdvectionData` used to query and keep
+    `tec_IDs`/`tec_weights`/`tec_sumw`/`tec_onIDs` for the WHOLE mesh on
+    every rank (~80 B per mesh node per rank, plus a cached copy of the
+    mesh coordinates). Results are unchanged by the fix, so only a shape
+    check notices a regression; the np=1 vs np=2 elevation comparison
+    guards the new owned-row scatter in `_advectPlates`.
+
+    Invariant: after a run with one plate update, on every rank the tec
+    tables have `lpoints` rows, no whole-mesh `mCoords` is cached, and the
+    final elevation matches the np=1 run (max diff < 1e-9 m; ~2e-13 seen).
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    needed = ["flat_advect.yml", "flat_advect.npz"]
+    if not all((FIXTURES_DIR / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+
+    yml = (FIXTURES_DIR / "flat_advect.yml").read_text()
+    yml = yml.replace("advect: 'iioe2'", "advect: 'interp'")
+    old_tec = "      end: 1.e4\n      hdisp: ['flat_advect','uv']"
+    assert old_tec in yml
+    # one plate event ending mid-run (the plate update fires at its end),
+    # then a map-free event
+    yml = yml.replace(old_tec, "      end: 5.e3\n      hdisp: ['flat_advect','uv']\n"
+                               "    - start: 5.e3\n      end: 1.e4")
+    child = tmp_path / "_plate.py"
+    child.write_text(_PLATE_INTERP_SCRIPT)
+    res = {}
+    for n in (1, 2):
+        run = tmp_path / f"n{n}"
+        run.mkdir()
+        shutil.copy(FIXTURES_DIR / "flat_advect.npz", run / "flat_advect.npz")
+        (run / "plate.yml").write_text(yml)
+        out = run / "out.json"
+        r = subprocess.run(
+            ["mpirun", "-n", str(n), sys.executable, str(child), "plate.yml", str(out)],
+            cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+            env=mpi_child_env(),
+        )
+        if r.returncode != 0 or not out.exists():
+            pytest.fail(f"`mpirun -n {n}` subprocess failed (rc={r.returncode}).\n"
+                        f"stderr:\n{r.stderr[-2000:]}")
+        with open(out) as f:
+            res[n] = json.load(f)
+    for r, s in enumerate(res[2]["ranks"]):
+        assert s["tec_local"], f"rank {r}: plate-interpolation tables are not local"
+        assert not s["mcoords_held"], f"rank {r} keeps a whole-mesh mCoords copy"
+    import numpy as np
+    h1, h2 = np.array(res[1]["h"]), np.array(res[2]["h"])
+    assert np.abs(h1 - h2).max() < 1.0e-9, (
+        f"plate advection np=1 vs np=2 differ by {np.abs(h1 - h2).max():.3g} m")
+
+
+_PLATE_STRAT_SCRIPT = '''\
+"""Child for test_plate_strata_partition_invariant (mpirun -n N)."""
+import sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False)
+m.runProcesses()
+own = m.glIDs
+f = {k: v[own].copy() for k, v in m._stratFields().items()}
+f["h"] = m.hLocal.getArray()[own].copy()
+# Probe the move alone (no solver round-off in its input): set every layer
+# field to a function of the input-mesh id, apply one more move with the
+# cached tables, record the result.
+for k, v in m._stratFields().items():
+    cols = np.arange(int(np.prod(v.shape[1:]))).reshape(v.shape[1:])
+    v[...] = m.locIDs.reshape((-1,) + (1,) * (v.ndim - 1)) * 1.0e-3 + cols
+if sys.argv[3] == "interp":
+    m._advectStrati()
+else:
+    m._advectStratiScheme()
+for k, v in m._stratFields().items():
+    f["probe_" + k] = v[own].copy()
+g = MPI.COMM_WORLD.gather((m.locIDs[own], f, m.stratStep), root=0)
+m.destroy()
+if MPI.COMM_WORLD.rank == 0:
+    ids = np.concatenate([a for a, _, _ in g]); out = {"stratStep": g[0][2]}
+    for k in g[0][1]:
+        arr = np.concatenate([b[k] for _, b, _ in g]); o = np.empty_like(arr); o[ids] = arr
+        out[k] = o
+    np.savez(sys.argv[2], **out)
+'''
+
+
+@pytest.mark.parametrize("scheme", ["interp", "iioe2"])
+def test_plate_strata_partition_invariant(tmp_path, scheme):
+    """
+    Protects: advecting the stratigraphy fetches each rank's source rows from
+    their OWNERS (`tectonics._fetchOwnerRows`, AO + blocked scatter) and syncs
+    owned rows (`stratalRecord`), for plate interpolation (`interp`,
+    `_advectStrati`) and for the advection schemes (`iioe2`,
+    `_advectStratiScheme`, semi-Lagrangian).
+
+    Silent failure prevented: a wrong owner mapping or a ghost-row sync gives
+    a partition-dependent stratigraphy (and the path used to crash outright:
+    `idNbghs`). The flat advection fixture has no erosion (K=0), so np=1 and
+    np=2 must agree exactly; a run with erosion differs by round-off-level
+    routing sensitivity even without tectonics.
+
+    Invariant: one stratigraphy move applied to identical input (each layer
+    field set from the input-mesh id) gives bitwise-equal fields at np=1 and
+    np=2 for both schemes; for `interp` the whole run agrees to 1e-12 of each
+    field's magnitude (round-off from the solves; bitwise on macOS).
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    import numpy as np
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    needed = ["flat_advect.yml", "flat_advect.npz"]
+    if not all((FIXTURES_DIR / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+
+    yml = (FIXTURES_DIR / "flat_advect.yml").read_text()
+    yml = yml.replace("advect: 'iioe2'", f"advect: '{scheme}'")
+    yml = yml.replace("    dt: 2.5e3\n", "    dt: 2.5e3\n    strat: 2.5e3\n")
+    old_tec = "      end: 1.e4\n      hdisp: ['flat_advect','uv']"
+    assert old_tec in yml and "strat: 2.5e3" in yml
+    if scheme == "interp":
+        # the plate update fires at the end of the hdisp event
+        yml = yml.replace(old_tec, "      end: 7.5e3\n      hdisp: ['flat_advect','uv']\n"
+                                   "    - start: 7.5e3\n      end: 1.e4")
+    child = tmp_path / "_plate_strat.py"
+    child.write_text(_PLATE_STRAT_SCRIPT)
+    res = {}
+    for n in (1, 2):
+        run = tmp_path / f"n{n}"
+        run.mkdir()
+        shutil.copy(FIXTURES_DIR / "flat_advect.npz", run / "flat_advect.npz")
+        (run / "plate.yml").write_text(yml)
+        out = run / "out.npz"
+        r = subprocess.run(
+            ["mpirun", "-n", str(n), sys.executable, str(child), "plate.yml", str(out),
+             scheme],
+            cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+            env=mpi_child_env(),
+        )
+        if r.returncode != 0 or not out.exists():
+            pytest.fail(f"`mpirun -n {n}` subprocess failed (rc={r.returncode}).\n"
+                        f"stderr:\n{r.stderr[-2000:]}")
+        res[n] = dict(np.load(out))
+    assert res[1]["stratStep"] > 0, "no layer recorded before the plate update"
+    # The move itself (probe: identical input on every partition) is bitwise
+    # partition-invariant for both schemes. Whole-run fields still go through
+    # solves whose round-off can depend on the partition and the platform:
+    # for interp they agree to a few ULPs (1 ULP of the 1e6 bedrock layer on
+    # the CI runners, exact on macOS locally); with iioe2 the SURFACE
+    # advection is a KSP solve (~5e-5 m here, already on dev) whose
+    # round-off the recorded layers inherit, so it is not compared.
+    for k in res[1]:
+        a1 = np.asarray(res[1][k], float)
+        diff = np.abs(a1 - np.asarray(res[2][k], float)).max()
+        if k.startswith("probe_"):
+            assert diff == 0.0, f"{k}: np=1 vs np=2 differ by {diff:.3g}"
+        elif scheme == "interp":
+            tol = 1e-12 * max(1.0, np.abs(a1).max())
+            assert diff <= tol, f"{k}: np=1 vs np=2 differ by {diff:.3g} (> {tol:.3g})"
+    assert any(k.startswith("probe_") for k in res[1])

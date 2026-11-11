@@ -1185,7 +1185,29 @@ class STRAMesh(object):
 
         return
 
-    def stratalRecord(self, indices, weights, onIDs):
+    def _stratFields(self):
+        """
+        The per-layer stratigraphic fields present in this run, as a dict of
+        local views ``name -> array[:, :stratStep(, provNb)]``. The single list
+        of what a lateral move of the column must carry (used by
+        `stratalRecord` and by plate advection, `tectonics._advectStrati`).
+        """
+        top = self.stratStep
+        f = {"stratH": self.stratH[:, :top], "stratZ": self.stratZ[:, :top],
+             "phiS": self.phiS[:, :top]}
+        if getattr(self, "stratK", None) is not None:
+            f["stratK"] = self.stratK[:, :top]
+        if getattr(self, "stratLith", False):
+            f["stratHf"] = self.stratHf[:, :top]
+            f["phiF"] = self.phiF[:, :top]
+        for name in ("stratDuri", "stratCrustType", "stratCrustSource"):
+            if getattr(self, name, None) is not None:
+                f[name] = getattr(self, name)[:, :top]
+        if getattr(self, "provOn", False):
+            f["stratP"] = self.stratP[:, :top, :]
+        return f
+
+    def stratalRecord(self, indices, weights, onIDs, source=None):
         """
         Once the interpolation has been performed, the following function updates the stratigraphic records based on the advected mesh.
 
@@ -1196,140 +1218,121 @@ class STRAMesh(object):
         kernel instead treats its extra fields as 0–1 fractions and renormalises
         them, which does not match the thickness representation here).
 
-        :arg indices: indices of the closest nodes used for interpolation
-        :arg weights: weights based on the distances to closest nodes
-        :arg onIDs: index of nodes remaining at the same position.
+        Intensive per-layer properties (`phiS`, `phiF`, `stratDuri`, `stratK`)
+        are interpolated with the same weights; the categorical crust codes take
+        the record of the primary (highest-weight) source node.
 
+        Scratch used: ``self.tmp`` (global) and ``self.tmpL`` (local), for the
+        halo sync of every advected column; both hold the last synced column
+        on exit.
+
+        :arg indices: (lpoints, 3) rows of ``source`` used for each local node
+        :arg weights: (lpoints, 3) interpolation weights
+        :arg onIDs: local nodes that coincide with a source node (copied)
+        :arg source: dict ``name -> rows`` as returned by `_stratFields`; the
+            rows ``indices`` points into. Default: this rank's own layers
+            (indices are local node ids). Plate advection passes the rows
+            fetched from their owners (`tectonics._advectStrati`).
         """
 
-        # Get local stratal dataset after displacements
-        loc_stratH = self.stratH[:, : self.stratStep]
-        loc_stratZ = self.stratZ[:, : self.stratStep]
-        loc_phiS = self.phiS[:, : self.stratStep]
-        nstratH, nstratZ, nphiS = strataonesed(
-            self.lpoints,
-            self.stratStep,
-            indices,
-            weights,
-            loc_stratH,
-            loc_stratZ,
-            loc_phiS,
-        )
+        if source is None:
+            source = self._stratFields()
+        nsrc = source["stratH"].shape[0]
+        top = self.stratStep
+        has = lambda name: name in source  # noqa: E731
 
-        if len(onIDs) > 0:
-            nstratZ[onIDs, :] = loc_stratZ[indices[onIDs, 0], :]
-            nstratH[onIDs, :] = loc_stratH[indices[onIDs, 0], :]
-            nphiS[onIDs, :] = loc_phiS[indices[onIDs, 0], :]
+        def interp(field, ref_h=None, ref_z=None):
+            # strataonesed interpolates three columns per call; the H/Z slots
+            # are reused when only one intensive field is wanted.
+            h = source["stratH"] if ref_h is None else ref_h
+            z = source["stratZ"] if ref_z is None else ref_z
+            a, b, c = strataonesed(nsrc, top, indices, weights, h, z, field)
+            return a, b, c
 
-        if self.stratLith:
+        def pin(new, src_field):
+            if len(onIDs) > 0:
+                new[onIDs, :] = src_field[indices[onIDs, 0], :]
+            return new
+
+        # Get stratal dataset after displacements
+        loc_stratH = source["stratH"]
+        loc_stratZ = source["stratZ"]
+        loc_phiS = source["phiS"]
+        nstratH, nstratZ, nphiS = interp(loc_phiS)
+        pin(nstratZ, loc_stratZ)
+        pin(nstratH, loc_stratH)
+        pin(nphiS, loc_phiS)
+
+        if has("stratK"):
+            _, _, nK = interp(source["stratK"])
+            pin(nK, source["stratK"])
+
+        if has("stratHf"):
             # Advect the fine pile with the same interpolation (stratHf as
             # thickness, phiF as porosity); the re-interpolated elevation is
             # identical to nstratZ above and discarded.
-            loc_stratHf = self.stratHf[:, : self.stratStep]
-            loc_phiF = self.phiF[:, : self.stratStep]
-            nstratHf, _, nphiF = strataonesed(
-                self.lpoints,
-                self.stratStep,
-                indices,
-                weights,
-                loc_stratHf,
-                loc_stratZ,
-                loc_phiF,
-            )
-            if len(onIDs) > 0:
-                nstratHf[onIDs, :] = loc_stratHf[indices[onIDs, 0], :]
-                nphiF[onIDs, :] = loc_phiF[indices[onIDs, 0], :]
+            nstratHf, _, nphiF = interp(source["phiF"], ref_h=source["stratHf"])
+            pin(nstratHf, source["stratHf"])
+            pin(nphiF, source["phiF"])
 
-        gwStrat = getattr(self, "stratDuri", None) is not None
-        if gwStrat:
-            # Advect the induration archive as an INTENSIVE per-layer property
-            # (thickness-weighted, exactly like phiS): pass stratDuri in the
-            # porosity slot; the re-interpolated H/Z are identical and discarded.
-            loc_duri = self.stratDuri[:, : self.stratStep]
-            _, _, nDuri = strataonesed(
-                self.lpoints,
-                self.stratStep,
-                indices,
-                weights,
-                loc_stratH,
-                loc_stratZ,
-                loc_duri,
-            )
-            if len(onIDs) > 0:
-                nDuri[onIDs, :] = loc_duri[indices[onIDs, 0], :]
+        if has("stratDuri"):
+            # Induration archive: an INTENSIVE per-layer property (like phiS).
+            _, _, nDuri = interp(source["stratDuri"])
+            pin(nDuri, source["stratDuri"])
 
-        provOn = getattr(self, "provOn", False)
-        if provOn:
-            # Advect each provenance class's per-layer thickness with the same
+        if has("stratP"):
+            # Each provenance class's per-layer thickness, with the same
             # interpolation (a bulk thickness, like stratHf). Linear weights
             # preserve Σ over classes == stratH (re-imposed below after sync).
-            nstratP = np.zeros((self.lpoints, self.stratStep, self.provNb))
+            nstratP = np.zeros((indices.shape[0], top, self.provNb))
             for c in range(self.provNb):
-                loc_P = np.ascontiguousarray(self.stratP[:, : self.stratStep, c])
-                nP, _, _ = strataonesed(
-                    self.lpoints, self.stratStep, indices, weights,
-                    loc_P, loc_stratZ, loc_phiS,
-                )
-                if len(onIDs) > 0:
-                    nP[onIDs, :] = loc_P[indices[onIDs, 0], :]
-                nstratP[:, :, c] = nP
+                loc_P = np.ascontiguousarray(source["stratP"][:, :, c])
+                nP, _, _ = interp(loc_phiS, ref_h=loc_P)
+                nstratP[:, :, c] = pin(nP, loc_P)
 
         # Categorical crust chemistry codes advect by NEAREST neighbour — an
         # integer species/source label cannot be linearly interpolated, so each
         # column takes the record of its primary (highest-weight) source node.
-        crustType = getattr(self, "stratCrustType", None) is not None
-        if crustType:
-            nCrustType = self.stratCrustType[indices[:, 0], : self.stratStep]
-        crustSource = getattr(self, "stratCrustSource", None) is not None
-        if crustSource:
-            nCrustSource = self.stratCrustSource[indices[:, 0], : self.stratStep]
+        if has("stratCrustType"):
+            nCrustType = source["stratCrustType"][indices[:, 0], :]
+        if has("stratCrustSource"):
+            nCrustSource = source["stratCrustSource"][indices[:, 0], :]
 
-        # Updates stratigraphic records after mesh advection on the edges of each partition
-        # to ensure that all stratigraphic information on the adjacent nodes of the neighbouring
-        # partition are equals on all processors sharing a common number of nodes.
-        for k in range(self.stratStep):
-            self.tmp.setArray(nstratZ[:, k])
+        # Make the records identical on every rank sharing a node: the OWNED
+        # rows go into the global scratch Vec and are scattered back to the
+        # local (ghost-including) arrays. (Until 2026-11 the full local column
+        # was set into the global Vec, which is only the right size at np=1.)
+        own = self.glIDs
+
+        def sync(new_col, dst, k, rint=False):
+            self.tmp.setArray(new_col[own])
             self.dm.globalToLocal(self.tmp, self.tmpL)
-            self.stratZ[:, k] = self.tmpL.getArray().copy()
+            v = self.tmpL.getArray()
+            dst[:, k] = np.rint(v) if rint else v.copy()
 
-            self.tmp.setArray(nstratH[:, k])
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            self.stratH[:, k] = self.tmpL.getArray().copy()
-            self.tmp.setArray(nphiS[:, k])
-            self.dm.globalToLocal(self.tmp, self.tmpL)
-            self.phiS[:, k] = self.tmpL.getArray().copy()
-
-            if self.stratLith:
-                self.tmp.setArray(nstratHf[:, k])
-                self.dm.globalToLocal(self.tmp, self.tmpL)
-                self.stratHf[:, k] = self.tmpL.getArray().copy()
-                self.tmp.setArray(nphiF[:, k])
-                self.dm.globalToLocal(self.tmp, self.tmpL)
-                self.phiF[:, k] = self.tmpL.getArray().copy()
-
-            if gwStrat:
-                self.tmp.setArray(nDuri[:, k])
-                self.dm.globalToLocal(self.tmp, self.tmpL)
-                self.stratDuri[:, k] = self.tmpL.getArray().copy()
-
-            if crustType:
-                self.tmp.setArray(nCrustType[:, k])
-                self.dm.globalToLocal(self.tmp, self.tmpL)
-                self.stratCrustType[:, k] = np.rint(self.tmpL.getArray())
-            if crustSource:
-                self.tmp.setArray(nCrustSource[:, k])
-                self.dm.globalToLocal(self.tmp, self.tmpL)
-                self.stratCrustSource[:, k] = np.rint(self.tmpL.getArray())
-
-            if provOn:
+        for k in range(top):
+            sync(nstratZ[:, k], self.stratZ, k)
+            sync(nstratH[:, k], self.stratH, k)
+            sync(nphiS[:, k], self.phiS, k)
+            if has("stratK"):
+                sync(nK[:, k], self.stratK, k)
+            if has("stratHf"):
+                sync(nstratHf[:, k], self.stratHf, k)
+                sync(nphiF[:, k], self.phiF, k)
+            if has("stratDuri"):
+                sync(nDuri[:, k], self.stratDuri, k)
+            if has("stratCrustType"):
+                sync(nCrustType[:, k], self.stratCrustType, k, rint=True)
+            if has("stratCrustSource"):
+                sync(nCrustSource[:, k], self.stratCrustSource, k, rint=True)
+            if has("stratP"):
                 for c in range(self.provNb):
-                    self.tmp.setArray(nstratP[:, k, c])
+                    self.tmp.setArray(nstratP[own, k, c])
                     self.dm.globalToLocal(self.tmp, self.tmpL)
                     self.stratP[:, k, c] = self.tmpL.getArray().copy()
 
-        if provOn:
+        if has("stratP"):
             # Re-impose Σ over classes == stratH after the interpolation drift.
-            top = self.stratStep
             np.clip(self.stratP[:, :top, :], 0.0, None, out=self.stratP[:, :top, :])
             psum = self.stratP[:, :top, :].sum(axis=2)
             scale = np.divide(

@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 
 from mpi4py import MPI
-from scipy import spatial
 from time import process_time
 
 from vtk.util import numpy_support  # type: ignore
@@ -79,6 +78,27 @@ class UnstMesh(object):
         self._buildMesh()
 
         return
+
+    @property
+    def mCoords(self):
+        """
+        Coordinates of the whole input mesh (``mpoints`` x 3), loaded from
+        the mesh file on first use and cached on the rank that asked.
+
+        Only the global-flexure DH grid (rank 0) and the plate-advection
+        interpolation (`tectonics._readAdvectionData`, every rank) need the
+        whole mesh; everything else works on the local partition. Loading on
+        demand keeps those ~24 B per mesh node off every rank of a run that
+        uses neither.
+        """
+        if getattr(self, "_mCoords", None) is None:
+            with np.load(self.meshFile) as data:
+                self._mCoords = data[self.infoCoords]
+        return self._mCoords
+
+    @mCoords.setter
+    def mCoords(self, value):
+        self._mCoords = value
 
     def _meshfrom_cell_list(self, dim, cells, coords):
         """
@@ -192,6 +212,9 @@ class UnstMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.maxarea, op=MPI.MAX)
 
         del Tmesh, edges_nodes, cells_nodes, cells_edges, cc, larea
+        # The Voronoi intermediates are only needed above (definetin has
+        # copied what it needs into the Fortran tables).
+        self.releaseVoronoi()
         gc.collect()
 
         if MPIrank == 0 and self.verbose:
@@ -286,13 +309,25 @@ class UnstMesh(object):
             It is worth mentionning that partitioning and field distribution from global to local PETSc DMPlex takes a lot of time for large mesh.
         """
 
-        # Read mesh attributes from file
+        # Read mesh attributes from file. Only rank 0 reads the input mesh: it
+        # builds the serial DMPlex and the global neighbour table, and every
+        # other rank receives its own vertices' input ids and elevations
+        # through the DMPlex distribution below. (Until 2026-11 every rank
+        # loaded the whole file, kept an int64 copy of the cells and built a
+        # whole-mesh KDTree to recover `locIDs`: ~100 B per MESH node on every
+        # rank, which dominated per-rank memory at high rank counts.)
         t0 = process_time()
-        loadData = np.load(self.meshFile)
-        self.mCoords = loadData[self.infoCoords]
-        self.mpoints = len(self.mCoords)
-        gZ = loadData[self.infoElev]
-        mCells = loadData[self.infoCells].astype(int)
+        self._mCoords = None
+        mCoords = gZ = mCells = None
+        npts = 0
+        if MPIrank == 0:
+            loadData = np.load(self.meshFile)
+            mCoords = loadData[self.infoCoords]
+            gZ = loadData[self.infoElev]
+            mCells = loadData[self.infoCells]
+            npts = len(mCoords)
+            del loadData
+        self.mpoints = MPI.COMM_WORLD.bcast(npts, root=0)
 
         # Get global mesh vertex neighbors (rank 0 owns the table; `epsfill` is
         # serial). `nover` is the number of vertices whose degree exceeds the 12
@@ -302,7 +337,7 @@ class UnstMesh(object):
         # so every rank raises the same error instead of rank 0 raising alone.
         nover = 0
         if MPIrank == 0:
-            nover = globalngbhs(self.mpoints, mCells)
+            nover = globalngbhs(self.mpoints, mCells.astype(int))
         nover = MPI.COMM_WORLD.bcast(nover, root=0)
         if nover > 0:
             raise ValueError(
@@ -312,7 +347,6 @@ class UnstMesh(object):
                 "re-generate the mesh with a lower maximum vertex degree."
                 % (self.meshFile, nover)
             )
-        mCells = None
         self.vtkMesh = None
         self.flatModel = False
         # Cyclic (periodic) boundary support: cyclicBC is True when at least one
@@ -326,10 +360,10 @@ class UnstMesh(object):
                 flush=True,
             )
 
-        # Create DMPlex
+        # Create DMPlex (serial on rank 0; the other ranks pass nothing)
         t0 = process_time()
-        self._meshfrom_cell_list(2, loadData[self.infoCells], self.mCoords)
-        del loadData
+        self._meshfrom_cell_list(2, mCells, mCoords)
+        del mCells, mCoords
         gc.collect()
         if MPIrank == 0 and self.verbose:
             print("Create DMPlex (%0.02f seconds)" % (process_time() - t0), flush=True)
@@ -341,7 +375,19 @@ class UnstMesh(object):
         origSect.setFieldName(0, "points")
         origSect.setUp()
         self.dm.setDefaultSection(origSect)
+        # Two vertex fields carried through the distribution: the input-mesh
+        # index and the input elevation. On the serial DMPlex (rank 0 only)
+        # vertex k of the section IS input vertex k (createFromCellList keeps
+        # the input order), so after distribution each rank holds, for every
+        # local vertex (owned + overlap), its exact input-mesh id: this is
+        # `locIDs`, previously recovered by a nearest-neighbour KDTree query
+        # on the whole mesh. Ids are float64-exact below 2**53.
         origVec = self.dm.createGlobalVector()
+        zVec = origVec.duplicate()
+        if MPIrank == 0:
+            origVec.setArray(np.arange(self.mpoints, dtype=np.float64))
+            zVec.setArray(gZ)
+        gZ = None
         if MPIrank == 0 and self.verbose:
             print(
                 "Define one DoF on the nodes (%0.02f seconds)" % (process_time() - t0),
@@ -356,12 +402,21 @@ class UnstMesh(object):
             partitioner.setFromOptions()
             sf = self.dm.distribute(overlap=self.overlap)
             newSect, newVec = self.dm.distributeField(sf, origSect, origVec)
+            zSect, newZ = self.dm.distributeField(sf, origSect, zVec)
             self.dm.setDefaultSection(newSect)
+            lids = newVec.getArray().copy()
+            lz = newZ.getArray().copy()
             newSect.destroy()
             newVec.destroy()
+            zSect.destroy()
+            newZ.destroy()
             sf.destroy()
+        else:
+            lids = origVec.getArray().copy()
+            lz = zVec.getArray().copy()
         MPIcomm.Barrier()
         origVec.destroy()
+        zVec.destroy()
         origSect.destroy()
         if MPIrank == 0 and self.verbose:
             print(
@@ -423,18 +478,15 @@ class UnstMesh(object):
 
         # From mesh values to local and global ones...
         t0 = process_time()
-        # Larger leafsize + skipping the rebalance/compact passes cuts the
-        # cKDTree build by ~2-3x for million-vertex meshes; the per-query
-        # cost grows only marginally because the queries here are k=1
-        # nearest-neighbour on an essentially identical point set.
-        tree = spatial.cKDTree(
-            self.mCoords,
-            leafsize=32,
-            balanced_tree=False,
-            compact_nodes=False,
-        )
-        distances, self.locIDs = tree.query(self.lcoords, k=1)
-        distances, self.glbIDs = tree.query(self.gcoords, k=1)
+        # Input-mesh id of every local vertex, delivered by the distribution
+        # above (one value per vertex, in local vertex order = lcoords order).
+        if lids.shape[0] != self.lpoints:
+            raise RuntimeError(
+                "Distributed vertex-id field has %d entries for %d local "
+                "vertices" % (lids.shape[0], self.lpoints)
+            )
+        self.locIDs = lids.astype(np.int64)
+        lz = lz.reshape(-1)
 
         # Local/Global mapping
         self.lgmap_row = self.dm.getLGMap()
@@ -452,7 +504,8 @@ class UnstMesh(object):
         # The PETSc DMPlex global id (`l2g`) is consistent across ranks WITHIN a
         # run, but PETSc RENUMBERS it per partition, so it is NOT invariant
         # across rank counts (this caused partition-dependent flow at np>1). The
-        # input-mesh index (`locIDs`, KDTree on coords) IS invariant — use it.
+        # input-mesh index (`locIDs`, delivered by the distribution) IS
+        # invariant — use it.
         # int32 because f2py declares the Fortran arg as default integer.
         self.gid = self.locIDs.astype(np.int32)
 
@@ -464,6 +517,18 @@ class UnstMesh(object):
         self.glIDs = np.where(self.inIDs == 1)[0]
         # ghostIDs are the shadow nodes indices on each partition
         self.ghostIDs = np.where(self.inIDs == 0)[0]
+        # Input-mesh ids of the GLOBAL-vector entries: PETSc's global vector
+        # holds the owned vertices in local order, so they are the owned
+        # local ids (gcoords == lcoords[glIDs]). Checked, collectively, since
+        # every global-vector write below relies on it.
+        self.glbIDs = self.locIDs[self.glIDs]
+        ok = (self.gcoords.shape[0] == self.glIDs.shape[0]
+              and np.array_equal(self.gcoords, self.lcoords[self.glIDs]))
+        if not MPI.COMM_WORLD.allreduce(ok, op=MPI.LAND):
+            raise RuntimeError(
+                "Global vertex order does not match the owned local vertices; "
+                "cannot map the input mesh onto the distributed DMPlex."
+            )
 
         # Local mesh boundary points in 2D model
         localBound = self._get_boundary()
@@ -506,10 +571,13 @@ class UnstMesh(object):
             self.east = _bc[self.boundCond[1]]
             self.south = _bc[self.boundCond[2]]
             self.west = _bc[self.boundCond[3]]
-            xmin = self.mCoords[:, 0].min()
-            xmax = self.mCoords[:, 0].max()
-            ymin = self.mCoords[:, 1].min()
-            ymax = self.mCoords[:, 1].max()
+            # Domain bounds from the local coordinates (every vertex is local
+            # on some rank, so the reduced min/max are the mesh's exactly).
+            lc = self.lcoords
+            xmin = MPI.COMM_WORLD.allreduce(lc[:, 0].min() if len(lc) else np.inf, op=MPI.MIN)
+            xmax = MPI.COMM_WORLD.allreduce(lc[:, 0].max() if len(lc) else -np.inf, op=MPI.MAX)
+            ymin = MPI.COMM_WORLD.allreduce(lc[:, 1].min() if len(lc) else np.inf, op=MPI.MIN)
+            ymax = MPI.COMM_WORLD.allreduce(lc[:, 1].max() if len(lc) else -np.inf, op=MPI.MAX)
             # Use np.isclose so boundary detection survives any future
             # coordinate transformation that introduces float drift.
             tol = 1.0e-9
@@ -555,8 +623,8 @@ class UnstMesh(object):
         self.hLocal = self.dm.createLocalVector()
         self.sizes = self.hGlobal.getSizes(), self.hGlobal.getSizes()
 
-        self.hGlobal.setArray(gZ[self.glbIDs])
-        self.hLocal.setArray(gZ[self.locIDs])
+        self.hGlobal.setArray(lz[self.glIDs])
+        self.hLocal.setArray(lz)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -594,8 +662,8 @@ class UnstMesh(object):
         self.teNb = -1
         self.sedfactNb = -1
 
-        del tree, distances, tmp2
-        del l2g, offproc, gZ, out, ptscells
+        del tmp2, lids, lz
+        del l2g, offproc, out, ptscells
         gc.collect()
 
         # Build stratigraphic data if any
@@ -962,7 +1030,7 @@ class UnstMesh(object):
             if pd.isnull(self.raindata["rUni"][nb]):
                 if pd.isnull(self.raindata["rzA"][nb]):
                     loadData = np.load(self.raindata.at[nb, "rMap"])
-                    rainVal = loadData[self.raindata.at[nb, "rKey"]]
+                    rainVal = loadData[self.raindata.at[nb, "rKey"]][self.locIDs]
                     self.rainA = None
                     self.rainB = None
                     del loadData
@@ -972,14 +1040,16 @@ class UnstMesh(object):
             else:
                 self.rainA = None
                 self.rainB = None
-                rainVal = np.full(self.mpoints, self.raindata.at[nb, "rUni"])
+                rainVal = np.full(self.lpoints, self.raindata.at[nb, "rUni"])
             
             if self.rainA is None:
                 rainVal[rainVal < 0] = 0.0
+                # Local slice only (indexed by locIDs above): a full-mesh
+                # copy per rank is ~8 B per mesh node for nothing.
                 self.rainMesh = rainVal
 
         if self.rainA is None:
-            self.rainVal = self.rainMesh[self.locIDs]
+            self.rainVal = self.rainMesh.copy()
         else:
             tmp = self.hLocal.getArray().copy()
             self.rainVal = tmp  * self.rainA + self.rainB
@@ -1024,9 +1094,9 @@ class UnstMesh(object):
         parser — the ice analogue of ``_updateRain``.
 
         Each interval supplies, per field, either a uniform scalar or a
-        per-vertex ``[file, key]`` map; both are materialised here to full-mesh
-        arrays (``elaMesh`` / ``iceMesh`` / ``termMesh``) which ``iceAccumulation``
-        indexes by ``locIDs``. Maps are (re)loaded only when the active interval
+        per-vertex ``[file, key]`` map; both are materialised here to LOCAL
+        arrays (``elaMesh`` / ``iceMesh`` / ``termMesh``, ``lpoints`` long,
+        already indexed by ``locIDs``) which ``iceAccumulation`` reads. Maps are (re)loaded only when the active interval
         changes (step changes, like the precipitation maps).
         """
         ts = self._iceTimeSeries
@@ -1052,12 +1122,12 @@ class UnstMesh(object):
     def _resolveIceField(self, field):
         """
         Materialise one glacier-geometry field (a ``(scalar, map_spec)`` pair,
-        exactly one non-None) to a full-mesh array.
+        exactly one non-None) to a local (``lpoints``) array.
         """
         scalar, spec = field
         if spec is not None:
-            return self._loadIceMap(spec, "ice map")
-        return np.full(self.mpoints, scalar, dtype=np.float64)
+            return self._loadIceMap(spec, "ice map")[self.locIDs]
+        return np.full(self.lpoints, scalar, dtype=np.float64)
 
     def _updateEvap(self):
         """
@@ -1094,15 +1164,15 @@ class UnstMesh(object):
             self.evapNb = nb
             if pd.isnull(self.evapdata["eUni"][nb]):
                 loadData = np.load(self.evapdata.at[nb, "eMap"])
-                evapVal = loadData[self.evapdata.at[nb, "eKey"]]
+                evapVal = loadData[self.evapdata.at[nb, "eKey"]][self.locIDs]
                 del loadData
             else:
-                evapVal = np.full(self.mpoints, self.evapdata.at[nb, "eUni"])
+                evapVal = np.full(self.lpoints, self.evapdata.at[nb, "eUni"])
 
             evapVal[evapVal < 0] = 0.0
             self.evapMesh = evapVal
 
-        self.evapVal = self.evapMesh[self.locIDs]
+        self.evapVal = self.evapMesh.copy()
 
         return
 
@@ -1128,14 +1198,14 @@ class UnstMesh(object):
             self.sedfactNb = nb
             if pd.isnull(self.sedfacdata["sUni"][nb]):
                 loadData = np.load(self.sedfacdata.at[nb, "sMap"])
-                sedfacVal = loadData[self.sedfacdata.at[nb, "sKey"]]
+                sedfacVal = loadData[self.sedfacdata.at[nb, "sKey"]][self.locIDs]
                 del loadData
             else:
-                sedfacVal = np.full(self.mpoints, self.sedfacdata.at[nb, "sUni"])
+                sedfacVal = np.full(self.lpoints, self.sedfacdata.at[nb, "sUni"])
             sedfacVal[sedfacVal < 0.1] = 0.1
             self.sedFacMesh = sedfacVal
 
-        self.sedfacVal = self.sedFacMesh[self.locIDs]
+        self.sedfacVal = self.sedFacMesh.copy()
 
         return
 
