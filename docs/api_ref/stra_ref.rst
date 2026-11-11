@@ -27,6 +27,7 @@ Class StraMesh
 
    .. autosummary::
 
+      ~STRAMesh._stratFields
       ~STRAMesh._initProvenance
       ~STRAMesh._fillZeroPorosity
       ~STRAMesh._surfaceK
@@ -51,6 +52,7 @@ Public functions
 Private functions
 ---------------------
 
+.. automethod:: sed.stratplex.STRAMesh._stratFields
 .. automethod:: sed.stratplex.STRAMesh._initProvenance
 .. automethod:: sed.stratplex.STRAMesh._fillZeroPorosity
 .. automethod:: sed.stratplex.STRAMesh._surfaceK

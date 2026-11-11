@@ -315,6 +315,20 @@ Reading the results
   peak that tripped the node limit — the sampled figure lags the actual peak, and
   a "192 GB" node leaves only ~185 GB to the job after OS overhead. Spread over
   two nodes, 96 ranks fits — which is why 96 is the smallest feasible 5 km count.)
+
+  *Update (November 2026, after these measurements):* several of those
+  replicated arrays are gone. Only rank 0 now reads the input mesh; every rank
+  receives its own vertices through the mesh distribution instead of loading
+  the whole file and building a whole-mesh search tree; the forcing maps
+  (rain, evaporation, erodibility factor, ice geometry) and the
+  plate-interpolation tables are kept for the local partition only. This
+  removes roughly 100 B per **mesh** node from every rank's setup peak and
+  ~30 B per mesh node held for the whole run, which matters most at high rank
+  counts where each rank's own share is small (measured on a 2M-node mesh at
+  16 ranks: non-root setup peak 1331 → 1120 MB). Rank 0 still builds the
+  serial mesh structure (about 1.8 kB per mesh node) and the pit-spillover
+  graph, so it remains the heaviest rank. The figures above have not been
+  re-measured.
 * **The 8 km and 5 km meshes scale superlinearly** at intermediate rank counts
   (8 km: efficiency 1.09 at 48, 1.03 at 96; 5 km: 1.18 at 144, 1.14 at 192 —
   *above* the ideal line). This is genuine, not a measurement artefact: at the

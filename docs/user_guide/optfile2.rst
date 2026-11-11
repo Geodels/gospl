@@ -39,11 +39,17 @@ Tectonic forcing parameters
 
 .. note::
 
-  There is no requirement to impose continuous tectonics forcing and you might chose to have periods without displacement by making discontinuous events using the ``start`` and ``end`` keys. 
+  There is no requirement to impose continuous tectonics forcing and you might chose to have periods without displacement by making discontinuous events using the ``start`` and ``end`` keys. An event may also carry no map at all (only ``start`` and ``end``), for instance to stop the motion after a plate stage; such an event leaves both vertical and horizontal displacements off for its duration.
+
+.. note::
+
+  On a **cyclic** (periodic) 2D model the mesh is a cylinder, but ``hdisp`` is still given in the flat frame, ``(vx, vy, 0)`` in m/yr: goSPL maps it around the cylinder so that fields wrap across the periodic seam.
 
 .. note::
 
   When applying horizontal displacement using the ``interp`` scheme (mainly used in global simulation to represent plate movements), the horizontal movements are performed at the end of the period (i.e., at the specified ``end`` time). In the other cases, the horizontal displacement is done at every timestep (specified by ``dt``).
+
+  With every scheme, the horizontal motion moves the surface fields (elevation, cumulative erosion/deposition, flexure, soil) **and**, when stratigraphy is recorded, the stratigraphic layers with all their properties (thickness, elevation at deposition, porosity, ``stratK``, and the dual-lithology, provenance and duricrust records when those options are on). See the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ for how the layers are moved and its limitations.
 
 
 .. Plate forcing parameters

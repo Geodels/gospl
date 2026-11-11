@@ -29,9 +29,12 @@ Class Tectonics
       ~Tectonics._varAdvector
       ~Tectonics._readAdvectionData
       ~Tectonics._advectPlates
-      ~Tectonics._findPts2Reduce
       ~Tectonics._advectStrati
-      ~Tectonics._updateStratInfo
+      ~Tectonics._advectStratiScheme
+      ~Tectonics._fetchOwnerRows
+      ~Tectonics._ownerPetscIndex
+      ~Tectonics._cylinderDisplace
+      ~Tectonics._cylinderVelocity
 
 Public functions
 ---------------------
@@ -48,6 +51,9 @@ Private functions
 .. automethod:: mesher.tectonics.Tectonics._varAdvector
 .. automethod:: mesher.tectonics.Tectonics._readAdvectionData
 .. automethod:: mesher.tectonics.Tectonics._advectPlates
-.. automethod:: mesher.tectonics.Tectonics._findPts2Reduce
 .. automethod:: mesher.tectonics.Tectonics._advectStrati
-.. automethod:: mesher.tectonics.Tectonics._updateStratInfo
+.. automethod:: mesher.tectonics.Tectonics._advectStratiScheme
+.. automethod:: mesher.tectonics.Tectonics._fetchOwnerRows
+.. automethod:: mesher.tectonics.Tectonics._ownerPetscIndex
+.. automethod:: mesher.tectonics.Tectonics._cylinderDisplace
+.. automethod:: mesher.tectonics.Tectonics._cylinderVelocity

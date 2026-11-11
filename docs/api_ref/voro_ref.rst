@@ -41,6 +41,7 @@ Voronoi helper used by :class:`mesher.unstructuredmesh.UnstMesh` to build the Ce
       ~VoroBuild.triangle_quality
       ~VoroBuild.angles
       ~VoroBuild.compute_curl
+      ~VoroBuild.releaseVoronoi
 
    .. rubric:: Private Methods
 
@@ -78,6 +79,7 @@ Public functions
 .. automethod:: mesher.meshfunc.VoroBuild.triangle_quality
 .. automethod:: mesher.meshfunc.VoroBuild.angles
 .. automethod:: mesher.meshfunc.VoroBuild.compute_curl
+.. automethod:: mesher.meshfunc.VoroBuild.releaseVoronoi
 
 
 Private functions
