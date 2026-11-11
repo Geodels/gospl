@@ -189,51 +189,91 @@ def test_tectonic_event_without_maps_runs(tmp_path):
         os.chdir(cwd)
 
 
-def test_scheme_advection_leaves_stratigraphy_known_bug(tmp_path):
+@pytest.mark.parametrize("scheme", ["upwind", "iioe1", "iioe2"])
+def test_scheme_advection_moves_stratigraphy(tmp_path, scheme):
     """
-    KNOWN BUG, pinned at its CURRENT behaviour (AGENTS.md > Known bugs):
-    the advection schemes (`advect: upwind|iioe1|iioe2` + `hdisp`) move the
-    surface fields in `tectonics._varAdvector` (elevation, cumED, flexure,
-    soil) but never the stratigraphic record, so the layers stay where they
-    were deposited while the surface above them moves. (Plate interpolation,
-    `advect: interp`, does move them: `test_plate_advection_moves_stratigraphy`.)
+    Protects: the advection schemes move the stratigraphic record
+    (`tectonics._advectStratiScheme`: semi-Lagrangian, departure point
+    ``x - v*dt``, then `stratalRecord`).
 
-    When fixed this test FAILS on purpose: replace it with a guard that the
-    layers move with the surface.
+    Silent failure prevented: `_varAdvector` advected the surface fields only,
+    so the layers stayed where they were deposited while the surface above
+    them moved (fixed 2026-11-11; docs/dev/FIXED_BUGS.md).
+
+    Invariant: on a regular grid with a velocity of exactly one cell per
+    step, every departure point is a mesh node, so after each advection step
+    every per-layer field at interior node (i, j) equals its pre-step value
+    at (i-1, j) exactly; the upstream column (departure outside the mesh) is
+    excluded.
     """
     import shutil
 
     from gospl.model import Model
 
-    for f in ("flat_advect.yml", "flat_advect.npz"):
-        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
-    yml = (tmp_path / "flat_advect.yml").read_text()
-    yml = yml.replace("    dt: 2.5e3\n", "    dt: 2.5e3\n    strat: 2.5e3\n")
-    assert "strat: 2.5e3" in yml
-    (tmp_path / "adv_strat.yml").write_text(yml)
+    n, dx, dt = 30, 1000.0, 1000.0
+    x, y = np.meshgrid(np.arange(n) * dx, np.arange(n) * dx)
+    v = np.c_[x.ravel(), y.ravel(), np.zeros(n * n)]
+    i, j = np.meshgrid(np.arange(n - 1), np.arange(n - 1))
+    a = (j * n + i).ravel()
+    cells = np.r_[np.c_[a, a + 1, a + n + 1], np.c_[a, a + n + 1, a + n]].astype(np.int32)
+    z = 100.0 + 0.01 * v[:, 0] + 0.003 * v[:, 1] ** 1.2       # varies along x and y
+    vel = np.zeros_like(v)
+    vel[:, 0] = dx / dt                                       # exactly one cell per step
+    np.savez(tmp_path / "grid.npz", v=v, c=cells, z=z, uv=vel)
+    (tmp_path / "adv.yml").write_text(f"""name: strata advection
+domain:
+    npdata: ['grid','v','c','z']
+    flowdir: 5
+    bc: 'oooo'
+    advect: '{scheme}'
+time:
+    start: 0.
+    end: 4000.
+    tout: 4000.
+    dt: {dt}
+    strat: {dt}
+spl:
+    K: 0.
+    d: 0.
+    m: 0.5
+sea:
+    position: -1000.
+climate:
+  - start: 0.
+    uniform: 1.
+tectonics:
+    - start: 0.
+      end: 4000.
+      hdisp: ['grid','uv']
+output:
+    dir: 'out'
+""")
 
     cwd = os.getcwd()
     os.chdir(tmp_path)
     model = None
-    seen = []
+    checks = []
     try:
-        model = Model("adv_strat.yml", verbose=False)
-        orig = model._varAdvector
+        model = Model("adv.yml", verbose=False)
+        orig = model._advectStratiScheme
+        col = np.rint(model.lcoords[:, 0] / dx).astype(int)
+        row = np.rint(model.lcoords[:, 1] / dx).astype(int)
+        key = {(c, r): k for k, (c, r) in enumerate(zip(col, row))}
+        inner = np.where(col >= 1)[0]
+        src = np.array([key[(col[k] - 1, row[k])] for k in inner])
 
-        def pinned():
-            z0 = model.stratZ.copy()
-            h0 = model.hLocal.getArray().copy()
+        def checked():
+            before = {k: a.copy() for k, a in model._stratFields().items()}
             orig()
-            if model.stratStep > 0:
-                moved = np.abs(model.hLocal.getArray() - h0).max()
-                seen.append((moved, np.array_equal(model.stratZ, z0)))
+            after = model._stratFields()
+            for k, b in before.items():
+                assert np.array_equal(after[k][inner], b[src]), f"{k} not shifted by one cell"
+            checks.append(model.stratStep)
 
-        model._varAdvector = pinned
+        model._advectStratiScheme = checked
         model.runProcesses()
     finally:
         if model is not None:
             model.destroy()
         os.chdir(cwd)
-    assert seen, "no advection step with recorded layers"
-    assert all(moved > 1.0 for moved, _ in seen), "the surface did not move"
-    assert all(same for _, same in seen), "the layers moved: the known bug may be fixed"
+    assert checks and max(checks) >= 2, checks

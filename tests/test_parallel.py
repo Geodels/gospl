@@ -1332,6 +1332,18 @@ m.runProcesses()
 own = m.glIDs
 f = {k: v[own].copy() for k, v in m._stratFields().items()}
 f["h"] = m.hLocal.getArray()[own].copy()
+# Probe the move alone (no solver round-off in its input): set every layer
+# field to a function of the input-mesh id, apply one more move with the
+# cached tables, record the result.
+for k, v in m._stratFields().items():
+    cols = np.arange(int(np.prod(v.shape[1:]))).reshape(v.shape[1:])
+    v[...] = m.locIDs.reshape((-1,) + (1,) * (v.ndim - 1)) * 1.0e-3 + cols
+if sys.argv[3] == "interp":
+    m._advectStrati()
+else:
+    m._advectStratiScheme()
+for k, v in m._stratFields().items():
+    f["probe_" + k] = v[own].copy()
 g = MPI.COMM_WORLD.gather((m.locIDs[own], f, m.stratStep), root=0)
 m.destroy()
 if MPI.COMM_WORLD.rank == 0:
@@ -1343,11 +1355,14 @@ if MPI.COMM_WORLD.rank == 0:
 '''
 
 
-def test_plate_strata_partition_invariant(tmp_path):
+@pytest.mark.parametrize("scheme", ["interp", "iioe2"])
+def test_plate_strata_partition_invariant(tmp_path, scheme):
     """
-    Protects: plate-interpolation advection of the stratigraphy fetches each
-    rank's source rows from their OWNERS (`tectonics._fetchOwnerRows`, AO +
-    blocked scatter) and syncs owned rows (`stratalRecord`).
+    Protects: advecting the stratigraphy fetches each rank's source rows from
+    their OWNERS (`tectonics._fetchOwnerRows`, AO + blocked scatter) and syncs
+    owned rows (`stratalRecord`), for plate interpolation (`interp`,
+    `_advectStrati`) and for the advection schemes (`iioe2`,
+    `_advectStratiScheme`, semi-Lagrangian).
 
     Silent failure prevented: a wrong owner mapping or a ghost-row sync gives
     a partition-dependent stratigraphy (and the path used to crash outright:
@@ -1355,8 +1370,9 @@ def test_plate_strata_partition_invariant(tmp_path):
     np=2 must agree exactly; a run with erosion differs by round-off-level
     routing sensitivity even without tectonics.
 
-    Invariant: after a plate stage with layers recorded, every per-layer
-    field and the elevation are bitwise equal at np=1 and np=2.
+    Invariant: one stratigraphy move applied to identical input (each layer
+    field set from the input-mesh id) gives bitwise-equal fields at np=1 and
+    np=2 for both schemes; for `interp` the whole run is bitwise equal too.
     """
     import shutil
     import subprocess
@@ -1373,12 +1389,14 @@ def test_plate_strata_partition_invariant(tmp_path):
         pytest.skip(f"missing one of {needed} in tests/fixtures.")
 
     yml = (FIXTURES_DIR / "flat_advect.yml").read_text()
-    yml = yml.replace("advect: 'iioe2'", "advect: 'interp'")
+    yml = yml.replace("advect: 'iioe2'", f"advect: '{scheme}'")
     yml = yml.replace("    dt: 2.5e3\n", "    dt: 2.5e3\n    strat: 2.5e3\n")
     old_tec = "      end: 1.e4\n      hdisp: ['flat_advect','uv']"
     assert old_tec in yml and "strat: 2.5e3" in yml
-    yml = yml.replace(old_tec, "      end: 7.5e3\n      hdisp: ['flat_advect','uv']\n"
-                               "    - start: 7.5e3\n      end: 1.e4")
+    if scheme == "interp":
+        # the plate update fires at the end of the hdisp event
+        yml = yml.replace(old_tec, "      end: 7.5e3\n      hdisp: ['flat_advect','uv']\n"
+                                   "    - start: 7.5e3\n      end: 1.e4")
     child = tmp_path / "_plate_strat.py"
     child.write_text(_PLATE_STRAT_SCRIPT)
     res = {}
@@ -1389,7 +1407,8 @@ def test_plate_strata_partition_invariant(tmp_path):
         (run / "plate.yml").write_text(yml)
         out = run / "out.npz"
         r = subprocess.run(
-            ["mpirun", "-n", str(n), sys.executable, str(child), "plate.yml", str(out)],
+            ["mpirun", "-n", str(n), sys.executable, str(child), "plate.yml", str(out),
+             scheme],
             cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
             env=mpi_child_env(),
         )
@@ -1398,6 +1417,13 @@ def test_plate_strata_partition_invariant(tmp_path):
                         f"stderr:\n{r.stderr[-2000:]}")
         res[n] = dict(np.load(out))
     assert res[1]["stratStep"] > 0, "no layer recorded before the plate update"
+    # The move itself (probe: identical input on every partition) is bitwise
+    # partition-invariant for both schemes. Whole-run fields are bitwise only
+    # for interp: with iioe2 the SURFACE advection is a KSP solve whose
+    # round-off depends on the partition (~5e-5 m here, already on dev), and
+    # layers recorded from that surface inherit it.
     for k in res[1]:
-        assert np.array_equal(res[1][k], res[2][k]), (
-            f"{k}: np=1 vs np=2 differ by {np.abs(res[1][k] - res[2][k]).max():.3g}")
+        if scheme == "interp" or k.startswith("probe_"):
+            diff = np.abs(np.asarray(res[1][k], float) - np.asarray(res[2][k], float)).max()
+            assert diff == 0.0, f"{k}: np=1 vs np=2 differ by {diff:.3g}"
+    assert any(k.startswith("probe_") for k in res[1])

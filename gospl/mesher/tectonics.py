@@ -40,6 +40,12 @@ class Tectonics(object):
         self.tecNb = -1
         self.paleoZ = None
         self.plateStep = False
+        # Advection-scheme stratigraphy move (semi-Lagrangian, see
+        # `_advectStratiScheme`): this rank's node velocities for the current
+        # tectonic event and the cached departure-point tables (rebuilt per
+        # event or when dt changes).
+        self._stratVel = None
+        self._stratAdv = None
 
         self.fiso = self.hGlobal.duplicate()
 
@@ -144,6 +150,9 @@ class Tectonics(object):
                     # changed, so the cached advection operator must be rebuilt.
                     getfacevelocity(self.lpoints, nodeVel)
                     self._advRebuild = True
+                    # The stratigraphy moves with the same node velocity.
+                    self._stratVel = nodeVel.copy()
+                    self._stratAdv = None
                 del hfull
             else:
                 self.hdisp = None
@@ -472,6 +481,11 @@ class Tectonics(object):
             self.Lsoil.setArray(lsoil)
             self.dm.localToGlobal(self.Lsoil, self.Gsoil)
 
+        # Stratigraphic record (moved semi-Lagrangian, after the surface).
+        # stratNb/stratStep are identical on every rank: collective-safe.
+        if self.stratNb > 0 and self.stratStep > 0:
+            self._advectStratiScheme()
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Compute Advection Processes (%0.02f seconds)" % (process_time() - t0),
@@ -734,17 +748,89 @@ class Tectonics(object):
 
         return
 
-    def _fetchOwnerRows(self, ids, fields):
+    def _advectStratiScheme(self):
+        """
+        Move the stratigraphic record with the advection schemes
+        (`advect: upwind|iioe1|iioe2`), semi-Lagrangian: each local node takes
+        the inverse-distance mix of the layers at the three mesh nodes nearest
+        to its departure point ``x - v*dt`` (same weights and copy-on-coincide
+        rule as plate advection), through `stratalRecord`.
+
+        Within a tectonic event the node velocity and `dt` are fixed, so the
+        departure tables are built once (one whole-mesh KDTree, then dropped)
+        and reused every step; only the owner-row fetch and the
+        interpolation run per step. IDW is not mass-conservative on its own,
+        exactly as for plate advection, and the surface itself is advected by
+        the selected scheme.
+
+        Collective (owner fetch, halo sync): gated on stratNb/stratStep and
+        the event's hdisp, identical on every rank.
+
+        Scratch used: ``self.tmp`` / ``self.tmpL`` (through `stratalRecord`).
+        """
+
+        t0 = process_time()
+        adv = self._stratAdv
+        if adv is None or adv["dt"] != self.dt:
+            dep = self.lcoords - self._stratVel * self.dt
+            tree = spatial.cKDTree(self.mCoords, leafsize=10)
+            self._mCoords = None
+            dist, ids = tree.query(dep, k=3)
+            del tree, dep
+            w = np.divide(1.0, dist, out=np.zeros_like(dist), where=dist != 0)
+            needed = np.unique(ids)
+            adv = {
+                "dt": self.dt,
+                "rows": np.searchsorted(needed, ids),
+                "w": w,
+                "on": np.where(dist[:, 0] == 0)[0],
+                "needed": needed,
+                "want": self._ownerPetscIndex(needed),
+            }
+            self._stratAdv = adv
+
+        source = self._fetchOwnerRows(adv["needed"], self._stratFields(), want=adv["want"])
+        self.stratalRecord(adv["rows"], adv["w"], adv["on"], source=source)
+
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Advect stratigraphic record (%0.02f seconds)" % (process_time() - t0),
+                flush=True,
+            )
+
+        return
+
+    def _ownerPetscIndex(self, ids):
+        """
+        PETSc global indices of the vertices with input-mesh ids ``ids``
+        (memory-scalable AO; owned node i has PETSc index rstart + i because
+        the global vector holds the owned nodes in local order,
+        gcoords == lcoords[glIDs]). Collective.
+        """
+
+        PETSc = petsc4py.PETSc
+        own = self.glIDs
+        rstart = self.hGlobal.getOwnershipRange()[0]
+        app = self.locIDs[own].astype(PETSc.IntType)
+        pidx = np.arange(rstart, rstart + len(own), dtype=PETSc.IntType)
+        ao = PETSc.AO().createMemoryScalable(app, pidx, comm=PETSc.COMM_WORLD)
+        want = ao.app2petsc(np.asarray(ids, dtype=PETSc.IntType).copy())
+        ao.destroy()
+        return want
+
+    def _fetchOwnerRows(self, ids, fields, want=None):
         """
         Collect, for a sorted array of input-mesh ids, the rows of local
         per-node arrays held by the ranks that OWN those nodes.
 
         :arg ids: sorted unique input-mesh ids wanted on this rank
         :arg fields: dict ``name -> local array`` (first axis ``lpoints``)
+        :arg want: optional precomputed `_ownerPetscIndex(ids)` (reused when
+            the same ids are fetched every step)
         :return: dict ``name -> array`` with first axis ``len(ids)``, rows in
             the order of ``ids``, other axes unchanged
 
-        Collective (AO creation and the scatter): every rank must call it.
+        Collective (AO lookup and the scatter): every rank must call it.
         """
 
         PETSc = petsc4py.PETSc
@@ -755,14 +841,8 @@ class Tectonics(object):
         ncols = int(sum(widths))
         own = self.glIDs
         nown = len(own)
-
-        # Owned nodes in global-vector order (gcoords == lcoords[glIDs]), so
-        # owned node i has PETSc index rstart + i.
-        rstart = self.hGlobal.getOwnershipRange()[0]
-        app = self.locIDs[own].astype(PETSc.IntType)
-        pidx = np.arange(rstart, rstart + nown, dtype=PETSc.IntType)
-        ao = PETSc.AO().createMemoryScalable(app, pidx, comm=comm)
-        want = ao.app2petsc(np.asarray(ids, dtype=PETSc.IntType).copy())
+        if want is None:
+            want = self._ownerPetscIndex(ids)
 
         gvec = PETSc.Vec().createMPI((nown * ncols, PETSc.DECIDE), bsize=ncols, comm=comm)
         gvec.setArray(np.hstack(flat)[own].ravel())
@@ -772,7 +852,7 @@ class Tectonics(object):
         sct.scatter(gvec, lvec, addv=PETSc.InsertMode.INSERT,
                     mode=PETSc.ScatterMode.FORWARD)
         got = lvec.getArray().reshape(len(ids), ncols).copy()
-        for obj in (sct, lvec, isf, gvec, ao):
+        for obj in (sct, lvec, isf, gvec):
             obj.destroy()
 
         out, c0 = {}, 0
