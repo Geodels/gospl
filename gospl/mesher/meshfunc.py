@@ -152,6 +152,36 @@ class VoroBuild(object):
 
         return
 
+    # Every array `initVoronoi`/`create_edges` and the cached properties
+    # allocate. They are only needed to build the FV tables in
+    # `UnstMesh._meshStructure`; `releaseVoronoi` drops them afterwards.
+    _VORONOI_ATTRS = (
+        "node_coords", "node_is_used", "cells", "edges", "subdomains",
+        "local_idx", "local_idx_inv", "idx_hierarchy", "half_edge_coords",
+        "ei_dot_ej", "ei_dot_ei", "cell_volumes", "ce_ratios",
+        "is_boundary_edge", "is_boundary_edge_individual",
+        "_edge_lengths", "_interior_ce_ratios", "_control_volumes",
+        "_cell_partitions", "_cv_centroids", "_surface_areas",
+        "_cell_circumcenters", "_signed_cell_areas", "_is_interior_node",
+        "_is_boundary_node", "_is_boundary_facet", "_interior_edge_lengths",
+        "_ce_ratios", "_edges_cells", "_edge_gid_to_edge_list",
+        "_edge_to_edge_gid", "_cell_centroids",
+    )
+
+    def releaseVoronoi(self):
+        """
+        Free the Voronoi/Delaunay intermediates once the finite-volume
+        tables are built. They are sized by the local partition (roughly
+        0.6 kB per local node) and nothing reads them after
+        `UnstMesh._meshStructure`; keeping them cost ~10% of a rank's
+        resident memory for the whole run.
+        """
+        for name in self._VORONOI_ATTRS:
+            if name in self.__dict__:
+                setattr(self, name, None)
+
+        return
+
     @property
     def edge_lengths(self):
         if self._edge_lengths is None:

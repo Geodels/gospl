@@ -56,11 +56,13 @@ goSPL is a parallel landscape-evolution model that integrates the stream-power l
 ## The numpy ↔ PETSc boundary
 Every state field exists in two parallel representations.
 
-**Numpy land** (raw arrays indexed by local node ID, dimensional, no halo): `self.lcoords` (m), `self.mCoords` (m), `self.larea` (m²), `self.rainVal` (m/yr), `self.upsub` (m/yr), `self.stratH/stratZ/phiS/stratK`, `self.stratHf/phiF` (dual-lithology fine pile — see `## Dual lithology`), `self.fineFrac/depoFineFrac` (dual), `self.pitParams`, `self.pitIDs`, `self.lFill`, `self.localFlex`, plus any `vec.getArray().copy()` view.
+**Numpy land** (raw arrays indexed by local node ID, dimensional, no halo): `self.lcoords` (m), `self.mCoords` (m; whole input mesh, a lazily loaded property: see below), `self.larea` (m²), `self.rainVal` (m/yr), `self.upsub` (m/yr), `self.stratH/stratZ/phiS/stratK`, `self.stratHf/phiF` (dual-lithology fine pile — see `## Dual lithology`), `self.fineFrac/depoFineFrac` (dual), `self.pitParams`, `self.pitIDs`, `self.lFill`, `self.localFlex`, plus any `vec.getArray().copy()` view.
 
 **PETSc land** (parallel Vec with halo, mutated via `setArray`/`getArray`/`localToGlobal`): `self.hLocal`/`self.hGlobal`, `self.cumED`/`self.cumEDLocal`, `self.FAL`/`self.FAG`, `self.fillFAL`, `self.Eb`/`self.EbLocal`, `self.bL`/`self.bG`, `self.areaLocal`/`self.areaGlobal`, `self.iceHL`/`self.iceMeltL`/`self.iceUbL`/`self.iceAbrL`/`self.iceFlex` (diagnostic glacial model — see `## Ice sheet`), `self.Lsoil`/`self.Gsoil`, `self.lHbed`/`self.gHbed`, `self.vSed`/`self.vSedLocal`, `self.vSedF`/`self.vSedFLocal` (dual-lithology fine flux), `self.fiso`.
 
 Both sides hold physical units; the boundary is about **who owns halo synchronisation**, not units. Cross only via `self.dm.localToGlobal(local, global)`, `self.dm.globalToLocal(global, local)`, `vec.getArray()`, `vec.setArray(arr)`. After mutating a `*Local` array view, you MUST `localToGlobal` before the next collective solve, or ranks see stale halos.
+
+**No whole-mesh arrays on every rank.** Memory per rank must scale with the partition (`lpoints`), not the mesh (`mpoints`): at 192 ranks a per-rank whole-mesh copy costs more than the rank's own data. Only rank 0 reads the input mesh (`_buildMesh`); every rank gets its vertices' input ids (`locIDs`, exact, via `distributeField` of an index field, no KDTree) and elevations through the DMPlex distribution, and `glbIDs == locIDs[glIDs]` (checked collectively). `self.mCoords` is a property that loads the whole-mesh coordinates on first use: only the global-flexure DH grid (rank 0) and plate advection read it. Forcing maps (`rainMesh`, `evapMesh`, `sedFacMesh`, `elaMesh`/`iceMesh`/`termMesh`) are stored as local slices. Guard: `test_mesh_not_replicated_per_rank`. Measure with `/tmp`-style harnesses that record per-rank RSS by init stage; at np=4 the effect is small (local data dominates), it shows at high rank counts.
 
 ## MPI contract
 **Collective** (every rank must call, in the same order): `self.dm.localToGlobal`, `self.dm.globalToLocal`, `MPI.COMM_WORLD.Allreduce/Bcast/bcast/Allgatherv/Reduce/Barrier`, `ksp.solve`, `snes.solve`, `ts.solve`, `vec.sum/max/min/norm/dot`, `mat.norm`, `vec.assemblyBegin/End`, `mat.assemblyBegin/End`, `vec.duplicate/destroy`, `mat.destroy`, `dm.distribute`, `petsc4py.PETSc.garbage_cleanup`. **Rank-local**: `vec.getArray()`, `vec.setArray()`, all numpy ops, anything inside `if MPIrank == 0:`.
@@ -156,7 +158,7 @@ The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment ca
 | 1 | `_ReadYaml(filename)` :247 | — | `self.input`, every YAML attr, `self.tNow` |
 | 2 | `_STRAMesh()` :256 | ReadYaml (`strataFile`) | `stratH/stratZ/phiS/stratK = None` |
 | 3 | `_VoroBuild()` :259 | — | Voronoi cache attrs reset |
-| 4 | `_UnstMesh()` :262 | ReadYaml + STRAMesh | `dm`, `hLocal`, `hGlobal`, `locIDs`, `glbIDs`, `lpoints`, `mpoints`, `lcoords`, `mCoords`, `larea`, `FVmesh_ngbID`, `lgmap_*`, `idBorders/idLBounds/ghostIDs`, `bL/bG`, calls `readStratLayers` |
+| 4 | `_UnstMesh()` :262 | ReadYaml + STRAMesh | `dm`, `hLocal`, `hGlobal`, `locIDs`, `glbIDs`, `lpoints`, `mpoints`, `lcoords`, `larea`, `FVmesh_ngbID`, `lgmap_*`, `idBorders/idLBounds/ghostIDs`, `bL/bG`, calls `readStratLayers` |
 | 5 | `_WriteMesh()` :265 | UnstMesh | `step`, `outputDir`, `upsG/upsL` |
 | 6 | `_FAMesh()` :268 | UnstMesh | `iMat`, `fillFAL`, `FAG`, `FAL`, `rtol`; defines `_matrix_build`, `_matrix_build_diag`, `_solve_KSP*` for every downstream class |
 | 7 | `_IceMesh()` :271 | FAMesh | `iceHL/iceMeltL/iceMeltRiverL/iceUbL/iceAbrL/iceFAL/iceFAG/iceFlex` + cached `iceMat` (only if `iceOn`) |
@@ -275,7 +277,7 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 
 ## Known bugs (fix before refactoring)
 All issues found by the 2026-10 analytical benchmarks and partition checks are fixed (see `docs/dev/FIXED_BUGS.md`). When you find one, record it here with how to reproduce it, and pin it with a benchmark or test at the current behaviour.
-- _(none currently open)_
+- **Plate-interpolation advection with stratigraphy crashes** (`domain: advect: interp` + a tectonics `hdisp` map + `strata` on). At the first plate update `tectonics._advectStrati` → `_findPts2Reduce` reads `self.idNbghs`, which nothing has assigned since the July 2024 refactor that removed `earthplates.py` (commit `5ea92c3`): `AttributeError: 'Model' object has no attribute 'idNbghs'`. Reproduce: `minimal_strat.yml` plus `advect: 'interp'` and a tectonics event with a zero `hdisp` map ending mid-run. Pinned at the current behaviour by `test_plate_advection_with_strata_known_bug` (`tests/test_advection.py`), which fails on purpose once fixed. The same path also holds several whole-mesh arrays on every rank (`tec_IDs`, `tec_weights`, and an `mpoints × stratStep` array per strata field in `_updateStratInfo`); fix the memory with the bug.
 
 ## Lessons from fixed bugs (full list: `docs/dev/FIXED_BUGS.md`)
 - Any `Vec`/`Mat` reduction, scatter or `Allreduce` under `if MPIrank == 0` or a rank-local `.any()` deadlocks at np>1, and serial always passes.

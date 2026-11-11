@@ -1131,3 +1131,98 @@ def test_advection_partition_invariant(tmp_path):
     edge, interior = dist < 600.0, dist >= 600.0
     assert d[interior].max() < 0.01, f"interior difference {d[interior].max():.3e} m"
     assert d[edge].max() < 0.01, f"edge-zone difference {d[edge].max():.3e} m"
+
+
+# ---------------------------------------------------------------------------
+# Mesh distribution: no whole-mesh copies on the ranks
+# ---------------------------------------------------------------------------
+
+_MESH_MEMORY_SCRIPT = '''\
+"""Child for test_mesh_not_replicated_per_rank (mpirun -n 2)."""
+import json, sys
+import numpy as np
+from scipy import spatial
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False)
+s = {}
+# 1. No rank keeps a whole-mesh coordinate copy after init (it is loaded
+#    lazily, only by global flexure / plate advection).
+s["mcoords_held"] = (vars(m).get("mCoords") is not None
+                     or vars(m).get("_mCoords") is not None)
+# 2. Forcing maps are stored as local slices.
+s["rain_len_ok"] = bool(m.rainMesh.shape[0] == m.lpoints)
+# 3. locIDs delivered by the distribution == nearest input vertex of each
+#    local coordinate (the KDTree mapping it replaced); glbIDs == owned ids.
+with np.load(m.meshFile) as d:
+    v = d[m.infoCoords]; z = d[m.infoElev]
+_, kd = spatial.cKDTree(v).query(m.lcoords, k=1)
+s["locids_ok"] = bool(np.array_equal(kd, m.locIDs))
+s["glbids_ok"] = bool(np.array_equal(m.glbIDs, m.locIDs[m.glIDs]))
+s["elev_ok"] = bool(np.array_equal(m.hLocal.getArray(), z[m.locIDs]))
+# 4. The lazy property returns the file coordinates.
+s["lazy_ok"] = bool(np.array_equal(m.mCoords, v))
+allok = MPI.COMM_WORLD.gather(s, root=0)
+m.destroy()
+if MPI.COMM_WORLD.rank == 0:
+    with open(sys.argv[2], "w") as f:
+        json.dump(allok, f)
+'''
+
+
+def test_mesh_not_replicated_per_rank(tmp_path):
+    """
+    Protects: `UnstMesh._buildMesh` reads the input mesh on rank 0 only and
+    hands every rank its own vertices' input ids and elevations through the
+    DMPlex distribution (2026-11 memory fix).
+
+    Silent failure prevented: every rank loading the whole mesh, building a
+    whole-mesh KDTree and keeping full-mesh `mCoords`/forcing-map copies.
+    That costs ~100 B per MESH node on EVERY rank, so at high rank counts it
+    dominates per-rank memory (a 192-rank Gadi job was OOM-killed). It does
+    not change results, so no output-based test would notice a regression.
+
+    Invariant (np=2, every rank): `_mCoords` is not held after init,
+    `rainMesh` is local-sized, `locIDs` equals the nearest-input-vertex
+    (KDTree) mapping it replaced, `glbIDs == locIDs[glIDs]`, the initial
+    elevation equals the input `z[locIDs]`, and the lazy `mCoords` equals
+    the file's coordinates.
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    needed = ["minimal.yml", "mesh.npz"]
+    if not all((FIXTURES_DIR / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+
+    child = tmp_path / "_mesh_mem.py"
+    child.write_text(_MESH_MEMORY_SCRIPT)
+    run = tmp_path / "n2"
+    run.mkdir()
+    for f in needed:
+        shutil.copy(FIXTURES_DIR / f, run / f)
+    out = run / "stats.json"
+    result = subprocess.run(
+        ["mpirun", "-n", "2", sys.executable, str(child), "minimal.yml", str(out)],
+        cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+        env=mpi_child_env(),
+    )
+    if result.returncode != 0 or not out.exists():
+        pytest.fail(f"`mpirun -n 2` subprocess failed (rc={result.returncode}).\n"
+                    f"stderr:\n{result.stderr[-2000:]}")
+    with open(out) as f:
+        per_rank = json.load(f)
+    for r, s in enumerate(per_rank):
+        assert not s["mcoords_held"], f"rank {r} keeps a whole-mesh mCoords copy"
+        assert s["rain_len_ok"], f"rank {r}: rainMesh is not a local slice"
+        assert s["locids_ok"], f"rank {r}: locIDs differ from the input-mesh mapping"
+        assert s["glbids_ok"], f"rank {r}: glbIDs != locIDs[glIDs]"
+        assert s["elev_ok"], f"rank {r}: initial elevation != input z[locIDs]"
+        assert s["lazy_ok"], f"rank {r}: lazy mCoords != file coordinates"

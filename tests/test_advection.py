@@ -84,3 +84,42 @@ def test_advection_iioe2_smooth_field_not_zeroed(tmp_path):
         f"[{z1.min():.2f}, {z1.max():.2f}], expected ~{const:.0f}"
     )
     np.testing.assert_allclose(z1.mean(), const, atol=1.0)
+
+
+def test_plate_advection_with_strata_known_bug(tmp_path):
+    """
+    KNOWN BUG, pinned at its CURRENT behaviour (AGENTS.md > Known bugs):
+    plate-interpolation advection (`domain: advect: interp` + a tectonics
+    `hdisp` map) with stratigraphy on crashes at the first plate update.
+    `tectonics._advectStrati` -> `_findPts2Reduce` reads `self.idNbghs`,
+    which nothing has assigned since the July 2024 refactor that removed
+    `earthplates.py` (commit 5ea92c3).
+
+    When the bug is fixed this test FAILS on purpose: replace it with a
+    guard on the fixed behaviour (strata advected, Σ layers conserved).
+    """
+    import shutil
+
+    from gospl.model import Model
+
+    for f in ("minimal_strat.yml", "mesh.npz"):
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    with np.load(tmp_path / "mesh.npz") as d:
+        np.savez(tmp_path / "hdisp.npz", xyz=np.zeros((len(d["v"]), 3)))
+    yml = (tmp_path / "minimal_strat.yml").read_text()
+    yml = yml.replace("domain:\n", "domain:\n    advect: 'interp'\n", 1)
+    yml += ("\ntectonics:\n  - start: 0.\n    end: 60.\n"
+            "    hdisp: ['hdisp', 'xyz']\n  - start: 60.\n    end: 100.\n")
+    (tmp_path / "plate_strat.yml").write_text(yml)
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    model = None
+    try:
+        model = Model("plate_strat.yml", verbose=False)
+        with pytest.raises(AttributeError, match="idNbghs"):
+            model.runProcesses()
+    finally:
+        if model is not None:
+            model.destroy()
+        os.chdir(cwd)
