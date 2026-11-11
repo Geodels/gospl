@@ -86,17 +86,22 @@ def test_advection_iioe2_smooth_field_not_zeroed(tmp_path):
     np.testing.assert_allclose(z1.mean(), const, atol=1.0)
 
 
-def test_plate_advection_with_strata_known_bug(tmp_path):
+def test_plate_advection_moves_stratigraphy(tmp_path):
     """
-    KNOWN BUG, pinned at its CURRENT behaviour (AGENTS.md > Known bugs):
-    plate-interpolation advection (`domain: advect: interp` + a tectonics
-    `hdisp` map) with stratigraphy on crashes at the first plate update.
-    `tectonics._advectStrati` -> `_findPts2Reduce` reads `self.idNbghs`,
-    which nothing has assigned since the July 2024 refactor that removed
-    `earthplates.py` (commit 5ea92c3).
+    Protects: plate-interpolation advection (`advect: interp` + `hdisp`) with
+    stratigraphy on (`tectonics._advectStrati` -> `STRAMesh.stratalRecord`).
 
-    When the bug is fixed this test FAILS on purpose: replace it with a
-    guard on the fixed behaviour (strata advected, Σ layers conserved).
+    Silent failure prevented: the path crashed at the first plate update
+    (`AttributeError: 'Model' object has no attribute 'idNbghs'`, unassigned
+    since the July 2024 refactor, 5ea92c3) and, past that, indexed the 1-D
+    `tec_sumw` as 3-D. It also moved only stratH/stratZ/phiS, leaving stratK
+    (and the dual/provenance/duricrust layers) behind (fixed 2026-11-11;
+    docs/dev/FIXED_BUGS.md).
+
+    Invariant: under a shear plate motion, right after the plate update every
+    per-layer field equals an independent numpy inverse-distance
+    interpolation of its pre-update values with the same `tec_*` tables
+    (to 1e-12 relative; exact on macOS), and the run completes.
     """
     import shutil
 
@@ -105,24 +110,45 @@ def test_plate_advection_with_strata_known_bug(tmp_path):
     for f in ("minimal_strat.yml", "mesh.npz"):
         shutil.copy(FIXTURES_DIR / f, tmp_path / f)
     with np.load(tmp_path / "mesh.npz") as d:
-        np.savez(tmp_path / "hdisp.npz", xyz=np.zeros((len(d["v"]), 3)))
+        v = d["v"]
+    vel = np.zeros_like(v)
+    vel[:, 0] = (np.ptp(v[:, 0]) / 600.0) * (v[:, 1] - v[:, 1].mean()) / np.ptp(v[:, 1])
+    np.savez(tmp_path / "shear.npz", xyz=vel)
     yml = (tmp_path / "minimal_strat.yml").read_text()
     yml = yml.replace("domain:\n", "domain:\n    advect: 'interp'\n", 1)
     yml += ("\ntectonics:\n  - start: 0.\n    end: 60.\n"
-            "    hdisp: ['hdisp', 'xyz']\n  - start: 60.\n    end: 100.\n")
+            "    hdisp: ['shear', 'xyz']\n  - start: 60.\n    end: 100.\n")
     (tmp_path / "plate_strat.yml").write_text(yml)
 
     cwd = os.getcwd()
     os.chdir(tmp_path)
     model = None
+    checked = []
     try:
         model = Model("plate_strat.yml", verbose=False)
-        with pytest.raises(AttributeError, match="idNbghs"):
-            model.runProcesses()
+        orig = model._advectStrati
+
+        def checked_advect():
+            before = {k: a.copy() for k, a in model._stratFields().items()}
+            ids, w, on = model.tec_IDs, model.tec_weights, model.tec_onIDs
+            orig()
+            after = model._stratFields()
+            for k, a in before.items():
+                exp = np.einsum("np,np...->n...", w, a[ids]) / w.sum(1)[:, None]
+                if len(on):
+                    exp[on] = a[ids[on, 0]]
+                np.testing.assert_allclose(after[k], exp, rtol=1e-12, atol=1e-9,
+                                           err_msg=f"{k} not advected as expected")
+                checked.append(k)
+
+        model._advectStrati = checked_advect
+        model.runProcesses()
+        assert model.tNow == model.tEnd
     finally:
         if model is not None:
             model.destroy()
         os.chdir(cwd)
+    assert {"stratH", "stratZ", "phiS", "stratK"} <= set(checked), checked
 
 
 def test_tectonic_event_without_maps_runs(tmp_path):
@@ -161,3 +187,53 @@ def test_tectonic_event_without_maps_runs(tmp_path):
         if model is not None:
             model.destroy()
         os.chdir(cwd)
+
+
+def test_scheme_advection_leaves_stratigraphy_known_bug(tmp_path):
+    """
+    KNOWN BUG, pinned at its CURRENT behaviour (AGENTS.md > Known bugs):
+    the advection schemes (`advect: upwind|iioe1|iioe2` + `hdisp`) move the
+    surface fields in `tectonics._varAdvector` (elevation, cumED, flexure,
+    soil) but never the stratigraphic record, so the layers stay where they
+    were deposited while the surface above them moves. (Plate interpolation,
+    `advect: interp`, does move them: `test_plate_advection_moves_stratigraphy`.)
+
+    When fixed this test FAILS on purpose: replace it with a guard that the
+    layers move with the surface.
+    """
+    import shutil
+
+    from gospl.model import Model
+
+    for f in ("flat_advect.yml", "flat_advect.npz"):
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    yml = (tmp_path / "flat_advect.yml").read_text()
+    yml = yml.replace("    dt: 2.5e3\n", "    dt: 2.5e3\n    strat: 2.5e3\n")
+    assert "strat: 2.5e3" in yml
+    (tmp_path / "adv_strat.yml").write_text(yml)
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    model = None
+    seen = []
+    try:
+        model = Model("adv_strat.yml", verbose=False)
+        orig = model._varAdvector
+
+        def pinned():
+            z0 = model.stratZ.copy()
+            h0 = model.hLocal.getArray().copy()
+            orig()
+            if model.stratStep > 0:
+                moved = np.abs(model.hLocal.getArray() - h0).max()
+                seen.append((moved, np.array_equal(model.stratZ, z0)))
+
+        model._varAdvector = pinned
+        model.runProcesses()
+    finally:
+        if model is not None:
+            model.destroy()
+        os.chdir(cwd)
+    assert seen, "no advection step with recorded layers"
+    assert all(moved > 1.0 for moved, _ in seen), "the surface did not move"
+    assert all(same for _, same in seen), "the layers moved: the known bug may be fixed"

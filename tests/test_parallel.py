@@ -1318,3 +1318,86 @@ def test_plate_interp_tables_local(tmp_path):
     h1, h2 = np.array(res[1]["h"]), np.array(res[2]["h"])
     assert np.abs(h1 - h2).max() < 1.0e-9, (
         f"plate advection np=1 vs np=2 differ by {np.abs(h1 - h2).max():.3g} m")
+
+
+_PLATE_STRAT_SCRIPT = '''\
+"""Child for test_plate_strata_partition_invariant (mpirun -n N)."""
+import sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False)
+m.runProcesses()
+own = m.glIDs
+f = {k: v[own].copy() for k, v in m._stratFields().items()}
+f["h"] = m.hLocal.getArray()[own].copy()
+g = MPI.COMM_WORLD.gather((m.locIDs[own], f, m.stratStep), root=0)
+m.destroy()
+if MPI.COMM_WORLD.rank == 0:
+    ids = np.concatenate([a for a, _, _ in g]); out = {"stratStep": g[0][2]}
+    for k in g[0][1]:
+        arr = np.concatenate([b[k] for _, b, _ in g]); o = np.empty_like(arr); o[ids] = arr
+        out[k] = o
+    np.savez(sys.argv[2], **out)
+'''
+
+
+def test_plate_strata_partition_invariant(tmp_path):
+    """
+    Protects: plate-interpolation advection of the stratigraphy fetches each
+    rank's source rows from their OWNERS (`tectonics._fetchOwnerRows`, AO +
+    blocked scatter) and syncs owned rows (`stratalRecord`).
+
+    Silent failure prevented: a wrong owner mapping or a ghost-row sync gives
+    a partition-dependent stratigraphy (and the path used to crash outright:
+    `idNbghs`). The flat advection fixture has no erosion (K=0), so np=1 and
+    np=2 must agree exactly; a run with erosion differs by round-off-level
+    routing sensitivity even without tectonics.
+
+    Invariant: after a plate stage with layers recorded, every per-layer
+    field and the elevation are bitwise equal at np=1 and np=2.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    import numpy as np
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    needed = ["flat_advect.yml", "flat_advect.npz"]
+    if not all((FIXTURES_DIR / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+
+    yml = (FIXTURES_DIR / "flat_advect.yml").read_text()
+    yml = yml.replace("advect: 'iioe2'", "advect: 'interp'")
+    yml = yml.replace("    dt: 2.5e3\n", "    dt: 2.5e3\n    strat: 2.5e3\n")
+    old_tec = "      end: 1.e4\n      hdisp: ['flat_advect','uv']"
+    assert old_tec in yml and "strat: 2.5e3" in yml
+    yml = yml.replace(old_tec, "      end: 7.5e3\n      hdisp: ['flat_advect','uv']\n"
+                               "    - start: 7.5e3\n      end: 1.e4")
+    child = tmp_path / "_plate_strat.py"
+    child.write_text(_PLATE_STRAT_SCRIPT)
+    res = {}
+    for n in (1, 2):
+        run = tmp_path / f"n{n}"
+        run.mkdir()
+        shutil.copy(FIXTURES_DIR / "flat_advect.npz", run / "flat_advect.npz")
+        (run / "plate.yml").write_text(yml)
+        out = run / "out.npz"
+        r = subprocess.run(
+            ["mpirun", "-n", str(n), sys.executable, str(child), "plate.yml", str(out)],
+            cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+            env=mpi_child_env(),
+        )
+        if r.returncode != 0 or not out.exists():
+            pytest.fail(f"`mpirun -n {n}` subprocess failed (rc={r.returncode}).\n"
+                        f"stderr:\n{r.stderr[-2000:]}")
+        res[n] = dict(np.load(out))
+    assert res[1]["stratStep"] > 0, "no layer recorded before the plate update"
+    for k in res[1]:
+        assert np.array_equal(res[1][k], res[2][k]), (
+            f"{k}: np=1 vs np=2 differ by {np.abs(res[1][k] - res[2][k]).max():.3g}")

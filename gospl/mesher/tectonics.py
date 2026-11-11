@@ -693,34 +693,28 @@ class Tectonics(object):
 
         return
 
-    def _findPts2Reduce(self):
-        """
-        Finds the nodes part of another partition that are required for interpolation.
-
-        :return: Indices of needed nodes present in other partitions
-        """
-
-        # Global neighbours for each local partition
-        lgNghbs = self.idNbghs[self.locIDs, :].flatten()
-
-        # Global IDs required locally but part of another partition
-        gids = lgNghbs[~np.isin(lgNghbs, self.locIDs)]
-
-        # Get all points that have to be transferred
-        vals = np.zeros(self.mpoints, dtype=int)
-        vals[gids] = 1
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, vals, op=MPI.MAX)
-
-        return np.where(vals > 0)[0]
-
     def _advectStrati(self):
         """
-        From advected stratigraphic information, retrieve points that are part of another partition and perform the interpolation.
+        Move the stratigraphic record with the plates: each local node takes
+        the inverse-distance mix of the layers of its three nearest advected
+        nodes (the same `tec_*` tables as elevation, see
+        `_readAdvectionData`), for every per-layer field (`STRAMesh._stratFields`).
+
+        Those source nodes can sit on any rank, so only the rows this rank's
+        interpolation reads are fetched, from their owners, in one blocked
+        PETSc scatter (input-mesh id -> PETSc index through a memory-scalable
+        AO); memory scales with the partition. Then `stratalRecord` does the
+        interpolation and the halo sync.
+
+        Collective: every rank calls it (gated on `stratNb`/`stratStep`/the
+        plate timer, all identical on every rank).
+
+        Scratch used: ``self.tmp`` / ``self.tmpL`` (through `stratalRecord`).
         """
 
-        # Get lobal point IDs that will need to be transferred globally
         t0 = process_time()
-        redIDs = self._findPts2Reduce()
+        needed = np.unique(self.tec_IDs)
+        source = self._fetchOwnerRows(needed, self._stratFields())
         if MPIrank == 0 and self.verbose:
             print(
                 "Send stratigraphy information to local partition (%0.02f seconds)"
@@ -728,64 +722,65 @@ class Tectonics(object):
                 flush=True,
             )
 
-        # Transfer the variables accordingly and perform operation
         t0 = process_time()
-        # The tec_* tables are already local (one row per local node) and
-        # tec_onIDs holds local indices. NOTE (known bug, AGENTS.md): this
-        # path is unreachable today (`_findPts2Reduce` raises first), and
-        # `tec_sumw` is 1-D, so the `[:, :, None]` below would also raise.
-        nghs = self.tec_IDs
-        wgts = self.tec_weights[:, :, None]
-        sumw = self.tec_sumw[:, :, None]
-        onID = self.tec_onIDs
-
-        self.stratH[:, : self.stratStep] = self._updateStratInfo(
-            redIDs, self.stratH[:, : self.stratStep], sumw, onID, wgts, nghs
-        )
-        self.stratZ[:, : self.stratStep] = self._updateStratInfo(
-            redIDs, self.stratZ[:, : self.stratStep], sumw, onID, wgts, nghs
-        )
-        self.phiS[:, : self.stratStep] = self._updateStratInfo(
-            redIDs, self.phiS[:, : self.stratStep], sumw, onID, wgts, nghs
-        )
+        rows = np.searchsorted(needed, self.tec_IDs)
+        self.stratalRecord(rows, self.tec_weights, self.tec_onIDs, source=source)
         if MPIrank == 0 and self.verbose:
             print(
                 "Define local stratigraphy variables after advection (%0.02f seconds)"
                 % (process_time() - t0),
                 flush=True,
             )
-        del nghs, wgts, sumw, onID
 
         return
 
-    def _updateStratInfo(self, reduceIDs, variable, sumw, onIDs, weights, nghs):
+    def _fetchOwnerRows(self, ids, fields):
         """
-        Update stratigraphic variables based on interpolated values.
+        Collect, for a sorted array of input-mesh ids, the rows of local
+        per-node arrays held by the ranks that OWN those nodes.
 
-        :arg reduceIDs: indices of nodes information that need to be available globally
-        :arg variable: stratigraphic variable to interpolate
-        :arg sumw: sum of weights for interpolation
-        :arg onIDs: nodes that remain fixed
-        :arg weights: weights for interpolation
-        :arg nghs: neighbours for interpolation
+        :arg ids: sorted unique input-mesh ids wanted on this rank
+        :arg fields: dict ``name -> local array`` (first axis ``lpoints``)
+        :return: dict ``name -> array`` with first axis ``len(ids)``, rows in
+            the order of ``ids``, other axes unchanged
 
-        :return: nvar interpolated stratigraphic variable
+        Collective (AO creation and the scatter): every rank must call it.
         """
 
-        # Reduce variable so that all values that need to be read from another partition can be
-        vals = np.zeros((self.mpoints, self.stratStep), dtype=np.float64) + MISSING_DATA_SENTINEL
-        vals[self.locIDs, :] = variable
-        redVals = vals[reduceIDs, :]
-        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, redVals, op=MPI.MAX)
-        vals[reduceIDs, :] = redVals
+        PETSc = petsc4py.PETSc
+        comm = PETSc.COMM_WORLD
+        names = list(fields)
+        flat = [np.asarray(fields[n]).reshape(self.lpoints, -1) for n in names]
+        widths = [f.shape[1] for f in flat]
+        ncols = int(sum(widths))
+        own = self.glIDs
+        nown = len(own)
 
-        # Inverse weighting distance...
-        tmp = np.sum(weights * vals[nghs, :], axis=1)
-        nvar = np.divide(tmp, sumw, where=sumw != 0, out=np.zeros_like(tmp))
-        if len(onIDs) > 0:
-            nvar[onIDs, :] = vals[nghs[onIDs, 0], :]
+        # Owned nodes in global-vector order (gcoords == lcoords[glIDs]), so
+        # owned node i has PETSc index rstart + i.
+        rstart = self.hGlobal.getOwnershipRange()[0]
+        app = self.locIDs[own].astype(PETSc.IntType)
+        pidx = np.arange(rstart, rstart + nown, dtype=PETSc.IntType)
+        ao = PETSc.AO().createMemoryScalable(app, pidx, comm=comm)
+        want = ao.app2petsc(np.asarray(ids, dtype=PETSc.IntType).copy())
 
-        return nvar
+        gvec = PETSc.Vec().createMPI((nown * ncols, PETSc.DECIDE), bsize=ncols, comm=comm)
+        gvec.setArray(np.hstack(flat)[own].ravel())
+        isf = PETSc.IS().createBlock(ncols, want, comm=PETSc.COMM_SELF)
+        lvec = PETSc.Vec().createSeq(len(ids) * ncols, bsize=ncols, comm=PETSc.COMM_SELF)
+        sct = PETSc.Scatter().create(gvec, isf, lvec, None)
+        sct.scatter(gvec, lvec, addv=PETSc.InsertMode.INSERT,
+                    mode=PETSc.ScatterMode.FORWARD)
+        got = lvec.getArray().reshape(len(ids), ncols).copy()
+        for obj in (sct, lvec, isf, gvec, ao):
+            obj.destroy()
+
+        out, c0 = {}, 0
+        for n, w in zip(names, widths):
+            shape = (len(ids),) + np.asarray(fields[n]).shape[1:]
+            out[n] = np.ascontiguousarray(got[:, c0:c0 + w]).reshape(shape)
+            c0 += w
+        return out
 
     def updatePaleoZ(self):
         """

@@ -536,6 +536,7 @@ def test_dual_lithology_advection_fine_pile():
     m.tmp = _MockVec(n)
     m.tmpL = _MockVec(n)
     m.dm = _MockDM()
+    m.glIDs = np.arange(n)   # every node owned (serial)
 
     # Identity interpolation: 3 neighbours all = self, weights summing to 1.
     indices = np.repeat(np.arange(n)[:, None], 3, axis=1)
