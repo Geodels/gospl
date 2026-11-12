@@ -892,9 +892,9 @@ def test_singular_routing_solve_still_falls_back(minimal_model):
         A.destroy(); b.destroy(); x.destroy()
 
 
-def _chain_into_cycle_system():
+def _chain_into_cycle_system(big=1.0):
     """N=1000 routing system: a 10-cell chain (200..209, b=1 each) drains into
-    a closed 2-cycle (100 <-> 101); cell 500 is an isolated source (b=1)."""
+    a closed 2-cycle (100 <-> 101); cell 500 is an isolated source (b=big)."""
     import petsc4py
     PETSc = petsc4py.PETSc
     N = 1000
@@ -914,9 +914,11 @@ def _chain_into_cycle_system():
     A.assemble()
     b = A.createVecLeft()
     b.set(0.0)
-    for i in list(range(200, 210)) + [500]:
+    for i in range(200, 210):
         if lo <= i < hi:
             b.setValue(i, 1.0)
+    if lo <= 500 < hi:
+        b.setValue(500, big)
     b.assemble()
     x = b.duplicate()
     b.copy(result=x)
@@ -950,6 +952,40 @@ def test_singular_routing_solve_repaired_not_zeroed(minimal_model):
         assert pond is not None, "the solve was zeroed, not repaired"
         assert abs(g(209) - 10.0) < 1e-6, "chain end lost its routed volume"
         assert abs(g(500) - 1.0) < 1e-9, "isolated source lost"
+        trapped = MPI.COMM_WORLD.allreduce(float(pond.sum()), op=MPI.SUM)
+        assert abs(trapped - 10.0) < 1e-6, (
+            "cycle should trap the chain's 10 units, got %g" % trapped)
+    finally:
+        m._routingPond = None
+        A.destroy(); b.destroy(); x.destroy()
+
+
+def test_singular_routing_solve_repaired_when_no_cell_flagged(minimal_model):
+    """
+    Protects: flowplex._pondRoutingRegion growing its region. When the flow
+    entering a cycle is small next to ||b|| (here one source of 1e6 elsewhere),
+    no cell exceeds the loose residual threshold (1e-3 ||b||) and the log read
+    "0 un-drained cell(s) localised: its result is discarded (zeroed)" on a
+    10 km global run, dropping the whole cascade pass, the big source with it.
+    The repair must find the cycle at the solver's own tolerance and keep
+    everything.
+    """
+    from mpi4py import MPI
+    m = minimal_model
+    _fresh_flow_ksps(m)
+    A, b, x = _chain_into_cycle_system(big=1.0e6)
+    try:
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        pond = m._routingPond
+        lo, hi = x.getOwnershipRange()
+        xa = x.getArray()
+
+        def g(i):
+            v = xa[i - lo] if lo <= i < hi else 0.0
+            return MPI.COMM_WORLD.allreduce(v, op=MPI.SUM)
+
+        assert pond is not None, "the solve was zeroed, not repaired"
+        assert abs(g(500) - 1.0e6) < 1e-3, "the large source was dropped"
         trapped = MPI.COMM_WORLD.allreduce(float(pond.sum()), op=MPI.SUM)
         assert abs(trapped - 10.0) < 1e-6, (
             "cycle should trap the chain's 10 units, got %g" % trapped)

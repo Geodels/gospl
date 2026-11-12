@@ -400,7 +400,7 @@ class FAMesh(object):
             benign = (not fatal) and (0 <= nbad <= self._undrained_benign_cap)
             # A non-fatal ROUTING solve over a small region is repaired instead
             # of discarded (see _pondRoutingRegion); global decision.
-            repair = benign and route and have_mask and nbad > 0
+            repair = benign and route and have_mask
             repaired = False
             if repair:
                 repaired = self._pondRoutingRegion(
@@ -457,8 +457,8 @@ class FAMesh(object):
                 if repaired:
                     print(
                         "[flow] routing solve: %d un-drained cell(s) made local "
-                        "sinks and the rest re-solved (trapped volume kept)"
-                        % nbad,
+                        "sinks (%d round(s)) and the rest re-solved (trapped "
+                        "volume kept)" % self._pondInfo,
                         flush=True,
                     )
                 elif benign:
@@ -710,45 +710,87 @@ class FAMesh(object):
         un-drainable region (a flow cycle or closed pocket) instead of
         discarding it.
 
-        The flagged cells ``bad`` (owned rows, the residual mask of
-        `_solve_KSP2`) become local sinks: their columns are removed from the
-        operator (nothing flows out of them; their diagonal stays 1), which
-        makes the system non-singular, and it is re-solved. Every other cell
-        gets its correct routed value; a sink keeps its own source plus what
-        flows into it from outside the region, and that volume is stored in
-        ``self._routingPond`` (owned rows) so the sediment cascade can deposit
-        it in place (`_takeRoutingPond`). Until 2026-11 the whole solve was
-        zeroed: on a 10 km global run a 3-cell cycle dropped the first pass of
-        the continental sediment cascade (about a quarter of that step's routed
-        sediment).
+        Cells of the region become local sinks: their columns are removed from
+        the operator (nothing flows out of them; their diagonal stays 1), which
+        makes the system non-singular, and it is re-solved with the exact
+        solver. Every other cell gets its correct routed value; a sink keeps
+        its own source plus what flows into it from outside the region, and
+        that volume is stored in ``self._routingPond`` (owned rows) so the
+        sediment cascade can deposit it in place (`_takeRoutingPond`).
 
-        Collective. Returns True when the re-solve converged (global); on
+        The region starts from ``bad`` (owned rows above the loose residual
+        threshold of `_solve_KSP2`; may be empty) and grows over a few rounds:
+        after each failed re-solve, cells whose residual exceeds the solver's
+        own acceptance level (``1e2 * rtol * ||b||``) are added. That covers a
+        cycle whose inflow is small next to ``||b||`` (it fails the KSP but
+        flags no cell at the loose threshold: the "0 un-drained cell(s)" case)
+        and a cycle only partly flagged at first. It stops when the region
+        would exceed the benign cap. Until 2026-11 the whole solve was zeroed:
+        on a 10 km global run (G 0.1-0.2) a cycle dropped a full pass of the
+        continental sediment cascade (a quarter of that step's sediment).
+
+        Collective. Returns True when a re-solve converged (global); on
         failure the caller zeroes the solve as before.
         """
-        keep = np.ones(len(bad))
-        keep[bad] = 0.0
-        d = vector1.duplicate()
-        d.setArray(keep)
-        e = vector1.duplicate()
-        e.setArray(1.0 - keep)
-        M = matrix.duplicate(copy=True)
-        M.diagonalScale(R=d)                     # drop the sinks' columns
-        M.setDiagonal(e, addv=petsc4py.PETSc.InsertMode.ADD_VALUES)
-        vector1.copy(vector2)
-        if self._ida_exact_allowed:
-            r = self._solveIDAExact(M, vector1, vector2, "pond")
-        else:
-            ksp = self._ksp_main
-            ksp.setOperators(M, M)
-            ksp.solve(vector1, vector2)
-            r = ksp.getConvergedReason()
-        M.destroy()
-        d.destroy()
-        e.destroy()
-        if r < 0:
+        comm = MPI.COMM_WORLD
+        mask = np.asarray(bad, dtype=bool).copy()
+        bnorm = vector1.norm()
+        tight = 1.0e2 * self.rtol * max(bnorm, 1.0e-300)
+        resid = vector1.duplicate()
+        ok = False
+        rounds = 0
+        for rounds in range(1, 5):
+            keep = np.ones(len(mask))
+            keep[mask] = 0.0
+            d = vector1.duplicate()
+            d.setArray(keep)
+            e = vector1.duplicate()
+            e.setArray(1.0 - keep)
+            M = matrix.duplicate(copy=True)
+            M.diagonalScale(R=d)                 # drop the sinks' columns
+            M.setDiagonal(e, addv=petsc4py.PETSc.InsertMode.ADD_VALUES)
+            vector1.copy(vector2)
+            if self._ida_exact_allowed:
+                r = self._solveIDAExact(M, vector1, vector2, "pond",
+                                        keep_iterate=True)
+            else:
+                ksp = self._ksp_main
+                ksp.setOperators(M, M)
+                ksp.solve(vector1, vector2)
+                r = ksp.getConvergedReason()
+            if r >= 0:
+                ok = True
+            else:
+                M.mult(vector2, resid)
+                resid.aypx(-1.0, vector1)        # b - M x
+                ra = np.abs(resid.getArray())
+                grow = (ra > tight) | ~np.isfinite(ra)
+                grow &= ~mask
+                n_new = comm.allreduce(int(np.count_nonzero(grow)), op=MPI.SUM)
+                n_tot = comm.allreduce(
+                    int(np.count_nonzero(mask | grow)), op=MPI.SUM
+                )
+                mask |= grow
+            M.destroy()
+            d.destroy()
+            e.destroy()
+            if ok or n_new == 0 or n_tot > self._undrained_benign_cap:
+                break
+        resid.destroy()
+        self._pondInfo = (
+            comm.allreduce(int(np.count_nonzero(mask)), op=MPI.SUM), rounds
+        )
+        if not ok:
+            if MPIrank == 0:
+                print(
+                    "[flow] routing repair failed after %d round(s) (%d cell(s) "
+                    "made sinks); the solve is discarded (zeroed)"
+                    % (rounds, self._pondInfo[0]),
+                    flush=True,
+                )
             return False
-        arr = np.zeros(len(bad))
-        arr[bad] = vector2.getArray()[bad]
+        arr = np.zeros(len(mask))
+        arr[mask] = vector2.getArray()[mask]
         self._routingPond = arr              # owned rows; mapped on take
         return True
 
@@ -795,7 +837,7 @@ class FAMesh(object):
             _rs.record(self, "ksp_stale_guess_reset", seed=bool(seed),
                        ratio=float(rnorm / bnorm) if bnorm > 0 else -1.0)
 
-    def _solveIDAExact(self, matrix, vector1, vector2, key):
+    def _solveIDAExact(self, matrix, vector1, vector2, key, keep_iterate=False):
         """
         Solve an ``(I - W^T)`` routing system with EXACT per-rank block
         factors: ``fgmres`` + ``bjacobi`` with an ``lu`` sub-solver
@@ -853,7 +895,7 @@ class FAMesh(object):
             if not np.isfinite(rnorm) or rnorm > 1.0e2 * self.rtol * max(bnorm, 1e-300):
                 r = -100                             # not actually solved
         _rs.count_ksp(self, key + "_exact", ksp.getIterationNumber(), r)
-        if r < 0:
+        if r < 0 and not keep_iterate:
             # Leave a clean, bounded guess for the fallback.
             vector1.copy(vector2)
         return r
