@@ -25,9 +25,18 @@ Options:
 
 - ``-i`` / ``--input`` *(required)* — the YAML input file.
 - ``-v`` / ``--verbose`` — print per-step model progress (phase-grouped). The
-  first line reports the goSPL version.
+  first line reports the goSPL version. It also prints ``[zprobe]`` lines: the
+  global elevation extremes after each stage, with the input-mesh node id of the
+  maximum (the row of the mesh ``.npz`` file, the same on any number of
+  processors), the volume and peak thickness of each deposit that has no upper
+  bound, and the stage that raised the maximum. They are the first place to look
+  for the origin of a spike.
 - ``--log`` — write the PETSc solver log summary.
-- ``--profile`` — record a per-phase wall-clock profile (``profile.json``).
+- ``--profile`` — record a per-phase wall-clock profile (``profile.json``). For a
+  finer split of a slow step (marine smoother, eps-fill, cascades, sediment
+  routing, SPL solve), run ``mpirun -n N python scripts/stage_profile.py
+  input.yml`` from the source tree on a two or three step window: it prints the
+  wall time per sub-stage on rank 0 and on the slowest rank.
 - ``--summary FILE`` — write one machine-readable JSON record per time step to
   ``FILE`` (JSON Lines): elevation range, NaN/inf counts, the step's eroded /
   deposited volume, per-phase wall time, flow-solver iteration counts and

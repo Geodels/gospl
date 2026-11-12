@@ -34,6 +34,10 @@ Stream Power Law parameters
         d. ``n`` is the slope coefficient from the SPL law: :math:`E = K (\bar{P}A)^m S^n` and takes the default value of 1.0.
         e. ``G`` dimensionless deposition coefficient for continental domain when accounting for sedimentation rate in the SPL following the model of `Yuan et al, 2019 <https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018JF004867>`_. The default value is 0.0 (purely detachment-limited model).
 
+        .. tip::
+
+            Choose ``G`` from the rainfall: keep ``G`` at or below about **half the typical rain rate in m/yr** over land (``G ≲ rain/2``; for example ``G: 0.1`` for rain mostly above 0.2 m/yr). The rule does not depend on the mesh resolution. The deposition term grows as ``G/rain``, and where it reaches the 0.99 cap (see :ref:`ero`) the coupled erosion-deposition system becomes nearly singular: the solve slows down step after step and can produce a single-cell elevation spike. With ``-v``, a growing "Solve SPL accounting for sediment deposition" time and ``zprobe`` lines reporting many cells at the cap are the warning signs.
+
         When ``n`` is **not** equal to 1.0 the SPL is solved with a non-linear PETSc ``SNES`` (the linear ``n == 1`` case uses a direct Krylov solve and needs none of the controls below). The transport-limited (``G > 0``) solver is the dominant cost of such a run, and its behaviour can be tuned (all optional):
 
         f. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
@@ -77,7 +81,7 @@ Hillslope and marine deposition parameters
 
         f. ``tsSteps`` is the maximum number of internal time-steps the adaptive controller may take per goSPL step (default: 2000). Increase if the verbose log shows many rejected steps,
         g. ``offshore`` is the distance offshore (m) beyond which the clinoform-distance cap is no longer applied (default: 1.0e7),
-        h. ``oFill`` is a depth (m, negative) **relative to sea level** below which the priority-flood algorithm is not applied — used to skip deep ocean cells (default: -6000.0). The cut-off elevation is ``sea level + oFill``, so with a sea level of 0 the value reads directly as an elevation, but on a model with a deep datum (e.g. ``sea: position: -2200``) an ``oFill`` of ``-1500`` means ``-3700`` m, not ``-1500`` m. Keep it well **below** sea level: the depression fill and the marine flow-direction surface are only smoothed at or above this cut-off, so a value above sea level leaves every bathymetric pocket on the shelf in place and sediment gets trapped at the coast.
+        h. ``oFill`` is a depth (m, negative) **relative to sea level** below which the priority-flood algorithm is not applied — used to skip deep ocean cells (default: -6000.0). The cut-off elevation is ``sea level + oFill``, so with a sea level of 0 the value reads directly as an elevation, but on a model with a deep datum (e.g. ``sea: position: -2200``) an ``oFill`` of ``-1500`` means ``-3700`` m, not ``-1500`` m. Keep it well **below** sea level: the depression fill and the marine flow-direction surface are only smoothed at or above this cut-off, so a value above sea level leaves every bathymetric pocket on the shelf in place and sediment gets trapped at the coast. On a **global** (spherical) model the marine flow-direction fill also starts no lower than the deepest point of the smoothed seafloor (plus 0.1 m), so an ``oFill`` deeper than the deepest ocean has no further effect and the whole ocean floor is filled; lowering ``oFill`` is not needed to route river sediment into the deep basins.
 
         *Optional: marine/lake diffusion solver*
 
@@ -90,6 +94,10 @@ Hillslope and marine deposition parameters
                 picardIts: 2
 
         By default the marine and lake non-linear diffusion is integrated with an adaptive non-linear PETSc time-stepper (``marineSolver: ts``). On large, stiff marine inputs this can dominate the run (the adaptive controller takes many sub-steps and stalls at the diffusivity threshold). The opt-in ``marineSolver: picard`` uses a **lagged-diffusivity** backward-Euler scheme instead: it takes ``picardSub`` sub-steps over the goSPL step (default 10), freezing the diffusivity within each and solving the resulting *linear* system with ``picardIts`` Picard updates (default 2). Each solve is linear (no non-linear stalls or step rejections), which is markedly faster on production meshes. It is an **approximation** — on small problems it matches the default solver almost exactly, but on large runs the deposit geometry differs slightly; increase ``picardSub`` to converge toward the time-stepper solution. The default remains ``ts``.
+
+        If the adaptive ``ts`` solver gives up during a run (too many rejected internal steps, typically with km-thick river-mouth deposits over steep slopes on a global mesh), goSPL prints a warning and switches to the ``picard`` solver for the rest of the run instead of stopping (it uses ``picardSub``/``picardIts``, or their defaults).
+
+        Both solvers move only freshly deposited sediment: across each cell face the diffusivity is taken from the higher of the two cells, so a cell without new deposit cannot lose its pre-existing bed. With ``-v`` the log prints ``Marine diffusion mass rescale``, a final volume correction that should read close to 1. A value far from 1 indicates a problem worth reporting (before November 2026 it read about 0.5 on global runs, because bare seafloor fed material into the deposits).
 
         .. note::
 

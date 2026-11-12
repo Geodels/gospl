@@ -6,7 +6,7 @@ of the tree. Update the relevant file when an invariant changes. Long-form ratio
 `REFACTOR_AUDIT.md`; past bugs and their guards: `docs/dev/FIXED_BUGS.md`; per-change
 history: `docs/dev/CHANGELOG_DEV.md`.
 
-Last reviewed 2026-11-11 against `feat/mesh-memory` (after `v2026.7.14`). In October 2026 this file
+Last reviewed 2026-11-12 against `fix/marine-diffusion-donor` (on `fix/sediment-routing-rescue`, after `v2026.7.14`). In October 2026 this file
 was split: it keeps only the rules that apply everywhere, and the subsystem detail
 moved verbatim into the files below.
 
@@ -36,7 +36,7 @@ agent.
 
 | Task | Command |
 |---|---|
-| Quick check (201 of 214 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
+| Quick check (207 of 221 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
 | One subsystem | `pytest tests/ -m flow` (markers: `tests/README.md`) |
 | Multi-rank guards (~70 s) | `pytest tests/ -m mpi` |
 | Full suite before a commit | `pytest tests/ -n 4` (CI runs it serially) |
@@ -316,6 +316,11 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - A cyclic model's mesh is 3-D (a cylinder) but its inputs are in the flat frame: any geometric operation (displacement, departure point) must map through `_cylinderVelocity`/`_cylinderDisplace`, never add the flat vector to the 3-D coordinates.
 - Memory that scales with the MESH on every rank is invisible at low rank counts (local data dominates) and decisive at high ones; measure the non-root ranks at two rank counts.
 - `flowAccumulation` runs twice per step, so it must not overwrite the per-step forcing it reads: `bL`/`bG` are read-only there and the net source (evaporation, ice split) goes to `_srcL`/`_srcG`. Writing it back evaporated the runoff twice (2026-10-27). `UnstMesh._setRunoffSource` is the only writer of `bL` (rain and orographic paths alike).
+- A face coefficient set by a state on one side (deposit thickness) must come from the cell material leaves (the donor), not the average of the two: averaging lets a bare cell shed bed into a deposit, and the `>= 0` clip after the solve keeps only the gain. A global mass rescale hid this for months by halving every marine deposit (2026-11-12, `_donorDiffCoeffs`). A rescale factor far from 1 is a symptom, not a fix.
+- A threshold derived from one surface must be computed on the surface the algorithm actually uses: the marine eps-fill cut-off came from the raw elevation while the fill ran on the smoothed one, so it never had a seed on a global mesh (no fill, ~660 terminal sinks, km-thick force-deposits).
+- PETSc fieldsplit sub-solver settings made with `subksp.setType()` before `setFromOptions()` do not survive the switch to Schur: set them through the options database and check with `-<prefix>ksp_view`. Both coupled deposition solves silently ran GMRES in their blocks (SPL solve ~5,000 s/step at 5 km).
+- A non-fatal solve that is discarded on failure must not be one whose result carries mass: the sediment routing solves were zeroed every step on fine global meshes until they got the exact-factor rescue (`route=True`).
+- An adaptive solver that can give up (TS `DIVERGED_STEP_REJECTED`) needs a fallback, not an abort: a 144-rank job should not die on an option that has a robust alternative.
 
 ## Intentional surprises (do NOT "fix")
 - **`gid` argument on `mfdreceivers` / `mfdrcvrs`**. The Fortran kernels take an extra `gid(nb)` argument (per-local-node vertex ID `self.gid`, set in `mesher/unstructuredmesh.py`; since 2026-06-21 it is `self.locIDs`, the partition-INVARIANT input-mesh id, no longer PETSc's per-partition numbering; see `gospl/flow/AGENTS.md`). Inside the kernels, the stored slope is perturbed by `val * (1 - 1.0e-15 * gid(n))` before the quicksort tie-break. This makes EXACT slope ties resolve deterministically across MPI decompositions (lower global ID wins). The perturbation is well below KSP-solver precision and does not affect physical results; near-ties driven by KSP floating-point noise are a separate problem and are NOT fixed by this pattern. See the relaxation comment on `test_parallel_correctness` in `tests/test_parallel.py` and `fortran/functions.F90:mfdreceivers` for the full rationale. **Do NOT remove the `gid` argument** — without it, `mfdreceivers` ordering depends on local iteration order and the parallel-correctness test diverges by ~10x from current baseline.
@@ -324,7 +329,7 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - **Fortran `meshparams` allocatables** must be freed per mesh in `definetin`; see `fortran/AGENTS.md`.
 
 ## CI contract (summary)
-- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (43 of 214 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
+- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (42 of 221 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
 - `tests-slow.yml`: slow tier nightly/tags/dispatch, benchmarks on `master`/`release-candidate` pushes. `examples-smoke.yml`: every local goSPL-examples input for 2 steps at np=2 (`scripts/examples_smoke.py`), nightly + dispatch. The Global-examples inputs are notebook products, gitignored in goSPL-examples, so CI cannot run them (a dispatch skips them all, and the script exits 2 when nothing ran): run `python scripts/examples_smoke.py <goSPL-examples> --only Global-examples` locally.
 - On a `v*` tag, `conda-build`, `pypi-publish` and `docker-build` each `needs:` the `_release-gate.yml` tests job, so nothing publishes unless the suite passes.
 - Matrix: `ubuntu-latest + macos-15 × Python 3.11 + 3.12`. macOS is pinned (not `macos-latest`) because the osx-arm64 OpenMPI 4.x / petsc4py 3.21 stack is validated per image.
