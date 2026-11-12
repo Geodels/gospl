@@ -994,6 +994,51 @@ def test_singular_routing_solve_repaired_when_no_cell_flagged(minimal_model):
         A.destroy(); b.destroy(); x.destroy()
 
 
+def test_routing_repair_reports_the_cells(minimal_model, capsys):
+    """
+    Protects: flowplex._reportRoutingRegion. When a mesh-sized routing solve
+    needs the pond repair, the flagged cells must be printed with their
+    input-mesh ids and upstream donors, so the un-drainable structure can be
+    located on the mesh (the 10 km G 0.2 run failed on cells nobody could see).
+    """
+    import petsc4py
+    PETSc = petsc4py.PETSc
+    m = minimal_model
+    try:
+        _fresh_flow_ksps(m)
+        n_loc = m.hGlobal.getLocalSize()
+        A = PETSc.Mat().createAIJ(
+            [(n_loc, PETSc.DECIDE), (n_loc, PETSc.DECIDE)], nnz=3,
+            comm=PETSc.COMM_WORLD,
+        )
+        lo, hi = A.getOwnershipRange()
+        for gi in range(lo, hi):
+            A.setValue(gi, gi, 1.0)
+        i, j = 0, 1                          # a 2-cycle on the first two rows
+        if lo <= i < hi:
+            A.setValue(i, j, -1.0)
+        if lo <= j < hi:
+            A.setValue(j, i, -1.0)
+        A.assemble()
+        b = m.hGlobal.duplicate()
+        b.set(0.0)
+        if lo <= 0 < hi:
+            b.setValue(0, 1.0)
+        if lo <= 5 < hi:
+            b.setValue(5, 1.0)
+        b.assemble()
+        x = b.duplicate()
+        b.copy(result=x)
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        out = capsys.readouterr().out
+        A.destroy(); b.destroy(); x.destroy()
+    finally:
+        m._routingPond = None
+        m.destroy()
+    assert "routing repair region" in out, out[-2000:]
+    assert " node " in out and "donors [" in out, out[-2000:]
+
+
 def test_stale_warm_start_guess_is_reset(minimal_model):
     """
     Protects: flowplex._warmStartGuard. Callers that pass a scratch Vec as

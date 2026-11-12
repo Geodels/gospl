@@ -662,6 +662,14 @@ class FAMesh(object):
             ksp.solve(vector1, vector2)
             r = ksp.getConvergedReason()
             _rs.count_ksp(self, key, ksp.getIterationNumber(), r)
+            if r >= 0 and routing and not self._trueResidualOK(
+                matrix, vector1, vector2
+            ):
+                # A "converged" primary on a singular routing block (a closed
+                # flow cycle): fgmres + shifted ILU can stop with a converged
+                # reason while the iterate is a null-space blow-up (2e13 on a
+                # 2-cell cycle). Treat it as failed so it is rescued/repaired.
+                r = -100
             if r < 0 and routing and self._ida_exact_allowed:
                 # Rescue a failed ROUTING solve exactly before treating it as
                 # un-drainable. On a long single-file drainage chain (a wide
@@ -780,6 +788,7 @@ class FAMesh(object):
         self._pondInfo = (
             comm.allreduce(int(np.count_nonzero(mask)), op=MPI.SUM), rounds
         )
+        self._reportRoutingRegion(matrix, vector1, vector2, mask)
         if not ok:
             if MPIrank == 0:
                 print(
@@ -793,6 +802,75 @@ class FAMesh(object):
         arr[mask] = vector2.getArray()[mask]
         self._routingPond = arr              # owned rows; mapped on take
         return True
+
+    def _reportRoutingRegion(self, matrix, vector1, vector2, mask, nmax=40):
+        """
+        Diagnostic for a routing solve that needed the pond repair: print the
+        flagged cells so the un-drainable structure can be found on the input
+        mesh. One line per cell (up to ``nmax``, rank 0): input-mesh id,
+        lon/lat (sphere) or x/y (flat), elevation, depression-filled and
+        sediment-filled surfaces, pit id, pit-sink flag, the system's source
+        ``b`` and solution ``x``, and the cell's UPSTREAM donors from its matrix
+        row (``-A_ij = W_ji``: input-mesh id and weight), which is where a flow
+        cycle shows up. Collective (one gather). Only for mesh-sized systems.
+        """
+        comm = MPI.COMM_WORLD
+        if vector1.getSize() != self.hGlobal.getSize():
+            return
+        lines = []
+        try:
+            rstart, _ = matrix.getOwnershipRange()
+            l2g = self.lgmap_col.indices
+            g2l = {int(g): k for k, g in enumerate(l2g)}
+            h = self.hLocal.getArray()
+            fill = getattr(self, "lFill", None)
+            sedf = getattr(self, "sedFilled", None)
+            pit = getattr(self, "pitIDs", None)
+            sink = getattr(self, "lsink", None)
+            ba = vector1.getArray()
+            xa = vector2.getArray()
+            for j in np.where(mask)[0][:nmax]:
+                gi = rstart + int(j)
+                k = g2l.get(gi)
+                if k is None:
+                    continue
+                c = self.lcoords[k]
+                if getattr(self, "flatModel", False):
+                    where = "x %.0f y %.0f" % (c[0], c[1])
+                else:
+                    r = np.linalg.norm(c)
+                    where = "lon %.3f lat %.3f" % (
+                        np.degrees(np.arctan2(c[1], c[0])),
+                        np.degrees(np.arcsin(c[2] / r)),
+                    )
+                cols, vals = matrix.getRow(gi)
+                donors = []
+                for cc, vv in zip(cols, vals):
+                    if int(cc) == gi or vv == 0.0:
+                        continue
+                    kk = g2l.get(int(cc))
+                    mid = int(self.locIDs[kk]) if kk is not None else -1
+                    donors.append("%d:%.3g" % (mid, -vv))
+                lines.append(
+                    "  node %d %s z %.3f fill %s sedfill %s pit %s sink %s "
+                    "b %.4g x %.4g donors [%s]" % (
+                        int(self.locIDs[k]), where, h[k],
+                        "%.3f" % fill[k] if fill is not None else "-",
+                        "%.3f" % sedf[k] if sedf is not None else "-",
+                        int(pit[k]) if pit is not None else "-",
+                        bool(sink[k]) if sink is not None else "-",
+                        ba[j], xa[j], " ".join(donors),
+                    )
+                )
+        except Exception as exc:              # diagnostics must never break a run
+            lines = ["  (diagnostic failed on this rank: %s)" % exc]
+        allines = comm.gather(lines, root=0)
+        if MPIrank == 0:
+            flat = [ln for part in allines for ln in part]
+            print("[flow] routing repair region (%d cell(s), first %d):"
+                  % (self._pondInfo[0], min(len(flat), nmax)), flush=True)
+            for ln in flat[:nmax]:
+                print(ln, flush=True)
 
     def _takeRoutingPond(self):
         """
@@ -812,6 +890,24 @@ class FAMesh(object):
         self._pondG.setArray(pond)
         self.dm.globalToLocal(self._pondG, self._pondL)  # collective
         return self._pondL.getArray() * self.inIDs
+
+    def _trueResidualOK(self, matrix, vector1, vector2):
+        """
+        True when ``||b - A x|| <= 1e2 * rtol * ||b||`` and finite: the same
+        acceptance test the exact rescue applies. Collective (one matvec, two
+        norms).
+        """
+        work = getattr(self, "_kspWork", None)
+        if work is None or work.getSize() != vector1.getSize():
+            if work is not None:
+                work.destroy()
+            work = vector1.duplicate()
+            self._kspWork = work
+        matrix.mult(vector2, work)
+        work.aypx(-1.0, vector1)
+        rnorm, bnorm = work.norm(), vector1.norm()
+        return bool(np.isfinite(rnorm)
+                    and rnorm <= 1.0e2 * self.rtol * max(bnorm, 1.0e-300))
 
     def _warmStartGuard(self, matrix, vector1, vector2, seed):
         """
