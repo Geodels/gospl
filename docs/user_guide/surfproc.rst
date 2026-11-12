@@ -97,7 +97,7 @@ Hillslope and marine deposition parameters
 
         If the adaptive ``ts`` solver gives up during a run (too many rejected internal steps, typically with km-thick river-mouth deposits over steep slopes on a global mesh), goSPL prints a warning and switches to the ``picard`` solver for the rest of the run instead of stopping (it uses ``picardSub``/``picardIts``, or their defaults).
 
-        Both solvers move only freshly deposited sediment: across each cell face the diffusivity is taken from the higher of the two cells, so a cell without new deposit cannot lose its pre-existing bed. With ``-v`` the log prints ``Marine diffusion mass rescale``, a final volume correction that should read close to 1. A value far from 1 indicates a problem worth reporting (before November 2026 it read about 0.5 on global runs, because bare seafloor fed material into the deposits).
+        Both solvers move only freshly deposited sediment: across each cell face the diffusivity is taken from the higher of the two cells, so a cell without new deposit cannot lose its pre-existing bed. The ``picard`` solver also limits each cell's export over a sub-step to the deposit it holds, which matters on fine meshes (cells of ~10 km or less) where a thin deposit on a steep slope could otherwise cut into its bed; **use** ``picard`` **on fine global meshes** (``ts`` has no such limit). With ``-v`` the log prints ``Marine diffusion mass rescale``, a final volume correction that should read close to 1. A value far from 1 indicates a problem worth reporting (before November 2026 it read about 0.5 on global runs, because bare seafloor fed material into the deposits).
 
         .. note::
 

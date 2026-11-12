@@ -66,6 +66,9 @@ class hillSLP(object):
         # FV face weights vDist/(eLgt*area) per (node, neighbour slot), mesh
         # geometry only; built lazily by _donorDiffCoeffs (plain numpy array).
         self._fvFaceW = None
+        # Owner-synced supply-limiter ratio (_donorDiffCoeffs limit=...).
+        self._limL = None
+        self._limG = None
 
         # Cached marine-morphology smoothing operator (_hillSlope smooth=2) and
         # its KSP. The smoothing diffusivity is mesh-size-based and timestep-
@@ -296,7 +299,7 @@ class hillSLP(object):
 
         return diffMat
 
-    def _donorDiffCoeffs(self, h, Cd, Cp=None):
+    def _donorDiffCoeffs(self, h, Cd, Cp=None, limit=None):
         r"""
         Finite-volume operator of the deposit diffusion
         :math:`\nabla\cdot(C_d\nabla h)` with an **upslope (donor) face
@@ -318,6 +321,15 @@ class hillSLP(object):
         :arg h: local surface ``bed + deposit`` (lpoints), halo-synced
         :arg Cd: local diffusivity (lpoints); ``Cd == 0`` closes the face
         :arg Cp: optional ``dCd/dh`` (lpoints) for the Newton Jacobian
+        :arg limit: optional ``(avail, dt)``: supply limiter. A cell cannot
+            export more fresh deposit in ``dt`` than the ``avail`` thickness it
+            carries: its outgoing faces are scaled by
+            ``R = min(1, avail / (dt * outflow))``, with ``R`` synced from the
+            owner to the ghosts (a ghost's outflow sees a truncated
+            neighbourhood). Without it a thin deposit on a steep slope with a
+            large ``Cd*dt/dx^2`` drains below its bed in one sub-step and the
+            ``>= 0`` clip creates volume (rescale ~0.4-0.5 on a 10 km global
+            run). Collective when given.
 
         :return: ``coeffs`` (lpoints, 1+K) of ``L`` (col 0 diagonal, cols
             ``1..K`` the ``FVmesh_ngbID`` neighbours) and the residual
@@ -341,6 +353,20 @@ class hillSLP(object):
         cf = np.where(donor_k, ck, cn)
         v = np.where(gate, cf * W, 0.0)
         dz = hk - hn
+        if limit is not None:
+            avail, dtl = limit
+            out = dtl * np.where(donor_k, v * np.maximum(dz, 0.0), 0.0).sum(axis=1)
+            R = np.ones(self.lpoints)
+            over = out > avail
+            R[over] = np.maximum(avail[over], 0.0) / out[over]
+            if self._limG is None:
+                self._limL = self.hLocal.duplicate()
+                self._limG = self.hGlobal.duplicate()
+            self._limL.setArray(R)
+            self.dm.localToGlobal(self._limL, self._limG)
+            self.dm.globalToLocal(self._limG, self._limL)
+            R = self._limL.getArray().copy()
+            v = v * np.where(donor_k, R[:, None], R[nn])
 
         coeffs = np.zeros((self.lpoints, 1 + ngb.shape[1]))
         coeffs[:, 0] = v.sum(axis=1)
@@ -1190,6 +1216,8 @@ class hillSLP(object):
         nsolve = 0
         for _ in range(nsub):
             self.h.copy(result=self.tmp1)          # h^start (BE right-hand side)
+            self.dm.globalToLocal(self.h, self.hl)
+            hstart = self.hl.getArray().copy()
             for _ in range(npic):
                 self.dm.globalToLocal(self.h, self.hl)
                 hloc = self.hl.getArray()
@@ -1200,7 +1228,11 @@ class hillSLP(object):
                 )
                 # Linear operator L = div(Cd grad .), same as the TS residual
                 # (Kp=0 -> no derivative term); 13-col (diag, 12 neighbours).
-                nlC, _ = self._donorDiffCoeffs(hloc, Cd)
+                # Supply limit: no cell exports more than the deposit it
+                # held at the start of the sub-step.
+                nlC, _ = self._donorDiffCoeffs(
+                    hloc, Cd, limit=(np.maximum(hstart - zb, 0.0), dt_sub)
+                )
                 coeffs = dt_sub * nlC
                 coeffs[:, 0] += 1.0                # M = I + dt_sub * L
                 M = self._assembleDiffMatCSR(coeffs)

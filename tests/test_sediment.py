@@ -577,6 +577,42 @@ def test_marine_diffusion_bare_bed_does_not_shed(minimal_model, solver):
     assert peak < 100.0, f"{solver}: 5 m deposit diffused to a {peak:.1f} m peak"
 
 
+def test_marine_picard_supply_limited(minimal_model):
+    """
+    Protects: the supply limiter of the Picard deposit diffusion
+    (`_donorDiffCoeffs(limit=(avail, dt_sub))` in `_diffuseImplicitPicard`).
+
+    Silent failure prevented: with a large diffusion number `Cd*dt_sub/dx^2`
+    (fine meshes: 10 km cells, `nonlinKm 2e4`) a deposit cell on a steep slope
+    exported more than its deposit in one sub-step, cut below its bed, and the
+    `>= 0` clip created volume: `Marine diffusion mass rescale` read 0.36-0.53
+    on a 10 km global run even with the donor face diffusivity. Here a 5 m
+    deposit with `nlK = 5e6` came out at 3.27x its volume without the limiter.
+    """
+    from mpi4py import MPI
+
+    model = minimal_model
+    if getattr(model, "flatModel", False):
+        pytest.skip("needs a sphere fixture with submarine relief")
+    try:
+        _steep_marine_setup(model, nlK=5.0e6)
+        owned = model.inIDs == 1
+        dh = np.zeros(model.lpoints)
+        dh[model.seaID] = 5.0
+        model.marineSolver = "picard"
+        model.picardSub, model.picardIts = 40, 4
+        vin = MPI.COMM_WORLD.allreduce(float(np.sum((dh * model.larea)[owned])))
+        nd = model._diffuseImplicit(dh, model.seaID, model.nlK, label="marine")
+        vout = MPI.COMM_WORLD.allreduce(float(np.sum((nd * model.larea)[owned])))
+    finally:
+        model.destroy()
+
+    assert abs(vout / vin - 1.0) < 1.0e-3, (
+        f"Picard diffusion volume ratio {vout / vin:.4f} != 1 at a large "
+        f"diffusion number: deposit cells drain below their bed (supply limiter)."
+    )
+
+
 def test_marine_ts_failure_falls_back_to_picard(minimal_model):
     """
     Protects: `_diffuseImplicit` falls back to the Picard solver when the
