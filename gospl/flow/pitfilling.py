@@ -849,25 +849,17 @@ class PITFill(object):
     def _unshiftFill(self, h, level):
         """
         Bring the depression-filled surface back from the shifted frame the
-        fill runs in (``h - level``) without round-off below the surface.
-
-        ``(h - level) + level`` does not round back to ``h``: with ``level``
-        near the global minimum (~-5700 m on Earth) about 14% of the cells of
-        a global mesh came back 1 ulp BELOW their own elevation (150.00000000000003
-        -> 150.0). The flat router picks a neighbour whose filled surface is
-        "not higher" while MFD follows the true surface, so a flat cell could
-        be sent to a 1-ulp-higher neighbour that MFD sends straight back: a
-        closed 2-cell flow cycle, a singular routing system, and a discarded
-        sediment cascade pass (10 km global run, 150 m DEM plateau). No cell is
-        allowed below ``h`` (that is all the cycle needs). Cells that round 1
-        ulp ABOVE ``h`` are deliberately left alone: they act as zero-volume
-        pits that let flat patches drain through the pit machinery, and
-        snapping them to ``h`` turned such flats into closed sinks that drop
-        the dual-lithology fine fraction (test_dual_fine_conservation).
-        Element-wise on halo-synced inputs, so owners and ghosts agree.
+        fill runs in (``h - level``). The round trip is NOT exact: about 14%
+        of a global mesh comes back 1 ulp below ``h`` and 14% 1 ulp above.
+        That noise is deliberately kept here: on flat plateaus it is what
+        keeps a flat connected (the ulp-high cells read as part of the flat);
+        clamping ``lFill >= h`` split 150 m DEM plateaus into ~1e5 isolated
+        flat sinks per step on a 10 km global run (water and sediment ponded,
+        ~20% less sediment delivered). The routing absorbs the noise instead
+        (``FAMesh._routingSurface``), which is what removes the flat/MFD
+        cycles the noise used to create.
         """
         self.lFill += level
-        np.maximum(self.lFill, h, out=self.lFill)
 
     def fillElevation(self, sed=False):
         """

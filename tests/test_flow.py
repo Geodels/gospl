@@ -1039,17 +1039,18 @@ def test_routing_repair_reports_the_cells(minimal_model, capsys):
     assert " node " in out and "donors [" in out, out[-2000:]
 
 
-def test_fill_never_below_surface_and_no_flat_cycle(minimal_model):
+def test_no_flat_mfd_cycle_on_roundoff_plateau(minimal_model):
     """
-    Protects: pitfilling._unshiftFill. The fill runs on ``h - level`` and was
+    Protects: flowplex._routingSurface. The fill runs on ``h - level`` and is
     shifted back with ``lFill += level``; with ``level`` near the global
-    minimum the round trip put ~14% of a global mesh 1 ulp BELOW its own
-    elevation (150.00000000000003 -> 150.0 on a 150 m DEM plateau). The flat
-    router then sent a flat cell to a 1-ulp-higher neighbour that MFD sent
-    straight back: closed 2-cell flow cycles that made the sediment cascade
-    singular (10 km global run, G 0.2). After filling, lFill >= h everywhere,
-    untouched cells keep h exactly, and no flat-routed cell's receiver routes
-    back to it.
+    minimum the round trip leaves 1-ulp noise between ``h`` and ``lFill``
+    (14% of a global mesh 1 ulp below, 14% above). The flat router reads
+    ``lFill`` and MFD read ``h``, so a flat cell was sent to a 1-ulp-higher
+    neighbour that MFD sent straight back: closed 2-cell flow cycles that made
+    the sediment cascade singular (10 km global run, 150 m DEM plateaus).
+    No flat-routed cell's receiver may route back to it. (Clamping
+    ``lFill >= h`` instead removed the cycles but split the plateaus into
+    ~1e5 isolated flat sinks: do not reintroduce it.)
     """
     from mpi4py import MPI
 
@@ -1069,10 +1070,6 @@ def test_fill_never_below_surface_and_no_flat_cycle(minimal_model):
         hl = m.hLocal.getArray().copy()
 
         m.fillElevation(sed=True)
-        below = int(np.count_nonzero(m.lFill < hl))
-        below = MPI.COMM_WORLD.allreduce(below, op=MPI.SUM)
-        assert below == 0, "%d cells have a filled surface below h" % below
-
         m._buildFlowDirection(hl)
         owned = m.inIDs == 1
         cyc = 0

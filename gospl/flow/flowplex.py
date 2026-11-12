@@ -1047,6 +1047,33 @@ class FAMesh(object):
 
         return
 
+    def _routingSurface(self, h, tol=1.0e-9):
+        """
+        Surface used to route flow: ``h``, except that a cell within ``tol``
+        (1 nm) of its depression-filled surface ``lFill`` takes ``lFill``.
+
+        ``lFill`` comes back from the shifted-frame fill with 1-ulp noise
+        (``pitfilling._unshiftFill``). The flat router (`_dirFlats`) works on
+        ``lFill`` and MFD on ``h``, so on a flat a cell 1 ulp above its
+        ``lFill`` was MFD-routed back to the flat cell that the flat router
+        had sent to it: closed 2-cell cycles, singular routing systems and
+        discarded sediment-cascade passes (10 km global run, 150 m DEM
+        plateaus). With the two rules reading the same values on flats, a
+        cycle is impossible: a flat cell i is sent to c only if
+        lFill(c) <= lFill(i), and c can MFD back only if its routing value
+        exceeds lFill(i), which needs h(c) more than ``tol`` above lFill(c),
+        but lFill >= h up to round-off. Element-wise on halo-synced arrays.
+        """
+        lf = getattr(self, "lFill", None)
+        if lf is None or lf.shape != np.shape(h):
+            return h
+        close = np.abs(h - lf) <= tol
+        if not close.any():
+            return h
+        hr = np.array(h, dtype=np.float64, copy=True)
+        hr[close] = lf[close]
+        return hr
+
     def _buildFlowDirection(self, h, down=True):
         """
         This function builds from neighbouring slopes the flow directions. It calls a fortran subroutine that locally computes for each vertice:
@@ -1061,6 +1088,11 @@ class FAMesh(object):
 
         # Get open marine regions
         self.seaID = np.where(self.lFill <= self.sealevel)[0]
+
+        # Route on a surface consistent with the flat directions (see
+        # _routingSurface): round-off between h and lFill must not create
+        # slopes the flat router cannot see.
+        h = self._routingSurface(h)
 
         # Define multiple flow directions for unfilled elevation.
         # `self.gid` is the per-node global ID; passed in to make the
