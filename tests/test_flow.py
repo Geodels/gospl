@@ -1039,6 +1039,56 @@ def test_routing_repair_reports_the_cells(minimal_model, capsys):
     assert " node " in out and "donors [" in out, out[-2000:]
 
 
+def test_fill_never_below_surface_and_no_flat_cycle(minimal_model):
+    """
+    Protects: pitfilling._unshiftFill. The fill runs on ``h - level`` and was
+    shifted back with ``lFill += level``; with ``level`` near the global
+    minimum the round trip put ~14% of a global mesh 1 ulp BELOW its own
+    elevation (150.00000000000003 -> 150.0 on a 150 m DEM plateau). The flat
+    router then sent a flat cell to a 1-ulp-higher neighbour that MFD sent
+    straight back: closed 2-cell flow cycles that made the sediment cascade
+    singular (10 km global run, G 0.2). After filling, lFill >= h everywhere,
+    untouched cells keep h exactly, and no flat-routed cell's receiver routes
+    back to it.
+    """
+    from mpi4py import MPI
+
+    m = minimal_model
+    try:
+        h = m.hLocal.getArray().copy()
+        land = h > 0.0
+        assert land.sum() > 20
+        ulp = np.nextafter(150.0, 200.0)
+        h[land] = 150.0
+        idx = np.where(land)[0]
+        h[idx[::3]] = ulp                     # 1-ulp micro-relief on the plateau
+        h[np.argmin(h)] = -5700.0             # deep minimum -> large shift
+        m.hLocal.setArray(h)
+        m.dm.localToGlobal(m.hLocal, m.hGlobal)
+        m.dm.globalToLocal(m.hGlobal, m.hLocal)
+        hl = m.hLocal.getArray().copy()
+
+        m.fillElevation(sed=True)
+        below = int(np.count_nonzero(m.lFill < hl))
+        below = MPI.COMM_WORLD.allreduce(below, op=MPI.SUM)
+        assert below == 0, "%d cells have a filled surface below h" % below
+
+        m._buildFlowDirection(hl)
+        owned = m.inIDs == 1
+        cyc = 0
+        for i in np.where(owned & (m.wghtVal[:, 0] == 1.0)
+                          & (m.rcvID[:, 0] == m.flatDirs))[0]:
+            c = m.rcvID[i, 0]
+            if c < 0 or c == i:
+                continue
+            back = (m.rcvID[c] == i) & (m.wghtVal[c] > 0.0)
+            cyc += int(back.any())
+        cyc = MPI.COMM_WORLD.allreduce(cyc, op=MPI.SUM)
+        assert cyc == 0, "%d flat-routed cells are routed back to" % cyc
+    finally:
+        m.destroy()
+
+
 def test_stale_warm_start_guess_is_reset(minimal_model):
     """
     Protects: flowplex._warmStartGuard. Callers that pass a scratch Vec as

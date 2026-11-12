@@ -846,6 +846,29 @@ class PITFill(object):
 
         return
 
+    def _unshiftFill(self, h, level):
+        """
+        Bring the depression-filled surface back from the shifted frame the
+        fill runs in (``h - level``) without round-off below the surface.
+
+        ``(h - level) + level`` does not round back to ``h``: with ``level``
+        near the global minimum (~-5700 m on Earth) about 14% of the cells of
+        a global mesh came back 1 ulp BELOW their own elevation (150.00000000000003
+        -> 150.0). The flat router picks a neighbour whose filled surface is
+        "not higher" while MFD follows the true surface, so a flat cell could
+        be sent to a 1-ulp-higher neighbour that MFD sends straight back: a
+        closed 2-cell flow cycle, a singular routing system, and a discarded
+        sediment cascade pass (10 km global run, 150 m DEM plateau). No cell is
+        allowed below ``h`` (that is all the cycle needs). Cells that round 1
+        ulp ABOVE ``h`` are deliberately left alone: they act as zero-volume
+        pits that let flat patches drain through the pit machinery, and
+        snapping them to ``h`` turned such flats into closed sinks that drop
+        the dual-lithology fine fraction (test_dual_fine_conservation).
+        Element-wise on halo-synced inputs, so owners and ghosts agree.
+        """
+        self.lFill += level
+        np.maximum(self.lFill, h, out=self.lFill)
+
     def fillElevation(self, sed=False):
         """
         This function is the main entry point to perform pit filling.
@@ -867,7 +890,7 @@ class PITFill(object):
         level = max(minh, self.sealevel + self.oFill)
 
         self._performFilling(hl - level, level, sed)
-        self.lFill += level
+        self._unshiftFill(hl, level)
         self._pitInformation(hl, level, sed)
 
         # Compute discrete depth-volume curves per pit. Used by water filling
