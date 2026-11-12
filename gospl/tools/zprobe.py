@@ -57,6 +57,21 @@ from mpi4py import MPI
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
 
+def _inputMeshId(obj, grow):
+    """
+    Input-mesh id (``locIDs``) of the node at PETSc global row ``grow`` of
+    ``hGlobal``; -1 if it cannot be mapped. Collective.
+    """
+    mid = -1
+    try:
+        lo, hi = obj.hGlobal.getOwnershipRange()
+        if lo <= grow < hi:
+            mid = int(obj.locIDs[obj.glIDs[grow - lo]])
+    except Exception:
+        mid = -1
+    return MPI.COMM_WORLD.allreduce(mid, op=MPI.MAX)
+
+
 def probeZ(obj, tag):
     """
     Report the global elevation range and the change in the global maximum
@@ -73,6 +88,11 @@ def probeZ(obj, tag):
 
     imax, zmax = obj.hGlobal.max()
     imin, zmin = obj.hGlobal.min()
+    # `imax` is PETSc's global row, which depends on the partition and is not
+    # an input-mesh id. Report the INPUT-MESH id (`locIDs`, what an npz row or
+    # ParaView shows): only the owner rank can map it (owned node i is global
+    # row rstart + i), so reduce. Collective (every rank reaches it).
+    imax = _inputMeshId(obj, imax)
 
     prev = getattr(obj, "_zprobe_last", None)
     obj._zprobe_last = zmax
@@ -83,7 +103,7 @@ def probeZ(obj, tag):
 
     if prev is None:
         print(
-            "[zprobe] %-22s zmax %12.2f (node %d)  zmin %12.2f"
+            "[zprobe] %-22s zmax %12.2f (mesh node %d)  zmin %12.2f"
             % (tag, zmax, imax, zmin),
             flush=True,
         )
@@ -91,7 +111,7 @@ def probeZ(obj, tag):
         dz = zmax - prev
         flag = "  <== RAISED THE GLOBAL MAXIMUM" if dz > 1.0 else ""
         print(
-            "[zprobe] %-22s zmax %12.2f (node %d)  dzmax %+12.2f%s"
+            "[zprobe] %-22s zmax %12.2f (mesh node %d)  dzmax %+12.2f%s"
             % (tag, zmax, imax, dz, flag),
             flush=True,
         )

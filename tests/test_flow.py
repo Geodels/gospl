@@ -815,6 +815,57 @@ def test_long_chain_routing_solve_rescued_exactly(minimal_model):
         A.destroy(); b.destroy(); x.destroy()
 
 
+def test_sediment_routing_solve_rescued_not_zeroed(minimal_model):
+    """
+    Protects: the upstream-integration sediment solves (`sedplex._getSedFlux`,
+    vSed/vSedF/vSedP) are ROUTING solves and get the exact-factor rescue
+    (`_solve_KSP(..., route=True)`).
+
+    Silent failure prevented: they called `_solve_KSP(False, fMati, ...)`
+    without a seed, so no rescue: on a fine global mesh (23.6M nodes, long
+    drainage chains) the primary failed, the 500-iteration fallback could not
+    reach the chain ends, and the WHOLE sediment flux was zeroed every step
+    (sediment load 0, almost no deposition), reported as "0 isolated
+    un-drained cell(s) ... benign" (fixed 2026-11-12; docs/dev/FIXED_BUGS.md).
+
+    Invariant: (1) a 3000-cell permuted chain solved the way _getSedFlux calls
+    it equals the exact solution; (2) every solve on `fMati` during a model
+    step passes route=True.
+    """
+    from mpi4py import MPI
+
+    if MPI.COMM_WORLD.Get_size() > 1:
+        pytest.skip("serial standalone matrix")
+    m = minimal_model
+    _fresh_flow_ksps(m)
+    A, b, x, exact = _chain_flow_system(3000)
+    try:
+        m._solve_KSP(False, A, b, x, route=True)
+        got = x.getArray()
+        assert got.any(), "sediment routing solve was zeroed"
+        assert np.allclose(got, exact, rtol=1e-6), (
+            "sediment routing solve wrong: max |err| %.3e" % np.abs(got - exact).max())
+    finally:
+        A.destroy(); b.destroy(); x.destroy()
+
+    _fresh_flow_ksps(m)          # drop the 3000-row operators cached above
+    calls = []
+    orig = m._solve_KSP
+
+    def spy(guess, matrix, vector1, vector2, fatal=False, seed=False, route=None):
+        if matrix is getattr(m, "fMati", None):
+            calls.append(route)
+        return orig(guess, matrix, vector1, vector2, fatal=fatal, seed=seed, route=route)
+
+    m._solve_KSP = spy
+    try:
+        m._getSedFlux()
+    finally:
+        del m._solve_KSP
+    assert calls, "no solve on fMati in _getSedFlux"
+    assert all(r is True for r in calls), calls
+
+
 def test_singular_routing_solve_still_falls_back(minimal_model):
     """
     A genuinely singular region (2-cycles) must NOT be "rescued": the exact

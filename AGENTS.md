@@ -44,6 +44,7 @@ agent.
 | Collective-under-rank-guard lint | `python scripts/lint_mpi_collectives.py` (CI runs it) |
 | np=1 vs np=N field comparison | `python scripts/ab_partition.py <input.yml> -n 4` |
 | Mass budget of a run | `python scripts/budget.py <output-dir>` |
+| Wall time per sub-stage (marine smoother, epsfill, cascades, sediment load, SPL), rank 0 vs max rank | `mpirun -n N python scripts/stage_profile.py <input.yml>` |
 | Per-rank memory by setup stage / step phase (rank 0 vs others) | `mpirun -n N python scripts/mem_profile.py <input.yml> [--json out.json]` |
 | Machine-readable per-step summary | `gospl -i input.yml --summary run.jsonl` |
 | Inspect / compare output | `gospl-inspect <output-dir> [--step N] [--compare <other-dir>] [--json]` (or `python -m gospl.analyse.runinspect` before a `pip install -e .` registers the command) |

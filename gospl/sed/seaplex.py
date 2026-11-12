@@ -174,6 +174,20 @@ class SEAMesh(object):
             # Only consider filleps in the first kms offshore
             hsmth = self._hillSlope(smooth=2)
             hsmth[self.coastDist > self.offshore] = BOUNDARY_FLOW_SENTINEL
+            # The cut-off must come from the surface that is FILLED (the
+            # smoothed one), not the raw elevation: smoothing raises the
+            # deepest cells, so `hGlobal.min() + 0.1` sat below every smoothed
+            # value, no cell seeded `epsfill`, and it silently returned the
+            # surface unchanged. The marine routing then ran on unfilled
+            # bathymetry with hundreds of terminal sinks, and river loads were
+            # force-deposited km-thick in the first shallow pit they reached
+            # (fixed 2026-11-12). The deepest smoothed cell now always seeds.
+            owned = self.inIDs == 1
+            smin = MPI.COMM_WORLD.allreduce(
+                float(hsmth[owned].min()) if owned.any() else np.inf, op=MPI.MIN
+            )
+            minh = max(smin + 0.1, self.sealevel + self.oFill)
+            self._oceanFillLevel = minh
         else:
             hsmth = hl.copy()
             hsmth[self.outletIDs] = BOUNDARY_FLOW_SENTINEL
@@ -362,6 +376,24 @@ class SEAMesh(object):
             ("marine_dep_pc_fieldsplit_type", "schur"),
             ("marine_dep_pc_fieldsplit_schur_fact_type", "full"),
             ("marine_dep_pc_fieldsplit_schur_precondition", "selfp"),
+            # Block solves. They MUST go through the options database: the
+            # `subksps[i].setType("preonly")` calls below run before
+            # `setFromOptions` switches the split to Schur, so they never took
+            # effect and both blocks ran GMRES (rtol 1e-5, up to 10,000 its)
+            # inside every outer iteration. On the routing (q) block, with long
+            # drainage chains, that cost grew step after step (~300 s -> ~5,000
+            # s per step on a 23.6M-node mesh, for the river SPL solve; fixed
+            # 2026-11-12). h: one ILU application per rank block (GASM).
+            ("marine_dep_fieldsplit_h_ksp_type", "preonly"),
+            ("marine_dep_fieldsplit_h_pc_type", "gasm"),
+            ("marine_dep_fieldsplit_q_ksp_type", "preonly"),
+            # Marine routing uses up to 12 flow directions, so exact LU fills in
+            # heavily (27 s symbolic on a 655k-node sphere) and GASM's set-up
+            # is as slow (35 s); block-Jacobi ILU solves it in 0.29 s, 6 outer
+            # iterations. (The river SPL q block keeps exact LU: 5 directions.)
+            ("marine_dep_fieldsplit_q_pc_type", "bjacobi"),
+            ("marine_dep_fieldsplit_q_sub_pc_type", "ilu"),
+            ("marine_dep_fieldsplit_q_sub_pc_factor_shift_type", "nonzero"),
         ):
             if not opts.hasName(key):
                 opts.setValue(key, val)
@@ -600,7 +632,7 @@ class SEAMesh(object):
                 if step % 100 == 0:
                     print(
                         "  --- Marine excess (sum in km3) %0.05f | iter %d"
-                        % (sumExcess * 10.e-9, step),
+                        % (sumExcess * 1.0e-9, step),
                         flush=True
                     )
 
@@ -701,11 +733,68 @@ class SEAMesh(object):
         depthbar = dwd / dw if dw > 0.0 else 0.0
 
         if depthbar > 0.0:
-            ffrac = np.clip(ff_mar * depth / max(depthbar, 1.0e-30), 0.0, 1.0)
             marine = mdep > 0.0
-            self.depoFineFrac[marine] = ffrac[marine]
+            self.depoFineFrac[marine] = self._conservingFineFraction(
+                ff_mar, depth / max(depthbar, 1.0e-30), mvol, owned, dw
+            )[marine]
 
         return
+
+    def _conservingFineFraction(self, ff_mar, w, mvol, owned, dw):
+        """
+        Per-node fine fraction ``clip(s * w, 0, 1)`` with the scale ``s`` chosen
+        so the deposited fine volume is exactly ``ff_mar * Σ mvol``.
+
+        The plain ``clip(ff_mar * w, 0, 1)`` conserves only while no node needs
+        a fraction above 1: deep deposits (large ``w``) were clipped and the
+        clipped fine was lost (0.97% of the fine budget on `minimal_dual` once
+        the marine eps-fill routed sediment into deep water; fixed 2026-11-12).
+        ``Σ mvol * clip(s * w, 0, 1)`` is monotone in ``s``, so ``s`` is found by
+        bisection. If even ``clip = 1`` wherever ``w > 0`` cannot absorb the
+        fine, the remainder goes uniformly to the ``w == 0`` deposits.
+
+        Collective: one ``allreduce`` per bisection step; every rank runs the
+        same number of steps (global sums and a fixed iteration count).
+
+        :arg ff_mar: domain fine fraction of the marine input
+        :arg w: per-node depth weight (``depth / depth_bar``)
+        :arg mvol: per-node deposited volume (m^3)
+        :arg owned: owned-node mask
+        :arg dw: ``Σ mvol`` over owned nodes of all ranks
+        :return: per-node fine fraction (local array)
+        """
+
+        comm = MPI.COMM_WORLD
+        target = ff_mar * dw
+        if target <= 0.0:
+            # No fine reached the sea (e.g. an all-coarse dual run): exactly 0,
+            # keeping all-coarse dual bit-identical to single-fraction.
+            return np.zeros_like(w)
+
+        def total(s):
+            f = np.clip(s * w, 0.0, 1.0)
+            return comm.allreduce(float(np.sum((mvol * f)[owned])), op=MPI.SUM)
+
+        pos = w > 0.0
+        cap = comm.allreduce(float(np.sum(mvol[owned & pos])), op=MPI.SUM)
+        if target >= cap:
+            # Every w > 0 deposit is all-fine; the rest fills the w == 0 ones.
+            f = np.where(pos, 1.0, 0.0)
+            rest = dw - cap
+            if rest > 0.0:
+                f[~pos] = min(1.0, (target - cap) / rest)
+            return f
+
+        lo, hi = 0.0, max(ff_mar, 1.0e-30)
+        while total(hi) < target:
+            hi *= 2.0
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            if total(mid) < target:
+                lo = mid
+            else:
+                hi = mid
+        return np.clip(hi * w, 0.0, 1.0)
 
     def _marineProvFraction(self, sedFlux):
         """
