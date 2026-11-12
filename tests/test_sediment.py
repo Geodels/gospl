@@ -869,3 +869,34 @@ def test_coupled_deposition_block_solves_are_direct(minimal_model):
     assert counts.get("marine"), "the coupled marine deposition solve never ran (Gmar > 0)"
     assert max(counts["spl"]) == 0, f"GMRES iterations inside the SPL coupled solve: {counts['spl']}"
     assert max(counts["marine"]) == 0, f"GMRES iterations inside the marine solve: {counts['marine']}"
+
+
+def test_routing_pond_is_deposited_in_place(minimal_model):
+    """
+    Protects: sedplex._keepRoutingPond. When a cascade routing solve is
+    repaired (flowplex._pondRoutingRegion), the volume its local sinks trap
+    must join the closed-sink deposit (minus cells already counted as pit
+    sinks), not vanish.
+    """
+    from mpi4py import MPI
+
+    m = minimal_model
+    try:
+        m.flowAccumulation()
+        n_owned = m.hGlobal.getLocalSize()
+        pond = np.zeros(n_owned)
+        pond[: min(5, n_owned)] = 2.0              # owned rows of a global Vec
+        m._routingPond = pond
+        m._closedDepo = np.zeros(m.lpoints)
+        m._keepRoutingPond(1.0)
+        got = MPI.COMM_WORLD.allreduce(float(m._closedDepo.sum()))
+        # expected: the ponded rows mapped to local, owned, non-sink nodes
+        m._pondG.setArray(pond)
+        m.dm.globalToLocal(m._pondG, m._pondL)
+        loc = m._pondL.getArray() * m.inIDs
+        want = MPI.COMM_WORLD.allreduce(float(loc[~m.lsink].sum()))
+        assert want > 0.0
+        assert abs(got - want) < 1e-12 * want
+        assert m._routingPond is None
+    finally:
+        m.destroy()

@@ -36,7 +36,7 @@ agent.
 
 | Task | Command |
 |---|---|
-| Quick check (207 of 221 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
+| Quick check (210 of 224 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
 | One subsystem | `pytest tests/ -m flow` (markers: `tests/README.md`) |
 | Multi-rank guards (~70 s) | `pytest tests/ -m mpi` |
 | Full suite before a commit | `pytest tests/ -n 4` (CI runs it serially) |
@@ -320,6 +320,7 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - A threshold derived from one surface must be computed on the surface the algorithm actually uses: the marine eps-fill cut-off came from the raw elevation while the fill ran on the smoothed one, so it never had a seed on a global mesh (no fill, ~660 terminal sinks, km-thick force-deposits).
 - PETSc fieldsplit sub-solver settings made with `subksp.setType()` before `setFromOptions()` do not survive the switch to Schur: set them through the options database and check with `-<prefix>ksp_view`. Both coupled deposition solves silently ran GMRES in their blocks (SPL solve ~5,000 s/step at 5 km).
 - A non-fatal solve that is discarded on failure must not be one whose result carries mass: the sediment routing solves were zeroed every step on fine global meshes until they got the exact-factor rescue (`route=True`).
+- A failure localised to a few cells must be repaired locally, not by discarding the whole solve: a 3-cell flow cycle zeroed a full sediment-cascade pass (`_pondRoutingRegion` now makes those cells sinks and re-solves).
 - An adaptive solver that can give up (TS `DIVERGED_STEP_REJECTED`) needs a fallback, not an abort: a 144-rank job should not die on an option that has a robust alternative.
 
 ## Intentional surprises (do NOT "fix")
@@ -329,7 +330,7 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - **Fortran `meshparams` allocatables** must be freed per mesh in `definetin`; see `fortran/AGENTS.md`.
 
 ## CI contract (summary)
-- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (42 of 221 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
+- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (42 of 224 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
 - `tests-slow.yml`: slow tier nightly/tags/dispatch, benchmarks on `master`/`release-candidate` pushes. `examples-smoke.yml`: every local goSPL-examples input for 2 steps at np=2 (`scripts/examples_smoke.py`), nightly + dispatch. The Global-examples inputs are notebook products, gitignored in goSPL-examples, so CI cannot run them (a dispatch skips them all, and the script exits 2 when nothing ran): run `python scripts/examples_smoke.py <goSPL-examples> --only Global-examples` locally.
 - On a `v*` tag, `conda-build`, `pypi-publish` and `docker-build` each `needs:` the `_release-gate.yml` tests job, so nothing publishes unless the suite passes.
 - Matrix: `ubuntu-latest + macos-15 × Python 3.11 + 3.12`. macOS is pinned (not `macos-latest`) because the osx-arm64 OpenMPI 4.x / petsc4py 3.21 stack is validated per image.

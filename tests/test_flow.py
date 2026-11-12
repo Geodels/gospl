@@ -869,8 +869,10 @@ def test_sediment_routing_solve_rescued_not_zeroed(minimal_model):
 def test_singular_routing_solve_still_falls_back(minimal_model):
     """
     A genuinely singular region (2-cycles) must NOT be "rescued": the exact
-    solver fails too, the sticky switch stays off, and the bounded fallback
-    zeroes the non-fatal solve as before.
+    solver fails too and the sticky switch stays off. Since 2026-11 the small
+    region is then made of local sinks and the solve repaired (see
+    test_singular_routing_solve_repaired_not_zeroed), so the result is finite
+    and keeps the source volume.
     """
     m = minimal_model
     _fresh_flow_ksps(m)
@@ -879,7 +881,80 @@ def test_singular_routing_solve_still_falls_back(minimal_model):
         m._solve_KSP(True, A, b, x, fatal=False, seed=True)
         assert m._ida_exact is False
         assert np.all(np.isfinite(x.getArray()))
+        # x is a through-flux; the conserved quantity is what the sinks trap:
+        # every source sits on a closed cycle, so all of it is ponded.
+        from mpi4py import MPI
+        assert m._routingPond is not None
+        trapped = MPI.COMM_WORLD.allreduce(float(m._routingPond.sum()))
+        assert abs(trapped - b.sum()) < 1e-8 * b.sum()
     finally:
+        m._routingPond = None
+        A.destroy(); b.destroy(); x.destroy()
+
+
+def _chain_into_cycle_system():
+    """N=1000 routing system: a 10-cell chain (200..209, b=1 each) drains into
+    a closed 2-cycle (100 <-> 101); cell 500 is an isolated source (b=1)."""
+    import petsc4py
+    PETSc = petsc4py.PETSc
+    N = 1000
+    A = PETSc.Mat().create(PETSc.COMM_WORLD)
+    A.setSizes(((None, N), (None, N)))
+    A.setType("aij")
+    A.setPreallocationNNZ((3, 3))
+    A.setUp()
+    lo, hi = A.getOwnershipRange()
+    for gi in range(lo, hi):
+        A.setValue(gi, gi, 1.0)
+    edges = [(100, 101), (101, 100)] + [(i, i + 1) for i in range(200, 209)]
+    edges.append((209, 100))
+    for src, dst in edges:                  # row dst receives from column src
+        if lo <= dst < hi:
+            A.setValue(dst, src, -1.0)
+    A.assemble()
+    b = A.createVecLeft()
+    b.set(0.0)
+    for i in list(range(200, 210)) + [500]:
+        if lo <= i < hi:
+            b.setValue(i, 1.0)
+    b.assemble()
+    x = b.duplicate()
+    b.copy(result=x)
+    return A, b, x
+
+
+def test_singular_routing_solve_repaired_not_zeroed(minimal_model):
+    """
+    Protects: flowplex._pondRoutingRegion. A non-fatal routing solve whose
+    failure is confined to a few cells (a closed flow cycle) used to be
+    DISCARDED whole (zeroed): on a 10 km global run (G 0.1) a 3-cell cycle
+    dropped the first pass of the continental sediment cascade, about a
+    quarter of that step's routed sediment. The cycle cells must instead
+    become local sinks: everything else routes normally, and the sink keeps
+    the volume flowing into it (here the 10-cell chain's 10 units).
+    """
+    from mpi4py import MPI
+    m = minimal_model
+    _fresh_flow_ksps(m)
+    A, b, x = _chain_into_cycle_system()
+    try:
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        pond = m._routingPond               # owned rows, or None if zeroed
+        lo, hi = x.getOwnershipRange()
+        xa = x.getArray()
+
+        def g(i):
+            v = xa[i - lo] if lo <= i < hi else 0.0
+            return MPI.COMM_WORLD.allreduce(v, op=MPI.SUM)
+
+        assert pond is not None, "the solve was zeroed, not repaired"
+        assert abs(g(209) - 10.0) < 1e-6, "chain end lost its routed volume"
+        assert abs(g(500) - 1.0) < 1e-9, "isolated source lost"
+        trapped = MPI.COMM_WORLD.allreduce(float(pond.sum()), op=MPI.SUM)
+        assert abs(trapped - 10.0) < 1e-6, (
+            "cycle should trap the chain's 10 units, got %g" % trapped)
+    finally:
+        m._routingPond = None
         A.destroy(); b.destroy(); x.destroy()
 
 
