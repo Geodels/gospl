@@ -1232,3 +1232,54 @@ def test_transport_limited_strata_conserve_volume(fixture, tmp_path):
     assert abs(net_rel) < 2.0e-4, (
         f"{fixture} with G=1: net volume {net_rel:+.2e} of activity "
         "(in-place SPL deposit routed downstream too?)")
+
+
+def test_closed_sink_deposit_recorded_in_stratigraphy(minimal_dual_model):
+    """
+    Protects: the closed-sink deposit (sedplex._distributeSediment, stray
+    flow-terminal cells and routing-repair volume) goes through deposeStrat
+    with the pit/lake infill (_updateSinks). Until 2026-11-12 it was added to
+    cumED/hGlobal directly: elevation rose but the stratigraphy recorded no
+    layer, no fine fraction and no provenance there.
+    """
+    from mpi4py import MPI
+    import gospl.sed.sedplex as sp
+
+    m = minimal_dual_model
+    try:
+        m.flowAccumulation()
+        m.erodepSPL()
+        m.flowAccumulation()
+        h0 = m.hLocal.getArray().copy()
+        land = np.where((m.inIDs == 1) & (h0 > m.sealevel + 10.0))[0]
+        # one target cell per rank that has land; volume of 1 km3
+        target = int(land[len(land) // 2]) if land.size else -1
+        vol = 1.0e9
+        orig = m._moveDownstream
+        state = {"done": False}
+
+        def inject(*a, **k):
+            r = orig(*a, **k)
+            if not state["done"]:
+                state["done"] = True
+                if target >= 0 and not m.lsink[target] and m.pitIDs[target] < 0:
+                    m._closedDepo[target] += vol
+            return r
+
+        m._moveDownstream = inject
+        strat0 = m.stratH.sum(axis=1).copy()
+        m.sedChange()
+        dh = m.hLocal.getArray() - h0
+        dstrat = m.stratH.sum(axis=1) - strat0
+        ok = target >= 0 and not m.lsink[target] and m.pitIDs[target] < 0
+        if ok:
+            want = vol / m.larea[target]
+            assert dh[target] > 0.9 * want, (dh[target], want)
+            # the layer must record (at least) what the surface gained
+            assert dstrat[target] >= dh[target] * (1.0 - 1.0e-6), (
+                "closed-sink deposit raised h by %.3f m but the stratigraphy "
+                "recorded %.3f m" % (dh[target], dstrat[target]))
+        n_ok = MPI.COMM_WORLD.allreduce(int(ok), op=MPI.SUM)
+        assert n_ok > 0, "no rank could place the test deposit"
+    finally:
+        m.destroy()

@@ -533,13 +533,13 @@ class SEDMesh(object):
             # take a whole trunk-river load and needle the topography.
             reportVolume(self, "closed-sink deposit", delta,
                          note="(unbounded; stray flow-terminal cells)")
-            self.tmpL.setArray(delta)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.cumED.axpy(1.0, self.tmp)
-            self.hGlobal.axpy(1.0, self.tmp)
-            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-            self.dm.globalToLocal(self.hGlobal, self.hLocal)
-        probeZ(self, "  closed-sink depo")
+            # Applied by _updateSinks together with the pit/lake infill, so it
+            # goes through deposeStrat (layer, dual fine fraction, provenance).
+            # Until 2026-11-12 it was added to cumED/hGlobal here directly and
+            # the stratigraphy never recorded it.
+            self._closedDelta = delta
+        else:
+            self._closedDelta = None
 
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
         if self.stratLith:
@@ -1089,6 +1089,16 @@ class SEDMesh(object):
         reportVolume(self, "pit-fill clipped", delta - capped,
                      note="(gmax = %.2f m)" % gmax)
         delta = capped
+
+        # Closed-sink deposit from the cascade (stray flow-terminal cells and
+        # routing-repair volume, _distributeSediment). Those cells are not pit
+        # cells, so `delta` is zero there; adding it here sends it through
+        # deposeStrat with the rest of the continental deposit. Not capped by
+        # the pit guard above: it is mass the cascade already removed.
+        cd = getattr(self, "_closedDelta", None)
+        if cd is not None:
+            delta = delta + cd
+            self._closedDelta = None
 
         # Apply deposit
         reportVolume(self, "pit/lake infill", delta)
