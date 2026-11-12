@@ -53,6 +53,12 @@ class FAMesh(object):
         _ex = os.environ.get("GOSPL_FLOW_IDA_EXACT", "")
         self._ida_exact = _ex == "1"
         self._ida_exact_allowed = _ex != "0"
+        # Volume trapped by the last routing solve that had to pond a small
+        # un-drainable region (local array, None otherwise); read once by the
+        # sediment cascade (`_takeRoutingPond`). See `_pondRoutingRegion`.
+        self._routingPond = None
+        self._pondG = None
+        self._pondL = None
 
         # An (I - W^T) solve that fails to converge on only a SMALL fraction of
         # rows is the benign isolated-pocket / micro-cycle case (genuinely
@@ -278,7 +284,7 @@ class FAMesh(object):
             [(getattr(reasons, r), r) for r in dir(reasons) if not r.startswith("_")]
         )
 
-    def _solve_KSP2(self, matrix, vector1, vector2, fatal=False):
+    def _solve_KSP2(self, matrix, vector1, vector2, fatal=False, route=False):
         """
         Solution of Krylov subspace iterative method (PETSc *scalable linear equations solvers* - **KSP**) implemented using the Flexible Generalized Minimal Residual method (`fgmres`) with Additive Schwarz preconditioning (`asm`).
 
@@ -361,6 +367,10 @@ class FAMesh(object):
                 resid.destroy()
             except Exception:
                 pass
+            # Every rank must agree before the mask gates a collective repair.
+            have_mask = MPI.COMM_WORLD.allreduce(
+                bad_mask_local is not None, op=MPI.LAND
+            )
             # Map the worst node's PETSc global index (partition-dependent) to
             # its INPUT-MESH id (`locIDs`, what an npz row / ParaView shows) and
             # coordinates. Only its owner rank can, so reduce: the allreduce is
@@ -388,6 +398,14 @@ class FAMesh(object):
             # (Allreduced) and `fatal` is identical on every rank, so the branch
             # is collective-consistent.
             benign = (not fatal) and (0 <= nbad <= self._undrained_benign_cap)
+            # A non-fatal ROUTING solve over a small region is repaired instead
+            # of discarded (see _pondRoutingRegion); global decision.
+            repair = benign and route and have_mask
+            repaired = False
+            if repair:
+                repaired = self._pondRoutingRegion(
+                    matrix, vector1, vector2, bad_mask_local
+                )
             # The RHS / matrix finiteness probes use Vec.norm / Mat.norm, which
             # are COLLECTIVE (each does an MPI_Allreduce). They MUST run on every
             # rank -- computing them inside `if MPIrank == 0` blocks rank 0 in the
@@ -430,12 +448,20 @@ class FAMesh(object):
                 cap=int(self._undrained_benign_cap), its=its,
                 worst_mesh_id=worst_mesh_id,
                 worst_xyz=None if worst_xyz is None else [float(v) for v in worst_xyz],
-                outcome=("benign" if benign else "ponded" if pond_fatal
+                outcome=("repaired" if repaired else "benign" if benign
+                         else "ponded" if pond_fatal
                          else "abort" if fatal else "zeroed"),
                 rhs_finite=rhs_finite, mat_finite=mat_finite,
             )
             if MPIrank == 0:
-                if benign:
+                if repaired:
+                    print(
+                        "[flow] routing solve: %d un-drained cell(s) made local "
+                        "sinks (%d round(s)) and the rest re-solved (trapped "
+                        "volume kept)" % self._pondInfo,
+                        flush=True,
+                    )
+                elif benign:
                     # Say what actually happens: a non-fatal solve's result is
                     # DISCARDED (zeroed below), not ponded. Until 2026-11 this
                     # read "left as local sinks (benign: they pond, mass
@@ -511,7 +537,7 @@ class FAMesh(object):
                     pond |= arr > total_runoff
                 arr[pond] = np.maximum(b[pond], 0.0)
                 vector2.setArray(arr)
-            else:
+            elif not repaired:
                 # Auxiliary / iterative-cascade (non-fatal) solves degrade
                 # gracefully: drop this solve's contribution (zero) and continue.
                 vector2.set(0.0)
@@ -549,6 +575,7 @@ class FAMesh(object):
         """
 
         routing = seed if route is None else bool(route)
+        self._routingPond = None
 
         if self._ksp_main is None:
             ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
@@ -635,6 +662,14 @@ class FAMesh(object):
             ksp.solve(vector1, vector2)
             r = ksp.getConvergedReason()
             _rs.count_ksp(self, key, ksp.getIterationNumber(), r)
+            if r >= 0 and routing and not self._trueResidualOK(
+                matrix, vector1, vector2
+            ):
+                # A "converged" primary on a singular routing block (a closed
+                # flow cycle): fgmres + shifted ILU can stop with a converged
+                # reason while the iterate is a null-space blow-up (2e13 on a
+                # 2-cell cycle). Treat it as failed so it is rescued/repaired.
+                r = -100
             if r < 0 and routing and self._ida_exact_allowed:
                 # Rescue a failed ROUTING solve exactly before treating it as
                 # un-drainable. On a long single-file drainage chain (a wide
@@ -671,10 +706,208 @@ class FAMesh(object):
                 vector1.copy(vector2)
             elif not np.isfinite(vector2.norm()):
                 vector2.set(0.0)
-            vector2 = self._solve_KSP2(matrix, vector1, vector2, fatal=fatal)
+            vector2 = self._solve_KSP2(matrix, vector1, vector2, fatal=fatal,
+                                       route=routing)
         safe_garbage_cleanup()
 
         return vector2
+
+    def _pondRoutingRegion(self, matrix, vector1, vector2, bad):
+        """
+        Repair a non-fatal ``(I - W^T)`` routing solve that failed on a SMALL
+        un-drainable region (a flow cycle or closed pocket) instead of
+        discarding it.
+
+        Cells of the region become local sinks: their columns are removed from
+        the operator (nothing flows out of them; their diagonal stays 1), which
+        makes the system non-singular, and it is re-solved with the exact
+        solver. Every other cell gets its correct routed value; a sink keeps
+        its own source plus what flows into it from outside the region, and
+        that volume is stored in ``self._routingPond`` (owned rows) so the
+        sediment cascade can deposit it in place (`_takeRoutingPond`).
+
+        The region starts from ``bad`` (owned rows above the loose residual
+        threshold of `_solve_KSP2`; may be empty) and grows over a few rounds:
+        after each failed re-solve, cells whose residual exceeds the solver's
+        own acceptance level (``1e2 * rtol * ||b||``) are added. That covers a
+        cycle whose inflow is small next to ``||b||`` (it fails the KSP but
+        flags no cell at the loose threshold: the "0 un-drained cell(s)" case)
+        and a cycle only partly flagged at first. It stops when the region
+        would exceed the benign cap. Until 2026-11 the whole solve was zeroed:
+        on a 10 km global run (G 0.1-0.2) a cycle dropped a full pass of the
+        continental sediment cascade (a quarter of that step's sediment).
+
+        Collective. Returns True when a re-solve converged (global); on
+        failure the caller zeroes the solve as before.
+        """
+        comm = MPI.COMM_WORLD
+        mask = np.asarray(bad, dtype=bool).copy()
+        bnorm = vector1.norm()
+        tight = 1.0e2 * self.rtol * max(bnorm, 1.0e-300)
+        resid = vector1.duplicate()
+        ok = False
+        rounds = 0
+        for rounds in range(1, 5):
+            keep = np.ones(len(mask))
+            keep[mask] = 0.0
+            d = vector1.duplicate()
+            d.setArray(keep)
+            e = vector1.duplicate()
+            e.setArray(1.0 - keep)
+            M = matrix.duplicate(copy=True)
+            M.diagonalScale(R=d)                 # drop the sinks' columns
+            M.setDiagonal(e, addv=petsc4py.PETSc.InsertMode.ADD_VALUES)
+            vector1.copy(vector2)
+            if self._ida_exact_allowed:
+                r = self._solveIDAExact(M, vector1, vector2, "pond",
+                                        keep_iterate=True)
+            else:
+                ksp = self._ksp_main
+                ksp.setOperators(M, M)
+                ksp.solve(vector1, vector2)
+                r = ksp.getConvergedReason()
+            if r >= 0:
+                ok = True
+            else:
+                M.mult(vector2, resid)
+                resid.aypx(-1.0, vector1)        # b - M x
+                ra = np.abs(resid.getArray())
+                grow = (ra > tight) | ~np.isfinite(ra)
+                grow &= ~mask
+                n_new = comm.allreduce(int(np.count_nonzero(grow)), op=MPI.SUM)
+                n_tot = comm.allreduce(
+                    int(np.count_nonzero(mask | grow)), op=MPI.SUM
+                )
+                mask |= grow
+            M.destroy()
+            d.destroy()
+            e.destroy()
+            if ok or n_new == 0 or n_tot > self._undrained_benign_cap:
+                break
+        resid.destroy()
+        self._pondInfo = (
+            comm.allreduce(int(np.count_nonzero(mask)), op=MPI.SUM), rounds
+        )
+        self._reportRoutingRegion(matrix, vector1, vector2, mask)
+        if not ok:
+            if MPIrank == 0:
+                print(
+                    "[flow] routing repair failed after %d round(s) (%d cell(s) "
+                    "made sinks); the solve is discarded (zeroed)"
+                    % (rounds, self._pondInfo[0]),
+                    flush=True,
+                )
+            return False
+        arr = np.zeros(len(mask))
+        arr[mask] = vector2.getArray()[mask]
+        self._routingPond = arr              # owned rows; mapped on take
+        return True
+
+    def _reportRoutingRegion(self, matrix, vector1, vector2, mask, nmax=40):
+        """
+        Diagnostic for a routing solve that needed the pond repair: print the
+        flagged cells so the un-drainable structure can be found on the input
+        mesh. One line per cell (up to ``nmax``, rank 0): input-mesh id,
+        lon/lat (sphere) or x/y (flat), elevation, depression-filled and
+        sediment-filled surfaces, pit id, pit-sink flag, the system's source
+        ``b`` and solution ``x``, and the cell's UPSTREAM donors from its matrix
+        row (``-A_ij = W_ji``: input-mesh id and weight), which is where a flow
+        cycle shows up. Collective (one gather). Only for mesh-sized systems.
+        """
+        comm = MPI.COMM_WORLD
+        if vector1.getSize() != self.hGlobal.getSize():
+            return
+        lines = []
+        try:
+            rstart, _ = matrix.getOwnershipRange()
+            l2g = self.lgmap_col.indices
+            g2l = {int(g): k for k, g in enumerate(l2g)}
+            h = self.hLocal.getArray()
+            fill = getattr(self, "lFill", None)
+            sedf = getattr(self, "sedFilled", None)
+            pit = getattr(self, "pitIDs", None)
+            sink = getattr(self, "lsink", None)
+            ba = vector1.getArray()
+            xa = vector2.getArray()
+            for j in np.where(mask)[0][:nmax]:
+                gi = rstart + int(j)
+                k = g2l.get(gi)
+                if k is None:
+                    continue
+                c = self.lcoords[k]
+                if getattr(self, "flatModel", False):
+                    where = "x %.0f y %.0f" % (c[0], c[1])
+                else:
+                    r = np.linalg.norm(c)
+                    where = "lon %.3f lat %.3f" % (
+                        np.degrees(np.arctan2(c[1], c[0])),
+                        np.degrees(np.arcsin(c[2] / r)),
+                    )
+                cols, vals = matrix.getRow(gi)
+                donors = []
+                for cc, vv in zip(cols, vals):
+                    if int(cc) == gi or vv == 0.0:
+                        continue
+                    kk = g2l.get(int(cc))
+                    mid = int(self.locIDs[kk]) if kk is not None else -1
+                    donors.append("%d:%.3g" % (mid, -vv))
+                lines.append(
+                    "  node %d %s z %.3f fill %s sedfill %s pit %s sink %s "
+                    "b %.4g x %.4g donors [%s]" % (
+                        int(self.locIDs[k]), where, h[k],
+                        "%.3f" % fill[k] if fill is not None else "-",
+                        "%.3f" % sedf[k] if sedf is not None else "-",
+                        int(pit[k]) if pit is not None else "-",
+                        bool(sink[k]) if sink is not None else "-",
+                        ba[j], xa[j], " ".join(donors),
+                    )
+                )
+        except Exception as exc:              # diagnostics must never break a run
+            lines = ["  (diagnostic failed on this rank: %s)" % exc]
+        allines = comm.gather(lines, root=0)
+        if MPIrank == 0:
+            flat = [ln for part in allines for ln in part]
+            print("[flow] routing repair region (%d cell(s), first %d):"
+                  % (self._pondInfo[0], min(len(flat), nmax)), flush=True)
+            for ln in flat[:nmax]:
+                print(ln, flush=True)
+
+    def _takeRoutingPond(self):
+        """
+        Return and clear the volume trapped by the last routing solve's pond
+        repair (local array, owned nodes only), or None. The flag is set by a
+        global decision, so every rank gets an array or every rank gets None;
+        collective when it is not None. Only for solves on mesh-sized
+        (DM) vectors.
+        """
+        pond = self._routingPond
+        self._routingPond = None
+        if pond is None:
+            return None
+        if self._pondG is None:
+            self._pondG = self.hGlobal.duplicate()
+            self._pondL = self.hLocal.duplicate()
+        self._pondG.setArray(pond)
+        self.dm.globalToLocal(self._pondG, self._pondL)  # collective
+        return self._pondL.getArray() * self.inIDs
+
+    def _trueResidualOK(self, matrix, vector1, vector2):
+        """
+        True when ``||b - A x|| <= 1e2 * rtol * ||b||`` and finite: the same
+        acceptance test the exact rescue applies. Collective (one matvec, two
+        norms).
+        """
+        work = getattr(self, "_kspWork", None)
+        if work is None or work.getSize() != vector1.getSize():
+            if work is not None:
+                work.destroy()
+            work = vector1.duplicate()
+            self._kspWork = work
+        matrix.mult(vector2, work)
+        work.aypx(-1.0, vector1)
+        rnorm, bnorm = work.norm(), vector1.norm()
+        return bool(np.isfinite(rnorm)
+                    and rnorm <= 1.0e2 * self.rtol * max(bnorm, 1.0e-300))
 
     def _warmStartGuard(self, matrix, vector1, vector2, seed):
         """
@@ -700,7 +933,7 @@ class FAMesh(object):
             _rs.record(self, "ksp_stale_guess_reset", seed=bool(seed),
                        ratio=float(rnorm / bnorm) if bnorm > 0 else -1.0)
 
-    def _solveIDAExact(self, matrix, vector1, vector2, key):
+    def _solveIDAExact(self, matrix, vector1, vector2, key, keep_iterate=False):
         """
         Solve an ``(I - W^T)`` routing system with EXACT per-rank block
         factors: ``fgmres`` + ``bjacobi`` with an ``lu`` sub-solver
@@ -758,7 +991,7 @@ class FAMesh(object):
             if not np.isfinite(rnorm) or rnorm > 1.0e2 * self.rtol * max(bnorm, 1e-300):
                 r = -100                             # not actually solved
         _rs.count_ksp(self, key + "_exact", ksp.getIterationNumber(), r)
-        if r < 0:
+        if r < 0 and not keep_iterate:
             # Leave a clean, bounded guess for the fallback.
             vector1.copy(vector2)
         return r
@@ -814,6 +1047,33 @@ class FAMesh(object):
 
         return
 
+    def _routingSurface(self, h, tol=1.0e-9):
+        """
+        Surface used to route flow: ``h``, except that a cell within ``tol``
+        (1 nm) of its depression-filled surface ``lFill`` takes ``lFill``.
+
+        ``lFill`` comes back from the shifted-frame fill with 1-ulp noise
+        (``pitfilling._unshiftFill``). The flat router (`_dirFlats`) works on
+        ``lFill`` and MFD on ``h``, so on a flat a cell 1 ulp above its
+        ``lFill`` was MFD-routed back to the flat cell that the flat router
+        had sent to it: closed 2-cell cycles, singular routing systems and
+        discarded sediment-cascade passes (10 km global run, 150 m DEM
+        plateaus). With the two rules reading the same values on flats, a
+        cycle is impossible: a flat cell i is sent to c only if
+        lFill(c) <= lFill(i), and c can MFD back only if its routing value
+        exceeds lFill(i), which needs h(c) more than ``tol`` above lFill(c),
+        but lFill >= h up to round-off. Element-wise on halo-synced arrays.
+        """
+        lf = getattr(self, "lFill", None)
+        if lf is None or lf.shape != np.shape(h):
+            return h
+        close = np.abs(h - lf) <= tol
+        if not close.any():
+            return h
+        hr = np.array(h, dtype=np.float64, copy=True)
+        hr[close] = lf[close]
+        return hr
+
     def _buildFlowDirection(self, h, down=True):
         """
         This function builds from neighbouring slopes the flow directions. It calls a fortran subroutine that locally computes for each vertice:
@@ -828,6 +1088,11 @@ class FAMesh(object):
 
         # Get open marine regions
         self.seaID = np.where(self.lFill <= self.sealevel)[0]
+
+        # Route on a surface consistent with the flat directions (see
+        # _routingSurface): round-off between h and lFill must not create
+        # slopes the flat router cannot see.
+        h = self._routingSurface(h)
 
         # Define multiple flow directions for unfilled elevation.
         # `self.gid` is the per-node global ID; passed in to make the

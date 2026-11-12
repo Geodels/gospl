@@ -101,6 +101,22 @@ class SEDMesh(object):
 
         return
 
+    def _keepRoutingPond(self, scale):
+        """
+        Add the volume trapped by the last routing solve's pond repair
+        (`flowplex._pondRoutingRegion`) to the closed-sink deposit, so a small
+        un-drainable region keeps the sediment that flows into it instead of
+        losing it. Sink cells are skipped: their volume is already counted by
+        their pit on the next cascade pass. Rank-local (the deposit itself is
+        applied collectively in `_distributeSediment`).
+
+        :arg scale: factor converting the solve's units to a volume (m3)
+        """
+        pond = self._takeRoutingPond()
+        if pond is not None and getattr(self, "_closedDepo", None) is not None:
+            keep = ~self.lsink
+            self._closedDepo[keep] += scale * pond[keep]
+
     def _getSedFlux(self):
         """
         This function computes sediment flux in cubic metres per year from incoming rivers. Like for the computation of the flow discharge and erosion rates, the sediment flux is solved by an implicit time integration method, the matrix system is the one obtained from the receiver distributions over the unfilled elevation mesh for the flow discharge (`fMat`).
@@ -131,6 +147,10 @@ class SEDMesh(object):
         # Get the volume of sediment transported in m3/yr
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed, route=True)
+        # Volume (m3 over the step) trapped by an un-drainable region of this
+        # solve, deposited in place by _distributeSediment.
+        pond = self._takeRoutingPond()
+        self._sedFluxPond = None if pond is None else pond * self.dt
 
         # Dual lithology: route the fine sub-flux through the SAME operator
         # (linear, so this is exact), then snapshot the per-node fine fraction
@@ -353,6 +373,7 @@ class SEDMesh(object):
                 # hop/iteration over the full network and grinds to max_it on a
                 # high-resolution global mesh (~10x slower first sediment step).
                 self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
+                self._keepRoutingPond(1.0)
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
                 if dual:
                     # Route the fine overspill through the SAME matrix (linear).
@@ -425,6 +446,11 @@ class SEDMesh(object):
         # outlet, above sea) during the cascade — deposited after the loop so a
         # closed (wall) domain conserves mass. Empty on open/marine domains.
         self._closedDepo = np.zeros(self.lpoints, dtype=np.float64)
+        sfp = getattr(self, "_sedFluxPond", None)
+        if sfp is not None:
+            keep = ~self.lsink                   # sinks are counted by their pit
+            self._closedDepo[keep] += sfp[keep]
+            self._sedFluxPond = None
 
         step = 0
         excess = True
@@ -507,13 +533,13 @@ class SEDMesh(object):
             # take a whole trunk-river load and needle the topography.
             reportVolume(self, "closed-sink deposit", delta,
                          note="(unbounded; stray flow-terminal cells)")
-            self.tmpL.setArray(delta)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.cumED.axpy(1.0, self.tmp)
-            self.hGlobal.axpy(1.0, self.tmp)
-            self.dm.globalToLocal(self.cumED, self.cumEDLocal)
-            self.dm.globalToLocal(self.hGlobal, self.hLocal)
-        probeZ(self, "  closed-sink depo")
+            # Applied by _updateSinks together with the pit/lake infill, so it
+            # goes through deposeStrat (layer, dual fine fraction, provenance).
+            # Until 2026-11-12 it was added to cumED/hGlobal here directly and
+            # the stratigraphy never recorded it.
+            self._closedDelta = delta
+        else:
+            self._closedDelta = None
 
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
         if self.stratLith:
@@ -1063,6 +1089,16 @@ class SEDMesh(object):
         reportVolume(self, "pit-fill clipped", delta - capped,
                      note="(gmax = %.2f m)" % gmax)
         delta = capped
+
+        # Closed-sink deposit from the cascade (stray flow-terminal cells and
+        # routing-repair volume, _distributeSediment). Those cells are not pit
+        # cells, so `delta` is zero there; adding it here sends it through
+        # deposeStrat with the rest of the continental deposit. Not capped by
+        # the pit guard above: it is mass the cascade already removed.
+        cd = getattr(self, "_closedDelta", None)
+        if cd is not None:
+            delta = delta + cd
+            self._closedDelta = None
 
         # Apply deposit
         reportVolume(self, "pit/lake infill", delta)

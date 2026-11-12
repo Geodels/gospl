@@ -37,7 +37,9 @@ volume AND peak thickness.
 2. **Unbounded deposition sites** (each conserves mass when routing has nowhere else
    to go): closed-sink deposit `_closedDepo` (always active on a sphere), marine
    force-deposit at terminal sinks and the cascade-exit residual, the `_diffuseOcean`
-   global mass rescale. `zprobe` instruments these.
+   global mass rescale. `zprobe` instruments these. The `Marine diffusion mass
+   rescale` line should read ~1 since the donor face diffusivity (2026-11-12); a
+   value far from 1 means the diffusion is creating or losing volume.
 3. **Flow solver**: `run.jsonl` events `flow_ksp_fallback_failed` (ponded / zeroed /
    abort, with `nbad` and `worst_mesh_id`) and `flow_cascade` with outcome `stall`.
    A large un-drained region is usually a topography problem: run

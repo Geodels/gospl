@@ -869,8 +869,10 @@ def test_sediment_routing_solve_rescued_not_zeroed(minimal_model):
 def test_singular_routing_solve_still_falls_back(minimal_model):
     """
     A genuinely singular region (2-cycles) must NOT be "rescued": the exact
-    solver fails too, the sticky switch stays off, and the bounded fallback
-    zeroes the non-fatal solve as before.
+    solver fails too and the sticky switch stays off. Since 2026-11 the small
+    region is then made of local sinks and the solve repaired (see
+    test_singular_routing_solve_repaired_not_zeroed), so the result is finite
+    and keeps the source volume.
     """
     m = minimal_model
     _fresh_flow_ksps(m)
@@ -879,8 +881,209 @@ def test_singular_routing_solve_still_falls_back(minimal_model):
         m._solve_KSP(True, A, b, x, fatal=False, seed=True)
         assert m._ida_exact is False
         assert np.all(np.isfinite(x.getArray()))
+        # x is a through-flux; the conserved quantity is what the sinks trap:
+        # every source sits on a closed cycle, so all of it is ponded.
+        from mpi4py import MPI
+        assert m._routingPond is not None
+        trapped = MPI.COMM_WORLD.allreduce(float(m._routingPond.sum()))
+        assert abs(trapped - b.sum()) < 1e-8 * b.sum()
     finally:
+        m._routingPond = None
         A.destroy(); b.destroy(); x.destroy()
+
+
+def _chain_into_cycle_system(big=1.0):
+    """N=1000 routing system: a 10-cell chain (200..209, b=1 each) drains into
+    a closed 2-cycle (100 <-> 101); cell 500 is an isolated source (b=big)."""
+    import petsc4py
+    PETSc = petsc4py.PETSc
+    N = 1000
+    A = PETSc.Mat().create(PETSc.COMM_WORLD)
+    A.setSizes(((None, N), (None, N)))
+    A.setType("aij")
+    A.setPreallocationNNZ((3, 3))
+    A.setUp()
+    lo, hi = A.getOwnershipRange()
+    for gi in range(lo, hi):
+        A.setValue(gi, gi, 1.0)
+    edges = [(100, 101), (101, 100)] + [(i, i + 1) for i in range(200, 209)]
+    edges.append((209, 100))
+    for src, dst in edges:                  # row dst receives from column src
+        if lo <= dst < hi:
+            A.setValue(dst, src, -1.0)
+    A.assemble()
+    b = A.createVecLeft()
+    b.set(0.0)
+    for i in range(200, 210):
+        if lo <= i < hi:
+            b.setValue(i, 1.0)
+    if lo <= 500 < hi:
+        b.setValue(500, big)
+    b.assemble()
+    x = b.duplicate()
+    b.copy(result=x)
+    return A, b, x
+
+
+def test_singular_routing_solve_repaired_not_zeroed(minimal_model):
+    """
+    Protects: flowplex._pondRoutingRegion. A non-fatal routing solve whose
+    failure is confined to a few cells (a closed flow cycle) used to be
+    DISCARDED whole (zeroed): on a 10 km global run (G 0.1) a 3-cell cycle
+    dropped the first pass of the continental sediment cascade, about a
+    quarter of that step's routed sediment. The cycle cells must instead
+    become local sinks: everything else routes normally, and the sink keeps
+    the volume flowing into it (here the 10-cell chain's 10 units).
+    """
+    from mpi4py import MPI
+    m = minimal_model
+    _fresh_flow_ksps(m)
+    A, b, x = _chain_into_cycle_system()
+    try:
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        pond = m._routingPond               # owned rows, or None if zeroed
+        lo, hi = x.getOwnershipRange()
+        xa = x.getArray()
+
+        def g(i):
+            v = xa[i - lo] if lo <= i < hi else 0.0
+            return MPI.COMM_WORLD.allreduce(v, op=MPI.SUM)
+
+        assert pond is not None, "the solve was zeroed, not repaired"
+        assert abs(g(209) - 10.0) < 1e-6, "chain end lost its routed volume"
+        assert abs(g(500) - 1.0) < 1e-9, "isolated source lost"
+        trapped = MPI.COMM_WORLD.allreduce(float(pond.sum()), op=MPI.SUM)
+        assert abs(trapped - 10.0) < 1e-6, (
+            "cycle should trap the chain's 10 units, got %g" % trapped)
+    finally:
+        m._routingPond = None
+        A.destroy(); b.destroy(); x.destroy()
+
+
+def test_singular_routing_solve_repaired_when_no_cell_flagged(minimal_model):
+    """
+    Protects: flowplex._pondRoutingRegion growing its region. When the flow
+    entering a cycle is small next to ||b|| (here one source of 1e6 elsewhere),
+    no cell exceeds the loose residual threshold (1e-3 ||b||) and the log read
+    "0 un-drained cell(s) localised: its result is discarded (zeroed)" on a
+    10 km global run, dropping the whole cascade pass, the big source with it.
+    The repair must find the cycle at the solver's own tolerance and keep
+    everything.
+    """
+    from mpi4py import MPI
+    m = minimal_model
+    _fresh_flow_ksps(m)
+    A, b, x = _chain_into_cycle_system(big=1.0e6)
+    try:
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        pond = m._routingPond
+        lo, hi = x.getOwnershipRange()
+        xa = x.getArray()
+
+        def g(i):
+            v = xa[i - lo] if lo <= i < hi else 0.0
+            return MPI.COMM_WORLD.allreduce(v, op=MPI.SUM)
+
+        assert pond is not None, "the solve was zeroed, not repaired"
+        assert abs(g(500) - 1.0e6) < 1e-3, "the large source was dropped"
+        trapped = MPI.COMM_WORLD.allreduce(float(pond.sum()), op=MPI.SUM)
+        assert abs(trapped - 10.0) < 1e-6, (
+            "cycle should trap the chain's 10 units, got %g" % trapped)
+    finally:
+        m._routingPond = None
+        A.destroy(); b.destroy(); x.destroy()
+
+
+def test_routing_repair_reports_the_cells(minimal_model, capsys):
+    """
+    Protects: flowplex._reportRoutingRegion. When a mesh-sized routing solve
+    needs the pond repair, the flagged cells must be printed with their
+    input-mesh ids and upstream donors, so the un-drainable structure can be
+    located on the mesh (the 10 km G 0.2 run failed on cells nobody could see).
+    """
+    import petsc4py
+    PETSc = petsc4py.PETSc
+    m = minimal_model
+    try:
+        _fresh_flow_ksps(m)
+        n_loc = m.hGlobal.getLocalSize()
+        A = PETSc.Mat().createAIJ(
+            [(n_loc, PETSc.DECIDE), (n_loc, PETSc.DECIDE)], nnz=3,
+            comm=PETSc.COMM_WORLD,
+        )
+        lo, hi = A.getOwnershipRange()
+        for gi in range(lo, hi):
+            A.setValue(gi, gi, 1.0)
+        i, j = 0, 1                          # a 2-cycle on the first two rows
+        if lo <= i < hi:
+            A.setValue(i, j, -1.0)
+        if lo <= j < hi:
+            A.setValue(j, i, -1.0)
+        A.assemble()
+        b = m.hGlobal.duplicate()
+        b.set(0.0)
+        if lo <= 0 < hi:
+            b.setValue(0, 1.0)
+        if lo <= 5 < hi:
+            b.setValue(5, 1.0)
+        b.assemble()
+        x = b.duplicate()
+        b.copy(result=x)
+        m._solve_KSP(True, A, b, x, fatal=False, seed=True)
+        out = capsys.readouterr().out
+        A.destroy(); b.destroy(); x.destroy()
+    finally:
+        m._routingPond = None
+        m.destroy()
+    assert "routing repair region" in out, out[-2000:]
+    assert " node " in out and "donors [" in out, out[-2000:]
+
+
+def test_no_flat_mfd_cycle_on_roundoff_plateau(minimal_model):
+    """
+    Protects: flowplex._routingSurface. The fill runs on ``h - level`` and is
+    shifted back with ``lFill += level``; with ``level`` near the global
+    minimum the round trip leaves 1-ulp noise between ``h`` and ``lFill``
+    (14% of a global mesh 1 ulp below, 14% above). The flat router reads
+    ``lFill`` and MFD read ``h``, so a flat cell was sent to a 1-ulp-higher
+    neighbour that MFD sent straight back: closed 2-cell flow cycles that made
+    the sediment cascade singular (10 km global run, 150 m DEM plateaus).
+    No flat-routed cell's receiver may route back to it. (Clamping
+    ``lFill >= h`` instead removed the cycles but split the plateaus into
+    ~1e5 isolated flat sinks: do not reintroduce it.)
+    """
+    from mpi4py import MPI
+
+    m = minimal_model
+    try:
+        h = m.hLocal.getArray().copy()
+        land = h > 0.0
+        assert land.sum() > 20
+        ulp = np.nextafter(150.0, 200.0)
+        h[land] = 150.0
+        idx = np.where(land)[0]
+        h[idx[::3]] = ulp                     # 1-ulp micro-relief on the plateau
+        h[np.argmin(h)] = -5700.0             # deep minimum -> large shift
+        m.hLocal.setArray(h)
+        m.dm.localToGlobal(m.hLocal, m.hGlobal)
+        m.dm.globalToLocal(m.hGlobal, m.hLocal)
+        hl = m.hLocal.getArray().copy()
+
+        m.fillElevation(sed=True)
+        m._buildFlowDirection(hl)
+        owned = m.inIDs == 1
+        cyc = 0
+        for i in np.where(owned & (m.wghtVal[:, 0] == 1.0)
+                          & (m.rcvID[:, 0] == m.flatDirs))[0]:
+            c = m.rcvID[i, 0]
+            if c < 0 or c == i:
+                continue
+            back = (m.rcvID[c] == i) & (m.wghtVal[c] > 0.0)
+            cyc += int(back.any())
+        cyc = MPI.COMM_WORLD.allreduce(cyc, op=MPI.SUM)
+        assert cyc == 0, "%d flat-routed cells are routed back to" % cyc
+    finally:
+        m.destroy()
 
 
 def test_stale_warm_start_guess_is_reset(minimal_model):

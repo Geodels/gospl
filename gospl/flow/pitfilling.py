@@ -846,6 +846,21 @@ class PITFill(object):
 
         return
 
+    def _unshiftFill(self, h, level):
+        """
+        Bring the depression-filled surface back from the shifted frame the
+        fill runs in (``h - level``). The round trip is NOT exact: about 14%
+        of a global mesh comes back 1 ulp below ``h`` and 14% 1 ulp above.
+        That noise is deliberately kept here: on flat plateaus it is what
+        keeps a flat connected (the ulp-high cells read as part of the flat);
+        clamping ``lFill >= h`` split 150 m DEM plateaus into ~1e5 isolated
+        flat sinks per step on a 10 km global run (water and sediment ponded,
+        ~20% less sediment delivered). The routing absorbs the noise instead
+        (``FAMesh._routingSurface``), which is what removes the flat/MFD
+        cycles the noise used to create.
+        """
+        self.lFill += level
+
     def fillElevation(self, sed=False):
         """
         This function is the main entry point to perform pit filling.
@@ -867,7 +882,7 @@ class PITFill(object):
         level = max(minh, self.sealevel + self.oFill)
 
         self._performFilling(hl - level, level, sed)
-        self.lFill += level
+        self._unshiftFill(hl, level)
         self._pitInformation(hl, level, sed)
 
         # Compute discrete depth-volume curves per pit. Used by water filling

@@ -203,8 +203,19 @@ The ``TFQMR`` (transpose-free QMR (quasi minimal residual)) KSP solver is used t
    numerical safeguard that keeps the :math:`\mathrm{(1-G')}` elevation block of
    the coupled system non-singular; it is *not* a deposition limiter. The
    implicit solve and the bounded incoming sediment flux
-   :math:`\mathrm{Q_{s_i}}` already prevent any unphysical build-up, so deposits
-   stay mass-conserving rather than forming numerical spikes.
+   :math:`\mathrm{Q_{s_i}}` keep deposits mass-conserving as long as the cap
+   is rarely reached. When :math:`\mathrm{G}` is large compared with the
+   rainfall, the cap is reached over a large part of the land: the coupled
+   block then approaches singularity, the solve slows down from step to step
+   and a single-cell elevation spike can form. Keep
+   :math:`\mathrm{G \lesssim \bar{P}/2}` (rain in m/yr), a rule that does not
+   depend on the mesh resolution.
+
+   The coupled system is solved with a Schur-complement field split whose
+   blocks are both direct: an exact per-rank LU on the routing block (a
+   permuted triangular matrix) and a single GASM preconditioner pass on the
+   elevation block. The block settings go through the PETSc options database
+   (prefix ``spl_ed_``), so they can be overridden from the command line.
 
 
 Dynamic soil

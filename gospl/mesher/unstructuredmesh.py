@@ -1287,6 +1287,7 @@ class UnstMesh(object):
         # Cached KSP/SNES/TS helpers (created lazily on first use)
         for name in (
             "_ksp_main", "_ksp_fallback", "_ksp_exact", "_kspWork",
+            "_pondG", "_pondL",
             "_srcL", "_srcG",
             "_snes_ed", "_snes_ed_f", "_snes_ed_x",
             "_snes_ed_fb", "_snes_ed_fb_f",
@@ -1297,7 +1298,7 @@ class UnstMesh(object):
             "_ts_marine", "_ts_marine_x", "_ts_marine_atol",
             "_smoothMat", "_ksp_smooth",
             "_hillMat", "_ksp_hill_lin",
-            "_ksp_picard", "_ksp_provdiff",
+            "_ksp_picard", "_ksp_provdiff", "_limL", "_limG",
             "_flexLm", "_flexA", "_flexKSP",
             "_ts_soil", "_ts_soil_x", "_ts_soil_f",
             "_advMatLeft", "_advMatRight", "_advKSP",

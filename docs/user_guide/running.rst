@@ -25,9 +25,27 @@ Options:
 
 - ``-i`` / ``--input`` *(required)* — the YAML input file.
 - ``-v`` / ``--verbose`` — print per-step model progress (phase-grouped). The
-  first line reports the goSPL version.
+  first line reports the goSPL version. It also prints ``[zprobe]`` lines: the
+  global elevation extremes after each stage, with the input-mesh node id of the
+  maximum (the row of the mesh ``.npz`` file, the same on any number of
+  processors), the volume and peak thickness of each deposit that has no upper
+  bound, and the stage that raised the maximum. They are the first place to look
+  for the origin of a spike. Two flow-routing lines may also appear: ``[flow]
+  routing solve: N un-drained cell(s) made local sinks … (trapped volume
+  kept)`` means a routing system was singular on a few cells (a closed flow
+  loop); those cells were made local sinks and the volume reaching them was
+  deposited in place. It is preceded by a ``[flow] routing repair region``
+  block listing the cells (input-mesh id, lon/lat, elevation, filled surfaces,
+  pit id, upstream donor cells). ``[flow] routing repair failed …`` means the
+  repair did not converge and that routing pass was discarded. Either line is
+  worth reporting with the block: it usually points to a topography or routing
+  issue on those cells.
 - ``--log`` — write the PETSc solver log summary.
-- ``--profile`` — record a per-phase wall-clock profile (``profile.json``).
+- ``--profile`` — record a per-phase wall-clock profile (``profile.json``). For a
+  finer split of a slow step (marine smoother, eps-fill, cascades, sediment
+  routing, SPL solve), run ``mpirun -n N python scripts/stage_profile.py
+  input.yml`` from the source tree on a two or three step window: it prints the
+  wall time per sub-stage on rank 0 and on the slowest rank.
 - ``--summary FILE`` — write one machine-readable JSON record per time step to
   ``FILE`` (JSON Lines): elevation range, NaN/inf counts, the step's eroded /
   deposited volume, per-phase wall time, flow-solver iteration counts and

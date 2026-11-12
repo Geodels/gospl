@@ -525,6 +525,121 @@ def test_marine_diffusion_conserves_on_steep_bathymetry(minimal_model):
 
 
 @pytest.mark.slow
+def _steep_marine_setup(model, dt=5.0e4, nlK=5.0e4):
+    """Raise sea level over the fixture's natural relief (steep bathymetry)."""
+    bed = model.hLocal.getArray().copy()
+    model.sealevel = 2000.0
+    model.seaID = bed < model.sealevel
+    model.dt = dt
+    model.nlK = nlK
+    return bed
+
+
+@pytest.mark.parametrize("solver", ["ts", "picard"])
+def test_marine_diffusion_bare_bed_does_not_shed(minimal_model, solver):
+    """
+    Protects: the upslope (donor) face diffusivity of the marine/lake deposit
+    diffusion (`hillslope._donorDiffCoeffs`, used by the TS residual/Jacobian
+    and the Picard operator).
+
+    Silent failure prevented: with the averaged face diffusivity
+    `0.5*(Cd_k + Cd_n)` a bare cell above a deposit lost BED material into it;
+    the >= 0 clip dropped that loss and kept the gain, so a 5 m deposit on
+    steep bathymetry came out at 2.17x its volume with a 456 m peak, under BOTH
+    solvers. `_diffuseOcean`'s mass rescale then scaled every deposit by ~0.5
+    (seen as `Marine diffusion mass rescale: 0.51` on a 10 km global run).
+    The raw solver output must conserve volume BEFORE any rescale.
+    """
+    from mpi4py import MPI
+
+    model = minimal_model
+    if getattr(model, "flatModel", False):
+        pytest.skip("needs a sphere fixture with submarine relief")
+    try:
+        _steep_marine_setup(model)
+        owned = model.inIDs == 1
+        dh = np.zeros(model.lpoints)
+        dh[model.seaID] = 5.0
+        model.marineSolver = solver
+        model.picardSub, model.picardIts = 40, 4
+        vin = MPI.COMM_WORLD.allreduce(float(np.sum((dh * model.larea)[owned])))
+        nd = model._diffuseImplicit(dh, model.seaID, model.nlK, label="marine")
+        vout = MPI.COMM_WORLD.allreduce(float(np.sum((nd * model.larea)[owned])))
+        peak = MPI.COMM_WORLD.allreduce(float(nd[owned].max()), op=MPI.MAX)
+    finally:
+        model.destroy()
+
+    # Pre-fix: vout/vin = 2.17 (both solvers), peak 452-457 m.
+    assert abs(vout / vin - 1.0) < 1.0e-6, (
+        f"{solver}: raw marine diffusion volume ratio {vout / vin:.4f} != 1; "
+        f"bare bed is shedding material into the deposit (face diffusivity)."
+    )
+    assert peak < 100.0, f"{solver}: 5 m deposit diffused to a {peak:.1f} m peak"
+
+
+def test_marine_picard_supply_limited(minimal_model):
+    """
+    Protects: the supply limiter of the Picard deposit diffusion
+    (`_donorDiffCoeffs(limit=(avail, dt_sub))` in `_diffuseImplicitPicard`).
+
+    Silent failure prevented: with a large diffusion number `Cd*dt_sub/dx^2`
+    (fine meshes: 10 km cells, `nonlinKm 2e4`) a deposit cell on a steep slope
+    exported more than its deposit in one sub-step, cut below its bed, and the
+    `>= 0` clip created volume: `Marine diffusion mass rescale` read 0.36-0.53
+    on a 10 km global run even with the donor face diffusivity. Here a 5 m
+    deposit with `nlK = 5e6` came out at 3.27x its volume without the limiter.
+    """
+    from mpi4py import MPI
+
+    model = minimal_model
+    if getattr(model, "flatModel", False):
+        pytest.skip("needs a sphere fixture with submarine relief")
+    try:
+        _steep_marine_setup(model, nlK=5.0e6)
+        owned = model.inIDs == 1
+        dh = np.zeros(model.lpoints)
+        dh[model.seaID] = 5.0
+        model.marineSolver = "picard"
+        model.picardSub, model.picardIts = 40, 4
+        vin = MPI.COMM_WORLD.allreduce(float(np.sum((dh * model.larea)[owned])))
+        nd = model._diffuseImplicit(dh, model.seaID, model.nlK, label="marine")
+        vout = MPI.COMM_WORLD.allreduce(float(np.sum((nd * model.larea)[owned])))
+    finally:
+        model.destroy()
+
+    assert abs(vout / vin - 1.0) < 1.0e-3, (
+        f"Picard diffusion volume ratio {vout / vin:.4f} != 1 at a large "
+        f"diffusion number: deposit cells drain below their bed (supply limiter)."
+    )
+
+
+def test_marine_ts_failure_falls_back_to_picard(minimal_model):
+    """
+    Protects: `_diffuseImplicit` falls back to the Picard solver when the
+    adaptive TS gives up (`DIVERGED_STEP_REJECTED`), instead of raising
+    PETSc error 91 and aborting the run (seen on a 10 km global run with
+    `marineSolver: ts`). The fallback is sticky (`marineSolver` -> picard).
+    """
+    model = minimal_model
+    if getattr(model, "flatModel", False):
+        pytest.skip("needs a sphere fixture with submarine relief")
+    try:
+        bed = _steep_marine_setup(model, dt=5.0e5, nlK=5.0e6)
+        dh = np.zeros(model.lpoints)
+        dh[model.seaID & (bed > 1000.0)] = 500.0
+        model._diffuseImplicit(dh, model.seaID, model.nlK, label="marine")
+        assert model.marineSolver == "ts"
+        # Any rejected step now exhausts the TS.
+        model._ts_marine.setMaxStepRejections(0)
+        nd = model._diffuseImplicit(dh, model.seaID, model.nlK, label="marine")
+        solver = model.marineSolver
+    finally:
+        model.destroy()
+
+    assert solver == "picard", "TS failure did not switch to the Picard solver"
+    assert np.all(np.isfinite(nd)) and nd.min() >= 0.0
+
+
 def test_ofill_is_relative_to_sea_level(minimal_model):
     """
     Protects: `oFill` means the SAME thing everywhere — a depth below sea level.
@@ -754,3 +869,34 @@ def test_coupled_deposition_block_solves_are_direct(minimal_model):
     assert counts.get("marine"), "the coupled marine deposition solve never ran (Gmar > 0)"
     assert max(counts["spl"]) == 0, f"GMRES iterations inside the SPL coupled solve: {counts['spl']}"
     assert max(counts["marine"]) == 0, f"GMRES iterations inside the marine solve: {counts['marine']}"
+
+
+def test_routing_pond_is_deposited_in_place(minimal_model):
+    """
+    Protects: sedplex._keepRoutingPond. When a cascade routing solve is
+    repaired (flowplex._pondRoutingRegion), the volume its local sinks trap
+    must join the closed-sink deposit (minus cells already counted as pit
+    sinks), not vanish.
+    """
+    from mpi4py import MPI
+
+    m = minimal_model
+    try:
+        m.flowAccumulation()
+        n_owned = m.hGlobal.getLocalSize()
+        pond = np.zeros(n_owned)
+        pond[: min(5, n_owned)] = 2.0              # owned rows of a global Vec
+        m._routingPond = pond
+        m._closedDepo = np.zeros(m.lpoints)
+        m._keepRoutingPond(1.0)
+        got = MPI.COMM_WORLD.allreduce(float(m._closedDepo.sum()))
+        # expected: the ponded rows mapped to local, owned, non-sink nodes
+        m._pondG.setArray(pond)
+        m.dm.globalToLocal(m._pondG, m._pondL)
+        loc = m._pondL.getArray() * m.inIDs
+        want = MPI.COMM_WORLD.allreduce(float(loc[~m.lsink].sum()))
+        assert want > 0.0
+        assert abs(got - want) < 1e-12 * want
+        assert m._routingPond is None
+    finally:
+        m.destroy()

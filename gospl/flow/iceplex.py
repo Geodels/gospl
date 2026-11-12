@@ -173,7 +173,7 @@ class IceMesh(object):
 
         # Parallel terminus-anchored fill + flat directions (no serial epsfill).
         self._performFilling(bed - terminus, terminus, sed=True)
-        self.lFill += terminus
+        self._unshiftFill(bed, terminus)
         self._pitInformation(bed, terminus, sed=True)
         fillz = self.lFill
 

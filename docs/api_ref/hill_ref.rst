@@ -27,6 +27,7 @@ Class hillSLP
       ~hillSLP._buildDiffMat
       ~hillSLP._assembleDiffMat
       ~hillSLP._assembleDiffMatCSR
+      ~hillSLP._donorDiffCoeffs
       ~hillSLP._makeDiffusionKSP
       ~hillSLP._solveSmooth
       ~hillSLP._diff_nl_monitor
@@ -52,6 +53,7 @@ Private functions
 .. automethod:: sed.hillslope.hillSLP._buildDiffMat
 .. automethod:: sed.hillslope.hillSLP._assembleDiffMat
 .. automethod:: sed.hillslope.hillSLP._assembleDiffMatCSR
+.. automethod:: sed.hillslope.hillSLP._donorDiffCoeffs
 .. automethod:: sed.hillslope.hillSLP._makeDiffusionKSP
 .. automethod:: sed.hillslope.hillSLP._solveSmooth
 .. automethod:: sed.hillslope.hillSLP._diff_nl_monitor
