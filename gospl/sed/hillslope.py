@@ -15,7 +15,6 @@ if "READTHEDOCS" not in os.environ:
     from gospl._fortran import sethillslopecoeff
     from gospl._fortran import hillslp_nl
     from gospl._fortran import jacobiancoeff
-    from gospl._fortran import fctcoeff
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
@@ -63,6 +62,10 @@ class hillSLP(object):
         # diffused tail getting a domain-average mix). Created lazily only when
         # provenance is on; see _diffuseProvTracers.
         self._ksp_provdiff = None
+
+        # FV face weights vDist/(eLgt*area) per (node, neighbour slot), mesh
+        # geometry only; built lazily by _donorDiffCoeffs (plain numpy array).
+        self._fvFaceW = None
 
         # Cached marine-morphology smoothing operator (_hillSlope smooth=2) and
         # its KSP. The smoothing diffusivity is mesh-size-based and timestep-
@@ -292,6 +295,66 @@ class hillSLP(object):
             tmpMat.destroy()
 
         return diffMat
+
+    def _donorDiffCoeffs(self, h, Cd, Cp=None):
+        r"""
+        Finite-volume operator of the deposit diffusion
+        :math:`\nabla\cdot(C_d\nabla h)` with an **upslope (donor) face
+        diffusivity**: the flux across a face takes the diffusivity of the
+        higher of its two cells, the one material leaves. Used by the marine
+        and lake diffusion (TS residual/Jacobian, Picard, provenance tracers).
+
+        The Fortran ``fctcoeff``/``jacobiancoeff`` average the two cells
+        (``0.5*(ck+cn)``). With ``Cd`` set by the local deposit thickness, a
+        bare cell above a deposit then sheds BED material at half the deposit's
+        diffusivity; ``_diffuseOcean`` clips the bed loss to zero and keeps the
+        gain downslope, so on steep bathymetry the diffused deposit carried ~2x
+        its input volume and the mass rescale halved every deposit. With the
+        donor rule a bare cell keeps only ``minDiff`` and cannot lose bed.
+        Each face flux is computed once from shared halo values, so the scheme
+        is conservative and partition-independent (owned rows only are used).
+        Ties (equal ``h``) take the larger diffusivity on both sides.
+
+        :arg h: local surface ``bed + deposit`` (lpoints), halo-synced
+        :arg Cd: local diffusivity (lpoints); ``Cd == 0`` closes the face
+        :arg Cp: optional ``dCd/dh`` (lpoints) for the Newton Jacobian
+
+        :return: ``coeffs`` (lpoints, 1+K) of ``L`` (col 0 diagonal, cols
+            ``1..K`` the ``FVmesh_ngbID`` neighbours) and the residual
+            ``L h`` (lpoints).
+        """
+
+        ngb = self.FVmesh_ngbID
+        if self._fvFaceW is None:
+            g = jacobiancoeff(h, np.ones(self.lpoints), np.zeros(self.lpoints))
+            self._fvFaceW = -g[:, 1 : 1 + ngb.shape[1]]
+        W = self._fvFaceW
+        valid = (W > 0.0) & (ngb >= 0)
+        nn = np.where(valid, ngb, 0)
+
+        hk = h[:, None]
+        hn = h[nn]
+        ck = Cd[:, None]
+        cn = Cd[nn]
+        gate = valid & (ck > 0.0) & (cn > 0.0)
+        donor_k = (hk > hn) | ((hk == hn) & (ck >= cn))
+        cf = np.where(donor_k, ck, cn)
+        v = np.where(gate, cf * W, 0.0)
+        dz = hk - hn
+
+        coeffs = np.zeros((self.lpoints, 1 + ngb.shape[1]))
+        coeffs[:, 0] = v.sum(axis=1)
+        coeffs[:, 1:] = -v
+        if Cp is not None:
+            # d/dh of the donor's Cd(h) term: W * Cp_donor * (h_k - h_n).
+            dflux = np.where(gate, W * dz, 0.0)
+            pk = Cp[:, None]
+            pn = Cp[nn]
+            coeffs[:, 0] += np.where(donor_k, pk * dflux, 0.0).sum(axis=1)
+            coeffs[:, 1:] += np.where(donor_k, 0.0, pn * dflux)
+        res = (v * dz).sum(axis=1)
+
+        return coeffs, res
 
     def _assembleDiffMatCSR(self, coeffs):
         """
@@ -672,7 +735,7 @@ class hillSLP(object):
                 Cd = self.minDiff_vec + np.multiply(self.Cd, dh / (dh + self.Dlimit))
             else:
                 Cd = self.minDiff_vec + np.multiply(self.Cd, (1.0 - np.exp(-self.dexp * dh)))
-            nlvec = fctcoeff(hl, Cd)
+            _, nlvec = self._donorDiffCoeffs(hl, Cd)
             f.setArray(hdot + nlvec[self.glIDs])
 
         return
@@ -709,7 +772,7 @@ class hillSLP(object):
                 Cp = np.multiply(self.Cd, self.Dlimit / (dh + self.Dlimit)**2)
             else:
                 Cp = np.multiply(self.Cd, self.dexp * np.exp(-self.dexp * dh))
-            nlC = jacobiancoeff(hl, Cd, Cp)
+            nlC, _ = self._donorDiffCoeffs(hl, Cd, Cp)
             diag = a + nlC[:, 0]
             offdiag = nlC[:, 1:]
             # Combine the diagonal and off-diagonal columns into one array for setting values in the matrix
@@ -782,6 +845,10 @@ class hillSLP(object):
         # the marine path had none. Rescale the (>=0) diffused deposit so its
         # volume matches the incoming marine deposit volume. This is a no-op
         # once deposits sit on gentle slopes (the clamp then discards ~nothing).
+        # Since 2026-11-12 the operator uses an upslope face diffusivity
+        # (`_donorDiffCoeffs`), so a bare cell no longer sheds bed and the raw
+        # output conserves volume to ~1e-8: the rescale is a safety net and
+        # should print ~1. A value far from 1 points to a bug.
         owned = self.inIDs == 1
         vin = MPI.COMM_WORLD.allreduce(
             float(np.sum((dh * self.larea)[owned])), op=MPI.SUM
@@ -874,8 +941,7 @@ class hillSLP(object):
         Cd = minDiff_vec + np.multiply(Cd0, 1.0 - np.exp(-self.dexp * dhdep))
 
         hloc = self.hLocal.getArray() + ndepo            # post-diffusion surface
-        zeroKp = np.zeros(self.lpoints)
-        nlC = jacobiancoeff(hloc, Cd, zeroKp)
+        nlC, _ = self._donorDiffCoeffs(hloc, Cd)
         coeffs = dt_sub * nlC
         coeffs[:, 0] += 1.0                              # M = I + dt_sub * L(Cd)
         M = self._assembleDiffMatCSR(coeffs)
@@ -954,6 +1020,9 @@ class hillSLP(object):
             ts.setIJacobian(self._evalJacobianMardDiff, self.mat)
             ts.setExactFinalTime(petsc4py.PETSc.TS.ExactFinalTime.MATCHSTEP)
             ts.setMaxSNESFailures(-1)
+            # A failed step returns a negative converged reason instead of
+            # raising, so _diffuseImplicit can fall back to the Picard solver.
+            ts.setErrorIfStepFails(False)
             snes = ts.getSNES()
             snes.setTolerances(max_it=10)
             # rosw is a linearly-implicit Rosenbrock-W method: each stage is ONE
@@ -1018,6 +1087,29 @@ class hillSLP(object):
         self._evalSolutionMardDiff(tstart, x)
 
         ts.solve(x)
+        # The adaptive TS can give up (DIVERGED_STEP_REJECTED after its maximum
+        # number of rejected steps) on thick deposits over steep relief, where
+        # the diffusivity switches on sharply at 0.1 m of deposit. It used to
+        # abort the run. Fall back to the Picard solver instead, for this and
+        # every later call (sticky): the converged reason is global, so every
+        # rank takes the same branch.
+        if ts.getConvergedReason() < 0:
+            if MPIrank == 0:
+                print(
+                    "[%s] adaptive TS diffusion failed (reason %d after %d "
+                    "rejected steps); using the Picard solver (picardSub=%d, "
+                    "picardIts=%d) for the rest of the run"
+                    % (
+                        label,
+                        ts.getConvergedReason(),
+                        ts.getStepRejections(),
+                        int(getattr(self, "picardSub", 10)),
+                        int(getattr(self, "picardIts", 2)),
+                    ),
+                    flush=True,
+                )
+            self.marineSolver = "picard"
+            return self._diffuseImplicitPicard(dh, mask, Cd_val, label=label)
         if MPIrank == 0 and self.verbose:
             print(
                 "Nonlinear diffusion solution (%s, %0.02f seconds)"
@@ -1055,11 +1147,11 @@ class hillSLP(object):
         backward-Euler sub-steps of size ``dt/picardSub``; within each sub-step
         it freezes the diffusivity :math:`C_d(h^k)` and solves the resulting
         **linear** system :math:`(I + \Delta t_{sub} L(C_d^k)) h^{k+1} = h^{start}`
-        with ``self.picardIts`` Picard updates. The operator ``L`` is built from
-        ``jacobiancoeff`` with a zero derivative term (``Kp=0``), so it is the
-        exact linear :math:`\nabla\cdot(C_d\nabla)` operator consistent with the
-        TS residual ``fctcoeff`` — including the "no flux across a zero-
-        diffusivity face" marine-mask gating.
+        with ``self.picardIts`` Picard updates. The operator ``L`` comes from
+        ``_donorDiffCoeffs`` without the derivative term, so it is the exact
+        linear :math:`\nabla\cdot(C_d\nabla)` operator of the TS residual,
+        including the upslope face diffusivity and the "no flux across a
+        zero-diffusivity face" marine-mask gating.
 
         Each solve is linear (a cached richardson+bjacobi KSP, no SNES) and,
         because :math:`C_d` is frozen, smooth — so it avoids the error-estimate
@@ -1085,7 +1177,6 @@ class hillSLP(object):
         minDiff_vec = np.zeros(self.lpoints)
         minDiff_vec[mask] = self.minDiff
         zb = self.hLocal.getArray().copy()         # pre-deposition bed
-        zeroKp = np.zeros(self.lpoints)
 
         # Deposited surface h = bed + dh (global self.h, local self.hl).
         self.hl.setArray(dh)
@@ -1107,9 +1198,9 @@ class hillSLP(object):
                 Cd = minDiff_vec + np.multiply(
                     Cd0, 1.0 - np.exp(-self.dexp * dhdep)
                 )
-                # Linear operator L = div(Cd grad .) consistent with fctcoeff
+                # Linear operator L = div(Cd grad .), same as the TS residual
                 # (Kp=0 -> no derivative term); 13-col (diag, 12 neighbours).
-                nlC = jacobiancoeff(hloc, Cd, zeroKp)
+                nlC, _ = self._donorDiffCoeffs(hloc, Cd)
                 coeffs = dt_sub * nlC
                 coeffs[:, 0] += 1.0                # M = I + dt_sub * L
                 M = self._assembleDiffMatCSR(coeffs)
