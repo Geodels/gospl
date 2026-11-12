@@ -697,3 +697,60 @@ output:
     assert seen.get("seeds", 0) > 0, "epsfill got no seed below its cut-off (no fill at all)"
     assert seen["changed"] > 0, "epsfill left the marine routing surface unchanged"
     assert nsink <= 5, f"{nsink} terminal sinks left on the marine routing surface"
+
+
+def test_coupled_deposition_block_solves_are_direct(minimal_model):
+    """
+    Protects: the coupled two-field deposition solves (`SPL._coupledEDSystem`,
+    `seaplex._depMarineSystem`) apply their block preconditioners once per
+    outer iteration (`fieldsplit_{h,q}_ksp_type preonly`), set through the
+    options database.
+
+    Silent failure prevented: the `subksps[i].setType("preonly")` calls ran
+    before `setFromOptions` switched the split to Schur, so they never took
+    effect: both blocks ran GMRES (rtol 1e-5, up to 10,000 its) inside every
+    outer iteration. Results were unchanged, so only the cost showed: the SPL
+    solve grew from ~300 s to ~5,000 s per step on a 23.6M-node mesh (fixed
+    2026-11-12, docs/dev/FIXED_BUGS.md).
+
+    Invariant: with G > 0 and Gmar > 0 on the minimal sphere, no GMRES
+    orthogonalisation happens inside either coupled solve (outer TFQMR,
+    preonly blocks), and both solves run.
+    """
+    import sys
+
+    import petsc4py
+
+    PETSc = petsc4py.PETSc
+    import gospl.eroder.SPL  # noqa: F401
+    from gospl.sed import seaplex
+    SPLmod = sys.modules["gospl.eroder.SPL"]
+
+    model = minimal_model
+    model.fDepa = 0.1
+    model.Gmar = 0.5
+    PETSc.Log.begin()
+    orth = PETSc.Log.Event("KSPGMRESOrthog")
+    counts = {}
+
+    def counted(name, f):
+        def g(self, *a, **k):
+            before = orth.getPerfInfo().get("count", 0)
+            out = f(self, *a, **k)
+            counts.setdefault(name, []).append(orth.getPerfInfo().get("count", 0) - before)
+            return out
+        return g
+
+    spl_orig = SPLmod.SPL.__dict__["_coupledEDSystem"]
+    sea_orig = seaplex.SEAMesh.__dict__["_depMarineSystem"]
+    SPLmod.SPL._coupledEDSystem = counted("spl", spl_orig)
+    seaplex.SEAMesh._depMarineSystem = counted("marine", sea_orig)
+    try:
+        model.runProcesses()
+    finally:
+        SPLmod.SPL._coupledEDSystem = spl_orig
+        seaplex.SEAMesh._depMarineSystem = sea_orig
+    assert counts.get("spl"), "the coupled SPL deposition solve never ran (G > 0)"
+    assert counts.get("marine"), "the coupled marine deposition solve never ran (Gmar > 0)"
+    assert max(counts["spl"]) == 0, f"GMRES iterations inside the SPL coupled solve: {counts['spl']}"
+    assert max(counts["marine"]) == 0, f"GMRES iterations inside the marine solve: {counts['marine']}"

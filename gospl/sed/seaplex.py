@@ -376,6 +376,24 @@ class SEAMesh(object):
             ("marine_dep_pc_fieldsplit_type", "schur"),
             ("marine_dep_pc_fieldsplit_schur_fact_type", "full"),
             ("marine_dep_pc_fieldsplit_schur_precondition", "selfp"),
+            # Block solves. They MUST go through the options database: the
+            # `subksps[i].setType("preonly")` calls below run before
+            # `setFromOptions` switches the split to Schur, so they never took
+            # effect and both blocks ran GMRES (rtol 1e-5, up to 10,000 its)
+            # inside every outer iteration. On the routing (q) block, with long
+            # drainage chains, that cost grew step after step (~300 s -> ~5,000
+            # s per step on a 23.6M-node mesh, for the river SPL solve; fixed
+            # 2026-11-12). h: one ILU application per rank block (GASM).
+            ("marine_dep_fieldsplit_h_ksp_type", "preonly"),
+            ("marine_dep_fieldsplit_h_pc_type", "gasm"),
+            ("marine_dep_fieldsplit_q_ksp_type", "preonly"),
+            # Marine routing uses up to 12 flow directions, so exact LU fills in
+            # heavily (27 s symbolic on a 655k-node sphere) and GASM's set-up
+            # is as slow (35 s); block-Jacobi ILU solves it in 0.29 s, 6 outer
+            # iterations. (The river SPL q block keeps exact LU: 5 directions.)
+            ("marine_dep_fieldsplit_q_pc_type", "bjacobi"),
+            ("marine_dep_fieldsplit_q_sub_pc_type", "ilu"),
+            ("marine_dep_fieldsplit_q_sub_pc_factor_shift_type", "nonzero"),
         ):
             if not opts.hasName(key):
                 opts.setValue(key, val)

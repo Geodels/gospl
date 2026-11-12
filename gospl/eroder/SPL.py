@@ -204,6 +204,22 @@ class SPL(object):
             ("spl_ed_pc_fieldsplit_type", "schur"),
             ("spl_ed_pc_fieldsplit_schur_fact_type", "full"),
             ("spl_ed_pc_fieldsplit_schur_precondition", "selfp"),
+            # Block solves. They MUST go through the options database: the
+            # `subksps[i].setType("preonly")` calls below run before
+            # `setFromOptions` switches the split to Schur, so they never took
+            # effect and both blocks ran GMRES (rtol 1e-5, up to 10,000 its)
+            # inside every outer iteration. On the routing (q) block, with long
+            # drainage chains, that cost grew step after step (~300 s -> ~5,000
+            # s per step on a 23.6M-node mesh; fixed 2026-11-12). h: one ILU
+            # application per rank block; q: EXACT per-rank LU (the routing
+            # block is a permuted triangular matrix per rank, as for the flow
+            # rescue). Same solution as before (checked against MUMPS).
+            ("spl_ed_fieldsplit_h_ksp_type", "preonly"),
+            ("spl_ed_fieldsplit_h_pc_type", "gasm"),
+            ("spl_ed_fieldsplit_q_ksp_type", "preonly"),
+            ("spl_ed_fieldsplit_q_pc_type", "bjacobi"),
+            ("spl_ed_fieldsplit_q_sub_pc_type", "lu"),
+            ("spl_ed_fieldsplit_q_sub_pc_factor_shift_type", "nonzero"),
         ):
             if not opts.hasName(key):
                 opts.setValue(key, val)
