@@ -30,7 +30,16 @@ Options:
   maximum (the row of the mesh ``.npz`` file, the same on any number of
   processors), the volume and peak thickness of each deposit that has no upper
   bound, and the stage that raised the maximum. They are the first place to look
-  for the origin of a spike.
+  for the origin of a spike. Two flow-routing lines may also appear: ``[flow]
+  routing solve: N un-drained cell(s) made local sinks … (trapped volume
+  kept)`` means a routing system was singular on a few cells (a closed flow
+  loop); those cells were made local sinks and the volume reaching them was
+  deposited in place. It is preceded by a ``[flow] routing repair region``
+  block listing the cells (input-mesh id, lon/lat, elevation, filled surfaces,
+  pit id, upstream donor cells). ``[flow] routing repair failed …`` means the
+  repair did not converge and that routing pass was discarded. Either line is
+  worth reporting with the block: it usually points to a topography or routing
+  issue on those cells.
 - ``--log`` — write the PETSc solver log summary.
 - ``--profile`` — record a per-phase wall-clock profile (``profile.json``). For a
   finer split of a slow step (marine smoother, eps-fill, cascades, sediment

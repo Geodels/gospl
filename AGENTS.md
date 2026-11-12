@@ -6,7 +6,7 @@ of the tree. Update the relevant file when an invariant changes. Long-form ratio
 `REFACTOR_AUDIT.md`; past bugs and their guards: `docs/dev/FIXED_BUGS.md`; per-change
 history: `docs/dev/CHANGELOG_DEV.md`.
 
-Last reviewed 2026-11-12 against `fix/marine-diffusion-donor` (on `fix/sediment-routing-rescue`, after `v2026.7.14`). In October 2026 this file
+Last reviewed 2026-11-12 against `fix/marine-diffusion-donor` (`dev` after PR #486, after `v2026.7.14`). In October 2026 this file
 was split: it keeps only the rules that apply everywhere, and the subsystem detail
 moved verbatim into the files below.
 
@@ -167,7 +167,7 @@ If a future contributor wants to convert one of these to CACHED, the obstacle is
 - Positional (`KSP().create(PETSc.COMM_WORLD)`) vs keyword (`SNES().create(comm=PETSc.COMM_WORLD)`) is purely cosmetic; both work identically.
 
 ## Flow accumulation (summary)
-The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment cascade. Its non-convergence is the most common symptom of trouble at scale. Know before touching it: the primary is `fgmres` (stationary Richardson diverges partition-dependently); a failed routing solve is first retried with exact block factors (`_solveIDAExact`, sticky once it works: long drainage chains are well posed, just beyond ILU/Richardson); the main discharge solve is `fatal=True` but **ponds** a small finite un-drained region instead of aborting (cap `GOSPL_UNDRAINED_CAP`); a failed iterate is never accepted; the outer cascade loop is bounded (stagnation break, relative floor, `_cascade_max_steps`); a reachability pin was tried and rejected. All of it, with the reasons: `gospl/flow/AGENTS.md`.
+The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment cascade. Its non-convergence is the most common symptom of trouble at scale. Know before touching it: the primary is `fgmres` (stationary Richardson diverges partition-dependently); a failed routing solve is first retried with exact block factors (`_solveIDAExact`, sticky once it works: long drainage chains are well posed, just beyond ILU/Richardson); the main discharge solve is `fatal=True` but **ponds** a small finite un-drained region instead of aborting (cap `GOSPL_UNDRAINED_CAP`); a failed iterate is never accepted; the outer cascade loop is bounded (stagnation break, relative floor, `_cascade_max_steps`); a reachability pin was tried and rejected. All of it, with the reasons: `gospl/flow/AGENTS.md`. Since 2026-11-12: the filled surface is clamped to `max(lFill, h)` (`pitfilling._unshiftFill`; the shifted-frame fill left 14% of a global mesh 1 ulp below `h`, forming flat/MFD 2-cycles); a routing solve's primary is accepted only on its true residual (`_trueResidualOK`, fgmres reported convergence on a 2-cycle with x = 2e13); and a non-fatal routing solve that fails on a small region is repaired, not zeroed (`_pondRoutingRegion`: those cells become sinks, the rest is re-solved, the trapped volume is deposited), with a `[flow] routing repair region` diagnostic listing the cells.
 
 ## The Model god-class
 `gospl/model.py` declares `Model` (`class Model(`) as multi-inheritance of 17 mixins. `Model.__init__` calls each parent's `__init__` **by name, not via `super()`**. The init order is load-bearing and differs from the MRO declaration order — adding `super().__init__()` will break the chain. Line numbers below are as of 2026-10-03; search for the call if they have drifted.
@@ -293,11 +293,12 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 - **A wandering `SIGABRT` on Linux that macOS does not reproduce:** a Fortran out-of-bounds write. Run `scripts/fcheck.sh`. Detail: `fortran/AGENTS.md`.
 - **A mass imbalance:** `scripts/budget.py <output-dir>`, or `--summary run.jsonl` for per-step budgets.
 - **A job killed for memory (OOM, `SIGKILL`, "exceeded memory allocation"):** run `scripts/mem_profile.py` at two rank counts; a stage whose peak on the non-root ranks does not shrink with more ranks holds a whole-mesh array per rank (see the memory rule above). On Gadi request full-node memory (`docs/getting_started/installHPC.rst`).
+- **`[flow] routing repair …` or `non-fatal routing solve did not converge` in the log:** a routing system is singular somewhere. The `[flow] routing repair region` block lists the cells (input-mesh id, lon/lat, z, fill, sedfill, pit, sink, b, x, upstream donors); look for two cells that are each other's donors (a cycle) and check why the routing rules disagree there before touching the solver (that is how the 1-ulp fill bug was found).
 - **The model aborted on a large un-drained region:** first run `scripts/fill_mesh_pits.py --check` on the input mesh. A topography problem is not a solver problem; `GOSPL_FLOW_KSP=richardson` does not fix a singular block.
 
 ## Known bugs (fix before refactoring)
 All issues found by the 2026-10 analytical benchmarks and partition checks are fixed (see `docs/dev/FIXED_BUGS.md`). When you find one, record it here with how to reproduce it, and pin it with a benchmark or test at the current behaviour.
-- _(none currently open)_
+- **Closed-sink deposits bypass the stratigraphy** (`sedplex._distributeSediment`, the `has_closed` block). `_closedDepo` (stray flow-terminal non-pit cells, and since 2026-11-12 the volume trapped by a routing repair) is added to `cumED`/`hGlobal` directly and never passed to `deposeStrat`, so with `stratNb > 0` those deposits get no layer, no dual fine fraction and no provenance (elevation and stratigraphy drift apart there). Rare after the 1-ulp fill fix, but real. Reproduce: any stratigraphic run with `[zprobe] closed-sink deposit` > 0 in the log; compare `cumED` with the sum of layer thicknesses at those nodes. Fix: fold the closed deposit into the pit `delta` of `_updateSinks` before `deposeStrat`.
 
 ## Lessons from fixed bugs (full list: `docs/dev/FIXED_BUGS.md`)
 - Any `Vec`/`Mat` reduction, scatter or `Allreduce` under `if MPIrank == 0` or a rank-local `.any()` deadlocks at np>1, and serial always passes.
