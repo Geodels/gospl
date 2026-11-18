@@ -1283,3 +1283,45 @@ def test_closed_sink_deposit_recorded_in_stratigraphy(minimal_dual_model):
         assert n_ok > 0, "no rank could place the test deposit"
     finally:
         m.destroy()
+
+
+@pytest.mark.slow
+def test_dual_fine_conservation_strong_hillslope(tmp_path):
+    """
+    Protects: the fine fraction of hillslope-creep deposits (dual lithology).
+    `deposeStrat` used the stale `depoFineFrac` left by the last river, pit or
+    marine deposition for hillslope deposits too, so strong diffusion created
+    fine sediment (+2.4 % at hillslopeKa = 1e5, +19 % at 1e7 on minimal_dual;
+    0 % at the fixture's 0.01, which is why test_dual_fine_conservation never
+    saw it). `hillslope._hillslopeFineFraction` now sets it from the material
+    the higher neighbours eroded (-0.1 % at 1e7).
+    """
+    import os
+    import re
+    import shutil
+    from mpi4py import MPI
+    from gospl.model import Model
+
+    src = FIXTURES_DIR / "minimal_dual.yml"
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip("minimal_dual.yml / mesh.npz not present")
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    text = re.sub(r"hillslopeKa: [^\n]*", "hillslopeKa: 1.0e7", src.read_text(), count=1)
+    (tmp_path / "strong.yml").write_text(text)
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model("strong.yml", verbose=False, showlog=False)
+        try:
+            if getattr(m, "flatModel", True):
+                pytest.skip("fine conservation needs a closed sphere")
+            m.runProcesses()
+            ero = MPI.COMM_WORLD.allreduce(m._fineEroded, op=MPI.SUM)
+            dep = MPI.COMM_WORLD.allreduce(m._fineDeposited, op=MPI.SUM)
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+    assert ero > 0.0
+    rel = abs(ero - dep) / ero
+    assert rel < 5.0e-3, f"fine eroded {ero:.4e} vs deposited {dep:.4e} ({rel:+.2e})"

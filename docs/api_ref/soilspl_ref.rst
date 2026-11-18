@@ -20,6 +20,7 @@ Class soilSPL
       ~soilSPL.updateSoilThickness
       ~soilSPL.erodepSPLsoil
       ~soilSPL.diffuseSoil
+      ~soilSPL._soilChannelSupply
 
    .. rubric:: Private Methods
 
@@ -43,6 +44,7 @@ Public functions
 .. automethod:: eroder.soilSPL.soilSPL.updateSoilThickness
 .. automethod:: eroder.soilSPL.soilSPL.erodepSPLsoil
 .. automethod:: eroder.soilSPL.soilSPL.diffuseSoil
+.. automethod:: eroder.soilSPL.soilSPL._soilChannelSupply
 
 
 Private functions

@@ -18,6 +18,7 @@ Class hillSLP
    .. autosummary::
 
       ~hillSLP.getHillslope
+      ~hillSLP.hillslopeBeforeRouting
 
    .. rubric:: Private Methods
 
@@ -25,6 +26,10 @@ Class hillSLP
 
       ~hillSLP._hillSlope
       ~hillSLP._buildDiffMat
+      ~hillSLP._channelMask
+      ~hillSLP._channelDiffusion
+      ~hillSLP._channelComposition
+      ~hillSLP._checkChannelOptions
       ~hillSLP._assembleDiffMat
       ~hillSLP._assembleDiffMatCSR
       ~hillSLP._donorDiffCoeffs
@@ -33,6 +38,7 @@ Class hillSLP
       ~hillSLP._diff_nl_monitor
       ~hillSLP._form_residual_nl_hillslope
       ~hillSLP._hillSlopeNL
+      ~hillSLP._hillslopeFineFraction
       ~hillSLP._evalFunctionMardDiff
       ~hillSLP._evalJacobianMardDiff
       ~hillSLP._evalSolutionMardDiff
@@ -44,6 +50,7 @@ Public functions
 ---------------------
 
 .. automethod:: sed.hillslope.hillSLP.getHillslope
+.. automethod:: sed.hillslope.hillSLP.hillslopeBeforeRouting
 
 
 Private functions
@@ -51,6 +58,10 @@ Private functions
 
 .. automethod:: sed.hillslope.hillSLP._hillSlope
 .. automethod:: sed.hillslope.hillSLP._buildDiffMat
+.. automethod:: sed.hillslope.hillSLP._channelMask
+.. automethod:: sed.hillslope.hillSLP._channelDiffusion
+.. automethod:: sed.hillslope.hillSLP._channelComposition
+.. automethod:: sed.hillslope.hillSLP._checkChannelOptions
 .. automethod:: sed.hillslope.hillSLP._assembleDiffMat
 .. automethod:: sed.hillslope.hillSLP._assembleDiffMatCSR
 .. automethod:: sed.hillslope.hillSLP._donorDiffCoeffs
@@ -59,6 +70,7 @@ Private functions
 .. automethod:: sed.hillslope.hillSLP._diff_nl_monitor
 .. automethod:: sed.hillslope.hillSLP._form_residual_nl_hillslope
 .. automethod:: sed.hillslope.hillSLP._hillSlopeNL
+.. automethod:: sed.hillslope.hillSLP._hillslopeFineFraction
 .. automethod:: sed.hillslope.hillSLP._evalFunctionMardDiff
 .. automethod:: sed.hillslope.hillSLP._evalJacobianMardDiff
 .. automethod:: sed.hillslope.hillSLP._evalSolutionMardDiff

@@ -80,6 +80,8 @@ class soilSPL(object):
         # Cached TS for the non-linear soil diffusion (rosw scheme); created
         # lazily on first call and reused across timesteps.
         self._ts_soil = None
+        # channel cells held fixed in the soil creep (`channelQ`), or None
+        self._soilChan = None
         self._ts_soil_x = None
         self._ts_soil_f = None
 
@@ -723,6 +725,8 @@ class soilSPL(object):
             dh[dh < 0.1] = 0.0
             Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-dh / self.H0)))
             nlvec = fctcoeff(hl, Cd)
+            if self._soilChan is not None:
+                nlvec[self._soilChan] = 0.0      # channel cells held fixed
             f.setArray(hdot + nlvec[self.glIDs])
 
         return
@@ -773,6 +777,10 @@ class soilSPL(object):
             vals_2d = np.column_stack(
                 [(a + nlC[self.glIDs, 0])[:, None], nlC[self.glIDs, 1:]]
             )
+            if self._soilChan is not None:
+                ch = self._soilChan[self.glIDs]
+                vals_2d[ch, 0] = a
+                vals_2d[ch, 1:] = 0.0
             for i, row in enumerate(self.glIDs):
                 B.setValuesLocal(row, cols_2d[i], vals_2d[i])
             B.assemble()
@@ -790,6 +798,91 @@ class soilSPL(object):
         assert t == 0.0, "only for t=0.0"
         x.setArray(self.h.getArray())
 
+        return
+
+    def _soilChannelSupply(self, x):
+        """
+        `diffusion: channelQ` with the soil model: hand the soil the creep
+        delivered to the fixed channel cells to the river load.
+
+        The creep is integrated by an adaptive TS, so the time-integrated flux
+        into each channel cell is not available, but the total is exact: the
+        channel rows did not change, so the volume lost by the non-channel
+        cells is what flowed into the channels. It is shared among the channel
+        cells in proportion to the inflow each receives in the final state
+        (``-fctcoeff`` at ``x``). A channel cell with a net outflow there
+        keeps that loss (taken from its elevation) and the gains are scaled so
+        that gains minus losses equal the total; when the final state gives no
+        usable split, the total is shared by cell area. The supply is bulk
+        soil, routed as such (deposit-equivalent ratio one), with the fine
+        fraction of the donors' surface composition (dual lithology) and the
+        channel cell's own source class (provenance).
+
+        Collective (reductions, halo syncs); called on every rank whenever the
+        option is on. Modifies ``x`` at the owned channel cells. Scratch:
+        ``self.tmpL``, ``self.tmp1`` and ``self.hl``.
+        """
+        comm = MPI.COMM_WORLD
+        chan = self._soilChan
+        own = np.zeros(self.lpoints, dtype=bool)
+        own[self.glIDs] = True
+        ids = np.where(chan & own)[0]
+        area = self.larea[ids]
+        # elevation before (self.h) and after (x) the creep, with ghosts
+        self.dm.globalToLocal(self.h, self.tmpL)
+        h0 = self.tmpL.getArray().copy()
+        self.dm.globalToLocal(x, self.hl)
+        h1 = self.hl.getArray().copy()
+        lost = comm.allreduce(
+            -float(((h1 - h0) * self.larea)[own & ~chan].sum()), op=MPI.SUM)
+        # inflow rate at the final state (fctcoeff = -div(Cd grad h))
+        dh = h1 - self.lHbed.getArray()
+        dh[dh < 0.1] = 0.0
+        Cd = self.minDiff + np.multiply(self.Cd, (1.0 - np.exp(-dh / self.H0)))
+        inflow = -fctcoeff(h1, Cd)[ids]
+        g = np.maximum(inflow, 0.0) * area * self.dt        # m3 over the step
+        lo = np.maximum(-inflow, 0.0) * area * self.dt
+        G = comm.allreduce(float(g.sum()), op=MPI.SUM)
+        L = comm.allreduce(float(lo.sum()), op=MPI.SUM)
+        A = comm.allreduce(float(area.sum()), op=MPI.SUM)
+        if G > 0.0 and lost + L >= 0.0:
+            lvol = lo
+            gvol = g * ((lost + L) / G)
+        elif lost < 0.0 and L > 0.0:
+            # net flow out of the channels: take it from the cells losing it
+            gvol = np.zeros_like(g)
+            lvol = lo * min(1.0, -lost / L)
+        else:
+            gvol = np.zeros_like(g)
+            lvol = np.zeros_like(lo)
+            if lost > 0.0 and A > 0.0:
+                gvol = lost * area / A
+        h1[ids] -= lvol / area
+        self.hl.setArray(h1)
+        self.dm.localToGlobal(self.hl, x)
+        self.hillDelivered += float(gvol.sum())
+        if self.nodep:
+            return
+        rate = np.zeros(self.lpoints)
+        rate[ids] = gvol / area / self.dt
+        self.tmpL.setArray(rate)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self._hillDelivG.axpy(1.0, self.tmp1)
+        if self._hillDelivFine is not None:
+            # donors' surface fine fraction, weighted by their slope into c
+            self.tmpL.setArray(1.0 - self._surfaceComposition())
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            ff = self.tmpL.getArray().copy()
+            ngb = self.FVmesh_ngbID[ids, : self.maxnb]
+            nb = np.where(ngb >= 0, ngb, ids[:, None])
+            w = np.where(ngb >= 0, np.maximum(h1[nb] - h1[ids][:, None], 0.0), 0.0)
+            ws = w.sum(axis=1)
+            fc = np.divide((w * ff[nb]).sum(axis=1), ws, out=ff[ids].copy(),
+                           where=ws > 0.0)
+            self._hillDelivFine[ids] += rate[ids] * fc
+        if self._hillDelivProv is not None:
+            self._hillDelivProv[ids, self.source_class[ids]] += rate[ids]
         return
 
     def diffuseSoil(self):
@@ -840,9 +933,16 @@ class soilSPL(object):
             # SNES nonlinear solver
             snes = ts.getSNES()
             snes.setTolerances(max_it=10)
-            # KSP linear solver
+            # KSP linear solver. rosw is a linearly-implicit Rosenbrock-W
+            # method: each stage is ONE linear solve with no Newton correction,
+            # so the stage system must actually be solved. It was `preonly` +
+            # gasm (one preconditioner application per stage), the inexact,
+            # partition-dependent setup fixed for the marine TS in 2026-10:
+            # 0.2 m between np=1 and np=3 on a small soil valley. Krylov-
+            # converge it instead, same GASM preconditioner (2026-11).
             ksp = snes.getKSP()
-            ksp.setType("preonly")
+            ksp.setType("gmres")
+            ksp.setTolerances(rtol=1.0e-8, atol=1.0e-12, max_it=1000)
             pc = ksp.getPC()
             pc.setType("gasm")
             ts.setFromOptions()
@@ -853,7 +953,12 @@ class soilSPL(object):
         ts = self._ts_soil
         x = self._ts_soil_x
         # Soil thicknesses are meters; mm-level absolute tolerance is plenty.
-        ts.setTolerances(atol=1e-3, rtol=1e-3)
+        # rtol = 0: the TS state is the absolute surface, so a relative
+        # tolerance scaled the allowed error with the elevation (0.2 m on a
+        # 200 m surface); against a tight reference the elevation error was
+        # 0.30 m max / 4.4 cm mean with rtol = 1e-3 and is 0.10 m / 3.5 mm
+        # with rtol = 0, for ~15 % more time (2026-11).
+        ts.setTolerances(atol=1e-3, rtol=0.0)
         ts.setTime(0.0)
         # Reset the step COUNTER (setTime only resets the clock). The cached TS
         # is reused and getStepNumber() is not reset by setTime, so without this
@@ -868,9 +973,14 @@ class soilSPL(object):
 
         tstart = ts.getTime()
         self._evalSolutionSoil(tstart, x)
+        # Channel cells (`diffusion: channelQ`) are held fixed in the creep;
+        # what the hillslopes deliver to them joins the river load.
+        self._soilChan = self._channelMask()
 
         # Solve nonlinear equation
         ts.solve(x)
+        if self._soilChan is not None:
+            self._soilChannelSupply(x)
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -916,6 +1026,9 @@ class soilSPL(object):
 
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
+            # creep deposit composition from the donors' surface material
+            # (dual lithology; no erodeStrat on this path)
+            self._hillslopeFineFraction(eroded=False)
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:

@@ -597,7 +597,14 @@ class ReadYaml(object):
             self.marineSolver = str(hillDict.get("marineSolver", "ts")).lower()
             self.picardSub = int(hillDict.get("picardSub", 10))
             self.picardIts = int(hillDict.get("picardIts", 2))
+            # Optional channel threshold (m3/yr): land cells whose discharge
+            # reaches it are rivers, held fixed in the hillslope diffusion; the
+            # material hillslopes deliver to them joins the routed river load
+            # (hillslope._channelDiffusion). None: diffusion everywhere, as
+            # before. With rain P, channelQ / P is a drainage area.
+            self.hillChannelQ = hillDict.get("channelQ")
         except KeyError:
+            self.hillChannelQ = None
             self.nlK = 10.0
             self.clinSlp = 1.0e-6
             self.Gmar = 0.
@@ -617,6 +624,10 @@ class ReadYaml(object):
             self.marineSolver = "ts"
         self.picardSub = max(1, self.picardSub)
         self.picardIts = max(1, self.picardIts)
+        if self.hillChannelQ is not None:
+            self.hillChannelQ = float(self.hillChannelQ)
+            if self.hillChannelQ <= 0.0:
+                raise ValueError("diffusion: channelQ must be > 0 (m3/yr).")
 
         return
 
