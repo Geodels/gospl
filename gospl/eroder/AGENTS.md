@@ -16,7 +16,7 @@ the original section names (most now live in the files listed in the root
 | `eroder/nlSPL.py` | `_solveNL_ed` | `self._snes_ed` (+ `self._snes_ed_fb`) | SNES, transport-limited (**`qn` default**, ngmres fallback) |
 | `eroder/nlSPL.py` | `_solveNL` | `self._snes_nl` | SNES, detachment-limited (nrichardson + analytic Jacobian) |
 | `eroder/soilSPL.py` | `_solveSoil` | `self._snes_soil` (+ `self._snes_soil_fb`) | SNES, soil-aware (**`qn` default**, ngmres fallback) |
-| `eroder/soilSPL.py` | `diffuseSoil` | `self._ts_soil` | TS (rosw soil diffusion) |
+| `eroder/soilSPL.py` | `diffuseSoil` | `self._ts_soil` | TS (rosw soil diffusion). Stage solve **gmres + gasm, rtol 1e-8** (was `preonly` + gasm until 2026-11: inexact and partition-dependent, 0.2 m np=1 vs np=3 on a small valley); error tolerance **atol 1e-3 m, rtol 0** (rtol 1e-3 on the absolute surface allowed ~0.2 m error per 200 m of elevation). Guard: `test_soil_diffusion_partition_invariant`. |
 
 ## Selectable solver + complementary fallback
 

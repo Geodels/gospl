@@ -1498,3 +1498,120 @@ def test_zprobe_reports_input_mesh_node(tmp_path):
                     f"stderr:\n{r.stderr[-2000:]}")
     res = json.loads(out.read_text())
     assert res["node"] == res["expected"], res
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("channels", [False, True])
+def test_soil_diffusion_partition_invariant(tmp_path, channels):
+    """
+    Protects: the soil-model creep TS (`soilSPL.diffuseSoil`) solves each
+    Rosenbrock stage (GMRES + GASM, rtol 1e-8). It used `preonly` + GASM, one
+    preconditioner application per stage: an inexact solve whose GASM blocks
+    follow the partition, so a small soil valley differed by 0.20 m between
+    np=1 and np=3 (the same fault fixed for the marine TS in 2026-10). Now
+    ~1e-8 m, with or without `channelQ` (whose soil path holds the channel
+    rows of this TS fixed). Open south edge: a fully walled valley drains to a
+    closed sink whose discharge is partition-dependent on its own.
+    """
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import numpy as np
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    scipy = pytest.importorskip("scipy")
+    from scipy.spatial import Delaunay
+
+    xs = np.arange(0.0, 2000.1, 50.0)
+    X, Y = np.meshgrid(xs, xs)
+    p = np.column_stack([X.ravel(), Y.ravel()])
+    z = 0.2 * np.abs(p[:, 0] - 1000.0) + 0.02 * p[:, 1] + 10.0
+    np.savez(tmp_path / "mesh.npz", v=np.column_stack([p, np.zeros(len(p))]),
+             c=Delaunay(p).simplices.astype(np.int64), z=z)
+    chan = "    channelQ: 2.e5\n" if channels else ""
+    (tmp_path / "soil.yml").write_text(
+        "name: soil partition\n"
+        "domain:\n    npdata: ['mesh','v','c','z']\n    flowdir: 1\n"
+        "    bc: 'wwfw'\n    seadepo: False\n    nodep: False\n"
+        "time:\n    start: 0.\n    end: 1.e4\n    tout: 1.e4\n    dt: 1.e3\n"
+        "spl:\n    K: 0.\n    d: 0.\n    m: 0.5\n"
+        f"diffusion:\n    hillslopeKa: 0.5\n    hillslopeKm: 0.\n{chan}"
+        "sea:\n    position: -100.\n"
+        "climate:\n  - start: 0.\n    uniform: 1.\n"
+        "soil:\n    mode: 'regolith'\n    soilK: 0.\n    maxProd: 0.\n"
+        "    depthProd: 0.5\n    uniform: 1.0\n"
+        "output:\n    dir: 'out'\n"
+    )
+    tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
+    keep = tmp_path / "ab"
+    res = subprocess.run(
+        [sys.executable, str(tool), "soil.yml", "-n", "3", "--steps", "5",
+         "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+        timeout=3 * MPI_TIMEOUT)
+    a, b = keep / "ab_np1.npz", keep / "ab_np3.npz"
+    assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
+    a, b = np.load(a), np.load(b)
+    d = np.abs(a["elev"] - b["elev"]).max()
+    assert d < 1.0e-4, f"np=1 vs np=3 elevation difference {d:.3e} m"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("law", ["linear", "series"])
+def test_channel_hillslope_partition_invariant(tmp_path, law):
+    """
+    Protects: `diffusion: channelQ` with deposition on (hillslopes run between
+    the incision and the sediment routing, `hillslopeBeforeRouting`) is
+    partition-invariant at np=3: elevation within 1e-3 m of np=1 after 5 steps
+    (1e-4 m measured, the level of the same case without the option). The
+    threshold is off the discharge lattice of this regular mesh (multiples of
+    625 m3/yr): at an exact multiple, solver round-off flips cells across it
+    and the runs differ by ~1 m, a tie, not a partition bug.
+    """
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import numpy as np
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    pytest.importorskip("scipy")
+    from scipy.spatial import Delaunay
+
+    xs = np.arange(0.0, 2000.1, 50.0)
+    X, Y = np.meshgrid(xs, xs)
+    p = np.column_stack([X.ravel(), Y.ravel()])
+    rng = np.random.default_rng(1)
+    z = 0.2 * np.abs(p[:, 0] - 1000.0) + 0.03 * p[:, 1] + 10.0 + 0.5 * rng.random(len(p))
+    np.savez(tmp_path / "mesh.npz", v=np.column_stack([p, np.zeros(len(p))]),
+             c=Delaunay(p).simplices.astype(np.int64), z=z)
+    nl = "    hillslopeSc: 0.8\n    hillslopeNb: 2\n" if law == "series" else ""
+    (tmp_path / "chan.yml").write_text(
+        "name: channel partition\n"
+        "domain:\n    npdata: ['mesh','v','c','z']\n    flowdir: 1\n"
+        "    bc: 'wwfw'\n    seadepo: False\n    nodep: False\n"
+        "time:\n    start: 0.\n    end: 5.e3\n    tout: 5.e3\n    dt: 1.e3\n"
+        "spl:\n    K: 2.e-5\n    d: 0.\n    m: 0.5\n    G: 1.\n"
+        "diffusion:\n    hillslopeKa: 0.5\n    hillslopeKm: 0.\n"
+        f"    channelQ: 1.0133e5\n{nl}"
+        "sea:\n    position: -100.\n"
+        "climate:\n  - start: 0.\n    uniform: 1.\n"
+        "output:\n    dir: 'out'\n"
+    )
+    tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
+    keep = tmp_path / "ab"
+    res = subprocess.run(
+        [sys.executable, str(tool), "chan.yml", "-n", "3", "--steps", "5",
+         "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+        timeout=3 * MPI_TIMEOUT)
+    a, b = keep / "ab_np1.npz", keep / "ab_np3.npz"
+    assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
+    a, b = np.load(a), np.load(b)
+    d = np.abs(a["elev"] - b["elev"]).max()
+    assert d < 1.0e-3, f"np=1 vs np=3 elevation difference {d:.3e} m"

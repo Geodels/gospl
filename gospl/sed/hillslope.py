@@ -95,6 +95,35 @@ class hillSLP(object):
         self._hill_seaID = None
         self._hill_pc_ready = False
 
+        # Channel cells excluded from the hillslope diffusion (`channelQ`,
+        # see `_channelDiffusion`): the mask the cached operator was built
+        # with, the unmasked operator coefficients (to measure what the
+        # hillslopes deliver to each channel cell), and the delivered volume
+        # rate (m/yr, global Vec) added to this step's routed load (the
+        # hillslopes run before the routing, `hillslopeBeforeRouting`).
+        self._hill_chan = None
+        self._hillCoeffs = None
+        self._hillDelivG = None
+        self._hillDelivFine = None   # fine part (dual lithology), local m/yr
+        self._hillDelivProv = None   # per-class part (provenance), local m/yr
+        self._chanIds = None         # owned channel cells of the last solve
+        # owner -> ghost sync pair for `_hillslopeFineFraction` (dual only)
+        self._ffG = None
+        self._ffL = None
+        if getattr(self, "stratLith", False):
+            self._ffG = self.hGlobal.duplicate()
+            self._ffL = self.hLocal.duplicate()
+        self._chanRate = None        # their bulk delivery rate (m/yr)
+        self.hillDelivered = 0.0     # rank-local cumulative volume (m3)
+        if getattr(self, "hillChannelQ", None) is not None:
+            self._checkChannelOptions()
+            self._hillDelivG = self.hGlobal.duplicate()
+            self._hillDelivG.set(0.0)
+            if getattr(self, "stratLith", False):
+                self._hillDelivFine = np.zeros(self.lpoints)
+            if getattr(self, "provOn", False):
+                self._hillDelivProv = np.zeros((self.lpoints, self.provNb))
+
         return
 
     def _hillSlope(self, smooth=0):
@@ -186,9 +215,12 @@ class hillSLP(object):
             Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
             Cd[self.seaID] = self.Cdm
             Cd = Cd * self._surfaceLithoD()
-            diffMat = self._buildDiffMat(Cd * self.dt)
+            chan = self._channelMask()
+            diffMat = self._buildDiffMat(Cd * self.dt, fixed=chan, keep=chan is not None)
             self._solve_KSP(True, diffMat, self.hOld, self.hGlobal)
             diffMat.destroy()
+            if chan is not None:
+                self._channelDiffusion(chan)
         else:
             # Constant Cda/Cdm ⇒ the operator (I - Cd*dt*L) is mesh+mask-
             # invariant: cache it and reuse the factorised PC, rebuilding only
@@ -197,17 +229,25 @@ class hillSLP(object):
             # Collective rebuild decision (see smooth=2 above): seaID is rank-
             # local but _buildDiffMat + PCSetUp are collective, so reduce the
             # "coastline moved" test across ranks or the solve deadlocks at np>1.
+            chan = self._channelMask()
             rebuild = self._hillMat is None or not np.array_equal(
                 self.seaID, self._hill_seaID
             )
+            if chan is not None:
+                # the channel mask changes as the drainage evolves: same
+                # collective rebuild rule as the coastline
+                rebuild = rebuild or not np.array_equal(chan, self._hill_chan)
             rebuild = MPI.COMM_WORLD.allreduce(rebuild, op=MPI.LOR)
             if rebuild:
                 Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
                 Cd[self.seaID] = self.Cdm
                 if self._hillMat is not None:
                     self._hillMat.destroy()
-                self._hillMat = self._buildDiffMat(Cd * self.dt)
+                self._hillMat = self._buildDiffMat(
+                    Cd * self.dt, fixed=chan, keep=chan is not None
+                )
                 self._hill_seaID = self.seaID.copy()
+                self._hill_chan = None if chan is None else chan.copy()
                 self._hill_pc_ready = False
             if self._ksp_hill_lin is None:
                 self._ksp_hill_lin = self._makeDiffusionKSP("hilllin_")
@@ -217,6 +257,8 @@ class hillSLP(object):
             self._hill_pc_ready = True
             ksp.solve(self.hOld, self.hGlobal)
             safe_garbage_cleanup()
+            if chan is not None:
+                self._channelDiffusion(chan)
 
         # Update cumulative erosion/deposition and elevation
         self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
@@ -230,7 +272,9 @@ class hillSLP(object):
 
         if self.stratNb > 0:
             self.erodeStrat()
+            self._channelComposition()
             self._hillslopeProvFraction()
+            self._hillslopeFineFraction()
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
@@ -242,7 +286,171 @@ class hillSLP(object):
 
         return
 
-    def _buildDiffMat(self, Kd):
+    def _checkChannelOptions(self):
+        """
+        Combinations `diffusion: channelQ` does not support (none at present:
+        the hillslope laws, stratigraphy, dual lithology, provenance and the
+        soil model are all handled). Kept as the single place to refuse one.
+        """
+        unsupported = []
+        if unsupported:
+            raise ValueError(
+                "diffusion: channelQ is not yet supported with "
+                + ", ".join(unsupported) + "."
+            )
+
+    def _channelMask(self):
+        """
+        Local mask of the channel cells excluded from the hillslope diffusion
+        (`diffusion: channelQ`, m3/yr): land cells whose discharge reaches the
+        threshold. None when the option is off. Uses the local discharge
+        (`FAL`, halo-synced), so ghost entries match their owners.
+        """
+        if self._hillDelivG is None:
+            return None
+        chan = self.FAL.getArray() >= self.hillChannelQ
+        chan[self.seaID] = False
+        return chan
+
+    def _channelDiffusion(self, chan, flux=None):
+        """
+        Hand the hillslope supply of the channel cells to the river load.
+
+        The channel cells were held at their elevation during the diffusion
+        solve (identity rows). The volume the hillslopes delivered to each
+        one is ``d = dt * div(q)`` at the cell: for the linear law
+        ``d = hOld - (A h)`` with the unmasked operator row ``A``
+        (`_hillCoeffs`), for the non-linear laws ``dt * flux`` (the kernel's
+        flux divergence, passed in ``flux``). Positive ``d`` (material
+        received) is added, as a rate, to the routed sediment source of the
+        same step (`sedplex._getSedFlux`, which runs after the hillslopes
+        when the option is set), or leaves the domain when
+        deposition is off (`nodep`); negative ``d`` (a channel cell that
+        would have lost material to a lower neighbour) is taken from the cell
+        itself, so the volume budget is exact.
+
+        Collective (halo syncs): called on every rank whenever the option is
+        on. Scratch Vecs: writes ``self.tmp`` / ``self.tmpL`` (the delivered
+        rate, before it is added to `_hillDelivG`); the caller overwrites
+        ``self.tmp`` right after.
+        """
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        h = self.hLocal.getArray().copy()
+        own = np.zeros(self.lpoints, dtype=bool)
+        own[self.glIDs] = True
+        ids = np.where(chan & own)[0]
+        if flux is not None:
+            d = self.dt * flux[ids]
+        else:
+            ngb = self.FVmesh_ngbID[ids, : self.maxnb]
+            coef = self._hillCoeffs[ids]
+            nb = np.where(ngb >= 0, ngb, ids[:, None])
+            ah = coef[:, 0] * h[ids] + (coef[:, 1 : self.maxnb + 1] * h[nb]).sum(axis=1)
+            d = h[ids] - ah          # h[ids] is still hOld (identity rows)
+        loss = np.minimum(d, 0.0)
+        gain = np.maximum(d, 0.0)
+        h[ids] += loss
+        self.hLocal.setArray(h)
+        self.dm.localToGlobal(self.hLocal, self.hGlobal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        self.hillDelivered += float((gain * self.larea[ids]).sum())
+        self._chanIds = ids
+        self._chanRate = gain / self.dt
+        if not self.nodep and self.stratNb == 0:
+            # bulk source, like Eb in _getSedFlux; with stratigraphy the
+            # routed source is solid volume: see _channelComposition
+            rate = np.zeros(self.lpoints)
+            rate[ids] = self._chanRate
+            self.tmpL.setArray(rate)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self._hillDelivG.axpy(1.0, self.tmp)
+        return
+
+    def _channelComposition(self):
+        """
+        With stratigraphy: turn the bulk delivery of each channel cell
+        (`_channelDiffusion`) into the total, fine and per-class parts of the
+        routed source of the same step, from the material its upslope neighbours
+        eroded in this diffusion step. The routed source with stratigraphy is
+        the deposit-equivalent thickness of `erodeStrat` (eroded solid over one
+        minus the fresh-deposit porosity), not the in-situ bulk.
+
+        Called between ``erodeStrat`` (which gives each eroding node's solid
+        eroded thickness ``thCoarse``/``thFine`` and classes ``provEro``) and
+        ``deposeStrat``. For a channel cell ``c`` the donors are its higher
+        neighbours ``j``, weighted by their creep flux into ``c``,
+        ``w_cj = a_cj * max(h_j - h_c, 0)`` (``a`` the FV stencil weight), and
+        restricted to those that eroded. The routed rate is the bulk rate
+        times the donors' ratio of deposit-equivalent to in-situ eroded
+        thickness, split by their fine fraction and class mix. A cell with no
+        eroding donor uses a ratio of one, its own surface composition and its
+        bedrock class. Donor values are synced from their
+        owners (collective; every rank calls it whenever the option is on).
+
+        Scratch Vecs: ``self.tmpL`` / ``self.tmp1`` (not ``self.tmp``, which
+        holds the step's elevation change read by ``deposeStrat``).
+        """
+        if self._chanIds is None or self.nodep or self.stratNb == 0:
+            return
+        dual = self._hillDelivFine is not None
+        prov = self._hillDelivProv is not None
+
+        def sync(arr):
+            self.tmpL.setArray(arr)
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            return self.tmpL.getArray().copy()
+
+        self.dm.globalToLocal(self.hOld, self.tmpL)
+        h = self.hLocal.getArray().copy()
+        bulk = np.maximum(self.tmpL.getArray() - h, 0.0) / self.dt   # eroded bulk rate
+        solid = self.thCoarse + (self.thFine if dual else 0.0)
+        frac = np.divide(solid, bulk, out=np.zeros_like(bulk), where=bulk > 0.0)
+        frac = sync(np.minimum(frac, 1.0))
+        eroding = sync(np.where(bulk > 0.0, 1.0, 0.0)) > 0.5
+        if dual:
+            ff = sync(np.divide(self.thFine, solid, out=np.zeros_like(solid), where=solid > 0.0))
+        if prov:
+            ptot = self.provEro.sum(axis=1)
+            pf = np.divide(self.provEro, ptot[:, None], out=np.zeros_like(self.provEro),
+                           where=ptot[:, None] > 0.0)
+            pf = np.column_stack([sync(pf[:, c]) for c in range(self.provNb)])
+
+        ids, rate = self._chanIds, self._chanRate
+        Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
+        Cd[self.seaID] = self.Cdm
+        if dual:
+            Cd = Cd * self._surfaceLithoD()
+        a = -sethillslopecoeff(self.lpoints, Cd * self.dt)[ids, 1 : 1 + self.maxnb]
+        ngb = self.FVmesh_ngbID[ids, : self.maxnb]
+        nb = np.where(ngb >= 0, ngb, ids[:, None])
+        w = np.where((a > 0.0) & (ngb >= 0) & eroding[nb],
+                     a * np.maximum(h[nb] - h[ids][:, None], 0.0), 0.0)
+        wsum = w.sum(axis=1)
+        has = wsum > 0.0
+        wn = np.divide(w, wsum[:, None], out=np.zeros_like(w), where=has[:, None])
+
+        sfrac = np.where(has, (wn * frac[nb]).sum(axis=1), 1.0)
+        srate = rate * sfrac
+        full = np.zeros(self.lpoints)
+        full[ids] = srate
+        self.tmpL.setArray(full)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self._hillDelivG.axpy(1.0, self.tmp1)
+        if dual:
+            own_f = 1.0 - self._surfaceComposition()[ids]
+            fcell = np.where(has, (wn * ff[nb]).sum(axis=1), own_f)
+            self._hillDelivFine[ids] += srate * fcell
+        if prov:
+            pcell = (wn[:, :, None] * pf[nb]).sum(axis=1)
+            none = ~has | (pcell.sum(axis=1) <= 0.0)
+            pcell[none] = 0.0
+            pcell[none, self.source_class[ids[none]]] = 1.0
+            pcell /= pcell.sum(axis=1, keepdims=True)
+            self._hillDelivProv[ids] += srate[:, None] * pcell
+        return
+
+    def _buildDiffMat(self, Kd, fixed=None, keep=False):
         """
         Assemble the implicit linear-diffusion operator :math:`(I - L)` for the
         finite-volume Laplacian, given per-node coefficients ``Kd`` (m², i.e. a
@@ -260,9 +468,16 @@ class hillSLP(object):
         """
 
         diffCoeffs = sethillslopecoeff(self.lpoints, Kd)
+        if keep:
+            # unmasked rows, used to measure the flux into fixed channel cells
+            self._hillCoeffs = diffCoeffs.copy()
         if self.flatModel:
             diffCoeffs[self.outletIDs, 1:] = 0.0
             diffCoeffs[self.outletIDs, 0] = 1.0
+        if fixed is not None:
+            # channel cells (`channelQ`): identity rows, held at their elevation
+            diffCoeffs[fixed, 1:] = 0.0
+            diffCoeffs[fixed, 0] = 1.0
 
         return self._assembleDiffMat(diffCoeffs)
 
@@ -537,6 +752,11 @@ class hillSLP(object):
 
         if self.flatModel:
             val[self.outletIDs] = 0.
+        if getattr(self, "_nlChan", None) is not None:
+            # channel cells (`channelQ`) are held fixed; keep their flux
+            # divergence for `_channelDiffusion`
+            self._nlFlux = val.copy()
+            val[self._nlChan] = 0.
 
         # Residuals
         res = h_array - self.hOldArray - self.dt * val
@@ -577,6 +797,7 @@ class hillSLP(object):
         if self.stratLith:
             self.Cd_nl = self.Cd_nl * self._surfaceLithoD()
         self.hOldArray = self.hLocal.getArray().copy()
+        self._nlChan = self._channelMask()
 
         if self._snes_hill is None:
             snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
@@ -619,6 +840,10 @@ class hillSLP(object):
             )
 
         x.copy(result=self.hGlobal)
+        if self._nlChan is not None:
+            # flux into the fixed channel cells at the converged state
+            self._form_residual_nl_hillslope(snes, x, self._snes_hill_f)
+            self._channelDiffusion(self._nlChan, flux=self._nlFlux)
 
         # Update cumulative erosion/deposition and elevation
         self.tmp.waxpy(-1.0, self.hOld, self.hGlobal)
@@ -628,7 +853,9 @@ class hillSLP(object):
 
         if self.stratNb > 0:
             self.erodeStrat()
+            self._channelComposition()
             self._hillslopeProvFraction()
+            self._hillslopeFineFraction()
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:
@@ -637,6 +864,66 @@ class hillSLP(object):
                 flush=True,
             )
         safe_garbage_cleanup()
+
+    def _hillslopeFineFraction(self, eroded=True):
+        r"""
+        Dual lithology: set the fine fraction of the hillslope-creep deposit
+        (``depoFineFrac``, read by ``deposeStrat``) from the material that
+        arrived by creep, instead of the value the last river, pit or marine
+        deposition left there.
+
+        For each node that gained elevation in the step, the fine fraction is
+        the creep-flux-weighted mix of its higher neighbours' material,
+
+        .. math::
+            f_i = \frac{\sum_j a_{ij}\,\max(z_j - z_i, 0)\,f_j}
+                       {\sum_j a_{ij}\,\max(z_j - z_i, 0)},
+
+        with ``a_ij`` the FV creep stencil weight, ``z`` the pre-diffusion
+        elevation and ``f_j`` the fine fraction (deposit-equivalent bulk) of
+        what donor ``j`` lost: its eroded ``thFine / (thCoarse + thFine)``
+        when ``eroded`` (called after ``erodeStrat``) and the donor eroded,
+        else its surface composition (the soil-model creep path, which does
+        not call ``erodeStrat``). A deposit with no higher neighbour keeps its
+        own surface composition. Until 2026-11 hillslope deposits used the
+        stale routed value, which created fine sediment under strong
+        diffusion (+2.4 % at Ka = 1e5, +19 % at 1e7 on the dual fixture).
+
+        Reads the step's elevation change from ``self.tmp`` (not modified).
+        Scratch: ``self.tmpL`` and the cached ``_ffG``/``_ffL`` pair.
+        Collective (owner -> ghost sync); called on every rank.
+        """
+        if not getattr(self, "stratLith", False):
+            return
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        dz = self.tmpL.getArray().copy()
+        zOld = self.hLocal.getArray() - dz
+        surf = 1.0 - self._surfaceComposition()
+        if eroded:
+            tot = self.thCoarse + self.thFine
+            ff = np.where(tot > 0.0, np.divide(self.thFine, tot, out=np.zeros_like(tot),
+                                                where=tot > 0.0), surf)
+        else:
+            ff = surf.copy()
+        self._ffL.setArray(ff)
+        self.dm.localToGlobal(self._ffL, self._ffG)
+        self.dm.globalToLocal(self._ffG, self._ffL)
+        ff = self._ffL.getArray().copy()
+
+        Cd = np.full(self.lpoints, self.Cda, dtype=np.float64)
+        Cd[self.seaID] = self.Cdm
+        Cd = Cd * self._surfaceLithoD()
+        a = -sethillslopecoeff(self.lpoints, Cd * self.dt)[:, 1 : 1 + self.maxnb]
+        ngb = self.FVmesh_ngbID[:, : self.maxnb]
+        nb = np.where(ngb >= 0, ngb, np.arange(self.lpoints)[:, None])
+        w = np.where((a > 0.0) & (ngb >= 0),
+                     a * np.maximum(zOld[nb] - zOld[:, None], 0.0), 0.0)
+        wsum = w.sum(axis=1)
+        mix = np.divide((w * ff[nb]).sum(axis=1), wsum,
+                        out=surf.copy(), where=wsum > 0.0)
+        dep = dz > 0.0
+        self.depoFineFrac[dep] = np.clip(mix[dep], 0.0, 1.0)
+        return
 
     def _hillslopeProvFraction(self):
         r"""
@@ -762,6 +1049,31 @@ class hillSLP(object):
         if self.memclear:
             del add_rate
             gc.collect()
+
+        return
+
+    def hillslopeBeforeRouting(self):
+        """
+        Hillslope step run between the river incision and the sediment
+        routing (`Model.runProcesses`, only with `diffusion: channelQ` and
+        deposition on), so the volume the hillslopes deliver to channel cells
+        (`_hillDelivG`, `_hillDelivFine`, `_hillDelivProv`) is routed by this
+        step's `sedChange` instead of the next one.
+
+        With stratigraphy, the hillslope `erodeStrat` overwrites the eroded
+        thicknesses of the river step (`thCoarse`, `thFine`, `provEro`) that
+        `sedplex._getSedFlux` routes next; they are saved and restored around
+        the hillslope step (the `glacialTill` pattern).
+        """
+        saved = {}
+        if self.stratNb > 0:
+            for key in ("thCoarse", "thFine", "provEro"):
+                val = getattr(self, key, None)
+                if val is not None:
+                    saved[key] = val.copy()
+        self.getHillslope()
+        for key, val in saved.items():
+            setattr(self, key, val)
 
         return
 

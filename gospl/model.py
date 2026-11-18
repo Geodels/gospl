@@ -460,6 +460,16 @@ class Model(
                     with self.profiler.phase("till"), self._phase("glacial-till"):
                         _IceMesh.glacialTill(self)
 
+                # With `diffusion: channelQ` the hillslopes run before the
+                # sediment routing, so what they deliver to channel cells
+                # joins this step's routed load (no lag). Without it, or
+                # without deposition, they run after the deposition below.
+                hillFirst = self.hillChannelQ is not None and not self.nodep
+                if hillFirst:
+                    with self.profiler.phase("hillslope"), self._phase("hillslope"):
+                        _hillSLP.hillslopeBeforeRouting(self)
+                    _probeZ(self, "after hillslope")
+
                 if not self.nodep:
                     # Downstream sediment deposition over the continents
                     with self.profiler.phase("flow"), self._phase("flow"):
@@ -474,9 +484,10 @@ class Model(
                         _probeZ(self, "after marine sed")
 
                 # Hillslope diffusion (linear and non-linear)
-                with self.profiler.phase("hillslope"), self._phase("hillslope"):
-                    _hillSLP.getHillslope(self)
-                _probeZ(self, "after hillslope")
+                if not hillFirst:
+                    with self.profiler.phase("hillslope"), self._phase("hillslope"):
+                        _hillSLP.getHillslope(self)
+                    _probeZ(self, "after hillslope")
 
                 # Per-step dual-lithology + provenance status lines ([dual] /
                 # [prov]; verbose only, no-op when each is off). Keeps the

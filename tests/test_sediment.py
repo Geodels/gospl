@@ -900,3 +900,264 @@ def test_routing_pond_is_deposited_in_place(minimal_model):
         assert m._routingPond is None
     finally:
         m.destroy()
+
+
+def _channel_valley_run(tmp_path, name, extra, nodep=True, steps=5, soil=False):
+    """V-shaped valley (2 x 2 km, 50 m), walls, uniform rain, no fluvial
+    erosion, hillslope diffusion only. Returns (model volume before, after,
+    hillslope volume handed to the rivers, valley-floor max rise)."""
+    import os
+    from mpi4py import MPI
+    from scipy.spatial import Delaunay
+    from gospl.model import Model
+
+    wd = tmp_path / name
+    wd.mkdir()
+    xs = np.arange(0.0, 2000.1, 50.0)
+    X, Y = np.meshgrid(xs, xs)
+    p = np.column_stack([X.ravel(), Y.ravel()])
+    # valley along x = 1000 m, draining south (y = 0)
+    z = 0.2 * np.abs(p[:, 0] - 1000.0) + 0.02 * p[:, 1] + 10.0
+    np.savez(wd / "mesh.npz", v=np.column_stack([p, np.zeros(len(p))]),
+             c=Delaunay(p).simplices.astype(np.int64), z=z)
+    (wd / "in.yml").write_text(
+        "name: channel diffusion\n"
+        "domain:\n    npdata: ['mesh','v','c','z']\n    flowdir: 1\n"
+        f"    bc: 'wwww'\n    seadepo: False\n    nodep: {nodep}\n"
+        f"time:\n    start: 0.\n    end: {steps * 1000.0}\n    tout: {steps * 1000.0}\n    dt: 1.e3\n"
+        "spl:\n    K: 0.\n    d: 0.\n    m: 0.5\n"
+        f"diffusion:\n    hillslopeKa: 0.5\n    hillslopeKm: 0.\n{extra}"
+        "sea:\n    position: -100.\n"
+        "climate:\n  - start: 0.\n    uniform: 1.\n"
+        + ("soil:\n    mode: 'regolith'\n    soilK: 0.\n    maxProd: 0.\n"
+           "    depthProd: 0.5\n    uniform: 1.0\n" if soil else "")
+        + "output:\n    dir: 'out'\n"
+    )
+    cwd = os.getcwd()
+    os.chdir(wd)
+    try:
+        m = Model("in.yml", verbose=False, showlog=False)
+        try:
+            assert bool(getattr(m, "cptSoil", False)) == soil
+            own = m.inIDs == 1
+            area = m.larea[own]
+            z0 = m.hLocal.getArray()[own].copy()
+            # valley-floor cells that are channels (discharge >= 2e5 m3/yr)
+            floor = own & (np.abs(m.lcoords[:, 0] - 1000.0) < 1.0) & (m.FAL.getArray() >= 2.0e5)
+            zf0 = m.hLocal.getArray()[floor].copy()
+            m.runProcesses()
+            z1 = m.hLocal.getArray()[own].copy()
+            zf1 = m.hLocal.getArray()[floor].copy()
+            v0 = MPI.COMM_WORLD.allreduce(float((z0 * area).sum()))
+            v1 = MPI.COMM_WORLD.allreduce(float((z1 * area).sum()))
+            out = MPI.COMM_WORLD.allreduce(float(getattr(m, "hillDelivered", 0.0)))
+            rise = MPI.COMM_WORLD.allreduce(float((zf1 - zf0).max()) if zf0.size else -1e30, op=MPI.MAX)
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+    return v0, v1, out, rise
+
+
+@pytest.mark.parametrize("law", ["linear", "series", "soil"])
+def test_channel_cells_excluded_from_diffusion(tmp_path, law):
+    """
+    Protects: `diffusion: channelQ` (2026-11). Hillslope diffusion acted on
+    every land cell, channel cells included, so hillslopes filled the
+    one-cell-wide rivers and the channel steepness grew as the mesh was
+    refined (k_s 30.5 / 41.6 / 66.4 at 200 / 100 / 50 m instead of U/K = 25;
+    25.1 / 25.2 / 25.4 with channelQ). With the option, cells whose discharge
+    reaches channelQ are held fixed, so the valley floor is not filled, and
+    the volume the hillslopes lose equals what is handed to the rivers
+    (`hillDelivered`, removed here since deposition is off).
+    """
+    pytest.importorskip("scipy")
+    nl = "    hillslopeSc: 0.6\n    hillslopeNb: 2\n" if law == "series" else ""
+    soil = law == "soil"      # the soil model's own creep solve
+    v0, v1, out, rise = _channel_valley_run(tmp_path, f"chan_{law}", nl + "    channelQ: 2.e5\n",
+                                            soil=soil)
+    assert out > 0.0, "nothing was handed to the rivers"
+    # closes to the diffusion solve's tolerance (an iterative solve is not
+    # exactly volume-conserving); a bookkeeping error would be O(out)
+    assert abs((v1 - v0) + out) < 1e-5 * out, (
+        f"volume change {v1 - v0:.6e} m3 vs delivered {out:.6e} m3")
+    assert rise <= 1e-9, f"valley floor raised by {rise:.3e} m"
+    # without the option the floor is filled by the hillslopes
+    _, _, out0, rise0 = _channel_valley_run(tmp_path, f"plain_{law}", nl, soil=soil)
+    assert out0 == 0.0 and rise0 > 1e-3, f"reference floor rise {rise0:.3e} m"
+
+
+def test_channel_cells_reach_the_river_load(tmp_path):
+    """With deposition on, the delivered volume joins the routed source of the
+    same step (`sedplex._getSedFlux`; the hillslopes run before the routing)."""
+    pytest.importorskip("scipy")
+    v0, v1, out, _ = _channel_valley_run(tmp_path, "routed", "    channelQ: 2.e5\n",
+                                         nodep=False, steps=3)
+    assert out > 0.0
+
+
+def test_channel_q_option_checks():
+    """channelQ must be > 0; dual lithology, provenance and the soil model are
+    all supported."""
+    from gospl.tools.inputparser import ReadYaml
+    from gospl.sed.hillslope import hillSLP
+
+    parser = ReadYaml.__new__(ReadYaml)
+    parser.input = {"diffusion": {"hillslopeKa": 0.1, "hillslopeKm": 0.1, "channelQ": 0.0}}
+    with pytest.raises(ValueError, match="channelQ"):
+        parser._extraHillslope()
+    parser.input = {"diffusion": {"hillslopeKa": 0.1, "hillslopeKm": 0.1}}
+    parser._extraHillslope()
+    assert parser.hillChannelQ is None
+    for flag in ("stratLith", "provOn", "cptSoil"):
+        obj = hillSLP.__new__(hillSLP)
+        obj.hillChannelQ = 1.0e6
+        setattr(obj, flag, True)
+        obj._checkChannelOptions()     # supported: no error
+
+
+def _fixture_with_channels(tmp_path, yml_name, quantile=0.9, kd=None):
+    """Copy a fixture (YAML + mesh) to tmp_path and enable `channelQ` at the
+    given quantile of the initial discharge, so a share of the cells are
+    channels. Returns the model (caller destroys it)."""
+    import os
+    import shutil
+    from gospl.model import Model
+    from mpi4py import MPI
+    from _helpers import FIXTURES_DIR
+
+    src = FIXTURES_DIR / yml_name
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip(f"{yml_name} / mesh.npz not present")
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    text = src.read_text()
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        (tmp_path / "probe.yml").write_text(text)
+        m = Model("probe.yml", verbose=False, showlog=False)
+        try:
+            fa = m.FAL.getArray()[m.inIDs == 1]
+            land = m.hLocal.getArray()[m.inIDs == 1] > 0.0
+            vals = np.concatenate(MPI.COMM_WORLD.allgather(fa[land]))
+        finally:
+            m.destroy()
+        q = float(np.quantile(vals, quantile))
+        assert "diffusion:\n" in text
+        text = text.replace("diffusion:\n", f"diffusion:\n    channelQ: {q}\n", 1)
+        if kd is not None:
+            # a hillslope diffusivity large enough for the supply to the
+            # channels to be a measurable share of the sediment budget
+            import re
+            text = re.sub(r"hillslopeKa: [^\n]*", f"hillslopeKa: {kd}", text, count=1)
+        (tmp_path / "chan.yml").write_text(text)
+        return Model("chan.yml", verbose=False, showlog=False)
+    finally:
+        os.chdir(cwd)
+
+
+@pytest.mark.slow
+def test_channel_cells_dual_fine_conservation(tmp_path):
+    """
+    Protects: `channelQ` with dual lithology. The hillslope supply handed to
+    the rivers carries the fine fraction of the eroded donors
+    (`_channelComposition`) into the fine routing: with channels active and
+    strong diffusion, the fine eroded must equal the fine deposited, with no
+    fine supply left unrouted at the end of the run (the hillslopes run before
+    the routing; same tolerance as test_dual_fine_conservation).
+    """
+    import os
+    from mpi4py import MPI
+
+    # strong diffusion so the channel supply is a measurable share of the
+    # fine budget (needs the hillslope fine-fraction fix of 2026-11)
+    m = _fixture_with_channels(tmp_path, "minimal_dual.yml", quantile=0.5, kd=1.0e7)
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        if getattr(m, "flatModel", True):
+            pytest.skip("fine conservation needs a closed sphere")
+        m.runProcesses()
+        ero = MPI.COMM_WORLD.allreduce(m._fineEroded, op=MPI.SUM)
+        dep = MPI.COMM_WORLD.allreduce(m._fineDeposited, op=MPI.SUM)
+        out = MPI.COMM_WORLD.allreduce(m.hillDelivered, op=MPI.SUM)
+        # fine supply not yet routed: none, the routing follows the hillslopes
+        pend = MPI.COMM_WORLD.allreduce(
+            float(np.sum((m._hillDelivFine * m.larea)[m.inIDs == 1])) * m.dt)
+    finally:
+        m.destroy()
+        os.chdir(cwd)
+    assert ero > 0.0 and out > 1.0e-2 * ero, "channel supply too small; test is vacuous"
+    assert pend == 0.0, f"fine supply left unrouted: {pend:.3e} m3"
+    rel = abs(dep - ero) / ero
+    assert rel < 5.0e-3, (
+        f"fine eroded {ero:.4e} vs deposited {dep:.4e} ({rel:.2e})")
+
+
+@pytest.mark.slow
+def test_channel_cells_provenance_conservation(tmp_path):
+    """
+    Protects: `channelQ` with provenance. The hillslope supply handed to the
+    rivers carries its source classes into the class routing: with a single
+    source class every layer must stay 100 % that class and the classes must
+    still partition the layer thickness (as test_provenance_conservation).
+    """
+    import os
+    from mpi4py import MPI
+
+    m = _fixture_with_channels(tmp_path, "minimal_prov.yml")
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m.runProcesses()
+        out = MPI.COMM_WORLD.allreduce(m.hillDelivered, op=MPI.SUM)
+        top = m.stratStep + 1
+        H = m.stratH[:, :top].copy()
+        P = m.stratP[:, :top, :].copy()
+    finally:
+        m.destroy()
+        os.chdir(cwd)
+    assert out > 0.0, "no hillslope supply reached a channel; test is vacuous"
+    assert float(np.abs(P[:, :, 0]).max()) == 0.0
+    relH = max(float(H.sum()), 1.0)
+    assert float(np.abs(P[:, :, 1] - H).sum()) / relH < 1.0e-6
+    assert float(np.abs(P.sum(axis=2) - H).sum()) / relH < 1.0e-6
+
+
+@pytest.mark.slow
+def test_channel_cells_total_sediment_conserved(tmp_path):
+    """
+    Protects: with stratigraphy the routed source is SOLID volume, so the bulk
+    hillslope supply to channel cells is converted with the eroded donors'
+    solid fraction (`_channelComposition`). Routing it as bulk would deposit
+    more than was eroded. On a closed sphere the volume change must vanish to
+    1e-4 of the activity, with no supply left unrouted at the end of the run:
+    the hillslopes run before the routing, so their supply is deposited in the
+    same step (with the former one-step lag the last step's supply was still
+    pending and the gap was 0.9e-3 to 2.9e-3).
+    """
+    import os
+    from mpi4py import MPI
+
+    m = _fixture_with_channels(tmp_path, "minimal_dual.yml", quantile=0.5, kd=1.0e7)
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        if getattr(m, "flatModel", True):
+            pytest.skip("mass conservation needs a closed sphere")
+        owned = m.inIDs == 1
+        before = m.cumEDLocal.getArray().copy()
+        m.runProcesses()
+        dED = m.cumEDLocal.getArray() - before
+        dV = MPI.COMM_WORLD.allreduce(float(np.sum((dED * m.larea)[owned])))
+        act = MPI.COMM_WORLD.allreduce(float(np.sum((np.abs(dED) * m.larea)[owned])))
+        out = MPI.COMM_WORLD.allreduce(m.hillDelivered, op=MPI.SUM)
+        # supply not yet routed: none, the routing follows the hillslopes
+        pend = m._hillDelivG.dot(m.areaGlobal) * m.dt
+    finally:
+        m.destroy()
+        os.chdir(cwd)
+    assert act > 0.0 and out > 1.0e-3 * act, (
+        f"supply to channels {out:.3e} m3 too small vs activity {act:.3e}")
+    assert pend == 0.0, f"supply left unrouted: {pend:.3e} m3"
+    assert abs(dV) / act < 1.0e-4, f"|sum dcumED|/activity = {abs(dV) / act:.2e}"

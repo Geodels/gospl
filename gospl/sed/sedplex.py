@@ -144,6 +144,14 @@ class SEDMesh(object):
             self.Eb.copy(result=self.tmp)
             self.tmp.scale(-1.0)
 
+        # Material the hillslopes delivered to channel cells (`diffusion:
+        # channelQ`, hillslope._channelDiffusion; the hillslopes run before
+        # this routing when the option is set) joins the routed load, then the
+        # store is emptied. Erosion-positive rate (m/yr), like the source above.
+        if getattr(self, "_hillDelivG", None) is not None:
+            self.tmp.axpy(1.0, self._hillDelivG)
+            self._hillDelivG.set(0.0)
+
         # Get the volume of sediment transported in m3/yr
         self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
         self._solve_KSP(False, self.fMati, self.tmp, self.vSed, route=True)
@@ -157,7 +165,13 @@ class SEDMesh(object):
         # of the routed (upstream-integrated) flux — i.e. the composition of
         # sediment arriving at each node. Done before fMati is destroyed.
         if self.stratNb > 0 and self.stratLith:
-            self.tmpL.setArray(self.thFine)
+            fine = self.thFine
+            if getattr(self, "_hillDelivFine", None) is not None:
+                # fine part of the hillslope supply to channel cells
+                # (`channelQ`, hillslope._channelComposition), then emptied
+                fine = fine + self._hillDelivFine
+                self._hillDelivFine[:] = 0.0
+            self.tmpL.setArray(fine)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
             self._solve_KSP(False, self.fMati, self.tmp, self.vSedF, route=True)
@@ -182,8 +196,12 @@ class SEDMesh(object):
         if self.provOn:
             self.dm.globalToLocal(self.vSed, self.vSedLocal)
             vtot = self.vSedLocal.getArray()
+            hprov = getattr(self, "_hillDelivProv", None)
             for c in range(self.provNb):
-                self.tmpL.setArray(self.provEro[:, c])
+                if hprov is not None:
+                    self.tmpL.setArray(self.provEro[:, c] + hprov[:, c])
+                else:
+                    self.tmpL.setArray(self.provEro[:, c])
                 self.dm.localToGlobal(self.tmpL, self.tmp)
                 self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
                 self._solve_KSP(False, self.fMati, self.tmp, self.vSedP[c], route=True)
@@ -194,6 +212,8 @@ class SEDMesh(object):
                 )
             np.clip(self.provFrac, 0.0, 1.0, out=self.provFrac)
             self.depoProvFrac = self.provFrac.copy()
+            if hprov is not None:
+                hprov[:] = 0.0
 
         self.fMati.destroy()
 
