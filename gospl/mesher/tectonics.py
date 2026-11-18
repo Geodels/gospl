@@ -590,6 +590,12 @@ class Tectonics(object):
         arr = fitedges(arr)
         lvec.setArray(arr)
         self.dm.localToGlobal(lvec, gvec)
+        # `fitedges` also re-extrapolated the GHOST edge nodes, each from its
+        # truncated local neighbourhood (partition-dependent values). The
+        # global Vec took only the owned values; bring them back to the ghosts
+        # so a reader of `lvec` (the open-edge reset in applyVerticalForcing,
+        # which now runs right after the advection) sees the owners' values.
+        self.dm.globalToLocal(gvec, lvec)
 
         return
 

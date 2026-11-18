@@ -827,10 +827,11 @@ class UnstMesh(object):
         """
         Finds the different values for climatic, tectonic and sea-level forcing that will be applied at any given time interval during the simulation.
 
-        :arg tectonics: also apply the vertical forcing (`applyVerticalForcing`:
-            uplift/subsidence and the open-edge reset). `Model.runProcesses`
-            passes False at the end of a step: it applies the vertical forcing
-            at the START of each step instead.
+        :arg tectonics: also apply the uplift/subsidence
+            (`applyVerticalForcing`). `Model.runProcesses` passes False at the
+            end of a step: it applies the uplift at the START of each step
+            instead. The open-edge reset below always runs here, at the end of
+            the step.
         """
 
         t0 = process_time()
@@ -873,13 +874,28 @@ class UnstMesh(object):
         if tectonics:
             self.applyVerticalForcing()
 
+        # Assign mesh boundaries: open ('o') edges are reset to a free-outflow
+        # base level each step (see _drainOpenEdges). Fixed ('f') / wall ('w') /
+        # cyclic ('c') edges keep their current elevation here. This stays at
+        # the END of the step: run before the processes (2026-11 attempt), its
+        # running minimum leaves exactly flat runs of edge nodes in which
+        # 1e-5 m solver noise decides which outlet captures a river, a
+        # partition dependence (test_advection_partition_invariant).
+        if self.flatModel:
+            tmp = self.hLocal.getArray().copy()
+            tmp = self._drainOpenEdges(tmp)
+            self.hLocal.setArray(tmp)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            # Ghost copies of open edge nodes were reset from a truncated
+            # local neighbourhood: take the owners' values back.
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
         return
 
     def applyVerticalForcing(self):
         """
-        Vertical forcing of one step: uplift/subsidence (`applyTectonics`, at
-        the `upsub` rate `getTectonics` selected for the step) then the
-        open-edge base-level reset.
+        Uplift/subsidence of one step (`applyTectonics`, at the `upsub` rate
+        `getTectonics` selected for the step).
 
         `Model.runProcesses` calls it at the START of every step, right after
         `getTectonics` and before the surface processes, so each output is the
@@ -892,17 +908,13 @@ class UnstMesh(object):
         pure-uplift run outputs exactly `z0 + U*t`.
         """
 
+        # Start from a halo-consistent elevation: this runs right after the
+        # horizontal advection, and the uplift reads hLocal, ghosts included
+        # (collective, on every rank).
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
         # Tectonic forcing
         self.applyTectonics()
-
-        # Assign mesh boundaries: open ('o') edges are reset to a free-outflow
-        # base level each step (see _drainOpenEdges). Fixed ('f') / wall ('w') /
-        # cyclic ('c') edges keep their current elevation here.
-        if self.flatModel:
-            tmp = self.hLocal.getArray().copy()
-            tmp = self._drainOpenEdges(tmp)
-            self.hLocal.setArray(tmp)
-            self.dm.localToGlobal(self.hLocal, self.hGlobal)
 
         return
 

@@ -412,8 +412,9 @@ class Model(
             # Perform advection and tectonics
             with self.profiler.phase("tectonics"), self._phase("tectonics"):
                 _Tectonics.getTectonics(self)
-                # This step's uplift/subsidence and open-edge reset, BEFORE
-                # the surface processes (see applyVerticalForcing).
+                # This step's uplift/subsidence, BEFORE the surface processes
+                # (see applyVerticalForcing; the open-edge reset stays at the
+                # end of the step, in applyForces).
                 _UnstMesh.applyVerticalForcing(self)
 
             if not self.fast:
@@ -500,8 +501,8 @@ class Model(
                 _probeZ(self, "after flexure")
 
             # Update tectonic, sea-level & climatic conditions
-            # (the vertical part, uplift + open-edge reset, runs at the start
-            # of the next step: see applyVerticalForcing)
+            # (the uplift runs at the start of the next step: see
+            # applyVerticalForcing)
             if self.tNow < self.tEnd:
                 with self.profiler.phase("forcing"), self._phase("forcing"):
                     _UnstMesh.applyForces(self, tectonics=False)
