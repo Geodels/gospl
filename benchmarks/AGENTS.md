@@ -28,11 +28,12 @@ Mesh `.npz` files under each benchmark's `boundary_condition[s]/` subfolder are 
 |---|---|---|---|
 | `test_spl.py` | SPL steady state | Braun & Willett 2013; Perron & Royden 2013 | Cases 150 & 200: 5/5 each (basin test skipped — no case meets >80%); case 100 excluded (finest-mesh basin/R² artifacts + ~34 min cost) |
 | `test_hillslope.py` | Hillslope diffusion | `z=(U/2κ)x(L-x)`; Roering, Kirchner & Dietrich 1999 | All `TOL_*` constants met |
-| `test_knickpoint.py` | Knickpoint propagation | `c=K·A^m`; Royden & Perron 2013; Tucker & Whipple 2002 | 4/4 sub-tests |
+| `test_knickpoint.py` | Knickpoint propagation | `c=K·A^m`; Royden & Perron 2013; Tucker & Whipple 2002 | 4/4 sub-tests. The front is tracked at `front_fraction=0.95`, which lags the mid-point by ~12 % (implicit-scheme smearing); the mid-point (0.5) follows the integral with slope ~1.000. The analytic celerity uses goSPL's own FA, so a mesh error in the area cannot cause a deviation. |
 | `test_dupuit.py` | Groundwater head (Dupuit-Boussinesq) | `s²=s_d²+(R/K)(2Wx−x²)` | RMSE 0.00 %, R²=1 |
 | `test_flexure.py` | Flat FEM + global flexure | cosine modes `w=q/(Dk⁴+Δρg)` (exact for the 5-point stencil); infinite-plate line load with image loads; degree-l spherical-harmonic response `q/(Δρg+D·P_l)` + flat-plate limit | FEM: discrete round-off, continuum <1%, 2nd-order convergence; line load RMSE <0.5%; global spectral 1e-9, mesh pipeline RMSE <1% |
 | `test_orography.py` | Orographic rain (Smith-Barstad, no mountain wave) | `P̂ = Cw·iku·ĥ/((1+ikuτc)(1+ikuτf))` on a 1-D ridge, with the background/floor clip reproduced | central-row RMSE <1.5% of peak, wind-parallel edge rows <1.5% (inflow-only BC since 2026-10); first-order convergence |
 | `test_advection.py` | Horizontal advection (upwind / iioe1 / iioe2) | translated Gaussian; uniform field (iioe2 zero-excess path) | mass < 1e-4 for every scheme (iioe2 mass-neutral since 2026-10), centroid, peak, RMSE; uniform field preserved |
+| `test_hillslope_nonlinear.py` | Non-linear hillslope (Taylor series, Andrews-Bucknam/Roering, power law) | steady ridge `D S F(S) = U x'` integrated exactly, hexagonal lattice | each law no more than 1 % (divide, RMSE) less accurate than the linear law on the same mesh (2026-11) |
 | `test_marine_diffusion.py` | Marine diffusion (`ts` and `picard`) | 2-D heat kernel on a constant-`Cd` deposit | volume 1e-12; D err, peak law, RMSE < 2e-3 for both solvers (the `ts` stage-solve fix, 2026-10) |
 | `test_geochem_balance.py` | Level-B geochemistry | per-step `dissolved = precipitated + exported`; 1-D strip `c=D0/(R+p)·(Ls/u)^(1+p/R)` | closure ~1e-15; strip vs exact discrete 2e-5 |
 

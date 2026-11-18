@@ -499,3 +499,71 @@ def test_cyclic_plate_advection_wraps_across_seam(tmp_path):
             model.destroy()
         os.chdir(cwd)
     assert seen, "no plate update happened"
+
+
+def _uplift_ridge_peak(tmp_path, dt):
+    """Steady linear-diffusion ridge under uniform uplift on a small hexagonal
+    strip (fixed east/west edges at z=0, walls north/south); returns the
+    peak of the final OUTPUT (read from disk, i.e. what a user sees)."""
+    import h5py
+    from scipy.spatial import Delaunay
+    from gospl.model import Model
+
+    L, dx, U = 1000.0, 50.0, 5.0e-4
+    dy = dx * np.sqrt(3.0) / 2.0
+    pts = []
+    for j in range(5):
+        xs = (np.arange(0.0, L + 0.5 * dx, dx) if j % 2 == 0 else
+              np.concatenate([[0.0], np.arange(0.5 * dx, L, dx), [L]]))
+        pts += [(x, j * dy) for x in xs]
+    p = np.array(pts)
+    t = np.where((p[:, 0] == 0.0) | (p[:, 0] == L), 0.0, U)
+    wd = tmp_path / f"dt{int(dt)}"
+    wd.mkdir()
+    np.savez(wd / "mesh.npz", v=np.column_stack([p, np.zeros(len(p))]),
+             c=Delaunay(p).simplices.astype(np.int64), z=np.zeros(len(p)), t=t)
+    (wd / "in.yml").write_text(
+        "name: uplift order\n"
+        "domain:\n    npdata: ['mesh','v','c','z']\n    flowdir: 1\n"
+        "    bc: 'wfwf'\n    seadepo: False\n    nodep: True\n"
+        f"time:\n    start: 0.\n    end: 2.e6\n    tout: 2.e6\n    dt: {dt}\n"
+        "spl:\n    K: 0.\n    d: 0.\n    m: 0.5\n"
+        "diffusion:\n    hillslopeKa: 0.5\n    hillslopeKm: 0.\n"
+        "sea:\n    position: -1.\n"
+        "climate:\n  - start: 0.\n    uniform: 0.\n"
+        "tectonics:\n  - start: 0.\n    end: 1.e8\n    upsub: ['mesh','t']\n"
+        "output:\n    dir: 'out'\n"
+    )
+    cwd = os.getcwd()
+    os.chdir(wd)
+    try:
+        m = Model("in.yml", verbose=False, showlog=False)
+        try:
+            m.runProcesses()
+        finally:
+            m.destroy()
+        with h5py.File("out/h5/gospl.1.p0.h5", "r") as f:
+            return float(np.max(f["elev"][:]))
+    finally:
+        os.chdir(cwd)
+
+
+def test_uplift_before_processes_steady_state_dt_independent(tmp_path):
+    """
+    Protects: the vertical forcing (uplift + open-edge reset) runs at the START
+    of a step, before the surface processes (`applyVerticalForcing`, 2026-11).
+    It ran at the END, after them, so every output carried one un-eroded
+    `U*dt` on top of the eroded surface: a steady relief that depended on dt
+    (~6 % between dt = 0.5 and 5 kyr in the implicit_timestepping example,
+    raised in the GMD review). An implicit steady state does not depend on dt,
+    so the output peak of a steady ridge must not either. With the old order
+    the two peaks below differ by U*(20 - 2) kyr = 9 m.
+    """
+    pytest.importorskip("scipy")
+    pytest.importorskip("h5py")
+    coarse = _uplift_ridge_peak(tmp_path, 2.0e4)
+    fine = _uplift_ridge_peak(tmp_path, 2.0e3)
+    assert fine > 100.0, f"ridge did not build ({fine:.2f} m)"
+    assert abs(coarse - fine) < 0.05, (
+        f"steady peak depends on dt: {coarse:.3f} m (dt=20 kyr) vs "
+        f"{fine:.3f} m (dt=2 kyr)")

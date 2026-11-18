@@ -823,9 +823,15 @@ class UnstMesh(object):
 
         return
 
-    def applyForces(self):
+    def applyForces(self, tectonics=True):
         """
         Finds the different values for climatic, tectonic and sea-level forcing that will be applied at any given time interval during the simulation.
+
+        :arg tectonics: also apply the uplift/subsidence
+            (`applyVerticalForcing`). `Model.runProcesses` passes False at the
+            end of a step: it applies the uplift at the START of each step
+            instead. The open-edge reset below always runs here, at the end of
+            the step.
         """
 
         t0 = process_time()
@@ -865,17 +871,50 @@ class UnstMesh(object):
                 flush=True,
             )
 
-        # Tectonic forcing
-        self.applyTectonics()
+        if tectonics:
+            self.applyVerticalForcing()
 
         # Assign mesh boundaries: open ('o') edges are reset to a free-outflow
         # base level each step (see _drainOpenEdges). Fixed ('f') / wall ('w') /
-        # cyclic ('c') edges keep their current elevation here.
+        # cyclic ('c') edges keep their current elevation here. This stays at
+        # the END of the step: run before the processes (2026-11 attempt), its
+        # running minimum leaves exactly flat runs of edge nodes in which
+        # 1e-5 m solver noise decides which outlet captures a river, a
+        # partition dependence (test_advection_partition_invariant).
         if self.flatModel:
             tmp = self.hLocal.getArray().copy()
             tmp = self._drainOpenEdges(tmp)
             self.hLocal.setArray(tmp)
             self.dm.localToGlobal(self.hLocal, self.hGlobal)
+            # Ghost copies of open edge nodes were reset from a truncated
+            # local neighbourhood: take the owners' values back.
+            self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        return
+
+    def applyVerticalForcing(self):
+        """
+        Uplift/subsidence of one step (`applyTectonics`, at the `upsub` rate
+        `getTectonics` selected for the step).
+
+        `Model.runProcesses` calls it at the START of every step, right after
+        `getTectonics` and before the surface processes, so each output is the
+        state after a complete step (uplift and erosion both applied). Until
+        2026-11 it ran at the END of the step, after the processes: an output
+        then held one un-eroded `U*dt` on top of the eroded surface, an
+        operator-splitting offset that made the steady relief depend on `dt`
+        (~6 % between dt = 0.5 and 5 kyr in the implicit_timestepping
+        example). With uplift first, a steady state is `dt`-independent and a
+        pure-uplift run outputs exactly `z0 + U*t`.
+        """
+
+        # Start from a halo-consistent elevation: this runs right after the
+        # horizontal advection, and the uplift reads hLocal, ghosts included
+        # (collective, on every rank).
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+
+        # Tectonic forcing
+        self.applyTectonics()
 
         return
 
@@ -1295,6 +1334,7 @@ class UnstMesh(object):
             "_snes_soil", "_snes_soil_f", "_snes_soil_x",
             "_snes_soil_fb", "_snes_soil_fb_f",
             "_snes_hill", "_snes_hill_f", "_snes_hill_x",
+            "_snes_hill_sG", "_snes_hill_sL",
             "_ts_marine", "_ts_marine_x", "_ts_marine_atol",
             "_smoothMat", "_ksp_smooth",
             "_hillMat", "_ksp_hill_lin",

@@ -937,10 +937,63 @@ subroutine sethillslopecoeff(nb, Kd, dcoeff)
 
 end subroutine sethillslopecoeff
 
-subroutine hillslp_nl(nb, elev, kd, exp, n, val)
+subroutine cellslope(nb, elev, slp)
+!*****************************************************************************
+! Magnitude of the surface gradient per node, by Green-Gauss on the Voronoi
+! cell: grad = (1/A) sum_p 0.5*(z_i - z_k) * n_p * l_p, with n_p the unit
+! Delaunay-edge direction (normal to the Voronoi face) and l_p the face
+! length. The difference form drops the closed-cell identity sum n_p l_p = 0,
+! so open boundary cells are not biased. On a curved (spherical) mesh the
+! radial component is removed. A ghost node's value uses a truncated
+! neighbourhood: the caller must halo-sync `slp` before it is read across a
+! face (see hillslope._form_residual_nl_hillslope).
+
+    use meshparams
+    implicit none
+
+    integer :: nb
+
+    double precision, intent(in) :: elev(nb)
+    double precision, intent(out) :: slp(nb)
+
+    integer :: k, p, i
+    double precision :: g(3), nvec(3), rhat(3)
+
+    slp = 0.
+    do k = 1, nb
+      if(FVarea(k)>0)then
+        g = 0.
+        do p = 1, FVnNb(k)
+          if(FVvDist(k,p)>0. .and. FVeLgt(k,p)>0.)then
+            i = FVnID(k,p)+1
+            nvec = (lcoords(i,1:3) - lcoords(k,1:3))/FVeLgt(k,p)
+            g = g + 0.5*(elev(i) - elev(k))*nvec*FVvDist(k,p)
+          endif
+        enddo
+        g = g/FVarea(k)
+        if(curvedmesh == 1)then
+          rhat = lcoords(k,1:3)/norm2(lcoords(k,1:3))
+          g = g - dot_product(g, rhat)*rhat
+        endif
+        slp(k) = norm2(g)
+      endif
+    enddo
+
+    return
+
+end subroutine cellslope
+
+subroutine hillslp_nl(nb, elev, kd, slp, exp, n, val)
 !*****************************************************************************
 ! Define non-linear hillslope coefficients based on a finite volume spatial
 ! discretisation as proposed in Tucker et al. (2001).
+!
+! The face flux is the linear one, D*(dz/L), times the law's factor q/(D*S)
+! evaluated on the face slope MAGNITUDE s = 0.5*(slp_k + slp_i), with `slp`
+! the per-node gradient magnitude from `cellslope` (halo-synced). Using the
+! edge slope |dz/L| instead (until 2026-11) under-estimates the slope on
+! every edge not aligned with the gradient (S*cos(theta)), which raised a
+! steady ridge by ~3 % (series) to ~9 % (power law, n=2) on any resolution.
 
     use meshparams
     implicit none
@@ -949,6 +1002,7 @@ subroutine hillslp_nl(nb, elev, kd, exp, n, val)
 
     double precision, intent(in) :: elev(nb)
     double precision, intent(in) :: kd(nb)
+    double precision, intent(in) :: slp(nb)
     double precision, intent(in) :: exp
     integer, intent(in) :: n
 
@@ -968,23 +1022,33 @@ subroutine hillslp_nl(nb, elev, kd, exp, n, val)
             c = 0.5*(ck+cn)/FVarea(k)
             v = c*FVvDist(k,p)/FVeLgt(k,p)
             dz = elev(i) - elev(k)
-            s = abs(dz/FVeLgt(k,p))
+            s = 0.5*(slp(k) + slp(i))
+            ! v*dz is the linear face flux D*S (times face length / area);
+            ! each law multiplies it by its flux factor q/(D*S). Until
+            ! 2026-11 the factors were the slope derivatives dq/dS/D
+            ! ((2j+1) series coefficients, n*S^(n-1), (1+f^2)/(1-f^2)^2),
+            ! so no option solved its documented law.
             if(n .eq. -1)then
-              ! Wang et al. (2024) approach
-              val(k) = val(k) + v*dz*exp*(s**(exp-1.))
+              ! Wang et al. (2024) power law: q = D S^p (p = exp)
+              if(s > 0.)then
+                val(k) = val(k) + v*dz*(s**(exp-1.))
+              endif
             else
               if(n > 0)then
-                ! Barnhart et al. (2019) approach
+                ! Ganti et al. (2012) truncated series, Barnhart et al.
+                ! (2019) Eq. 14: q = D S [1 + (S/Sc)^2 + ... + (S/Sc)^(2(n-1))]
                 su = 1.
                 fval = s/exp
                 do jn = 1, n-1
-                  su = su + (2*jn+1)*(fval**(2*jn))
+                  su = su + fval**(2*jn)
                 enddo
                 val(k) = val(k) + v*dz*su
               else
-                ! Andrews–Bucknam law: flux diverges close to Sc
+                ! Andrews and Bucknam (1987) / Roering et al. (1999):
+                ! q = D S / (1 - (S/Sc)^2), which diverges at Sc; S/Sc is
+                ! capped at 0.8 so the flux stays finite (linear above it)
                 fval = min(s/exp, 0.8)
-                su = (1 + fval**2) / (1 - fval**2 )**2
+                su = 1. / (1. - fval**2)
                 val(k) = val(k) + v*dz*su
               endif
             endif

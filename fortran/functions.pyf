@@ -32,10 +32,17 @@ python module _fortran
             double precision dimension(nb),intent(out),depend(nb) :: elat
         end subroutine ice_lateral_erosion
 
-        subroutine hillslp_nl(nb,elev,kd,exp,n,val)
+        subroutine cellslope(nb,elev,slp)
+            integer :: nb
+            double precision dimension(nb),intent(in),depend(nb) :: elev
+            double precision dimension(nb),intent(out),depend(nb) :: slp
+        end subroutine cellslope
+
+        subroutine hillslp_nl(nb,elev,kd,slp,exp,n,val)
             integer :: nb
             double precision dimension(nb),intent(in),depend(nb) :: elev
             double precision dimension(nb),intent(in),depend(nb) :: kd
+            double precision dimension(nb),intent(in),depend(nb) :: slp
             double precision intent(in) :: exp
             integer intent(in) :: n
             double precision dimension(nb),intent(out),depend(nb) :: val

@@ -14,6 +14,7 @@ from gospl.tools.constants import MARINE_SMOOTH_N_LAND, MARINE_SMOOTH_N_SEA
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import sethillslopecoeff
     from gospl._fortran import hillslp_nl
+    from gospl._fortran import cellslope
     from gospl._fortran import jacobiancoeff
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -46,6 +47,8 @@ class hillSLP(object):
         self._snes_hill = None
         self._snes_hill_f = None
         self._snes_hill_x = None
+        self._snes_hill_sG = None
+        self._snes_hill_sL = None
 
         # Cached TS for marine non-linear diffusion (rosw scheme); created
         # lazily on first call and reused across timesteps.
@@ -508,17 +511,29 @@ class hillSLP(object):
         snes : PETSc.SNES: The snes object.
         h : PETSc.Vec: The current solution vector (h^{n+1}) at the new time step.
         F : PETSc.Vec: The residual vector to be filled.
+
+        Scratch Vecs: writes ``self.hl`` (the local iterate). The slope
+        magnitude goes through the dedicated ``_snes_hill_sG``/``_snes_hill_sL``
+        pair, not a shared scratch Vec.
         """
 
         # Current state
         self.dm.globalToLocal(h, self.hl)
         h_array = self.hl.getArray()
 
-        # Compute slope
+        # Gradient magnitude per node (the law's slope S). A ghost's value is
+        # computed on a truncated neighbourhood, so take every node's value
+        # from its owner before a face reads it (collective: every rank runs
+        # the residual).
+        slp = cellslope(self.lpoints, h_array)
+        self._snes_hill_sG.setArray(slp[self.glIDs])
+        self.dm.globalToLocal(self._snes_hill_sG, self._snes_hill_sL)
+        slp = self._snes_hill_sL.getArray()
+
         if self.K_sc == 0:
-            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_nl, -1)
+            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, slp, self.K_nl, -1)
         else:
-            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, self.K_sc, self.K_nb)
+            val = hillslp_nl(self.lpoints, h_array, self.Cd_nl, slp, self.K_sc, self.K_nb)
 
         if self.flatModel:
             val[self.outletIDs] = 0.
@@ -538,13 +553,17 @@ class hillSLP(object):
         .. math::
           \frac{\partial h}{\partial t}= \nabla \cdot \left( C_d(h) \nabla h \right)
 
-        Two flavors of non-linear diffusion are possible based on user defined parameters:
+        Three flux laws are available based on user defined parameters (S the
+        gradient magnitude, see ``cellslope``):
 
-        1. a non-critical hillslope model following the work of `Wang et al. (2024) <https://www.sciencedirect.com/science/article/pii/S0169555X24001053>`_.
-        2. a non-linear depth-dependent creep law as described in `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_ (section 3.4.5).
+        1. power law ``q = D S^p`` (``hillslopenl: p``), the non-critical model of `Wang et al. (2024) <https://www.sciencedirect.com/science/article/pii/S0169555X24001053>`_;
+        2. truncated Taylor series ``q = D S [1 + (S/Sc)^2 + ... + (S/Sc)^(2(N-1))]`` (``hillslopeSc``, ``hillslopeNb: N``), `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_ Eq. 14;
+        3. critical-slope law ``q = D S / (1 - (S/Sc)^2)`` (``hillslopeNb: 0``), Roering et al. (1999), with ``S/Sc`` capped at 0.8.
+
+        Validated against exact steady ridges in ``benchmarks/test_hillslope_nonlinear.py``.
 
         .. note::
-            In this implementation of the SNES, we do not form the Jacobian and PETSc calculates it based on the residual function. Here, a Nonlinear Generalized Minimum Residual method is used ``ngmres``, a Preconditioned Conjugate Gradient ``cg`` method is defined for the KSP and the preconditioner allows for multi-grid methods based on the HYPRE BoomerAMG approach.
+            The SNES forms no Jacobian: it is a limited-memory quasi-Newton (L-BFGS) with a matrix-free critical-point line search (options prefix ``hillnl_``).
         """
 
         t0 = process_time()
@@ -566,16 +585,24 @@ class hillSLP(object):
             if self.verbose:
                 snes.setMonitor(self._diff_nl_monitor)
             self._snes_hill_f = self.hGlobal.duplicate()
+            self._snes_hill_sG = self.hGlobal.duplicate()
+            self._snes_hill_sL = self.hLocal.duplicate()
             snes.setFunction(self._form_residual_nl_hillslope, self._snes_hill_f)
-            snes.setType('ngmres')
-            ksp = snes.getKSP()
-            ksp.setType("cg")
-            pc = ksp.getPC()
-            pc.setType("hypre")
+            # Limited-memory quasi-Newton (L-BFGS) with the matrix-free
+            # critical-point line search, as in soilSPL/nlSPL. The previous
+            # bare `ngmres` ignored its KSP/PC and aborted inside its SVD
+            # ("SVD generated inconsistent output") at the first step on a
+            # 10 m mesh (diffusion number ~10), for the Taylor-series law
+            # before and after the 2026-11 flux-law fix.
+            prefix = "hillnl_"
+            snes.setOptionsPrefix(prefix)
+            snes.setType("qn")
             petsc_options = petsc4py.PETSc.Options()
-            petsc_options['pc_hypre_type'] = 'boomeramg'
-            ksp.getPC().setFromOptions()
-            ksp.setTolerances(rtol=1.0e-6)
+            if not petsc_options.hasName(prefix + "snes_qn_type"):
+                petsc_options[prefix + "snes_qn_type"] = "lbfgs"
+            if not petsc_options.hasName(prefix + "snes_linesearch_type"):
+                petsc_options[prefix + "snes_linesearch_type"] = "cp"
+            snes.setFromOptions()
             self._snes_hill_x = self.hGlobal.duplicate()
             self._snes_hill = snes
 

@@ -18,6 +18,7 @@ Class UnstMesh
 
       ~UnstMesh.applyForces
       ~UnstMesh.applyTectonics
+      ~UnstMesh.applyVerticalForcing
       ~UnstMesh.destroy_DMPlex
 
    .. rubric:: Properties
@@ -49,6 +50,7 @@ Public functions
 
 .. automethod:: mesher.unstructuredmesh.UnstMesh.applyForces
 .. automethod:: mesher.unstructuredmesh.UnstMesh.applyTectonics
+.. automethod:: mesher.unstructuredmesh.UnstMesh.applyVerticalForcing
 .. automethod:: mesher.unstructuredmesh.UnstMesh.destroy_DMPlex
 
 

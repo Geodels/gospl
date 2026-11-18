@@ -1101,6 +1101,9 @@ def test_advection_partition_invariant(tmp_path):
       difference ~2-3 m (both IIOE schemes) -> ~1e-5 m.
 
     np=3 (not 2): the 2-way cut on this fixture does not exercise the limiter.
+    np=4 too: running the open-edge reset before the processes (a 2026-11
+    attempt) passed at np=3 but differed by 2.5e-2 m interior / 8.5 m edge at
+    np=4 (and failed on CI); one rank count can pass by luck.
     """
     import shutil
     import subprocess
@@ -1114,23 +1117,26 @@ def test_advection_partition_invariant(tmp_path):
     tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
     for f in ("flat_advect.yml", "flat_advect.npz"):
         shutil.copy(FIXTURES_DIR / f, tmp_path / f)
-    keep = tmp_path / "ab"
-    res = subprocess.run(
-        [sys.executable, str(tool), "flat_advect.yml", "-n", "3", "--steps", "3",
-         "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
-        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
-        timeout=3 * MPI_TIMEOUT)
-    a, b = keep / "ab_np1.npz", keep / "ab_np3.npz"
-    assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
-    a, b = np.load(a), np.load(b)
-    c = a["_coords"]
-    lo, hi = c[:, :2].min(0), c[:, :2].max(0)
-    dist = np.minimum(c[:, :2] - lo, hi - c[:, :2]).min(axis=1)
-    d = np.abs(a["elev"] - b["elev"])
-    assert np.isfinite(d).all()
-    edge, interior = dist < 600.0, dist >= 600.0
-    assert d[interior].max() < 0.01, f"interior difference {d[interior].max():.3e} m"
-    assert d[edge].max() < 0.01, f"edge-zone difference {d[edge].max():.3e} m"
+    for nproc in (3, 4):
+        keep = tmp_path / f"ab{nproc}"
+        res = subprocess.run(
+            [sys.executable, str(tool), "flat_advect.yml", "-n", str(nproc),
+             "--steps", "3", "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+            cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+            timeout=3 * MPI_TIMEOUT)
+        a, b = keep / "ab_np1.npz", keep / f"ab_np{nproc}.npz"
+        assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
+        a, b = np.load(a), np.load(b)
+        c = a["_coords"]
+        lo, hi = c[:, :2].min(0), c[:, :2].max(0)
+        dist = np.minimum(c[:, :2] - lo, hi - c[:, :2]).min(axis=1)
+        d = np.abs(a["elev"] - b["elev"])
+        assert np.isfinite(d).all()
+        edge, interior = dist < 600.0, dist >= 600.0
+        assert d[interior].max() < 0.01, (
+            f"np={nproc}: interior difference {d[interior].max():.3e} m")
+        assert d[edge].max() < 0.01, (
+            f"np={nproc}: edge-zone difference {d[edge].max():.3e} m")
 
 
 # ---------------------------------------------------------------------------

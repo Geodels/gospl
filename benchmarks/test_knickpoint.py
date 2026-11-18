@@ -655,11 +655,12 @@ def writeMarkdown(r, output_path="knickpoint_benchmark.md"):
         f"| Regression slope | {r['position_slope']:.4f} (target 1.0) |",
         f"| Intercept | {r['position_ic']:.1f} m |",
         f"",
-        f"> **Note on slope > 1:** The model propagates the knickpoint "
-        f"~{100*(r['position_slope']-1):.0f}% faster than the pure `∫K·A^m dt` "
-        f"prediction. This is a known mesh-resolution effect on unstructured grids: "
-        f"the local FA at the wave front slightly overestimates the contributing "
-        f"area, increasing the effective celerity. It is not a model error.",
+        f"> **Note on the slope:** the regression slope ({r['position_slope']:.3f}) "
+        f"depends on which level of the front is tracked (`front_fraction`). The "
+        f"first-order implicit scheme smears the front: its 5 % and 95 % levels lead "
+        f"and lag the mid-point by ~12 %, and the mid-point (0.5) follows `∫K·A^m dt` "
+        f"with a slope of 0.996-1.000 for dt = 25-400 yr. The analytic celerity uses "
+        f"goSPL's own FA, so a mesh error in the area cannot cause a deviation.",
         f"",
         f"## Figures",
         f"",

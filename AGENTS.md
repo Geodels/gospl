@@ -6,7 +6,7 @@ of the tree. Update the relevant file when an invariant changes. Long-form ratio
 `REFACTOR_AUDIT.md`; past bugs and their guards: `docs/dev/FIXED_BUGS.md`; per-change
 history: `docs/dev/CHANGELOG_DEV.md`.
 
-Last reviewed 2026-11-12 against `fix/marine-diffusion-donor` (`dev` after PR #486, after `v2026.7.14`). In October 2026 this file
+Last reviewed 2026-11-18 on `dev` (after PR #487 and the GMD-review fixes: non-linear hillslope laws, uplift at the start of the step). In October 2026 this file
 was split: it keeps only the rules that apply everywhere, and the subsystem detail
 moved verbatim into the files below.
 
@@ -128,7 +128,7 @@ Created lazily on first use, stored as `self._X`, reused for the whole run (avoi
 | `eroder/nlSPL.py` | `_solveNL` | `_snes_nl` | SNES nrichardson + analytic Jacobian |
 | `eroder/soilSPL.py` | `_solveSoil` | `_snes_soil` (+`_fb`) | SNES `qn`, `ngmres` fallback, adaptive sub-stepping |
 | `eroder/soilSPL.py` | `diffuseSoil` | `_ts_soil` | TS rosw |
-| `sed/hillslope.py` | `_hillSlopeNL` | `_snes_hill` | SNES |
+| `sed/hillslope.py` | `_hillSlopeNL` | `_snes_hill` (+`_snes_hill_sG/sL` slope halo) | SNES `qn` (`hillnl_`; bare `ngmres` aborted on fine meshes) |
 | `sed/hillslope.py` | `_diffuseImplicit` | `_ts_marine` | TS rosw (marine + lake); stage solve gmres+gasm (NOT preonly: rosw has no Newton correction) |
 | `sed/hillslope.py` | `_solveSmooth` | `_ksp_smooth` (+`_smoothMat`) | KSP, operator rebuilt on coastline move |
 | `sed/hillslope.py` | `_hillSlope(smooth=0)` | `_ksp_hill_lin` (+`_hillMat`) | KSP, operator rebuilt on coastline move |
@@ -300,6 +300,14 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 All issues found by the 2026-10 analytical benchmarks and partition checks are fixed (see `docs/dev/FIXED_BUGS.md`). When you find one, record it here with how to reproduce it, and pin it with a benchmark or test at the current behaviour.
 - _(none currently open)_
 
+## Known limitations (documented, not bugs)
+Stated in the GMD model-description paper (revision of Nov 2026) and in the user and technical guides. Do not "fix" them silently: a change of behaviour must update the docs and be discussed with the maintainer.
+- **Hillslope diffusion acts on channel cells**, so the hillslope/fluvial balance depends on resolution: with `hillslopeKa: 0.2` the steady channel steepness of an uplifted block is 30.5 / 41.6 / 66.4 at 200 / 100 / 50 m spacing instead of U/K = 25 (25.1-25.3 without diffusion). Users must choose `hillslopeKa` for their resolution (`docs/user_guide/surfproc.rst` > Changing the mesh resolution). A possible improvement (not implemented) is to exclude channel cells from the diffusion and pass the hillslope flux into the river load (Hergarten & Pietrek 2023).
+- **Eulerian advection (`upwind`/`iioe1`/`iioe2`) does not carry the drainage across a lateral motion**: the valley pattern lags and then reorganises (Hergarten & Fraters 2026). Plate interpolation (`interp`) carries it. Test: a steady 40 x 20 km landscape moved at 4 mm/yr for 1 Myr (`docs/tech_guide/tecto.rst` warning).
+- **Knickpoint benchmark front**: the first-order implicit scheme smears a knickpoint, so its 5 % and 95 % levels lead and lag the mid-point by ~12 %; only the mid-point follows `∫K A^m dt` (slope 0.996-1.000). This is discretisation, not a celerity error.
+
+The paper's scripts and review tests live outside the repository (paper folder, `review_tests/`). When a change alters a number quoted in the docs or the paper (benchmark results, example outputs), update both.
+
 ## Lessons from fixed bugs (full list: `docs/dev/FIXED_BUGS.md`)
 - Any `Vec`/`Mat` reduction, scatter or `Allreduce` under `if MPIrank == 0` or a rank-local `.any()` deadlocks at np>1, and serial always passes.
 - A scratch Vec that holds a result you keep must not be reused for an intermediate reduction on the skip path (IIOE2 zeroed fields this way). The converse holds too: a scratch Vec passed as a KSP solution with `guess=True` is a STALE starting guess; `_solve_KSP` now resets one that is worse than zero, but seed routing solves explicitly (`b`, `seed=True`).
@@ -324,6 +332,8 @@ All issues found by the 2026-10 analytical benchmarks and partition checks are f
 - Two rules that route the same cells must read the same surface: flat routing on `lFill` and MFD on `h` differed by 1-ulp round-off and formed closed flow cycles. Make them consistent at the routing step, not by clamping the fill (that fragmented DEM plateaus into ~1e5 sinks). Find the cycle's cells (the routing-repair diagnostic) before adding more solver rescue, and check a fix on the production case, not only on the guard test.
 - A failure localised to a few cells must be repaired locally, not by discarding the whole solve: a 3-cell flow cycle zeroed a full sediment-cascade pass (`_pondRoutingRegion` now makes those cells sinks and re-solves).
 - An adaptive solver that can give up (TS `DIVERGED_STEP_REJECTED`) needs a fallback, not an abort: a 144-rank job should not die on an option that has a robust alternative.
+- A non-linear flux law is implemented as its flux factor `q/(D S)`, not its derivative `dq/dS`, and the factor is evaluated on the gradient magnitude, not the edge slope (`S cos(theta)` on an unstructured mesh). Both errors survived two years because no option had a benchmark against its exact solution (`hillslp_nl`, 2026-11).
+- Operator splitting decides what an output shows: uplift applied after the processes left one un-eroded `U*dt` in every output and made the steady relief depend on `dt`. The uplift runs at the START of a step (`applyVerticalForcing`, 2026-11); keep it there. The open-edge reset stays at the END (`applyForces`): run before the processes, its flat edge runs made outlet capture partition-dependent (`test_advection_partition_invariant`). Check partition invariance at several rank counts (`scripts/ab_partition.py -n 2/3/4`): one rank count can pass by luck.
 
 ## Intentional surprises (do NOT "fix")
 - **`gid` argument on `mfdreceivers` / `mfdrcvrs`**. The Fortran kernels take an extra `gid(nb)` argument (per-local-node vertex ID `self.gid`, set in `mesher/unstructuredmesh.py`; since 2026-06-21 it is `self.locIDs`, the partition-INVARIANT input-mesh id, no longer PETSc's per-partition numbering; see `gospl/flow/AGENTS.md`). Inside the kernels, the stored slope is perturbed by `val * (1 - 1.0e-15 * gid(n))` before the quicksort tie-break. This makes EXACT slope ties resolve deterministically across MPI decompositions (lower global ID wins). The perturbation is well below KSP-solver precision and does not affect physical results; near-ties driven by KSP floating-point noise are a separate problem and are NOT fixed by this pattern. See the relaxation comment on `test_parallel_correctness` in `tests/test_parallel.py` and `fortran/functions.F90:mfdreceivers` for the full rationale. **Do NOT remove the `gid` argument** — without it, `mfdreceivers` ordering depends on local iteration order and the parallel-correctness test diverges by ~10x from current baseline.
@@ -356,6 +366,7 @@ The API reference (`docs/api_ref/*.rst`) is Sphinx **autodoc** — it imports ea
 | `test_flexure.py` | Flat FEM + global flexure | cosine modes `w=q/(Dk⁴+Δρg)` (exact for the 5-point stencil); infinite-plate line load with image loads; degree-l spherical-harmonic response `q/(Δρg+D·P_l)` + flat-plate limit | FEM: discrete round-off, continuum <1%, 2nd-order convergence; line load RMSE <0.5%; global spectral 1e-9, mesh pipeline RMSE <1% |
 | `test_orography.py` | Orographic rain (Smith-Barstad, no mountain wave) | `P̂ = Cw·iku·ĥ/((1+ikuτc)(1+ikuτf))` on a 1-D ridge, with the background/floor clip reproduced | central-row RMSE <1.5% of peak, wind-parallel edge rows <1.5% (inflow-only BC since 2026-10); first-order convergence |
 | `test_advection.py` | Horizontal advection (upwind / iioe1 / iioe2) | translated Gaussian; uniform field (iioe2 zero-excess path) | mass < 1e-4 for every scheme (iioe2 mass-neutral since 2026-10), centroid, peak, RMSE; uniform field preserved |
+| `test_hillslope_nonlinear.py` | Non-linear hillslope (Taylor series, Andrews-Bucknam/Roering, power law) | steady ridge `D S F(S) = U x'` integrated exactly, hexagonal lattice | each law no more than 1 % (divide, RMSE) less accurate than the linear law on the same mesh (2026-11) |
 | `test_marine_diffusion.py` | Marine diffusion (`ts` and `picard`) | 2-D heat kernel on a constant-`Cd` deposit | volume 1e-12; D err, peak law, RMSE < 2e-3 for both solvers (the `ts` stage-solve fix, 2026-10) |
 | `test_geochem_balance.py` | Level-B geochemistry | per-step `dissolved = precipitated + exported`; 1-D strip `c=D0/(R+p)·(Ls/u)^(1+p/R)` | closure ~1e-15; strip vs exact discrete 2e-5 |
 
