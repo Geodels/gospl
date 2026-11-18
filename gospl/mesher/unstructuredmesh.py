@@ -823,9 +823,14 @@ class UnstMesh(object):
 
         return
 
-    def applyForces(self):
+    def applyForces(self, tectonics=True):
         """
         Finds the different values for climatic, tectonic and sea-level forcing that will be applied at any given time interval during the simulation.
+
+        :arg tectonics: also apply the vertical forcing (`applyVerticalForcing`:
+            uplift/subsidence and the open-edge reset). `Model.runProcesses`
+            passes False at the end of a step: it applies the vertical forcing
+            at the START of each step instead.
         """
 
         t0 = process_time()
@@ -864,6 +869,28 @@ class UnstMesh(object):
                 "Update Climatic Forces (%0.02f seconds)" % (process_time() - t0),
                 flush=True,
             )
+
+        if tectonics:
+            self.applyVerticalForcing()
+
+        return
+
+    def applyVerticalForcing(self):
+        """
+        Vertical forcing of one step: uplift/subsidence (`applyTectonics`, at
+        the `upsub` rate `getTectonics` selected for the step) then the
+        open-edge base-level reset.
+
+        `Model.runProcesses` calls it at the START of every step, right after
+        `getTectonics` and before the surface processes, so each output is the
+        state after a complete step (uplift and erosion both applied). Until
+        2026-11 it ran at the END of the step, after the processes: an output
+        then held one un-eroded `U*dt` on top of the eroded surface, an
+        operator-splitting offset that made the steady relief depend on `dt`
+        (~6 % between dt = 0.5 and 5 kyr in the implicit_timestepping
+        example). With uplift first, a steady state is `dt`-independent and a
+        pure-uplift run outputs exactly `z0 + U*t`.
+        """
 
         # Tectonic forcing
         self.applyTectonics()
