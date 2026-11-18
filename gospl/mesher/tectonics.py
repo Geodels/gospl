@@ -40,6 +40,13 @@ class Tectonics(object):
         self.tecNb = -1
         self.paleoZ = None
         self.plateStep = False
+        # `interp_remap` schedule (None when off): remap interval (yr), end of
+        # the current event's motion, and its (file, key) to reload the
+        # whole-mesh rates for a shorter last remap.
+        self._remapT = None
+        self._remapEnd = None
+        self._remapSrc = None
+        self._remapCur = None
         # Advection-scheme stratigraphy move (semi-Lagrangian, see
         # `_advectStratiScheme`): this rank's node velocities for the current
         # tectonic event and the cached departure-point tables (rebuilt per
@@ -126,9 +133,30 @@ class Tectonics(object):
                 self.hdisp = hfull[self.locIDs, :]
                 # In case of advection based on interpolation from plate position
                 if self.advscheme == 0:
-                    self._readAdvectionData(hfull, timer)
+                    tsub = self._remapInterval(hfull, timer)
                     self.plateStep = True
-                    self.plateTimer = self.tecdata.at[nb, "end"]
+                    if tsub is None:
+                        self._remapT = None
+                        self._readAdvectionData(hfull, timer)
+                        self.plateTimer = self.tecdata.at[nb, "end"]
+                    else:
+                        # Apply the event's motion in remaps of `tsub` years
+                        # (tables for a v*tsub displacement, reused at each
+                        # remap; see updatePaleoZ / _nextRemap).
+                        start = self.tecdata.at[nb, "start"]
+                        self._remapT = tsub
+                        self._remapEnd = start + timer
+                        self._remapSrc = (fname, key)
+                        self._readAdvectionData(hfull, tsub)
+                        self._remapCur = tsub
+                        # first remap time after now (a restart resumes the
+                        # schedule; a remap at tNow was done before its output)
+                        k = int(np.floor((self.tNow - start) / tsub + 1.0e-9)) + 1
+                        self.plateTimer = min(start + k * tsub, self._remapEnd)
+                        first = self.plateTimer - (start + (k - 1) * tsub)
+                        if abs(first - tsub) > 1.0e-6 * self.dt:
+                            self._readAdvectionData(hfull, first)
+                            self._remapCur = first
                 else:
                     # Get the velocity from the input file.
                     nodeVel = np.zeros((self.lpoints, 3))
@@ -599,6 +627,68 @@ class Tectonics(object):
 
         return
 
+    def _remapInterval(self, hfull, timer):
+        """
+        Remap interval (yr) for `advect: interp` with `interp_remap`: the
+        nearest whole number of time steps over which the fastest node moves
+        `interp_remap` mesh spacings (at least one step). Returns None when
+        the option is off, the motion is zero, or one remap covers the whole
+        event (then the event is applied once at its end, as without it).
+
+        The mesh spacing is the square root of the mean owned cell area,
+        reduced over the ranks (collective; reached on every rank since it
+        depends only on the configuration and the event's whole-mesh rates).
+        """
+        if getattr(self, "interpRemap", None) is None:
+            return None
+        if getattr(self, "_remapSpacing", None) is None:
+            loc = np.array([self.larea[self.glIDs].sum(), float(len(self.glIDs))])
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, loc, op=MPI.SUM)
+            self._remapSpacing = float(np.sqrt(loc[0] / loc[1]))
+        vmax = float(np.sqrt((np.asarray(hfull, dtype=np.float64) ** 2).sum(axis=1)).max())
+        if vmax <= 0.0:
+            return None
+        nstep = int(np.rint(self.interpRemap * self._remapSpacing / (vmax * self.dt)))
+        tsub = max(1, nstep) * self.dt
+        if tsub >= timer - 1.0e-6 * self.dt:
+            return None
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Plate interpolation remapped every %g yr (%.2f mesh spacings)"
+                % (tsub, vmax * tsub / self._remapSpacing),
+                flush=True,
+            )
+        return tsub
+
+    def _nextRemap(self):
+        """
+        After a remap: schedule the next one, with new tables for a shorter
+        last remap of the event (rates reloaded from the event's file), or
+        close the schedule at the end of the event's motion. Collective when
+        it rebuilds the tables (same decision on every rank: it depends only
+        on global times).
+        """
+        tol = 1.0e-6 * self.dt
+        if self.plateTimer >= self._remapEnd - tol:
+            self.plateStep = False
+            self._remapT = None
+            return
+        nxt = min(self.plateTimer + self._remapT, self._remapEnd)
+        if self._remapEnd - nxt < tol:
+            nxt = self._remapEnd
+        dur = nxt - self.plateTimer
+        # tables represent a displacement over `_remapCur` years: rebuild them
+        # when the next remap spans a different time (shorter last remap, or
+        # back to the regular interval after a shorter first one on restart)
+        if abs(dur - self._remapCur) > tol:
+            fname, key = self._remapSrc
+            with np.load(fname) as mdata:
+                hfull = mdata[key]
+            self._readAdvectionData(hfull, dur)
+            self._remapCur = dur
+            del hfull
+        self.plateTimer = nxt
+
     def _readAdvectionData(self, hdisp, timer):
         """
         From a tectonic input file, this function reads the horizontal displacements information, containing the displacement rates along each axis.
@@ -913,8 +1003,12 @@ class Tectonics(object):
         """
 
         if self.plateStep:
-            if self.plateTimer == self.tNow:
+            if self._remapT is None:
+                if self.plateTimer == self.tNow:
+                    self._advectPlates()
+            elif abs(self.plateTimer - self.tNow) < 1.0e-6 * self.dt:
                 self._advectPlates()
+                self._nextRemap()
 
         if self.paleoZ is None:
             return

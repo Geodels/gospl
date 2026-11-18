@@ -47,7 +47,7 @@ Tectonic forcing parameters
 
 .. note::
 
-  When applying horizontal displacement using the ``interp`` scheme (mainly used in global simulation to represent plate movements), the horizontal movements are performed at the end of the period (i.e., at the specified ``end`` time). In the other cases, the horizontal displacement is done at every timestep (specified by ``dt``).
+  When applying horizontal displacement using the ``interp`` scheme (mainly used in global simulation to represent plate movements), the horizontal movements are performed at the end of the period (i.e., at the specified ``end`` time), unless ``domain: interp_remap`` is set: the displacement is then applied in remaps of about ``interp_remap`` mesh spacings through the period (the interval is a whole number of time steps, printed with ``-v``). In the other cases, the horizontal displacement is done at every timestep (specified by ``dt``).
 
   With every scheme, the horizontal motion moves the surface fields (elevation, cumulative erosion/deposition, flexure, soil) **and**, when stratigraphy is recorded, the stratigraphic layers with all their properties (thickness, elevation at deposition, porosity, ``stratK``, and the dual-lithology, provenance and duricrust records when those options are on). See the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ for how the layers are moved and its limitations.
 

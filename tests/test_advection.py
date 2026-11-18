@@ -567,3 +567,96 @@ def test_uplift_before_processes_steady_state_dt_independent(tmp_path):
     assert abs(coarse - fine) < 0.05, (
         f"steady peak depends on dt: {coarse:.3f} m (dt=20 kyr) vs "
         f"{fine:.3f} m (dt=2 kyr)")
+
+
+def _remap_bump_run(tmp_path, name, tect, extra=""):
+    """Gaussian bump on a flat 3 x 2 km mesh (100 m), no erosion, moved east
+    at 0.02 m/yr (20 m per 1 kyr step) for 20 kyr with `advect: interp`.
+    Returns the bump centroid x at the three outputs (0, 10, 20 kyr)."""
+    import h5py
+    from scipy.spatial import Delaunay
+    from gospl.model import Model
+
+    wd = tmp_path / name
+    wd.mkdir()
+    xs, ys = np.arange(0.0, 3000.1, 100.0), np.arange(0.0, 2000.1, 100.0)
+    X, Y = np.meshgrid(xs, ys)
+    p = np.column_stack([X.ravel(), Y.ravel()])
+    z = 50.0 * np.exp(-((p[:, 0] - 1000.0) ** 2 + (p[:, 1] - 1000.0) ** 2) / (2 * 250.0 ** 2))
+    h = np.zeros((len(p), 3))
+    h[:, 0] = 0.02
+    np.savez(wd / "mesh.npz", v=np.column_stack([p, np.zeros(len(p))]),
+             c=Delaunay(p).simplices.astype(np.int64), z=z, h=h)
+    (wd / "in.yml").write_text(
+        "name: remap\n"
+        "domain:\n    npdata: ['mesh','v','c','z']\n    flowdir: 1\n"
+        f"    bc: 'wwww'\n    seadepo: False\n    nodep: True\n    advect: 'interp'\n{extra}"
+        "time:\n    start: 0.\n    end: 2.e4\n    tout: 1.e4\n    dt: 1.e3\n"
+        "spl:\n    K: 0.\n    d: 0.\n    m: 0.5\n"
+        "diffusion:\n    hillslopeKa: 0.\n    hillslopeKm: 0.\n"
+        "sea:\n    position: -100.\n"
+        "climate:\n  - start: 0.\n    uniform: 0.\n"
+        f"tectonics:\n{tect}"
+        "output:\n    dir: 'out'\n"
+    )
+    cwd = os.getcwd()
+    os.chdir(wd)
+    try:
+        m = Model("in.yml", verbose=False, showlog=False)
+        try:
+            m.runProcesses()
+        finally:
+            m.destroy()
+        cx = []
+        with h5py.File("out/h5/topology.p0.h5", "r") as f:
+            x = f["coords"][:, 0]
+        for k in range(3):
+            with h5py.File(f"out/h5/gospl.{k}.p0.h5", "r") as f:
+                zz = f["elev"][:].ravel()
+            cx.append(float((x * zz).sum() / zz.sum()))
+        return np.array(cx)
+    finally:
+        os.chdir(cwd)
+
+
+def test_interp_remap_carries_the_surface(tmp_path):
+    """
+    Protects: `domain: interp_remap` (2026-11). With `advect: 'interp'` a
+    tectonic event's motion was applied once, at the event's end, so a long
+    event moved nothing until then (and a final event ending after the run
+    never moved at all); splitting the event by hand into remaps of about one
+    mesh spacing was the only way to carry the drainage with the motion (the
+    per-step Eulerian schemes and sub-cell remaps do not). `interp_remap: 1`
+    schedules those remaps automatically: here every 5 steps (100 m = one
+    spacing). The bump must move with the motion at the intermediate output,
+    and the result must equal hand-split 5-kyr events bit for bit.
+    """
+    pytest.importorskip("scipy")
+    pytest.importorskip("h5py")
+    one = "  - start: 0.\n    end: 1.e8\n    hdisp: ['mesh','h']\n"
+    cx = _remap_bump_run(tmp_path, "auto", one, extra="    interp_remap: 1\n")
+    moved = cx - cx[0]
+    # 0.02 m/yr: 200 m at 10 kyr, 400 m at 20 kyr (IDW is not exact: 1/4 cell)
+    assert abs(moved[1] - 200.0) < 25.0, f"moved {moved[1]:.1f} m by 10 kyr"
+    assert abs(moved[2] - 400.0) < 25.0, f"moved {moved[2]:.1f} m by 20 kyr"
+    split = "".join(
+        f"  - start: {k * 5e3}\n    end: {(k + 1) * 5e3}\n    hdisp: ['mesh','h']\n"
+        for k in range(4)
+    )
+    ref = _remap_bump_run(tmp_path, "split", split)
+    assert np.array_equal(cx, ref), f"auto {cx} vs hand-split {ref}"
+
+
+def test_interp_remap_needs_interp():
+    """`interp_remap` is only valid with `advect: interp`, and must be > 0."""
+    from gospl.tools.inputparser import ReadYaml
+
+    for advect, remap in (("upwind", 1), ("interp", 0)):
+        parser = ReadYaml.__new__(ReadYaml)   # skip the file/IO bootstrap
+        parser.input = {"domain": {"advect": advect, "interp_remap": remap}}
+        with pytest.raises(ValueError, match="interp_remap"):
+            parser._extraDomain2()
+    parser = ReadYaml.__new__(ReadYaml)
+    parser.input = {"domain": {"advect": "interp"}}
+    parser._extraDomain2()
+    assert parser.interpRemap is None
