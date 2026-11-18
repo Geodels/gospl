@@ -569,10 +569,14 @@ def test_uplift_before_processes_steady_state_dt_independent(tmp_path):
         f"{fine:.3f} m (dt=2 kyr)")
 
 
-def _remap_bump_run(tmp_path, name, tect, extra=""):
+def _remap_bump_run(tmp_path, name, tect, extra="", shear=False):
     """Gaussian bump on a flat 3 x 2 km mesh (100 m), no erosion, moved east
     at 0.02 m/yr (20 m per 1 kyr step) for 20 kyr with `advect: interp`.
-    Returns the bump centroid x at the three outputs (0, 10, 20 kyr)."""
+    Returns the bump centroid x at the three outputs (0, 10, 20 kyr).
+
+    With ``shear``: two bumps (y = 400 and 1600 m) in a velocity growing
+    linearly with y, ``vx = 0.02 y / 2000`` m/yr; returns the centroid x of
+    the lower (slow) and upper (fast) halves, shape (2, 3)."""
     import h5py
     from scipy.spatial import Delaunay
     from gospl.model import Model
@@ -582,9 +586,14 @@ def _remap_bump_run(tmp_path, name, tect, extra=""):
     xs, ys = np.arange(0.0, 3000.1, 100.0), np.arange(0.0, 2000.1, 100.0)
     X, Y = np.meshgrid(xs, ys)
     p = np.column_stack([X.ravel(), Y.ravel()])
-    z = 50.0 * np.exp(-((p[:, 0] - 1000.0) ** 2 + (p[:, 1] - 1000.0) ** 2) / (2 * 250.0 ** 2))
     h = np.zeros((len(p), 3))
-    h[:, 0] = 0.02
+    if shear:
+        z = sum(50.0 * np.exp(-((p[:, 0] - 1000.0) ** 2 + (p[:, 1] - yc) ** 2)
+                              / (2 * 200.0 ** 2)) for yc in (400.0, 1600.0))
+        h[:, 0] = 0.02 * p[:, 1] / 2000.0
+    else:
+        z = 50.0 * np.exp(-((p[:, 0] - 1000.0) ** 2 + (p[:, 1] - 1000.0) ** 2) / (2 * 250.0 ** 2))
+        h[:, 0] = 0.02
     np.savez(wd / "mesh.npz", v=np.column_stack([p, np.zeros(len(p))]),
              c=Delaunay(p).simplices.astype(np.int64), z=z, h=h)
     (wd / "in.yml").write_text(
@@ -607,14 +616,16 @@ def _remap_bump_run(tmp_path, name, tect, extra=""):
             m.runProcesses()
         finally:
             m.destroy()
-        cx = []
         with h5py.File("out/h5/topology.p0.h5", "r") as f:
-            x = f["coords"][:, 0]
+            x, y = f["coords"][:, 0], f["coords"][:, 1]
+        halves = [y < 1000.0, y >= 1000.0] if shear else [np.ones(len(x), bool)]
+        cx = np.zeros((len(halves), 3))
         for k in range(3):
             with h5py.File(f"out/h5/gospl.{k}.p0.h5", "r") as f:
                 zz = f["elev"][:].ravel()
-            cx.append(float((x * zz).sum() / zz.sum()))
-        return np.array(cx)
+            for j, sel in enumerate(halves):
+                cx[j, k] = float((x * zz)[sel].sum() / zz[sel].sum())
+        return cx if shear else cx[0]
     finally:
         os.chdir(cwd)
 
@@ -636,15 +647,39 @@ def test_interp_remap_carries_the_surface(tmp_path):
     one = "  - start: 0.\n    end: 1.e8\n    hdisp: ['mesh','h']\n"
     cx = _remap_bump_run(tmp_path, "auto", one, extra="    interp_remap: 1\n")
     moved = cx - cx[0]
-    # 0.02 m/yr: 200 m at 10 kyr, 400 m at 20 kyr (IDW is not exact: 1/4 cell)
+    # 0.02 m/yr: 200 m at 10 kyr, 400 m at 20 kyr
     assert abs(moved[1] - 200.0) < 25.0, f"moved {moved[1]:.1f} m by 10 kyr"
     assert abs(moved[2] - 400.0) < 25.0, f"moved {moved[2]:.1f} m by 20 kyr"
     split = "".join(
         f"  - start: {k * 5e3}\n    end: {(k + 1) * 5e3}\n    hdisp: ['mesh','h']\n"
         for k in range(4)
     )
-    ref = _remap_bump_run(tmp_path, "split", split)
+    # same weights as the auto run (barycentric with `interp_remap`): each
+    # 5-kyr event is a single remap of one spacing
+    ref = _remap_bump_run(tmp_path, "split", split, extra="    interp_remap: 1\n")
     assert np.array_equal(cx, ref), f"auto {cx} vs hand-split {ref}"
+
+
+def test_interp_remap_variable_velocity(tmp_path):
+    """
+    Protects: `interp_remap` with a velocity that varies in space uses
+    barycentric weights in the displaced triangles
+    (`tectonics._barycentricTables`). The remap interval is set by the
+    fastest nodes (one spacing per remap at 0.02 m/yr: every 5 kyr), so a
+    region moving at 0.004 m/yr is displaced by a fifth of a cell per remap;
+    inverse-distance weighting of the three nearest displaced nodes is biased
+    towards the nearest node's value there and moved the slow bump 70 m
+    instead of 80 m (barycentric: 80.9 m and 318.5 m). Each bump must travel
+    at its own (centroid-weighted) speed, 80 m and 320 m in 20 kyr, within
+    5 %.
+    """
+    pytest.importorskip("scipy")
+    pytest.importorskip("h5py")
+    one = "  - start: 0.\n    end: 1.e8\n    hdisp: ['mesh','h']\n"
+    cx = _remap_bump_run(tmp_path, "shear", one, extra="    interp_remap: 1\n", shear=True)
+    moved = cx[:, 2] - cx[:, 0]
+    for got, want, label in ((moved[0], 80.0, "slow"), (moved[1], 320.0, "fast")):
+        assert abs(got - want) < 0.05 * want, f"{label} bump moved {got:.1f} m, expected {want:.0f} m"
 
 
 def test_interp_remap_needs_interp():
