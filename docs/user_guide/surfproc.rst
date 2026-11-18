@@ -40,7 +40,9 @@ Stream Power Law parameters
 
         .. tip::
 
-            **Changing the mesh resolution.** Keep ``K``, ``G`` and the diffusion coefficients (``nonlinKm``, ``hillslopeKa``/``Km``) when you refine or coarsen a mesh. ``K`` is not rescaled: drainage area is in m², so along channels, where flow converges, the erosion rate at a given area and slope is the same on any mesh. On hillslopes and ridges, where the multiple-flow-direction routing spreads flow across cells, a cell's flow accumulation scales with the cell size, so the same ``K`` erodes them less on a finer mesh (by about ``0.5^m`` per halving of the cell size). The total sediment yield can therefore change, also because a channel is one cell wide and the resolved slopes differ. To match yields between two meshes, compare the first-step marine supply (``Marine excess`` with ``-v``) and the lake infill on both, then scale ``K`` by their ratio. ``G`` does not depend on the cell size (the deposited thickness ``G·Q·dt/(P·A)`` has no area left in it), and the diffusion coefficients are physical diffusivities in m²/yr. The ``picard`` marine sub-steps should grow with resolution, as below.
+            **Changing the mesh resolution.** Keep ``K``, ``G`` and the diffusion coefficients (``nonlinKm``, ``hillslopeKa``/``Km``) when you refine or coarsen a mesh. ``K`` is not rescaled: drainage area is in m², so along channels, where flow converges, the erosion rate at a given area and slope is the same on any mesh. On hillslopes and ridges, where the multiple-flow-direction routing spreads flow across cells, a cell's flow accumulation scales with the cell size, so the same ``K`` erodes them less on a finer mesh (by about ``0.5^m`` per halving of the cell size). The total sediment yield can therefore change, also because a channel is one cell wide and the resolved slopes differ. To match yields between two meshes, compare the first-step marine supply (``Marine excess`` with ``-v``) and the lake infill on both, then scale ``K`` by their ratio. ``G`` does not depend on the cell size (the deposited thickness ``G·Q·dt/(P·A)`` has no area left in it), and ``nonlinKm`` is a physical diffusivity in m²/yr. The ``picard`` marine sub-steps should grow with resolution, as below.
+
+            **The land hillslope diffusivity (``hillslopeKa``) is the exception.** Hillslope diffusion also acts on the channel cells, which are one cell wide, so the flux the neighbouring cells deliver into a river grows as the cells shrink and steepens the channels more on finer meshes. In a test (20 x 20 km block uplifted at 1 mm/yr, ``K: 4.e-5``, ``m: 0.5``, steady state), the channel steepness was 25 (= U/K) at 200, 100 and 50 m spacing without diffusion, but 30.5, 41.6 and 66.4 with ``hillslopeKa: 0.2`` (mean elevation 77, 121 and 203 m). Choose ``hillslopeKa`` for the resolution of the mesh you use, and check that the channel steepness is not inflated; values measured at the hillslope scale (about 0.01 m²/yr) are a reasonable start on fine meshes.
 
         When ``n`` is **not** equal to 1.0 the SPL is solved with a non-linear PETSc ``SNES`` (the linear ``n == 1`` case uses a direct Krylov solve and needs none of the controls below). The transport-limited (``G > 0``) solver is the dominant cost of such a run, and its behaviour can be tuned (all optional):
 
@@ -149,7 +151,11 @@ Hillslope and marine deposition parameters
         f. ``hillslopeSc`` is the critical slope,
         g. ``hillslopeNb`` is the number of terms used in the truncated Taylor series formulation.
 
-        In this last model, the non-linear creep formulation is described in `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_ (section 3.4.3 **EQ. 14**).
+        In this last model, the non-linear creep formulation is described in `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_ (section 3.4.3 **EQ. 14**). With ``hillslopeNb: 0`` the full critical-slope law of Roering et al. (1999), :math:`q = D S / (1 - (S/S_c)^2)`, is used instead of the series; :math:`S/S_c` is capped at 0.8 so the flux stays finite.
+
+        .. note::
+
+            Before November 2026 the non-linear options solved the slope derivative of these fluxes rather than the fluxes themselves (series coefficients 1, 3, 5, ... instead of 1, 1, 1, ...; :math:`p\,S^{p}` instead of :math:`S^{p}`). Runs using ``hillslopenl`` or ``hillslopeSc`` give different (correct) results since then.
 
 
 Ice sheets and glacial erosion

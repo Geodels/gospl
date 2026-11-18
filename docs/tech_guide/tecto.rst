@@ -18,7 +18,7 @@ Uplift & subsidence
 
 In the most simple case of vertical-only displacements (*i.e.* uplift or subsidence), the model requires the declaration of successive events using :yaml:`start`, :yaml:`end` times and the tectonic rates map :yaml:`upsub` (in metres per year). This map is defined prior to the model run for goSPL spherical or 2D mesh as a  numpy zip array.
 
-During the model run and for each time step, the prescribed rates are applied on all vertices of all partition by increasing or decreasing their elevation values following imposed local subsidence or uplift rates.
+During the model run and for each time step, the prescribed rates are applied on all vertices of all partition by increasing or decreasing their elevation values following imposed local subsidence or uplift rates. The vertical displacement is applied at the start of each time step, before the surface processes, so an output is the state after a complete step (uplift and erosion both applied) and a steady-state landscape does not depend on the time step. (Until November 2026 it was applied at the end of the step, and every output carried one un-eroded increment :math:`\mathrm{U\,\Delta t}`.)
 
 
 Horizontal advection
@@ -43,6 +43,10 @@ The Upwind scheme offers a rapid solution to the advection problem but with pote
 Alternatively, the user can perform the advection of elevation and erosion by solving the advection equation based on a finite volume space discretization and a semi-implicit discretization in time called the Inflow-Implicit/Outflow-Explicit scheme and following the work from `Mikula & Ohlberger, 2014 <https://www.math.sk/mikula/mo-FVCA6.pdf>`_.
 
 Setting the approach for a given simulation is done in the input file by setting the `advect` key to either `upwind`, `iioe1` or `iioe2`.
+
+.. warning::
+
+  These Eulerian schemes advect the elevation while the drainage is recomputed from it at every step, so **valleys are not carried across a horizontal motion perpendicular to the flow** (Hergarten and Fraters, 2026, `egusphere-2026-2060 <https://doi.org/10.5194/egusphere-2026-2060>`_). In a test (a steady stream-power landscape, 40 x 20 km at 200 m, moved at 4 mm/yr across the rivers for 1 Myr), the valley pattern moved only 0.6 to 0.9 km of the imposed 1 km after 0.25 Myr with `upwind`, `iioe1` and `iioe2`, and had reorganised beyond recognition after 0.5 Myr, whereas plate interpolation (`interp`, 50 kyr intervals) moved it by 1.0, 2.0 and 3.9 km after 0.25, 0.5 and 1 Myr, as imposed. Use `interp` wherever the drainage is displaced laterally.
 
 .. note::
 
@@ -126,9 +130,9 @@ The approach solves the bi-harmonic equation governing the bending/flexure of a 
 
 .. math::
 
-  D \frac{d^4 w}{d^4 x} + \Delta \rho g w = q
+  \nabla^2 \left( D_f \nabla^2 w \right) + \Delta \rho g w = q, \qquad D_f = \frac{E\,T_e^3}{12(1-\nu^2)}
 
-where :math:`D` is the flexural rigidity,  :math:`w` is vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material.
+where :math:`D_f` is the flexural rigidity (Young's modulus :math:`E`, Poisson's ratio :math:`\nu`, elastic thickness :math:`T_e`, which may vary in space), :math:`w` is the vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material. The operator is the product of two finite-volume Laplacians with :math:`D_f` between them, factorised once by a direct solver (LU, MUMPS in parallel). For a variable :math:`D_f` the full plate equation also contains twisting terms in :math:`(1-\nu)` and derivatives of :math:`D_f`; they are neglected, which is exact for a uniform :math:`T_e`.
 
 **pyshtools** for global simulations 
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -59,7 +59,7 @@ A more complex version of the creep law involves a non-linear relationship betwe
   \frac{\partial \eta}{\partial t}= -\nabla \cdot \left( D(\eta) \nabla \eta \right)
 
 
-and in goSPL, the user might choose between two approaches. 
+and in goSPL, the user might choose between three laws: the truncated Taylor series below, the full critical-slope law it approximates (``hillslopeNb: 0``), and a power law. 
 
 
 The first one follows is derived by Ganti et al. (2012) for the Andrews-Bucknam (see `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_). Where the non-linear formulation captures accelerated creep and shallow landsliding as the gradient approaches an effective angle of repose for loose granular material. It uses a truncated Taylor series formulation for soil flux and takes the following form:
@@ -68,7 +68,7 @@ The first one follows is derived by Ganti et al. (2012) for the Andrews-Bucknam 
 
   \mathrm{q_h} = \mathrm{-D S \left[  1 + \left(\frac{S}{S_c}\right)^2 + \left(\frac{S}{S_c}\right)^4 + ... + + \left(\frac{S}{S_c}\right)^{2(N-1)}  \right] }
 
-where :math:`\mathrm{S = −\nabla \eta}` is topographic gradient (positive downhill), :math:`\mathrm{D}` is the transport efficiency factor, and :math:`\mathrm{S_c}` is a critical gradient. The user specifies the number of terms :math:`\mathrm{N}` to be used in the approximation. The nonlinear flux rule results in convex-up topography for shallow slopes and transitions to linear hillslopes for steeper slopes (see `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_).
+where :math:`\mathrm{S = −\nabla \eta}` is topographic gradient (positive downhill), :math:`\mathrm{D}` is the transport efficiency factor, and :math:`\mathrm{S_c}` is a critical gradient. The user specifies the number of terms :math:`\mathrm{N}` to be used in the approximation. Setting :math:`\mathrm{N = 0}` uses the full critical-slope law instead, :math:`\mathrm{q_h = -D S / (1 - (S/S_c)^2)}` (Roering et al., 1999), with :math:`\mathrm{S/S_c}` capped at 0.8 so the flux stays finite. The nonlinear flux rule results in convex-up topography for shallow slopes and transitions to linear hillslopes for steeper slopes (see `Barnhart et al. (2019) <https://gmd.copernicus.org/articles/12/1267/2019/gmd-12-1267-2019.pdf>`_).
 
 
 The second approach uses a non-critical hillslope model following the work of `Wang et al. (2024) <https://www.sciencedirect.com/science/article/pii/S0169555X24001053>`_. This hillslope model is compatible with the existing linear and non-linear hillslope models and is capable of emulating topographic evolution under arbitrary hillslope gradients. It takes the following form:
@@ -78,6 +78,10 @@ The second approach uses a non-critical hillslope model following the work of `W
   \mathrm{q_h} = \mathrm{-D S^n}
 
 :math:`\mathrm{n}` is a positive constant of the hillslope gradient exponent. When :math:`\mathrm{n=1}`, the equation simplifies to a linear hillslope model; when :math:`\mathrm{n>1}`, it becomes a non-linear hillslope model. 
+
+**Coupling with rivers and resolution.** Fluvial incision and sediment routing act first in each step, then the diffusion acts on every land cell, channel cells included: what diffusion brings into a valley is deposited in the channel cells and removed by the next fluvial step (as eroded surface in the detachment-limited mode, as part of the routed load with ``G > 0``). A river is a line of single cells, so the diffusive flux delivered into it grows as the cells shrink and the balance between the two processes depends on the mesh resolution (Hergarten and Pietrek, 2023): with ``hillslopeKa: 0.2`` the steady channel steepness of an uplifted block rose from 30.5 to 66.4 (instead of 25) between 200 and 50 m spacing, while without diffusion it stayed at 25. Choose the land diffusivity for the mesh resolution (see the user guide, *Changing the mesh resolution*).
+
+**Discretisation.** On each Voronoi face the flux is the linear finite-volume flux :math:`\mathrm{D\,\Delta\eta/L}` multiplied by the law's factor :math:`\mathrm{q_h/(D S)}`, evaluated on the face average of the gradient magnitude :math:`\mathrm{|\nabla\eta|}` of the two cells (a Green-Gauss gradient on the Voronoi cell). Using the slope along the face's own edge instead would under-estimate :math:`\mathrm{S}` on every edge not aligned with the gradient and leave a steady ridge a few percent too high at any resolution. The implicit step is solved with a PETSc SNES (quasi-Newton L-BFGS, options prefix ``hillnl_``). All three laws are validated against their exact steady ridge profiles in ``benchmarks/test_hillslope_nonlinear.py``.
 
 .. note::
   
