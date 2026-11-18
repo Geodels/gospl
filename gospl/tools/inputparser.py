@@ -357,6 +357,23 @@ class ReadYaml(object):
                 "iioe1 / iioe2 / upwind / interp." % advscheme
             )
 
+        # Optional remap interval for `advect: interp`, in mesh spacings: the
+        # displacement of each tectonic event is applied in remaps of about
+        # this many cell widths instead of once at the event's end (None:
+        # once per event, the historical behaviour). Remaps of half a cell or
+        # more carry the drainage with the motion; sub-cell remaps (and the
+        # per-step Eulerian schemes) do not (2026-11 lateral-motion test).
+        self.interpRemap = domainDict.get("interp_remap")
+        if self.interpRemap is not None:
+            self.interpRemap = float(self.interpRemap)
+            if self.interpRemap <= 0.0:
+                raise ValueError("domain: interp_remap must be > 0 (mesh spacings).")
+            if self.advscheme != 0:
+                raise ValueError(
+                    "domain: interp_remap only applies to advect: 'interp' "
+                    "(got advect: '%s')." % advscheme
+                )
+
         self.radius = domainDict.get("radius", 6378137.0)
         self.gravity = domainDict.get("gravity", 9.81)
 
