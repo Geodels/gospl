@@ -29,6 +29,7 @@ Class Tectonics
       ~Tectonics._varAdvector
       ~Tectonics._readAdvectionData
       ~Tectonics._remapInterval
+      ~Tectonics._barycentricTables
       ~Tectonics._nextRemap
       ~Tectonics._advectPlates
       ~Tectonics._advectStrati
@@ -53,6 +54,7 @@ Private functions
 .. automethod:: mesher.tectonics.Tectonics._varAdvector
 .. automethod:: mesher.tectonics.Tectonics._readAdvectionData
 .. automethod:: mesher.tectonics.Tectonics._remapInterval
+.. automethod:: mesher.tectonics.Tectonics._barycentricTables
 .. automethod:: mesher.tectonics.Tectonics._nextRemap
 .. automethod:: mesher.tectonics.Tectonics._advectPlates
 .. automethod:: mesher.tectonics.Tectonics._advectStrati

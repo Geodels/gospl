@@ -718,7 +718,6 @@ class Tectonics(object):
 
         # Build a tree with the advected nodes
         tree = spatial.cKDTree(XYZ, leafsize=10)
-        del XYZ
 
         # Query the distances from this rank's unstructured nodes (lcoords
         # are the input coordinates of locIDs, bit for bit).
@@ -731,7 +730,11 @@ class Tectonics(object):
         self.tec_onIDs = np.where(distances[:, 0] == 0)[0]
         self.tec_sumw = np.sum(self.tec_weights, axis=1)
 
-        del tree, distances
+        if getattr(self, "interpRemap", None) is not None:
+            # `interp_remap`: barycentric weights in the displaced triangle
+            # that contains each node (IDW kept where none does)
+            self._barycentricTables(XYZ, tree)
+        del tree, distances, XYZ
 
         # Fetch plan shared by `_advectPlates` and `_advectStrati`: the input
         # ids this rank's interpolation reads, each local row's position in
@@ -749,6 +752,92 @@ class Tectonics(object):
             )
 
         return
+
+    def _barycentricTables(self, XYZ, vtree, chunk=20000, ncand=12, nvert=12):
+        """
+        Replace the inverse-distance tables of `_readAdvectionData` by linear
+        (barycentric) weights wherever a displaced mesh triangle contains the
+        node (`interp_remap` only; plain `interp` keeps the IDW tables, so its
+        results are unchanged).
+
+        Inverse-distance weighting of the three nearest displaced nodes is
+        biased towards the nearest one: for a displacement of a fraction of a
+        cell it mostly returns that node's own value, so a surface moves too
+        slowly (a remap of a tenth of a cell carried valleys 0.7 km of 4 km).
+        With a spatially varying velocity the remap interval is set by the
+        fastest nodes, so slow regions always move sub-cell distances. The
+        barycentric weights in the containing displaced triangle reproduce a
+        linear field exactly, so every region moves at its own speed (with
+        the smoothing of linear interpolation).
+
+        The candidate triangles of each node are the `ncand` displaced cells
+        with the nearest centroids; the one whose smallest barycentric
+        coordinate is largest is taken, and it contains the node when that
+        coordinate is >= -1e-9 (tiny negatives are clipped and the weights
+        renormalised). Nodes outside every displaced cell (an inflow edge)
+        keep their IDW row. In 3-D (sphere, cylinder) the node is projected on
+        the triangle's plane.
+
+        Memory scales with the partition: the candidate cells are only those
+        touching one of the `nvert` displaced vertices nearest to a local node
+        (the vertices of a containing cell are among them), selected from the
+        cell list read once as int32 (transient, the size of the whole-mesh
+        coordinates already held here) and released straight away. The
+        result does not depend on the partition: every candidate set is a
+        superset of the cells near the node, and the choice depends only on
+        the geometry.
+
+        :arg XYZ: displaced coordinates of the whole input mesh (mpoints x 3).
+        :arg vtree: KD-tree of ``XYZ`` (built by `_readAdvectionData`).
+        """
+        near = np.unique(vtree.query(self.lcoords, k=min(nvert, len(XYZ)))[1])
+        with np.load(self.meshFile) as data:
+            cells = np.asarray(data[self.infoCells], dtype=np.int32)
+        mark = np.zeros(len(XYZ), dtype=bool)
+        mark[near] = True
+        cells = cells[mark[cells].any(axis=1)].astype(np.int64)
+        del mark, near
+        ctree = spatial.cKDTree(XYZ[cells].mean(axis=1), leafsize=10)
+        P = self.lcoords
+        n = len(P)
+        k = min(ncand, len(cells))
+        found = np.zeros(n, dtype=bool)
+        for s0 in range(0, n, chunk):
+            s1 = min(n, s0 + chunk)
+            _, cand = ctree.query(P[s0:s1], k=k)
+            cand = cand.reshape(s1 - s0, k)
+            tri = cells[cand]                                   # (m, k, 3)
+            A = XYZ[tri[..., 0]]
+            v0 = XYZ[tri[..., 1]] - A
+            v1 = XYZ[tri[..., 2]] - A
+            v2 = P[s0:s1, None, :] - A
+            d00 = np.einsum("ijk,ijk->ij", v0, v0)
+            d01 = np.einsum("ijk,ijk->ij", v0, v1)
+            d11 = np.einsum("ijk,ijk->ij", v1, v1)
+            d20 = np.einsum("ijk,ijk->ij", v2, v0)
+            d21 = np.einsum("ijk,ijk->ij", v2, v1)
+            den = d00 * d11 - d01 * d01
+            ok = den > 0.0
+            den = np.where(ok, den, 1.0)
+            lb = (d11 * d20 - d01 * d21) / den
+            lc = (d00 * d21 - d01 * d20) / den
+            lam = np.stack([1.0 - lb - lc, lb, lc], axis=-1)    # (m, k, 3)
+            mn = np.where(ok, lam.min(axis=-1), -np.inf)
+            best = mn.argmax(axis=1)
+            r = np.arange(s1 - s0)
+            inside = mn[r, best] >= -1.0e-9
+            w = np.clip(lam[r, best], 0.0, None)
+            w /= w.sum(axis=1, keepdims=True)
+            rows = np.arange(s0, s1)[inside]
+            self.tec_IDs[rows] = tri[r, best][inside]
+            self.tec_weights[rows] = w[inside]
+            self.tec_sumw[rows] = 1.0
+            found[s0:s1] = inside
+        # exact-hit rows only for the IDW rows left (a barycentric row that
+        # sits on a vertex already has the weights (1, 0, 0))
+        self.tec_onIDs = self.tec_onIDs[~found[self.tec_onIDs]]
+        self._baryFound = found
+        del ctree, cells
 
     def _advectPlates(self):
         """
