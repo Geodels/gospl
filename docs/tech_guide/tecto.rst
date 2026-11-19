@@ -46,7 +46,40 @@ Setting the approach for a given simulation is done in the input file by setting
 
 .. warning::
 
-  These Eulerian schemes advect the elevation while the drainage is recomputed from it at every step, so **valleys are not carried across a horizontal motion perpendicular to the flow** (Hergarten and Fraters, 2026, `egusphere-2026-2060 <https://doi.org/10.5194/egusphere-2026-2060>`_). In a test (a steady stream-power landscape, 40 x 20 km at 200 m, moved at 4 mm/yr across the rivers for 1 Myr), the valley pattern moved only 0.6 to 0.9 km of the imposed 1 km after 0.25 Myr with `upwind`, `iioe1` and `iioe2`, and had reorganised beyond recognition after 0.5 Myr, whereas plate interpolation (`interp`, 50 kyr intervals) moved it by 1.0, 2.0 and 3.9 km after 0.25, 0.5 and 1 Myr, as imposed. Use `interp` wherever the drainage is displaced laterally, with ``domain: interp_remap: 1`` so the motion is applied in remaps of about one mesh spacing (automatic, since 2026-11). The remap size matters more than the scheme: in the same test, plate interpolation remapped every step (0.1 cell) moved the valleys only 0.7 km in 1 Myr, because inverse-distance weighting of a departure point a tenth of a cell from a node mostly copies the node's own value; remaps of 0.5, 1, 2 and 5 cells all moved them by 3.9 to 4.1 km. With ``interp_remap`` the interpolation uses **barycentric weights** in the displaced triangle that contains each node (inverse-distance weighting is kept where no triangle does, e.g. an inflow edge). They reproduce a linear field exactly, so a region that moves only a fraction of a cell per remap still moves at its own speed: this matters when the velocity varies in space, since the remap interval is set by the fastest nodes. In a shear test (velocity growing linearly across the domain, remaps of one cell for the fastest nodes) a bump moving a fifth of a cell per remap travelled 80.9 m of 80 m, against 70 m with inverse-distance weights. Remaps much smaller than a cell remain diffusive (linear interpolation smooths at every remap): in the lateral-motion test, remaps of a tenth of a cell moved the valleys at the right speed at first (1.3 km of 2 km after 0.5 Myr) but smoothed them away by 1 Myr, so keep ``interp_remap`` around 1 (0.5 and 1 both moved the valleys by 4.0 km).
+  These Eulerian schemes advect the elevation while the drainage is recomputed from it at every step, so **valleys are not carried across a horizontal motion perpendicular to the flow** (Hergarten and Fraters, 2026, `egusphere-2026-2060 <https://doi.org/10.5194/egusphere-2026-2060>`_). Use plate interpolation (``advect: 'interp'``) with ``domain: interp_remap: 1`` wherever the drainage is displaced laterally (see *Plate interpolation remaps* below).
+
+  **Lateral-motion test.** A steady stream-power landscape (40 x 20 km, 200 m spacing, rivers draining south, uplift 1 mm/yr, ``K = 4e-5``, ``m = 0.5``, ``dt = 5`` kyr) was moved east at 4 mm/yr (0.1 cell per step) for 1 Myr while uplift and incision continued, and the valley pattern was located by cross-correlating the elevation across the flow with the initial one (``review_tests/adv_*.py`` of the GMD paper). Displacement of the valley pattern (imposed: 1, 2 and 4 km after 0.25, 0.5 and 1 Myr):
+
+  .. list-table::
+     :header-rows: 1
+     :widths: 50 16 16 16
+
+     * - method
+       - 0.25 Myr
+       - 0.5 Myr
+       - 1 Myr
+     * - ``upwind``, ``iioe1``, ``iioe2``
+       - 0.6 to 0.9 km
+       - lost
+       - lost
+     * - ``interp``, hand-split 50 kyr events (IDW)
+       - 1.0 km
+       - 2.0 km
+       - 3.9 km
+     * - ``interp`` remapped every step, 0.1 cell (IDW)
+       - --
+       - --
+       - 0.7 km
+     * - ``interp_remap: 0.1`` (barycentric)
+       - --
+       - 1.3 km
+       - lost
+     * - ``interp_remap: 0.5``, ``1``, ``2`` or ``5`` (barycentric)
+       - --
+       - 1.9 to 2.0 km
+       - 4.0 km
+
+  "Lost": the pattern no longer correlates with the initial one (the drainage reorganised). The size of the remap matters more than the scheme: a displacement of a tenth of a cell per remap either barely moves the valleys (inverse-distance weights mostly copy the nearest node) or, with barycentric weights, moves them at the right speed but smooths them away (linear interpolation diffuses a little at every remap). Remaps of half a cell to a few cells carry them.
 
 .. note::
 
@@ -92,7 +125,9 @@ Used for global mesh, the horizontal advection (advect: `interp`) often correspo
 
   Due to tectonic advection, the density of the surface nodes evolves over time, which leads to areas showing rarefaction or accumulation of nodes. In order for the finite volume scheme to remain accurate, local addition and deletion of nodes and remeshing of the triangulated spherical surface are therefore required. However, the remeshing process is computationally expensive and requires to rebuild not only the delaunay mesh but also the associated voronoi one and to redistribute the mesh and its vertices parameters with `PETSc <https://www.mcs.anl.gov/petsc/>`_.
 
-  To avoid remeshing, the initial mesh is assumed to remain fixed and the advected points are then used to interpolate the advected nodes informations (elevation, erosion, deposition, stratigraphic information...) onto the fixed ones using an inverse weighting distance approach on the **three** nearest advected points, found with a `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_. A mesh node that coincides with an advected point takes its values exactly. This is an efficient approach but it might not be the most accurate one. With ``domain: interp_remap`` the weights are instead the **barycentric** coordinates of the node in the advected mesh triangle that contains it (the three nearest points are kept where no advected triangle does, for instance on an inflow edge): linear interpolation reproduces a linear field exactly and is not biased towards the nearest point, which matters when a remap moves a region by a fraction of a cell.
+  To avoid remeshing, the initial mesh is assumed to remain fixed and the advected points are then used to interpolate the advected nodes informations (elevation, erosion, deposition, stratigraphic information...) onto the fixed ones using an inverse weighting distance approach on the **three** nearest advected points, found with a `SciPy cKDTree <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html>`_. A mesh node that coincides with an advected point takes its values exactly. This is an efficient approach but it might not be the most accurate one. **Plate interpolation remaps** (``domain: interp_remap``, a number of mesh spacings, > 0). Without it, each tectonic event's displacement is applied once, at the event's end. With it, the event is applied in remaps: the interval is the whole number of time steps (at least one) over which the fastest node of the event moves about ``interp_remap`` mesh spacings (the spacing is the square root of the mean cell area); it is printed with ``-v``. If one remap would cover the whole event, the event is applied once at its end, as without the option. The interpolation tables are built once per event and reused at every remap (rebuilt only for a shorter last remap, or the first one after a restart).
+
+With ``interp_remap`` the interpolation weights are always **barycentric** (there is no option to choose): each node takes the barycentric coordinates of the advected mesh triangle that contains it, and the three nearest points (inverse-distance weights) are used only where no advected triangle does, for instance on an inflow edge (on the 659k-node global example, 6 nodes). Linear interpolation reproduces a linear field exactly and is not biased towards the nearest point. This matters because the remap interval is set by the fastest nodes: where the velocity is lower, a remap moves the surface by a fraction of a cell. In a shear test (velocity growing linearly across the domain, one cell per remap for the fastest nodes), a bump moving a fifth of a cell per remap travelled 80.9 m of 80 m, against 70 m with inverse-distance weights. Plain ``interp`` (without ``interp_remap``) keeps the inverse-distance weights, so its results are unchanged.
 
 **Parallel runs and memory.** The search tree is built on the whole advected mesh (a node's nearest advected points can come from anywhere), once per tectonic interval, and released straight away. Each process then keeps the interpolation weights of its own nodes only, and the values it needs (surface fields and stratigraphic layers) are fetched from the processes that own the source nodes. With ``interp_remap`` the candidate triangles are only those touching the advected points nearest to the process's own nodes, read from the cell list once per interval and released. No whole-mesh copy of any field is kept between plate updates, and the result does not depend on the number of processes.
 
