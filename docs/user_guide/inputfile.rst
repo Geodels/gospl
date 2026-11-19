@@ -63,6 +63,28 @@ Initial mesh definition and simulation declaration
         i. ``advect`` define the advection scheme used when applying horizontal displacements. Choices are ``upwind``, ``iioe1``, ``iioe2`` and ``interp``  (go to the technical `information <https://gospl.readthedocs.io/en/latest/tech_guide/tecto.html#horizontal-advection>`_ in the documentation for more information).
         j. ``interp_remap`` (optional, only with ``advect: 'interp'``, a number of mesh spacings > 0) applies each tectonic event's displacement in remaps of about this many mesh spacings instead of once at the end of the event. The remap interval is the whole number of time steps (at least one) over which the event's fastest node moves ``interp_remap`` spacings (printed with ``-v``); if that interval is as long as the event, the event is applied once at its end. With this key the interpolation always uses **barycentric weights** in the displaced mesh triangles (inverse-distance weights only where no displaced triangle covers a node), so regions moving slower than the fastest nodes, where the velocity varies in space, also move at their own speed. **Use** ``interp_remap: 1`` **whenever horizontal motion should carry the drainage**: in the lateral-motion test of the technical guide, remaps of 0.5 to 5 spacings moved the valleys by the imposed 4 km, while remaps of a tenth of a cell smoothed them away and the per-step Eulerian schemes lost them.
 
+           **Example.** A 200 m mesh moved east at up to 4 mm/yr for 1 Myr, with ``dt = 5`` kyr. ``interp_remap`` goes in the ``domain`` block; the motion itself is a ``tectonics`` event with ``hdisp`` (rates in m/yr, one row per mesh vertex, here ``(0.004, 0, 0)``):
+
+           .. code:: yaml
+
+               domain:
+                   npdata: ['data/mesh','v','c','z']
+                   advect: 'interp'
+                   interp_remap: 0.5     # remap every ~half mesh spacing
+
+               time:
+                   start: 0.
+                   end: 1.e6
+                   dt: 5.e3
+
+               tectonics:
+                 - start: 0.
+                   end: 1.e6
+                   hdisp: ['data/mesh','h']   # (vx, vy, vz) in m/yr
+                   upsub: ['data/mesh','t']   # optional uplift rate (m/yr)
+
+           goSPL then computes, at the start of the event, ``nstep = round(interp_remap × Δx / (v_max × dt))`` = round(0.5 × 200 / (0.004 × 5000)) = 5 steps, i.e. a remap every ``tsub = 25`` kyr. The surface is remapped at 25, 50, 75, … , 1000 kyr (40 remaps), each moving every node by ``v × 25 kyr`` (100 m for the fastest ones), at the start of the step that begins at that time, so the output written at that time already shows the moved surface. ``Δx`` is the square root of the mean cell area and ``v_max`` the largest speed of the event. With ``interp_remap: 1`` it would be every 50 kyr (20 remaps of 200 m); without the key, a single remap of 4 km at 1 Myr. When ``interp_remap × Δx`` is covered in less than one step (fast plates, long ``dt``), the interval is one step and each remap moves more than requested; run with ``-v`` to see the interval actually used (e.g. ``Plate interpolation remapped every 25000 yr (0.50 mesh spacings)``).
+
 .. warning::
 
   It is worth noting that all the input files require to run a goSPL simulation must be defined as numpy zip array (**.npz**). This allows to directly and efficiently load the dataset during initialisation. This is specially efficient when running large models. 
