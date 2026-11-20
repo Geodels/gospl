@@ -16,7 +16,11 @@
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
-      "Bash(git show *)"
+      "Bash(git show *)",
+      "Bash(time python -m pytest *)",
+      "Bash(mpirun -n * python -m pytest *)",
+      "Bash(mpirun -np * python -m pytest *)",
+      "Bash(timeout * mpirun * python -m pytest *)"
     ]
   },
   "hooks": {
