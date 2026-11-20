@@ -2,6 +2,7 @@
 build
 builddir
 docs/_build/*
+docs/.jupyterlite.doit.db
 *.pyc
 __pycache__/
 .vscode/*
