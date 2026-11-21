@@ -161,7 +161,7 @@ The approach considers the local balance between erosion and deposition and is b
 
 where :math:`\mathrm{\lambda_{i,rcv}}` is the length of the edges connecting the considered vertex to its receiver and :math:`\mathrm{\Omega_i}` is the area (voronoi) of the node :math:`i`. 
 
-:math:`\mathrm{Q_{s_i}}` is the upstream incoming sediment flux in m3/yr and :math:`\mathrm{G'}` is equal to :math:`\mathrm{G \Omega_i / \bar{P}A}`.
+:math:`\mathrm{Q_{s_i}}` is the upstream incoming sediment flux in m3/yr and :math:`\mathrm{G'}` is equal to :math:`\mathrm{G \Omega_i / \bar{P}A}`. :math:`\mathrm{G'}` is dimensionless, so the deposition coefficient :math:`\mathrm{G}` has the units of a precipitation rate (m/yr): with :math:`\mathrm{\bar{P}A}` in m3/yr and :math:`\mathrm{\Omega_i}` in m2, :math:`\mathrm{G' = G/\bar{P}}` where :math:`\mathrm{\bar{P}}` is the rain rate.
 
 The upstream incoming sediment flux is obtained from the total sediment flux :math:`\mathrm{Q_{t_i}}` where:
 
