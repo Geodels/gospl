@@ -1144,7 +1144,11 @@ def basin_rivers(result, basin_id=None, area_threshold=None):
     basin). Returns a dict with the **main stem** (traced from the outlet up the
     largest-area donor at each step) and the list of **tributaries** (each
     channel head traced down to the main stem), every path carrying
-    ``x``/``y``/``dist``/``elev``/``chi``/``area`` arrays ordered outlet->source.
+    ``x``/``y``/``dist``/``elev``/``chi``/``area`` arrays. The two orders differ:
+    the main stem runs **source -> outlet** (index 0 is the channel head, the last
+    point the basin outlet), while each tributary runs from its confluence with
+    the main stem up to its channel head. ``dist`` is the flow distance to the
+    outlet in both cases, so profiles plotted against it are unaffected.
     """
     ny, nx = result["y"].size, result["x"].size
     basin = result["basin"]
@@ -1221,12 +1225,12 @@ def basin_rivers(result, basin_id=None, area_threshold=None):
             cur = recv[cur]
         if cur >= 0 and on_main[cur]:
             seg.append(int(cur))          # confluence point on the main stem
-        tribs.append(_pack(seg[::-1]))    # outlet-ward order
+        tribs.append(_pack(seg[::-1]))    # confluence -> channel head
 
     return {
         "basin_id": basin_id,
         "area_threshold": area_threshold,
-        "main_stem": _pack(main[::-1]),   # outlet -> source... reverse to source->outlet
+        "main_stem": _pack(main[::-1]),   # traced outlet -> source, stored source -> outlet
         "tributaries": tribs,
     }
 
