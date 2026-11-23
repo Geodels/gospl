@@ -187,11 +187,100 @@ fraction).
   fine one;
 - np=1 vs np=3 invariance (`mpi`).
 
+## 6b. Why the deposits are still sheets with dots (motivation for G3b)
+
+After the bypass, cap and tapers, the `fraction: 0.3` regional run still shows isolated
+dots in the gravity deposit (48 cells more than 50 % above their neighbours, up to
+80 m on one cell in one step at the foreset toe) and no channel. An instrumented run
+(every gravity step from 190 kyr) rules out terminal sinks, the cap (100-200 m of room
+left), local supply and `Lambda` (0.02-0.1, like the neighbours). The cause is the flux:
+the marine network funnels the gravity flux into single-cell paths where the foreset is
+gullied in front of the river lobes, with 5-10 times the neighbours' flux, and the
+deposit is a fixed share of the flux. Two things are missing:
+
+1. **Concentrated flow should bypass or erode, not deposit.** A confined, faster current
+   carries its load further and cuts its bed. Without erosion there is no positive
+   feedback (a deeper path captures more flow and is cut deeper), so no channel forms.
+2. **The network spreads the flow by design.** `_matOcean` computes directions on a
+   SMOOTHED bathymetry with up to 12 receivers, made to spread river sediment at sea.
+   A channel needs flow concentrated on the actual seafloor; a lobe needs it to spread
+   where the channel ends.
+
+## 6c. Phase G3b (proposed): gravity network, slope erosion, channels and lobes
+
+### Gravity network
+
+The gravity currents get their own routing matrix `W_g`, built each step like
+`_matOcean` but on the eps-filled ACTUAL bathymetry (no smoothing), with `n_g`
+receivers (`gravity: receivers`, default 6) and a flow-partition exponent `p_g`
+(`gravity: flow_exp`, default 2; weights proportional to `S^p_g`, see `mfdrcvrs`). On
+the slope the steepest path dominates (concentration into channels); on the gentle basin
+floor the gradients are similar in every direction and the flow spreads (lobes). The
+fill reuses the serial `epsfill` path of `_matOcean` (one more gather on rank 0 per step;
+acceptable regionally, to be measured globally, where `network: smoothed` keeps the
+current matrix).
+
+### Slope erosion, linear in the flux
+
+A current picks up sediment where it is steep and strong. With `l_i` the cell size, an
+erosion length `L_e` (`gravity: erosion_length`, m; the shorter, the stronger) and a
+slope dependence `f(S) = (S/S_e)^4 / (1 + (S/S_e)^4)` (`gravity: erosion_slope` = `S_e`;
+the mirror of the deposition taper: 0 on flat ground, 1/2 at `S_e`, ~1 above), the
+volume picked up at node `i` is
+
+    e_i = eps_i q_i,   eps_i = (l_i / L_e) f(S_i)
+
+proportional to the flux through the node, so the flux grows downstream on steep ground
+and is self-reinforcing where it concentrates. The balance becomes
+
+    q_i = s_i + sum_j W_ji (1 - Lambda_j + eps_j) q_j
+    net deposit_i = (Lambda_i - eps_i) q_i          (negative = erosion)
+
+still linear and exactly conservative (supplied + eroded = deposited + exported). The
+operator is no longer diagonally dominant where `eps > Lambda`, but the eps-filled
+network is a DAG (triangular in flow order), so the system stays uniquely solvable; the
+shared routing KSP and its exact-factor rescue handle it.
+
+Limits (both iterated like the cap: lower `eps_i` where exceeded and re-solve):
+- **erodible thickness**: at most `max_erosion` (m per step, default 10) per cell, which
+  also guards against the runaway seen with the explicit glacial abrasion (erosion on
+  slopes steepens them);
+- **no erosion above the bypass depth** (the shelf is the river and wave domain).
+
+### Composition (dual lithology, provenance)
+
+Erosion removes material from the stratigraphy through `erodeStrat` (thickness in
+`self.tmp`), which gives the eroded coarse/fine and class split; the river step's
+`thCoarse`/`thFine`/`provEro` are saved and restored around the call (the
+`hillslopeBeforeRouting` pattern). Because the fractions have their own run-out lengths,
+the coupled total is solved first (Picard, 2-3 passes: route each fraction with the
+eroded volume of the previous pass added as a source in the eroded composition, update
+`e = eps q_total`), and the final pass routes every fraction and class with the final
+erosion as an explicit source. Conservation is exact whatever the number of passes,
+because the source added to the routing is exactly what `erodeStrat` removed.
+
+### Expected behaviour and tests
+
+- inclined plane with a small gully: the flux concentrates, the gully deepens over steps
+  (channel), and a lobe forms where it reaches the flat floor;
+- budget: supplied + eroded = deposited + exported, every step;
+- dual and provenance conservation (`_fineEroded`/`_fineDeposited`, `stratP`);
+- erosion only where `S > ~S_e` and deeper than the bypass depth; `max_erosion` respected;
+- partition invariance (`ab_partition --steps 1`);
+- the regional margin: an incised slope channel and a terminal lobe, no dots.
+
+Effort: about 6-9 working days (network 1, erosion and limits 2, composition 2-3,
+tests and the regional example 2-3). Main risks: stability of slope erosion over kyr
+steps (hence `max_erosion` and a stability note, as for the glacial abrasion), and the
+extra serial fill on global meshes.
+
 ## 7. Phases
 
 - **G1 (this branch):** split + routed solve + run-out length + fixed/flood trigger,
   single fraction and dual lithology, `gravDep` output, tests, docs.
 - **G2 (done):** provenance classes in lockstep; budget in the `--summary` JSON.
+- **G3b (proposed, see 6c):** gravity network on the actual bathymetry, linear slope
+  erosion with limits, composition of the eroded material, channels and lobes.
 - **G3:** slope-failure trigger (remobilise sediment above a critical slope), optional
   slope-dependent deposition, catchment-area-dependent `sigma`; example in
   goSPL-examples (delta and slope, regional; one global run).
