@@ -697,6 +697,12 @@ Marine gravity currents
                 runout_fine: 2.e5     # run-out length of the fine fraction (m), dual lithology
                 bypass_depth: 50.     # no deposition shallower than this (m below sea level)
                 bypass_slope: 0.01    # no deposition on steeper gradients (optional)
+                network: raw          # routing surface: raw (default) or smoothed
+                receivers: 6          # receivers per node on the raw network (1 to 12)
+                flow_exp: 2.          # flow-partition exponent on the raw network
+                erosion_length: 2.e5  # slope erosion (m; absent = no erosion)
+                erosion_slope: 0.02   # gradient at which erosion reaches half its rate
+                max_erosion: 10.      # maximum erosion per cell and step (m)
                 # fraction: 0.2       # fixed fraction of the river load; if absent, flood trigger:
                 flood:
                     c_crit: 40.       # hyperpycnal threshold concentration (kg/m3)
@@ -729,10 +735,25 @@ Marine gravity currents
            form. Gradients depend on the mesh resolution (a coarse mesh smears
            the slope), so choose it from the gradients of your own mesh; it is
            meant for regional runs.
-        e. ``fraction`` (0 to 1, optional): a fixed fraction of the river load
+        e. ``network`` (``raw`` or ``smoothed``, default ``raw``): the surface the
+           currents follow. ``raw`` is the actual seafloor (depressions filled),
+           with ``receivers`` downslope neighbours per node and a flow-partition
+           exponent ``flow_exp``: on steep slopes the steepest path takes most of
+           the flow (channels), on gentle floors it spreads (lobes). ``smoothed``
+           reuses the clinoform network (smoothed seafloor, up to 12 receivers),
+           which spreads the flow everywhere.
+        f. ``erosion_length`` (m, optional; no erosion without it): the currents
+           pick up sediment where the seafloor is steep, a volume proportional to
+           the flux through the cell, (cell size / ``erosion_length``) times
+           ``(S/S_e)^4 / (1 + (S/S_e)^4)`` with ``S_e`` = ``erosion_slope``. The
+           shorter the length, the stronger the erosion. A cell either erodes or
+           deposits, never erodes shallower than ``bypass_depth``, and loses at most
+           ``max_erosion`` metres per step. The eroded sediment (with its fine
+           fraction and provenance) joins the current.
+        g. ``fraction`` (0 to 1, optional): a fixed fraction of the river load
            entering the gravity pathway everywhere, useful to calibrate a
            regional case.
-        f. ``flood`` (used when ``fraction`` is absent): the fraction carried by
+        h. ``flood`` (used when ``fraction`` is absent): the fraction carried by
            floods whose concentration exceeds ``c_crit``, computed at each river
            mouth from its mean discharge and load, assuming log-normal daily
            discharges (``sigma``) and a rating curve ``Qs ~ Q^rating_exp``. The
@@ -740,9 +761,10 @@ Marine gravity currents
            hyperpycnal threshold, so floods carry the gravity currents: raise
            ``sigma`` for flashy rivers.
 
-        The cumulative gravity deposit is written as ``gravDep`` (m). With
-        verbose output, each step prints the supplied, deposited and exported
-        volumes (the budget closes to the solver tolerance).
+        The cumulative gravity deposit (net of the slope erosion) is written as
+        ``gravDep`` (m). With verbose output, each step prints the supplied,
+        eroded, deposited and exported volumes (the budget closes to the solver
+        tolerance).
 
         .. note::
 

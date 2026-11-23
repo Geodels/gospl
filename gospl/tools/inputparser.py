@@ -1698,7 +1698,10 @@ class ReadYaml(object):
         (coarse or single fraction, m) and ``gravRunoutFine`` (fine fraction
         under dual lithology, m), the bypass conditions ``gravBypassDepth`` (m
         below sea level, default 50) and ``gravBypassSlope`` (off by default),
-        and the trigger: a fixed fraction
+        the routing network (``gravNetwork`` 'raw' or 'smoothed',
+        ``gravReceivers``, ``gravFlowExp``), the slope erosion
+        (``gravErosionLength``, off when absent, ``gravErosionSlope``,
+        ``gravMaxErosion`` m per step), and the trigger: a fixed fraction
         ``gravFraction`` of the river load, or (when ``fraction`` is absent) the
         flood-fraction parameters ``gravCcrit`` (kg/m3), ``gravRating`` (b > 1),
         ``gravSigma`` (log-std of daily discharge) and ``gravRhoS`` (kg/m3).
@@ -1725,6 +1728,29 @@ class ReadYaml(object):
             raise ValueError("gravity: bypass_depth must be >= 0 (m below sea level)")
         if self.gravBypassSlope is not None and self.gravBypassSlope <= 0.0:
             raise ValueError("gravity: bypass_slope must be positive")
+
+        # Gravity network (phase G3b): 'raw' = own routing on the eps-filled,
+        # UNSMOOTHED bathymetry (concentrates on slopes, spreads on flat floors),
+        # 'smoothed' = the clinoform cascade's network (dMat1).
+        self.gravNetwork = str(gravDict.get("network", "raw")).lower()
+        if self.gravNetwork not in ("raw", "smoothed"):
+            raise ValueError("gravity: network must be 'raw' or 'smoothed'")
+        self.gravReceivers = int(gravDict.get("receivers", 6))
+        self.gravFlowExp = float(gravDict.get("flow_exp", 2.0))
+        if not 1 <= self.gravReceivers <= 12:
+            raise ValueError("gravity: receivers must lie between 1 and 12")
+        if self.gravFlowExp < 0.0:
+            raise ValueError("gravity: flow_exp must be >= 0")
+
+        # Slope erosion (phase G3b): off unless erosion_length (m) is given.
+        el = gravDict.get("erosion_length")
+        self.gravErosionLength = None if el is None else float(el)
+        self.gravErosionSlope = float(gravDict.get("erosion_slope", 0.02))
+        self.gravMaxErosion = float(gravDict.get("max_erosion", 10.0))
+        if self.gravErosionLength is not None and self.gravErosionLength <= 0.0:
+            raise ValueError("gravity: erosion_length must be positive (m)")
+        if self.gravErosionSlope <= 0.0 or self.gravMaxErosion <= 0.0:
+            raise ValueError("gravity: erosion_slope and max_erosion must be positive")
 
         frac = gravDict.get("fraction")
         self.gravFraction = None if frac is None else float(frac)

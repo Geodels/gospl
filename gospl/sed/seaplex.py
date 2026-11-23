@@ -93,6 +93,106 @@ class SEAMesh(object):
         frac[ok] = ndtr((mu + b * sig * sig - lnX0) / sig)
         return frac
 
+    def _gravNetwork(self, hl):
+        r"""
+        Routing network of the gravity currents (phase G3b): sets ``self._gW``
+        (the transposed receiver-weight matrix ``W^T``) and ``self._gSink`` (the
+        terminal sinks of that network).
+
+        ``gravity: network: smoothed`` reuses the clinoform cascade's matrix
+        ``self.dMat1`` (smoothed bathymetry, up to 12 receivers, made to SPREAD
+        river sediment). The default ``raw`` builds a separate matrix on the
+        eps-filled ACTUAL bathymetry with ``gravity: receivers`` receivers and a
+        flow-partition exponent ``gravity: flow_exp`` (``mfdrcvrs``): on steep
+        slopes the steepest path takes most of the flux (channels), on gentle
+        floors the gradients are alike and the flux spreads (lobes). Same
+        construction as ``_matOcean`` (serial ``epsfill`` on rank 0 from the
+        owned nodes, single-pass CSR assembly); release with ``_gravRelease``.
+
+        Collective (min reduction, gather, bcast, matrix assembly).
+
+        :arg hl: pre-deposition local elevation
+        """
+        if self.gravNetwork == "smoothed":
+            self._gW, self._gSink, self._gWown = self.dMat1, self.is_sink_local, False
+            return
+        minh = max(self.hGlobal.min()[1] + 0.1, self.sealevel + self.oFill)
+        surf = hl.copy()
+        far = None
+        if self.flatModel:
+            surf[self.outletIDs] = BOUNDARY_FLOW_SENTINEL
+        else:
+            far = self.coastDist > self.offshore
+            surf[far] = BOUNDARY_FLOW_SENTINEL
+        fillz = self._gatherGlobalOnRoot(surf)
+        if MPIrank == 0:
+            fillz = epsfill(minh, fillz)
+        fillz = MPI.COMM_WORLD.bcast(fillz, root=0)[self.locIDs]
+        if far is not None:
+            fillz[far] = hl[far]
+        rcv, _, wght = mfdrcvrs(
+            self.gravReceivers, self.gravFlowExp, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
+        )
+        # With fewer than 12 receivers, mfdrcvrs pads the unused slots with -1
+        # and keeps the first `receivers` weights WITHOUT renormalising them (a
+        # node with 7 downslope neighbours kept 6 weights of 1/7: 1/7 of its
+        # flux vanished). Point the padding at the node itself with zero weight
+        # and renormalise every row (below); a sink has no outgoing weight.
+        # A closed pit below the fill cut-off (sealevel + oFill) keeps its raw
+        # elevation, and mfdrcvrs then hands its flux to ALL its (higher)
+        # neighbours: the flux flowed uphill and came back, a cycle that left
+        # the solve singular. Keep only receivers strictly lower than the node;
+        # a node with none is a sink (a closed deep keeps what reaches it).
+        nodes = np.arange(self.lpoints)
+        pad = rcv < 0
+        rcv[pad] = np.broadcast_to(nodes[:, None], rcv.shape)[pad]
+        wght[pad] = 0.0
+        wght[fillz[rcv] >= fillz[:, None]] = 0.0
+        wsum = wght.sum(axis=1)
+        wght = np.divide(wght, wsum[:, None], out=np.zeros_like(wght),
+                         where=wsum[:, None] > 0.0)
+        if self.flatModel:
+            rcv[self.outletIDs, :] = np.tile(self.outletIDs, (12, 1)).T
+            wght[self.outletIDs, :] = 0.0
+        sink = (wsum <= 0.0) | np.all(rcv.astype(int) == nodes[:, None], axis=1)
+        if self.flatModel:
+            sink[self.outletIDs] = False
+
+        IntType = petsc4py.PETSc.IntType
+        rcvFlat = rcv.astype(IntType)
+        data = wght.copy()
+        data[rcvFlat == nodes[:, None]] = 0.0
+        indptr = np.arange(0, self.lpoints * 12 + 1, 12, dtype=IntType)
+        off = self._matrix_build(nnz=(12, 12))
+        off.assemblyBegin()
+        off.setValuesLocalCSR(
+            indptr, rcvFlat.ravel(), data.ravel(),
+            addv=petsc4py.PETSc.InsertMode.ADD_VALUES,
+        )
+        off.assemblyEnd()
+        W = self.zMat.copy()
+        W.axpy(1.0, off)
+        off.destroy()
+        W.transpose()
+        self._gW, self._gSink, self._gWown = W, sink, True
+        return
+
+    def _gravRelease(self):
+        """Destroy the gravity network matrix if ``_gravNetwork`` built one
+        (collective)."""
+        if getattr(self, "_gWown", False) and self._gW is not None:
+            self._gW.destroy()
+        self._gW, self._gWown = None, False
+        return
+
+    def _gravSync(self, arr):
+        """Owner -> ghost copy of a local array (collective; scratch
+        ``self.tmpL``, ``self.tmp1``)."""
+        self.tmpL.setArray(arr)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return self.tmpL.getArray().copy()
+
     def _gravLambda(self, runout):
         r"""
         Deposited fraction of the gravity flux at each node,
@@ -103,9 +203,11 @@ class SEAMesh(object):
         ``1/(1 + (S/S_b)^4)`` with ``S`` the gradient and ``S_b = bypass_slope``
         (one half at ``S_b``: the flow crosses the foresets and deposits at
         their toe). Smooth tapers, not switches, so that noisy gradients do not
-        make neighbouring cells alternate between deposit and bypass. Terminal sinks keep what reaches them (1) and open outlets
-        export it (0). Synced owner -> ghost (the gradient of a ghost node,
-        computed on its truncated neighbourhood, is not the owner's).
+        make neighbouring cells alternate between deposit and bypass. Terminal
+        sinks of the gravity network (``self._gSink``) keep what reaches them
+        (1) and open outlets export it (0). Synced owner -> ghost (the gradient
+        of a ghost node, computed on its truncated neighbourhood, is not the
+        owner's).
 
         Scratch Vecs: ``self.tmpL``, ``self.tmp1``. Collective.
 
@@ -125,23 +227,118 @@ class SEAMesh(object):
         if self.gravBypassSlope is not None:
             ratio = cellslope(self.lpoints, hl) / self.gravBypassSlope
             lam *= 1.0 / (1.0 + ratio ** 4)
-        lam[self.is_sink_local] = 1.0
+        lam[self._gSink] = 1.0
         lam[self.outletIDs] = 0.0
-        self.tmpL.setArray(lam)
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
-        self.dm.globalToLocal(self.tmp1, self.tmpL)
-        return self.tmpL.getArray().copy()
+        return self._gravSync(lam)
 
-    def _gravRoute(self, supply, runout, room=None):
+    def _gravEps(self, hl):
         r"""
-        Route gravity-current supplies down the marine flow network with a
+        Slope-erosion coefficient of the gravity currents (phase G3b): the
+        fraction of the flux picked up at each node,
+
+        .. math::
+
+            \varepsilon_i = \frac{\ell_i}{L_e}\,\frac{(S_i/S_e)^4}{1 + (S_i/S_e)^4}
+
+        with the cell size ``l_i``, ``erosion_length`` ``L_e`` and
+        ``erosion_slope`` ``S_e`` (0 on flat ground, one half at ``S_e``), times
+        the depth taper of ``_gravLambda`` (no erosion on the shelf above the
+        bypass depth). Zero at the network's sinks and at open outlets. Synced
+        owner -> ghost. Collective.
+
+        :arg hl: pre-deposition local elevation
+
+        :return: local array of erosion coefficients (>= 0)
+        """
+        ratio = (cellslope(self.lpoints, hl) / self.gravErosionSlope) ** 4
+        eps = np.sqrt(self.larea) / self.gravErosionLength * ratio / (1.0 + ratio)
+        if self.gravBypassDepth > 0.0:
+            depth = self.sealevel - hl
+            eps *= np.clip((depth - self.gravBypassDepth) / self.gravBypassDepth, 0.0, 1.0)
+        eps[self._gSink] = 0.0
+        eps[self.outletIDs] = 0.0
+        return self._gravSync(eps)
+
+    def _gravSolve(self, factor, col):
+        r"""
+        One routed solve ``(I - W^T diag(factor)) q = col`` on the gravity
+        network, ``factor = 1 - Lambda`` (+ ``eps`` with slope erosion). Shared
+        routing KSP (``_solve_KSP(route=True)``); returns the local flux and the
+        volume ponded by a failed solve (or None). Scratch ``self.tmp``,
+        ``self.tmp1``, ``self.tmpL``. Collective.
+        """
+        self.tmpL.setArray(factor)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        M = self._gW.copy()
+        M.diagonalScale(R=self.tmp1)
+        M.scale(-1.0)
+        M.shift(1.0)
+        self.tmpL.setArray(col)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._solve_KSP(False, M, self.tmp, self.tmp1, route=True)
+        M.destroy()
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        q = np.maximum(self.tmpL.getArray().copy(), 0.0)
+        return q, self._takeRoutingPond()
+
+    def _gravErosion(self, supply, hl):
+        r"""
+        Slope erosion by the gravity currents (phase G3b,
+        ``docs/DESIGN_GRAVITY_CURRENTS.md`` 6c). A node ERODES where the
+        pick-up coefficient exceeds the deposited fraction (``eps > Lambda`` of
+        the coarse or single fraction) and then receives no deposit
+        (each node erodes or deposits in a step, never both, so the
+        stratigraphy is not counted twice); elsewhere it only deposits. The
+        total flux with pick-up solves
+
+        .. math::
+
+            (I - W^T \mathrm{diag}(1 - \Lambda + \varepsilon))\, Q = S
+
+        and the eroded bulk volume is ``e = eps Q``, at most
+        ``max_erosion x cell area`` (``eps`` is lowered where exceeded and the
+        solve repeated, at most 20 passes; this also guards against a runaway).
+        The eroded volume then enters the deposition routing as an explicit
+        source, so conservation is exact whatever the coupling error.
+
+        Scratch ``self.tmp``, ``self.tmp1``, ``self.tmpL``. Collective.
+
+        :arg supply: total gravity supply (m3 over the step, local array)
+        :arg hl: pre-deposition local elevation
+
+        :return: eroded bulk volume (m3, local) and the eroding-node mask
+        """
+        eps = self._gravEps(hl)
+        lam = self._gravLambda(self.gravRunout)
+        ero = eps > lam
+        eps[~ero] = 0.0
+        lam[ero] = 0.0
+        Q, _ = self._gravSolve(1.0 - lam + eps, supply)
+        cap = self.gravMaxErosion * self.larea
+        owned = self.inIDs == 1
+        for _ in range(20):
+            over = ero & (eps * Q > cap * (1.0 + 1.0e-9)) & (Q > 0.0)
+            more = MPI.COMM_WORLD.allreduce(bool((over & owned).any()), op=MPI.LOR)
+            if not more:
+                break
+            eps = eps.copy()
+            eps[over] = cap[over] / Q[over]
+            eps = self._gravSync(eps)
+            Q, _ = self._gravSolve(1.0 - lam + eps, supply)
+        e = eps * Q
+        e[~ero] = 0.0
+        return e, ero
+
+    def _gravRoute(self, supply, runout, room=None, nodep=None):
+        r"""
+        Route gravity-current supplies down the gravity network with a
         run-out length, ``(I - W^T diag(1 - Lambda)) q = s``, deposit
         ``Lambda q`` (``docs/DESIGN_GRAVITY_CURRENTS.md`` §2.1-2.2).
 
-        ``W^T`` is the marine routing matrix ``self.dMat1`` (built by
-        ``_matOcean``; call before it is destroyed). ``Lambda`` comes from
-        ``_gravLambda`` (run-out length, bypass on the shelf and, optionally, on
-        steep slopes, 1 at terminal sinks, 0 at open outlets).
+        ``W^T`` is the gravity network matrix ``self._gW`` (``_gravNetwork``).
+        ``Lambda`` comes from ``_gravLambda`` (run-out length, bypass on the
+        shelf and, optionally, on steep slopes, 1 at terminal sinks, 0 at open
+        outlets) and is 0 at the eroding nodes ``nodep`` (phase G3b).
 
         Accommodation: with ``room`` (m3 per node), a node cannot receive more
         than its room. The first column (the total supply) is solved, every
@@ -152,10 +349,6 @@ class SEAMesh(object):
         in the domain). The remaining columns (provenance classes) are then
         solved with the final ``Lambda``, so they sum to the total.
 
-        The operator is a copy of ``dMat1`` scaled column-wise and solved with
-        the shared routing KSP (``_solve_KSP(route=True)``); a ponded region of
-        a failed solve deposits in place.
-
         Scratch Vecs: overwrites ``self.tmp``, ``self.tmp1`` and ``self.tmpL``
         (all free at this point of ``seaChange``). Collective.
 
@@ -163,6 +356,7 @@ class SEAMesh(object):
             shape ``(lpoints,)`` or ``(lpoints, k)`` (column 0 = the total)
         :arg runout: run-out length (m)
         :arg room: accommodation per node (m3, local array) or None
+        :arg nodep: eroding-node mask (no deposit there) or None
 
         :return: deposited and exported volumes (m3, local arrays of the same
             shape as ``supply``; export is non-zero at outlets only)
@@ -172,28 +366,14 @@ class SEAMesh(object):
         if single:
             sup = sup[:, None]
         lam = self._gravLambda(runout)
+        if nodep is not None:
+            lam[nodep] = 0.0
         owned = self.inIDs == 1
 
-        def _solve(lam, col):
-            """One routed solve; returns (q, pond) for supply column `col`."""
-            self.tmpL.setArray(1.0 - lam)
-            self.dm.localToGlobal(self.tmpL, self.tmp1)
-            M = self.dMat1.copy()
-            M.diagonalScale(R=self.tmp1)
-            M.scale(-1.0)
-            M.shift(1.0)
-            self.tmpL.setArray(col)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self._solve_KSP(False, M, self.tmp, self.tmp1, route=True)
-            M.destroy()
-            self.dm.globalToLocal(self.tmp1, self.tmpL)
-            q = np.maximum(self.tmpL.getArray().copy(), 0.0)
-            return q, self._takeRoutingPond()
-
-        q, pond = _solve(lam, sup[:, 0])
+        q, pond = self._gravSolve(1.0 - lam, sup[:, 0])
         if room is not None:
             cap = np.maximum(room, 0.0)
-            capped = ~self.is_sink_local
+            capped = ~self._gSink
             for _ in range(20):
                 over = capped & (lam * q > cap * (1.0 + 1.0e-9) + 1.0e-9) & (q > 0.0)
                 more = MPI.COMM_WORLD.allreduce(bool((over & owned).any()), op=MPI.LOR)
@@ -202,17 +382,14 @@ class SEAMesh(object):
                 lam = lam.copy()
                 lam[over] = cap[over] / q[over]
                 # sync owner -> ghost so every rank scales the same columns
-                self.tmpL.setArray(lam)
-                self.dm.localToGlobal(self.tmpL, self.tmp1)
-                self.dm.globalToLocal(self.tmp1, self.tmpL)
-                lam = self.tmpL.getArray().copy()
-                q, pond = _solve(lam, sup[:, 0])
+                lam = self._gravSync(lam)
+                q, pond = self._gravSolve(1.0 - lam, sup[:, 0])
 
         dep = np.zeros_like(sup)
         exported = np.zeros_like(sup)
         for k in range(sup.shape[1]):
             if k > 0:
-                q, pond = _solve(lam, sup[:, k])
+                q, pond = self._gravSolve(1.0 - lam, sup[:, k])
             dep[:, k] = lam * q
             exported[self.outletIDs, k] = q[self.outletIDs]
             if pond is not None:
@@ -1160,16 +1337,55 @@ class SEAMesh(object):
                 provFlux = vdep[:, None] * comp
             marDep = self._distOcean(vdep, provFlux=provFlux)
         if gravOn:
+            # Gravity network (own matrix on the actual bathymetry by default).
+            self._gravNetwork(hl)
+
+            # Slope erosion (G3b, optional): bulk volume picked up on steep
+            # ground, removed from the stratigraphy here (erodeStrat gives its
+            # deposit-equivalent coarse/fine/class split; the river step's
+            # thCoarse/thFine/provEro are restored around the call) and added
+            # to the routed supply as an explicit source.
+            eroMask = None
+            eroBulk = np.zeros(self.lpoints, dtype=np.float64)
+            eroC = np.zeros(self.lpoints, dtype=np.float64)
+            eroF = np.zeros(self.lpoints, dtype=np.float64)
+            eroP = None
+            if self.gravErosionLength is not None:
+                eroBulk, eroMask = self._gravErosion(gravSed, hl)
+                if self.stratNb > 0:
+                    saved = {k: getattr(self, k).copy()
+                             for k in ("thCoarse", "thFine", "provEro")
+                             if getattr(self, k, None) is not None}
+                    self.tmpL.setArray(-eroBulk / self.larea)
+                    self.dm.localToGlobal(self.tmpL, self.tmp)
+                    self.erodeStrat()
+                    eroC = self.thCoarse * self.dt * self.larea
+                    if self.stratLith:
+                        eroF = self.thFine * self.dt * self.larea
+                    if provOn:
+                        eroP = self.provEro * self.dt * self.larea[:, None]
+                    for k, v in saved.items():
+                        setattr(self, k, v)
+                else:
+                    eroC = eroBulk.copy()
+            eroTot = eroC + eroF
+
             # Column 0: the supply; with provenance, one more column per source
             # class (the arriving composition provFrac, which a passive label
-            # shares between the coarse and fine parts). Same operator, so the
+            # shares between the coarse and fine parts, plus the eroded classes
+            # split by the eroded coarse/fine share). Same operator, so the
             # class deposits sum to the total.
             comp = self.provFrac if provOn else None
 
-            def _cols(v):
+            def _cols(v, eroPart):
                 if comp is None:
                     return v[:, None]
-                return np.column_stack([v, comp * v[:, None]])
+                cls = comp * (v - eroPart)[:, None]
+                if eroP is not None:
+                    cls = cls + eroP * np.divide(
+                        eroPart, eroTot, out=np.zeros_like(eroTot), where=eroTot > 0
+                    )[:, None]
+                return np.column_stack([v, cls])
 
             # Accommodation: a gravity deposit cannot build a cell above the
             # bypass depth (the fine fraction gets what the coarse one leaves).
@@ -1179,15 +1395,19 @@ class SEAMesh(object):
                     (self.sealevel - self.gravBypassDepth - hl) * self.larea - marDep,
                     0.0,
                 )
-            coarse = gravSed - gravFine if gravFine is not None else gravSed
-            dC, eC = self._gravRoute(_cols(coarse), self.gravRunout, room=room)
+            coarse = (gravSed - gravFine if gravFine is not None else gravSed) + eroC
+            dC, eC = self._gravRoute(_cols(coarse, eroC), self.gravRunout,
+                                     room=room, nodep=eroMask)
             if gravFine is not None:
                 roomF = None if room is None else np.maximum(room - dC[:, 0], 0.0)
-                dF, eF = self._gravRoute(_cols(gravFine), self.gravRunoutFine, room=roomF)
+                fine = gravFine + eroF
+                dF, eF = self._gravRoute(_cols(fine, eroF), self.gravRunoutFine,
+                                         room=roomF, nodep=eroMask)
             else:
                 dF, eF = np.zeros_like(dC), np.zeros_like(eC)
             gDepC, gExpC, gDepF, gExpF = dC[:, 0], eC[:, 0], dF[:, 0], eF[:, 0]
             gravProvDep = (dC[:, 1:] + dF[:, 1:]) if comp is not None else None
+            self._gravRelease()
         self.dMat1.destroy()
 
         # Diffuse downstream
@@ -1226,23 +1446,31 @@ class SEAMesh(object):
             self._gravProvThick = (
                 gravProvDep / self.larea[:, None] if gravProvDep is not None else None
             )
-            self.tmpL.setArray(gravCasc + gC + gF)
+            eTh = eroBulk / self.larea
+            # The stratigraphy gets the DEPOSITS only (cascade + gravity): the
+            # slope erosion was already removed from it by erodeStrat. Elevation
+            # and erosion/deposition rates get the net change.
+            self._gravDepoOnly = gravCasc + gC + gF
+            self.tmpL.setArray(gravCasc + gC + gF - eTh)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.gravDep += gC + gF
+            # net gravity change: deposit (+) or slope erosion (-)
+            self.gravDep += gC + gF - eTh
             owned = self.inIDs == 1
             sums = MPI.COMM_WORLD.allreduce(
                 np.array([gravSed[owned].sum(),
                           (gDepC + gDepF)[owned].sum(),
-                          (gExpC + gExpF)[owned].sum()]),
+                          (gExpC + gExpF)[owned].sum(),
+                          eroTot[owned].sum()]),
                 op=MPI.SUM,
             )
             self.gravBudget = sums
             if MPIrank == 0 and self.verbose:
-                err = (sums[0] - sums[1] - sums[2]) / max(sums[0], 1.0)
+                err = (sums[0] + sums[3] - sums[1] - sums[2]) / max(sums[0] + sums[3], 1.0)
                 print(
-                    "[gravity] supplied %0.4g km3, deposited %0.4g km3, "
-                    "exported %0.4g km3 (closure %0.1e)"
-                    % (sums[0] * 1e-9, sums[1] * 1e-9, sums[2] * 1e-9, err),
+                    "[gravity] supplied %0.4g km3, eroded %0.4g km3, deposited "
+                    "%0.4g km3, exported %0.4g km3 (closure %0.1e)"
+                    % (sums[0] * 1e-9, sums[3] * 1e-9, sums[1] * 1e-9,
+                       sums[2] * 1e-9, err),
                     flush=True,
                 )
 
@@ -1269,6 +1497,11 @@ class SEAMesh(object):
 
         # Update stratigraphic layer parameters
         if self.stratNb > 0:
+            if gravOn:
+                # deposits only: the gravity slope erosion is already out of
+                # the stratigraphy (erodeStrat in the gravity step)
+                self.tmpL.setArray(self._gravDepoOnly)
+                self.dm.localToGlobal(self.tmpL, self.tmp)
             if self.stratLith:
                 # Post-cascade fine reaching the sea (same sink mask as
                 # sedFlux), carried by the continental fine-enriched overspill.

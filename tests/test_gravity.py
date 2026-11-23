@@ -199,8 +199,8 @@ def test_gravity_budget_and_fine_conservation(tmp_path):
     )
     if out["flatModel"]:
         pytest.skip("needs the closed sphere fixture")
-    sup, dep, exp = out["gravBudget"]
-    assert sup > 0.0
+    sup, dep, exp, ero = out["gravBudget"]
+    assert sup > 0.0 and ero == 0.0           # no slope erosion configured
     assert abs(sup - dep - exp) / sup < 1.0e-6
     assert MPI.COMM_WORLD.allreduce(float(out["gravDep"].max()), op=MPI.MAX) > 0.0
     ero = MPI.COMM_WORLD.allreduce(out["_fineEroded"], op=MPI.SUM)
@@ -226,6 +226,7 @@ def test_gravity_route_matches_explicit_cascade(tmp_path):
             m.runProcesses()          # builds the coast distance and pit state
             m.sinkIDs = m.lFill <= m.sealevel
             m._matOcean()
+            m._gravNetwork(m.hLocal.getArray().copy())
             supply = np.zeros(m.lpoints)
             sea = np.where(m.sinkIDs & (m.inIDs == 1))[0]
             supply[sea[:: max(1, len(sea) // 20)]] = 1.0e9
@@ -238,11 +239,12 @@ def test_gravity_route_matches_explicit_cascade(tmp_path):
                 ref += lam * cur
                 m.tmpL.setArray((1.0 - lam) * cur)
                 m.dm.localToGlobal(m.tmpL, m.tmp)
-                m.dMat1.mult(m.tmp, m.tmp1)
+                m._gW.mult(m.tmp, m.tmp1)
                 m.dm.globalToLocal(m.tmp1, m.tmpL)
                 cur = m.tmpL.getArray().copy()
                 if cur.sum() < 1.0e-9 * supply.sum():
                     break
+            m._gravRelease()
             m.dMat1.destroy()
             owned = m.inIDs == 1
             err = np.abs(dep - ref)[owned].sum() / supply[owned].sum()
@@ -373,21 +375,163 @@ def test_gravity_accommodation_cap(tmp_path):
             m.runProcesses()
             m.sinkIDs = m.lFill <= m.sealevel
             m._matOcean()
+            m._gravNetwork(m.hLocal.getArray().copy())
             supply = np.zeros(m.lpoints)
             sea = np.where(m.sinkIDs & (m.inIDs == 1))[0]
             supply[sea[:: max(1, len(sea) // 20)]] = 1.0e9
             free, _ = m._gravRoute(supply, m.gravRunout)
             room = 0.1 * free
             dep, exp = m._gravRoute(supply, m.gravRunout, room=room)
+            m._gravRelease()
             m.dMat1.destroy()
             owned = m.inIDs == 1
-            ok = owned & ~m.is_sink_local
+            ok = owned & ~m._gSink
             assert (dep[ok] <= room[ok] * (1.0 + 1.0e-6) + 1.0e-3).all()
             assert (free[ok] > room[ok] + 1.0).any(), "cap never active"
             sup = supply[owned].sum()
             assert abs(sup - dep[owned].sum() - exp[owned].sum()) / sup < 1.0e-6
             # the capped volume went elsewhere (sinks, other nodes or export)
             assert (dep[ok] < free[ok] - 1.0).any()
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+
+
+def test_gravity_raw_network_conserves(tmp_path):
+    """The raw gravity network (``mfdrcvrs`` on the eps-filled bathymetry with
+    6 receivers): every non-sink node passes ALL its flux on (outgoing weights
+    sum to 1; mfdrcvrs pads unused slots with -1 and does not renormalise),
+    a sink passes nothing, and with almost no deposition on the way the routed
+    volume closes on sinks + export (an uphill receiver at a pit below the fill
+    cut-off made a cycle and a singular solve)."""
+    from gospl.model import Model
+
+    yml = _write_case(tmp_path, "rawnet", GRAV_BLOCK.format(frac=0.5))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model(yml, verbose=False, showlog=False)
+        try:
+            m.runProcesses()
+            m.sinkIDs = m.lFill <= m.sealevel
+            m._matOcean()
+            m._gravNetwork(m.hLocal.getArray().copy())
+            # outgoing weight of each node: column sums of W^T
+            m.tmpL.set(1.0)
+            m.dm.localToGlobal(m.tmpL, m.tmp)
+            m._gW.multTranspose(m.tmp, m.tmp1)
+            m.dm.globalToLocal(m.tmp1, m.tmpL)
+            wout = m.tmpL.getArray().copy()
+            owned = m.inIDs == 1
+            inner = owned.copy()
+            if m.flatModel:
+                inner[m.outletIDs] = False
+            ns = inner & ~m._gSink
+            assert ns.any() and m._gSink[owned].any()
+            assert np.abs(wout[ns] - 1.0).max() < 1.0e-12, "flux lost on the way"
+            assert np.abs(wout[inner & m._gSink]).max() < 1.0e-12
+            supply = np.zeros(m.lpoints)
+            sea = np.where(m.sinkIDs & owned)[0]
+            supply[sea[:: max(1, len(sea) // 20)]] = 1.0e9
+            dep, exp = m._gravRoute(supply, 1.0e15)
+            m._gravRelease()
+            m.dMat1.destroy()
+            sup = supply[owned].sum()
+            err = abs(sup - dep[owned].sum() - exp[owned].sum()) / sup
+            assert err < 1.0e-6, f"routed budget {err:.2e}"
+            # nearly everything reached a sink or left the domain
+            through = (dep[owned & m._gSink].sum() + exp[owned].sum()) / sup
+            assert through > 0.5, f"only {through:.2f} reached sinks/export"
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+
+
+EROSION_BLOCK = (
+    "gravity:\n"
+    "    runout: 3.0e5\n"
+    "    runout_fine: 1.2e6\n"
+    "    fraction: 0.5\n"
+    "    erosion_length: 5.0e4\n"
+    "    erosion_slope: 0.005\n"
+    "    max_erosion: 2.0\n\n"
+)
+
+
+@pytest.mark.slow
+def test_gravity_slope_erosion(tmp_path):
+    """Slope erosion by gravity currents (phase G3b): the currents pick up
+    sediment, the budget closes with it (supplied + eroded = deposited +
+    exported), the fine volume is conserved with the eroded fine routed on,
+    and in the last step no node eroded more than ``max_erosion``, none above
+    the bypass depth, and no node both eroded and received a deposit."""
+    from mpi4py import MPI
+    from gospl.model import Model
+    from gospl.sed.seaplex import SEAMesh
+
+    rec = {}
+    orig = SEAMesh._gravErosion
+
+    def spy(self, supply, hl):
+        e, mask = orig(self, supply, hl)
+        rec.update(e=e.copy(), mask=mask.copy(), hl=hl.copy())
+        return e, mask
+
+    yml = _write_case(tmp_path, "ero", gravity=EROSION_BLOCK)
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    SEAMesh._gravErosion = spy
+    try:
+        m = Model(yml, verbose=False, showlog=False)
+        try:
+            m.runProcesses()
+            sup, dep, exp, ero = m.gravBudget
+            assert ero > 0.0, "no slope erosion: test is vacuous"
+            assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-5
+            fe = MPI.COMM_WORLD.allreduce(m._fineEroded, op=MPI.SUM)
+            fd = MPI.COMM_WORLD.allreduce(m._fineDeposited, op=MPI.SUM)
+            assert abs(fe - fd) / fe < 5.0e-3, f"fine {fe:.4e} vs {fd:.4e}"
+
+            owned = m.inIDs == 1
+            eTh = rec["e"] / m.larea
+            assert (eTh[owned] <= m.gravMaxErosion * (1 + 1e-6)).all()
+            shallow = (m.sealevel - rec["hl"]) <= m.gravBypassDepth
+            assert (eTh[owned & shallow] == 0.0).all()
+            casc, gC, gF = m._gravThick
+            assert ((gC + gF)[rec["mask"] & owned] == 0.0).all()
+        finally:
+            m.destroy()
+    finally:
+        SEAMesh._gravErosion = orig
+        os.chdir(cwd)
+
+
+@pytest.mark.slow
+def test_gravity_slope_erosion_provenance(tmp_path):
+    """Eroded material carries its source classes: with slope erosion and two
+    provenance classes, every layer stays exactly partitioned by class."""
+    from gospl.model import Model
+
+    src = FIXTURES_DIR / "minimal_prov2.yml"
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip("minimal_prov2.yml / mesh.npz not present")
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    v = np.load(tmp_path / "mesh.npz")["v"]
+    np.savez(tmp_path / "prov_src.npz", rock=(v[:, 0] > v[:, 0].mean()).astype(np.int64))
+    text = re.sub(r"dir: '[^']*'", "dir: 'out'", src.read_text())
+    (tmp_path / "prov.yml").write_text(text.replace("output:", EROSION_BLOCK + "output:", 1))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model("prov.yml", verbose=False, showlog=False)
+        try:
+            m.runProcesses()
+            assert m.gravBudget[3] > 0.0, "no slope erosion: test is vacuous"
+            top = m.stratStep + 1
+            H, P = m.stratH[:, :top], m.stratP[:, :top, :]
+            assert np.abs(P.sum(axis=2) - H).sum() / max(H.sum(), 1.0) < 1.0e-6
         finally:
             m.destroy()
     finally:

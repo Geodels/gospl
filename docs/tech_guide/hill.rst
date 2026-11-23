@@ -111,7 +111,7 @@ Before the diffusion, river sediment is routed across the sea floor along flow d
 Gravity currents (optional)
 ---------------------------
 
-With a ``gravity`` block, part of the river load reaching the sea travels as a gravity current (hyperpycnal flow or turbidity current) instead of being spread by the clinoform scheme. A fraction :math:`\mathrm{f_h}` of the load arriving at each marine node is diverted and routed down the same seafloor flow network as the clinoform cascade (receiver matrix :math:`\mathrm{W}`). A fraction :math:`\mathrm{\Lambda_i}` of the flux passing a node deposits there and the rest moves on, so the flux :math:`\mathrm{q}` solves the linear system
+With a ``gravity`` block, part of the river load reaching the sea travels as a gravity current (hyperpycnal flow or turbidity current) instead of being spread by the clinoform scheme. A fraction :math:`\mathrm{f_h}` of the load arriving at each marine node is diverted and routed down a seafloor flow network (receiver matrix :math:`\mathrm{W}`). By default (``network: raw``) this network is built on the actual seafloor with its depressions filled, with ``receivers`` downslope neighbours per node and weights proportional to the gradient to the power ``flow_exp``, so the flow concentrates on steep slopes and spreads on gentle floors; ``network: smoothed`` uses the network of the clinoform cascade. A fraction :math:`\mathrm{\Lambda_i}` of the flux passing a node deposits there and the rest moves on, so the flux :math:`\mathrm{q}` solves the linear system
 
 .. math::
 
@@ -125,4 +125,12 @@ The diverted fraction is either fixed (``fraction``) or computed from floods. go
 
   \mathrm{f_h = \Phi\left(\frac{\mu + b\sigma^2 - \ln X_0}{\sigma}\right)}, \qquad \mathrm{X_0 = \left(\frac{C_c\, E[X^b]}{\bar C}\right)^{1/(b-1)}}, \qquad \mathrm{E[X^b] = e^{b\mu + b^2\sigma^2/2}}
 
-where :math:`\mathrm{\Phi}` is the standard normal distribution function. The design, limitations and planned extensions (slope failure) are in ``docs/DESIGN_GRAVITY_CURRENTS.md``.
+where :math:`\mathrm{\Phi}` is the standard normal distribution function.
+
+With ``erosion_length`` :math:`\mathrm{L_e}`, the currents also erode the seafloor where it is steep. The volume picked up at node :math:`\mathrm{i}` is proportional to the flux through it,
+
+.. math::
+
+  \mathrm{e_i = \epsilon_i q_i}, \qquad \mathrm{\epsilon_i = \frac{\ell_i}{L_e} \frac{(S_i/S_e)^4}{1 + (S_i/S_e)^4}}
+
+(:math:`\mathrm{S_e}` = ``erosion_slope``, with the same depth taper as the deposition), so that :math:`\mathrm{\left(I - W^T \mathrm{diag}(1 - \Lambda + \epsilon)\right) q = s}`. A node either erodes (:math:`\mathrm{\epsilon_i > \Lambda_i}`, and then :math:`\mathrm{\Lambda_i = 0}`) or deposits (:math:`\mathrm{\epsilon_i = 0}`). Where :math:`\mathrm{e_i}` would exceed ``max_erosion`` times the cell area, :math:`\mathrm{\epsilon_i}` is lowered and the solve repeated. The eroded volume is removed from the stratigraphy, which gives its fine fraction and provenance, and is added to the routed supply of each fraction and class at the eroding node, so supplied plus eroded volume equals deposited plus exported volume. Erosion steepens the slopes it acts on, which is why it is limited per step. The design, limitations and planned extensions (slope failure) are in ``docs/DESIGN_GRAVITY_CURRENTS.md``.

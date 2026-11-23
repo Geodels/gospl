@@ -206,7 +206,7 @@ deposit is a fixed share of the flux. Two things are missing:
    A channel needs flow concentrated on the actual seafloor; a lobe needs it to spread
    where the channel ends.
 
-## 6c. Phase G3b (proposed): gravity network, slope erosion, channels and lobes
+## 6c. Phase G3b: gravity network, slope erosion, channels and lobes
 
 ### Gravity network
 
@@ -259,6 +259,33 @@ eroded volume of the previous pass added as a source in the eroded composition, 
 erosion as an explicit source. Conservation is exact whatever the number of passes,
 because the source added to the routing is exactly what `erodeStrat` removed.
 
+### As implemented (2026-11-23)
+
+Three points differ from, or add to, the proposal above.
+
+- **mfdrcvrs with fewer than 12 receivers.** The kernel pads the unused slots with -1
+  and keeps the first `n_g` weights without renormalising them: a node with 7 downslope
+  neighbours kept 6 weights of 1/7 and 1/7 of its flux vanished (2 to 90 % of the
+  supply lost on the test mesh). `_gravNetwork` points the padding at the node itself
+  with zero weight and renormalises every row.
+- **Pits below the fill cut-off.** `epsfill` starts at `sealevel + oFill`, so a closed
+  deep below it keeps its raw elevation, and `mfdrcvrs` hands its flux to all its
+  (higher) neighbours: an uphill cycle and a singular solve. Only receivers strictly
+  lower than the node are kept; a node with none is a terminal sink (a closed deep keeps
+  what reaches it).
+- **Erode or deposit, never both, and no Picard loop.** At each node the larger of
+  `eps` and `Lambda` (coarse) wins: an eroding node has `Lambda = 0`, a depositing node
+  `eps = 0`. The erosion is computed once, on the total gravity supply
+  (`_gravErosion`: `eps q`, capped at `max_erosion` by iteration), removed from the
+  stratigraphy with `erodeStrat` (river arrays saved and restored), and its coarse,
+  fine and class parts are added to the routed supply as an explicit source at the
+  eroding nodes, which do not deposit (`nodep`). The budget is exact (supplied + eroded
+  = deposited + exported) because the source is exactly what `erodeStrat` removed; the
+  Picard passes of the proposal were not needed. The stratigraphy then receives the
+  deposits only (`deposeStrat`), while elevation, `cumED`, `EDrate` and `gravDep` get
+  the net change; giving `deposeStrat` the net change made the eroded fine count twice
+  (5 % fine excess in the test).
+
 ### Expected behaviour and tests
 
 - inclined plane with a small gully: the flux concentrates, the gully deepens over steps
@@ -279,8 +306,9 @@ extra serial fill on global meshes.
 - **G1 (this branch):** split + routed solve + run-out length + fixed/flood trigger,
   single fraction and dual lithology, `gravDep` output, tests, docs.
 - **G2 (done):** provenance classes in lockstep; budget in the `--summary` JSON.
-- **G3b (proposed, see 6c):** gravity network on the actual bathymetry, linear slope
-  erosion with limits, composition of the eroded material, channels and lobes.
+- **G3b (coded, see 6c):** gravity network on the actual bathymetry, linear slope
+  erosion with limits, composition of the eroded material. Next: the regional
+  channel/lobe test.
 - **G3:** slope-failure trigger (remobilise sediment above a critical slope), optional
   slope-dependent deposition, catchment-area-dependent `sigma`; example in
   goSPL-examples (delta and slope, regional; one global run).

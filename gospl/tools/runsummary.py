@@ -32,8 +32,8 @@ up to solver round-off):
   and pass counts, SNES fallbacks and soil sub-stepping).
 
 * ``gravity`` (only with the ``gravity:`` block): the step's gravity-current
-  ``supplied``, ``deposited`` and ``exported`` volumes (m^3); supplied =
-  deposited + exported to the solver tolerance (~1e-6 relative on long bypass
+  ``supplied``, ``eroded`` (slope erosion), ``deposited`` and ``exported``
+  volumes (m^3); supplied + eroded = deposited + exported to the solver tolerance (~1e-6 relative on long bypass
   paths; ``gospl-inspect`` flags more than 1e-5).
 
 A final ``{"end": true, ...}`` record carries the total wall time.
@@ -208,7 +208,8 @@ class RunSummary(object):
         gb = getattr(model, "gravBudget", None)
         if getattr(model, "gravOn", False) and gb is not None:
             rec["gravity"] = {"supplied": float(gb[0]), "deposited": float(gb[1]),
-                              "exported": float(gb[2])}
+                              "exported": float(gb[2]),
+                              "eroded": float(gb[3]) if len(gb) > 3 else 0.0}
         with open(self.path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         self.step += 1
