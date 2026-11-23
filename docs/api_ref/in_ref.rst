@@ -43,6 +43,7 @@ Class ReadYaml
       ~ReadYaml._readCompaction
       ~ReadYaml._extraStrata
       ~ReadYaml._extraProvenance
+      ~ReadYaml._readGravity
       ~ReadYaml._readFlex
       ~ReadYaml._extraFlex
       ~ReadYaml._readOrography
@@ -86,6 +87,7 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._readCompaction
 .. automethod:: tools.inputparser.ReadYaml._extraStrata
 .. automethod:: tools.inputparser.ReadYaml._extraProvenance
+.. automethod:: tools.inputparser.ReadYaml._readGravity
 .. automethod:: tools.inputparser.ReadYaml._readFlex
 .. automethod:: tools.inputparser.ReadYaml._extraFlex
 .. automethod:: tools.inputparser.ReadYaml._readOrography

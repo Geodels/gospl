@@ -1617,6 +1617,57 @@ def test_channel_hillslope_partition_invariant(tmp_path, law):
     assert d < 1.0e-3, f"np=1 vs np=3 elevation difference {d:.3e} m"
 
 
+@pytest.mark.slow
+def test_gravity_partition_invariant(tmp_path):
+    """
+    Protects: the marine gravity-current routing (`gravity:`, a routed solve on
+    the marine network, dual lithology) adds no partition dependence. The
+    coarse minimal_dual sphere is not partition-exact on its own: without
+    gravity, np=1 vs np=3 already differs after one step by up to 4.2e-3 m in
+    elevation and 5e-5 (relative) in the sediment load. With gravity the
+    elevation difference is the same and the gravity deposit differs by
+    3e-5 relative, i.e. by what it inherits from the load. Asserted: gravity
+    deposit within 1e-3 of its maximum, elevation within 1e-2 m, after one step.
+    """
+    import re
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import numpy as np
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    src = FIXTURES_DIR / "minimal_dual.yml"
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip("minimal_dual.yml / mesh.npz not present")
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    text = re.sub(r"dir: '[^']*'", "dir: 'out'", src.read_text())
+    text = text.replace(
+        "output:",
+        "gravity:\n    runout: 3.0e5\n    runout_fine: 1.2e6\n    fraction: 0.5\n\noutput:",
+        1,
+    )
+    (tmp_path / "grav.yml").write_text(text)
+    tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
+    keep = tmp_path / "ab"
+    res = subprocess.run(
+        [sys.executable, str(tool), "grav.yml", "-n", "3", "--steps", "1",
+         "--field", "gravDep", "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+        timeout=3 * MPI_TIMEOUT)
+    a, b = keep / "ab_np1.npz", keep / "ab_np3.npz"
+    assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
+    a, b = np.load(a), np.load(b)
+    gmax = np.abs(a["gravDep"]).max()
+    assert gmax > 0.0, "no gravity deposit: test is vacuous"
+    dg = np.abs(a["gravDep"] - b["gravDep"]).max() / gmax
+    assert dg < 1.0e-3, f"np=1 vs np=3 gravity deposit differs by {dg:.2e} of its max"
+    de = np.abs(a["elev"] - b["elev"]).max()
+    assert de < 1.0e-2, f"np=1 vs np=3 elevation difference {de:.3e} m"
+
+
 def test_ab_partition_runs_requested_steps(tmp_path):
     """
     Protects: `scripts/ab_partition.py --steps K` runs K time steps. Until

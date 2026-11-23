@@ -39,6 +39,7 @@ Each rank writes its own partition of the data into `gospl.<step>.p<rank>.h5`. T
 | `FA` | `FA` | `self.FAL.getArray().copy()` + floor + sea-cell clamp | always |
 | `iceFA`, `iceH` | `iceFA`, `iceH` | `self.iceFAL/iceHL.getArray().copy()` + floor | `self.iceOn` |
 | `flexIso` | `flexIso` | `self.localFlex` (numpy array) | `self.flexOn` |
+| `gravDep` | `gravDep` | `self.gravDep` (numpy array, cumulative gravity-current deposit) | `self.gravOn` |
 | `soilH` | `soilH` | `self.Lsoil.getArray().copy()` (Vec) | `self.cptSoil` |
 | `sedLoad` | `SL` | `self.vSedLocal.getArray().copy()` + floor | always |
 | `sedLoadF` | `SLf` | `self.vSedFLocal.getArray().copy()` + floor (fine sub-flux; coarse = sedLoad − sedLoadF) | `self.stratLith` (dual lithology) |

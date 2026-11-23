@@ -68,6 +68,7 @@ class ReadYaml(object):
         self._readErofactor()
         self._readRain()
         self._readCompaction()
+        self._readGravity()
         self._readIce()
         self._readGroundwater()
         self._readOrography()
@@ -1685,6 +1686,57 @@ class ReadYaml(object):
         # Default to a single source class everywhere if none specified.
         if self.provOn and self._provSourceUniform is None and self._provSourceMap is None:
             self._provSourceUniform = 0
+        return
+
+    def _readGravity(self):
+        """
+        Parse the optional marine **gravity-current** block (``gravity:``), see
+        ``docs/DESIGN_GRAVITY_CURRENTS.md``.
+
+        Sets ``self.gravOn`` (master opt-in, False when the block is absent so
+        every gravity path is gated out), the run-out lengths ``gravRunout``
+        (coarse or single fraction, m) and ``gravRunoutFine`` (fine fraction
+        under dual lithology, m), and the trigger: a fixed fraction
+        ``gravFraction`` of the river load, or (when ``fraction`` is absent) the
+        flood-fraction parameters ``gravCcrit`` (kg/m3), ``gravRating`` (b > 1),
+        ``gravSigma`` (log-std of daily discharge) and ``gravRhoS`` (kg/m3).
+        """
+        self.gravOn = False
+        gravDict = self.input.get("gravity")
+        if gravDict is None:
+            return
+        if not isinstance(gravDict, dict):
+            raise ValueError("gravity: expects a block of keys (runout, fraction or flood, ...)")
+
+        self.gravRunout = float(gravDict.get("runout", 5.0e4))
+        self.gravRunoutFine = float(gravDict.get("runout_fine", 4.0 * self.gravRunout))
+        if self.gravRunout <= 0.0 or self.gravRunoutFine <= 0.0:
+            raise ValueError("gravity: runout and runout_fine must be positive (m)")
+
+        frac = gravDict.get("fraction")
+        self.gravFraction = None if frac is None else float(frac)
+        if self.gravFraction is not None and not 0.0 <= self.gravFraction <= 1.0:
+            raise ValueError("gravity: fraction must lie between 0 and 1")
+
+        flood = gravDict.get("flood") or {}
+        self.gravCcrit = float(flood.get("c_crit", 40.0))
+        self.gravRating = float(flood.get("rating_exp", 1.8))
+        self.gravSigma = float(flood.get("sigma", 1.2))
+        self.gravRhoS = float(flood.get("rho_s", 2650.0))
+        if self.gravFraction is None:
+            if self.gravRating <= 1.0:
+                raise ValueError("gravity: flood rating_exp must be > 1")
+            if self.gravSigma <= 0.0 or self.gravCcrit <= 0.0 or self.gravRhoS <= 0.0:
+                raise ValueError("gravity: flood c_crit, sigma and rho_s must be positive")
+
+        if getattr(self, "provOn", False):
+            raise ValueError(
+                "gravity: provenance tracers are not supported yet with gravity "
+                "currents (phase G2 of docs/DESIGN_GRAVITY_CURRENTS.md); remove one "
+                "of the two blocks."
+            )
+
+        self.gravOn = True
         return
 
     def _readFlex(self):

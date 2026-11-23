@@ -680,6 +680,65 @@ Sediment provenance tracers
             See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/provenance.html>`_ (provenance section) for the algorithm, the standalone post-processing tool, and the copper-prospectivity scope.
 
 
+Marine gravity currents
+-----------------------------------------------------
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+
+        **Declaration example**:
+
+        .. code:: yaml
+
+            gravity:
+                runout: 5.e4          # run-out length (m), coarse or single fraction
+                runout_fine: 2.e5     # run-out length of the fine fraction (m), dual lithology
+                # fraction: 0.2       # fixed fraction of the river load; if absent, flood trigger:
+                flood:
+                    c_crit: 40.       # hyperpycnal threshold concentration (kg/m3)
+                    rating_exp: 1.8   # b in the rating curve Qs ~ Q^b (> 1)
+                    sigma: 1.2        # log-standard deviation of daily discharge
+                    rho_s: 2650.      # sediment density (kg/m3)
+
+        Adds a second pathway for the part of the river load that travels as a
+        gravity current (hyperpycnal flow or turbidity current) instead of being
+        spread by the clinoform scheme. That part is routed down the seafloor
+        network and deposits gradually, so it builds lobes beyond the foresets.
+        Without the block, the marine deposition is unchanged.
+
+        a. ``runout`` (m, default ``5.e4``): the distance over which the gravity
+           deposit decays by a factor *e*. It does not depend on the mesh
+           resolution, so the same value works at regional and global scale (it
+           must be larger than the cell size).
+        b. ``runout_fine`` (m, default ``4 x runout``): the run-out length of the
+           fine fraction under dual lithology; coarse sediment settles nearer the
+           river mouth than fine sediment.
+        c. ``fraction`` (0 to 1, optional): a fixed fraction of the river load
+           entering the gravity pathway everywhere, useful to calibrate a
+           regional case.
+        d. ``flood`` (used when ``fraction`` is absent): the fraction carried by
+           floods whose concentration exceeds ``c_crit``, computed at each river
+           mouth from its mean discharge and load, assuming log-normal daily
+           discharges (``sigma``) and a rating curve ``Qs ~ Q^rating_exp``. The
+           long-term mean concentration is almost always far below the
+           hyperpycnal threshold, so floods carry the gravity currents: raise
+           ``sigma`` for flashy rivers.
+
+        The cumulative gravity deposit is written as ``gravDep`` (m). With
+        verbose output, each step prints the supplied, deposited and exported
+        volumes (the budget closes to the solver tolerance).
+
+        .. note::
+
+            Provenance tracers are not yet routed by this pathway: a model with
+            both ``gravity`` and ``provenance`` stops with an error. On coarse
+            global meshes, small steep coastal catchments (the most hyperpycnal
+            rivers) are merged into larger outlets, so their gravity currents
+            are underestimated. Design: ``docs/DESIGN_GRAVITY_CURRENTS.md``.
+
+
 Groundwater & duricrust
 -----------------------
 

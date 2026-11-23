@@ -505,6 +505,14 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["flexIso"][:, 0] = self.localFlex
+            if getattr(self, "gravOn", False):
+                f.create_dataset(
+                    "gravDep",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["gravDep"][:, 0] = self.gravDep
             if self.cptSoil:
                 f.create_dataset(
                     "soilH",
@@ -811,6 +819,13 @@ class WriteMesh(object):
                 else:
                     self.localFlex = np.zeros(self.lpoints)
 
+            if getattr(self, "gravOn", False):
+                # Cumulative gravity-current deposit (older outputs lack it).
+                if "/gravDep" in hf:
+                    self.gravDep = np.array(hf["/gravDep"], dtype=np.float64)[:, 0]
+                else:
+                    self.gravDep = np.zeros(self.lpoints)
+
             if self.cptSoil:
                 if "/soilH" in hf:
                     self.Lsoil.setArray(np.array(hf["/soilH"])[:, 0])
@@ -1053,6 +1068,16 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/flexIso</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+            if getattr(self, "gravOn", False):
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="gravDep">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/gravDep</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

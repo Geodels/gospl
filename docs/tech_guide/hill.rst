@@ -107,3 +107,22 @@ The transport coefficient depends on the thickness :math:`\mathrm{h_d}` of the f
 Two time integrators are available (``marineSolver``). The default ``ts`` is an adaptive linearly-implicit Rosenbrock-W scheme (PETSc ``TS rosw``) whose stage systems are solved by GMRES with a GASM preconditioner; its error is controlled on the deposit thickness, not the absolute elevation. The ``picard`` option takes ``picardSub`` backward-Euler sub-steps with the coefficient lagged over ``picardIts`` iterations, each a linear solve. If the adaptive ``ts`` integrator fails (too many rejected steps), goSPL switches to ``picard`` for the rest of the run.
 
 Before the diffusion, river sediment is routed across the sea floor along flow directions computed on a smoothed bathymetry whose depressions are filled by a priority flood. The fill starts at ``sea level + oFill``; on a global model it starts no lower than the deepest point of the smoothed surface plus 0.1 m, so the whole ocean floor drains to a few terminal sinks instead of hundreds of closed pockets.
+
+Gravity currents (optional)
+---------------------------
+
+With a ``gravity`` block, part of the river load reaching the sea travels as a gravity current (hyperpycnal flow or turbidity current) instead of being spread by the clinoform scheme. A fraction :math:`\mathrm{f_h}` of the load arriving at each marine node is diverted and routed down the same seafloor flow network as the clinoform cascade (receiver matrix :math:`\mathrm{W}`). A fraction :math:`\mathrm{\Lambda_i}` of the flux passing a node deposits there and the rest moves on, so the flux :math:`\mathrm{q}` solves the linear system
+
+.. math::
+
+  \mathrm{\left(I - W^T \mathrm{diag}(1 - \Lambda)\right) q = s}, \qquad \mathrm{deposit_i = \Lambda_i q_i}, \qquad \mathrm{\Lambda_i = 1 - e^{-\ell_i / L}}
+
+where :math:`\mathrm{s}` is the diverted supply, :math:`\mathrm{\ell_i}` the cell size and :math:`\mathrm{L}` the run-out length (``runout``; ``runout_fine`` for the fine fraction under dual lithology). On a uniform slope the deposit decays as :math:`\mathrm{e^{-x/L}}` whatever the mesh spacing. Terminal sinks keep what reaches them and open boundaries export it, so the supplied volume equals the deposited plus the exported volume to the solver tolerance. The system is solved once per fraction and step with the routing solver of the flow accumulation. The gravity deposit is added to the marine deposit after the diffusion, and under dual lithology the fine fraction of each node is the volume-weighted blend of the clinoform deposit and the coarse and fine gravity deposits, so the fine volume is conserved.
+
+The diverted fraction is either fixed (``fraction``) or computed from floods. goSPL's discharge :math:`\mathrm{\bar Q}` and load :math:`\mathrm{\bar Q_s}` are long-term means, and the mean concentration :math:`\mathrm{\bar C = \rho_s \bar Q_s/\bar Q}` is almost always far below the hyperpycnal threshold :math:`\mathrm{C_c}` (about 40 kg/m³, Mulder and Syvitski, 1995). With log-normal daily discharges :math:`\mathrm{X = Q/\bar Q}` (log-standard deviation :math:`\mathrm{\sigma}`, mean 1, :math:`\mathrm{\mu = -\sigma^2/2}`) and a rating curve :math:`\mathrm{Q_s \propto Q^b}`, the fraction of the load carried above the threshold is
+
+.. math::
+
+  \mathrm{f_h = \Phi\left(\frac{\mu + b\sigma^2 - \ln X_0}{\sigma}\right)}, \qquad \mathrm{X_0 = \left(\frac{C_c\, E[X^b]}{\bar C}\right)^{1/(b-1)}}, \qquad \mathrm{E[X^b] = e^{b\mu + b^2\sigma^2/2}}
+
+where :math:`\mathrm{\Phi}` is the standard normal distribution function. The design, limitations and planned extensions (provenance, slope failure) are in ``docs/DESIGN_GRAVITY_CURRENTS.md``.
