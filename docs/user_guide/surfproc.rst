@@ -880,9 +880,11 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
   the domain, or use walls, if the distal lobes matter.
 - *Global meshes.* Small steep coastal catchments (the most hyperpycnal
   rivers) are merged into larger outlets, so their gravity currents are
-  underestimated. The ``raw`` network fills the seafloor depressions serially
-  on one processor every step, which becomes slow on meshes of millions of
-  nodes: use ``smoothed`` there.
+  underestimated. The seafloor depressions are filled on one processor (the
+  whole surface is gathered, filled and broadcast), as for the clinoform
+  network that goSPL builds anyway. ``network: smoothed`` reuses that fill;
+  ``raw`` adds a second one every step, which costs time and memory on meshes
+  of millions of nodes: prefer ``smoothed`` there.
 - *Calibration.* The module has been tested on one regional margin and on the
   test meshes. Compare the deposit with the clinoform wedge without the block
   (the gravity part moves sediment from the foresets to the basin floor) and
