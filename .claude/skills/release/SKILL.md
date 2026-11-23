@@ -64,3 +64,24 @@ push again. Do not re-tag for trivial post-tag cleanup while a publish is runnin
   `v<v>` and `stable`; if still stale, wipe the version and rebuild.
 - GitHub release: create it as a **draft** for the maintainer to publish.
 - `docker/slurm/*.pbs|.slurm` `CONTAINER=` paths reference the new `.sif` name.
+
+## 7. goSPL-examples (same tag name)
+goSPL-examples follows goSPL's branches and tags: its `dev` branch runs against goSPL
+`dev` (its `environment.yml` builds goSPL from the `dev` branch on GitHub; the nightly
+`examples-smoke` checks out that branch), `main` holds the examples of the latest
+release, and every goSPL release `v<v>` has a goSPL-examples tag `v<v>`. After the conda
+package `gospl=<v>` is published:
+```bash
+cd goSPL-examples
+git checkout main && git merge --no-ff dev
+git show <previous tag>:environment.yml > environment.yml   # back to the conda pin
+# set `- gospl=<v>` and carry over any NEW non-goSPL dependency added on dev
+git commit -am "Target goSPL v<v> release"
+# fresh env from this file + scripts/examples_smoke.py <examples> before tagging
+git push origin main                          # ask before pushing
+git tag v<v> && git push origin v<v>          # ask: builds the Docker image, moves `latest`
+git checkout dev
+```
+Pushing ANY tag to goSPL-examples builds and publishes the `geodels/gospl-examples`
+image (a non-rc tag also moves `latest`), so never re-push or rename old tags.
+The two oldest tags (`2026.06.08`, `2026.6.13`) have no `v` prefix: leave them.
