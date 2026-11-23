@@ -28,7 +28,7 @@ one subsystem marker. They are registered in `pyproject.toml` (authoritative).
 | `parser` | `test_parser.py` | forcing DataFrames, YAML parsing (no mesh) |
 | `contracts` | `test_contracts.py` | `rcvIDi` snapshot, scratch Vecs, `Eb` sign |
 | `flow` | `test_flow.py`, `test_fill_mesh_pits.py` | flow KSP, pits, cascade, evaporation, `globalngbhs` |
-| `sediment` | `test_sediment.py` | mass conservation, marine routing/diffusion, `oFill` |
+| `sediment` | `test_sediment.py`, `test_gravity.py` | mass conservation, marine routing/diffusion, `oFill`; gravity currents (budget, fine/provenance conservation, network, erosion, slope failure, spreading, defaults) |
 | `boundaries` | `test_boundaries.py` | `o/f/w/c` edges, closed-sink deposition, cyclic |
 | `advection` | `test_advection.py` | advection schemes, tectonic events, stratigraphy moved by horizontal motion (flat, cyclic, sphere; serial) |
 | `flexure` | `test_flexure.py` | flat FEM, global DH grid |

@@ -6,7 +6,7 @@ of the tree. Update the relevant file when an invariant changes. Long-form ratio
 `REFACTOR_AUDIT.md`; past bugs and their guards: `docs/dev/FIXED_BUGS.md`; per-change
 history: `docs/dev/CHANGELOG_DEV.md`.
 
-Last reviewed 2026-11-19 on `dev` (after PR #491: the GMD-review fixes, `diffusion: channelQ`, `domain: interp_remap` with barycentric weights). In October 2026 this file
+Last reviewed 2026-11-23 on `feat/gravity-currents` (gravity currents phases G1-G3, not merged into `dev`; after merging `dev` @ `c4c1ba3`). In October 2026 this file
 was split: it keeps only the rules that apply everywhere, and the subsystem detail
 moved verbatim into the files below.
 
@@ -36,7 +36,7 @@ agent.
 
 | Task | Command |
 |---|---|
-| Quick check (214 of 228 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
+| Quick check (254 of 275 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
 | One subsystem | `pytest tests/ -m flow` (markers: `tests/README.md`) |
 | Multi-rank guards (~70 s) | `pytest tests/ -m mpi` |
 | Full suite before a commit | `pytest tests/ -n 4` (CI runs it serially) |
@@ -252,7 +252,7 @@ Each is gated by a flag and must stay **byte-identical when off** (guard that wi
 - **Groundwater, duricrust, Level-B geochemistry** (`groundwater:`, `gwOn`/`duriOn`/`gwGeochemOn`): implicit Dupuit head (hypre), duricrust armoring via `_surfaceLithoK`, conservative multi-species solutes (direct LU). Detail: `docs/DESIGN_WATERTABLE_DURICRUST.md`, `docs/DESIGN_WATERTABLE_GEOCHEM.md`, `docs/tech_guide/groundwater.rst`.
 - **Soil / regolith** (`soil:`): `mode: regolith` keeps deposits in the stratigraphy. Detail: `docs/DESIGN_SOIL_REGOLITH.md`.
 - **Channel cells out of the hillslope diffusion** (`diffusion: channelQ`, m³/yr): cells with discharge ≥ channelQ are identity rows of the diffusion and their hillslope supply joins the same step's routed load (`hillslopeBeforeRouting` moves the hillslope step between incision and routing when deposition is on). Removes the resolution dependence of the channel steepness. Detail: `gospl/sed/AGENTS.md`, `docs/tech_guide/hill.rst`; example `goSPL-examples/Local-examples/hillslope_channels`.
-- **Marine gravity currents** (`gravity:`, `gravOn`, phase G1): part of the river load reaching the sea (fixed or flood fraction) is routed down the marine network with a run-out length, `(I - W^T diag(1-Lambda)) q = s`, and deposited beyond the clinoforms; coarse and fine have their own run-out under dual lithology; provenance classes ride the same solve (phase G2). Phase G3b: own network on the eps-filled raw seafloor (`network: raw`, default) and optional linear slope erosion (`erosion_length`, erode-or-deposit per node, `max_erosion`). Detail: `gospl/sed/AGENTS.md`, `docs/DESIGN_GRAVITY_CURRENTS.md`. Channel belts and lobes at regional resolution: separate coarse/fine networks (`receivers_fine`, `flow_exp_fine`), smoothing (`network_smooth`, `slope_smooth`), conservative deposit spreading (`deposit_spread`, default two cell sizes), `coarse_factor` (default 0.3). Phase G3: slope-failure trigger (`failure_slope`). Slope erosion is an expert option (warning on cells coarser than `GRAVITY_EROSION_MAX_CELL`). Benchmark `benchmarks/test_gravity.py`. Branch `feat/gravity-currents`, not merged into `dev`.
+- **Marine gravity currents** (`gravity:`, `gravOn`, phases G1-G3): part of the river load reaching the sea (fixed or flood fraction) is routed down the marine network with a run-out length, `(I - W^T diag(1-Lambda)) q = s`, and deposited beyond the clinoforms; coarse and fine have their own run-out under dual lithology; provenance classes ride the same solve (phase G2). Phase G3b: own network on the eps-filled raw seafloor (`network: raw`, default) and optional linear slope erosion (`erosion_length`, erode-or-deposit per node, `max_erosion`). Detail: `gospl/sed/AGENTS.md`, `docs/DESIGN_GRAVITY_CURRENTS.md`. Channel belts and lobes at regional resolution: separate coarse/fine networks (`receivers_fine`, `flow_exp_fine`), smoothing (`network_smooth`, `slope_smooth`), conservative deposit spreading (`deposit_spread`, default two cell sizes), `coarse_factor` (default 0.3). Phase G3: slope-failure trigger (`failure_slope`). Slope erosion is an expert option (warning on cells coarser than `GRAVITY_EROSION_MAX_CELL`). Benchmark `benchmarks/test_gravity.py`. Branch `feat/gravity-currents`, not merged into `dev`.
 - **Plate interpolation remaps** (`domain: interp_remap`, mesh spacings, `advect: interp` only): each event is applied in remaps of about that many spacings (whole number of steps set by the fastest node), with barycentric weights in the displaced triangles (`tectonics._barycentricTables`, IDW only where no triangle covers a node). Plain `interp` keeps IDW. Detail: `docs/tech_guide/tecto.rst` (lateral-motion test table).
 
 ## Input parsing and forcing (summary)
@@ -350,7 +350,7 @@ The paper's scripts and review tests live outside the repository (paper folder, 
 - **Fortran `meshparams` allocatables** must be freed per mesh in `definetin`; see `fortran/AGENTS.md`.
 
 ## CI contract (summary)
-- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (42 of 228 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
+- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref <branch>`), the only way to run the FULL suite on `dev` or a feature branch in CI (a pull request into `dev` starts NO tests): the nightly `tests-slow` runs just the `slow` subset (68 of 275 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
 - `tests-slow.yml`: slow tier nightly/tags/dispatch, benchmarks on `master`/`release-candidate` pushes. `examples-smoke.yml`: every local goSPL-examples input for 2 steps at np=2 (`scripts/examples_smoke.py`), nightly + dispatch. The Global-examples inputs are notebook products, gitignored in goSPL-examples, so CI cannot run them (a dispatch skips them all, and the script exits 2 when nothing ran): run `python scripts/examples_smoke.py <goSPL-examples> --only Global-examples` locally.
 - On a `v*` tag, `conda-build`, `pypi-publish` and `docker-build` each `needs:` the `_release-gate.yml` tests job, so nothing publishes unless the suite passes.
 - Matrix: `ubuntu-latest + macos-15 × Python 3.11 + 3.12`. macOS is pinned (not `macos-latest`) because the osx-arm64 OpenMPI 4.x / petsc4py 3.21 stack is validated per image.
