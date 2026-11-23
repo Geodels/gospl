@@ -703,7 +703,18 @@ class SEDMesh(object):
         depression, used as the initial-pile location for the non-linear
         diffusion path in large/deep partially-filled pits.
 
-        :return: boolean array (lpoints) marking inlet cells (owned cells only)
+        Donors are OWNED nodes only: a ghost's initial receivers (``rcvIDi``)
+        come from its truncated local neighbourhood and can be wrong, and an
+        inlet whose donor is owned by another rank was dropped by an
+        owned-destination filter, so the inlet set (hence where a pit's
+        deposit piles up) changed with the partition (2026-11-24). Each rank
+        counts the crossings of its owned donors into every local destination,
+        ghost or owned, and the counts are added to the destination's owner
+        (``localToGlobal`` with ``ADD_VALUES``), then sent back to the ghosts.
+
+        Scratch Vecs: ``self.tmp``, ``self.tmpL`` (overwritten). Collective.
+
+        :return: boolean array (lpoints) marking inlet cells (owned and ghost)
         """
 
         if not hasattr(self, "rcvIDi"):
@@ -721,13 +732,16 @@ class SEDMesh(object):
         dst_pit = self.pitIDs[dst]
         dst_in_pit = dst_pit >= 0
         cross_pit = src_pit != dst_pit
-        owned_dst = self.inIDs[dst] == 1
-        inlet_edges = dst_in_pit & cross_pit & owned_dst
+        owned_src = self.inIDs[src] == 1
+        inlet_edges = dst_in_pit & cross_pit & owned_src
 
-        inlet_mask = np.zeros(self.lpoints, dtype=bool)
-        if inlet_edges.any():
-            inlet_mask[dst[inlet_edges]] = True
-        return inlet_mask
+        cnt = np.zeros(self.lpoints, dtype=np.float64)
+        np.add.at(cnt, dst[inlet_edges], 1.0)
+        self.tmp.set(0.0)
+        self.tmpL.setArray(cnt)
+        self.dm.localToGlobal(self.tmpL, self.tmp, addv=petsc4py.PETSc.InsertMode.ADD_VALUES)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        return self.tmpL.getArray() > 0.5
 
     def _diffuseLargePit(self, hl, depo, pit_select):
         """
@@ -759,8 +773,9 @@ class SEDMesh(object):
 
         # Per-pit inlet count (globally)
         inlet_count = np.zeros(num_pits, dtype=np.float64)
-        if inlet_mask.any():
-            ids = self.pitIDs[inlet_mask]
+        own_inlet = inlet_mask & (self.inIDs == 1)    # ghosts would count twice
+        if own_inlet.any():
+            ids = self.pitIDs[own_inlet]
             grp = npi.group_by(ids)
             up, cnts = grp.sum(np.ones_like(ids, dtype=np.float64))
             inlet_count[up] = cnts

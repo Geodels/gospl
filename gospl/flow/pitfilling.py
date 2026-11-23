@@ -229,12 +229,23 @@ class PITFill(object):
         # hash-based and faster than any numpy sort-based dedup here — verified
         # by micro-benchmark; this dedup is <~30 ms even at 200k edges and is
         # NOT the pitgraph hot spot).
+        # Several edges can join the same two labels at the SAME spill
+        # elevation (a rim node with more than one lower neighbour outside the
+        # pit: max(z_rim, z_out) = z_rim for each). keep="first" after an
+        # elevation-only sort then kept whichever row came first, and both the
+        # row order (concatenated per rank) and the tie order of pandas' default
+        # (unstable) sort depend on the partition, and on the platform (x86 and
+        # ARM sort ties differently): the crossing node, hence where a pit's
+        # overflow enters, changed with the rank count (37 % of the maximum
+        # discharge at one node on the ubuntu CI, 2026-11-24). Sort on the
+        # elevation then the crossing node's input-mesh id (column 5), stably,
+        # so the choice and the edge order given to fill_edges are invariant.
         cgraph = pd.DataFrame(
-            mgraph, columns=["source", "target", "elev", "spill", "rank"]
+            mgraph, columns=["source", "target", "elev", "spill", "rank", "lid"]
         )
-        cgraph = cgraph.sort_values("elev")
+        cgraph = cgraph.sort_values(["elev", "lid"], kind="mergesort")
         cgraph = cgraph.drop_duplicates(["source", "target"], keep="first")
-        cgraph = cgraph.values
+        cgraph = cgraph.values[:, :5]
 
         # --- Pit-label compaction --------------------------------------------
         # source/target are globally-offset pit labels (disjoint per rank), so
@@ -567,6 +578,15 @@ class PITFill(object):
 
         # Get local meshes edges and communication nodes
         ledges = edge_tile(0.0, self.borders, hl)
+        # A cell below the fill level with a neighbour above it is a seed
+        # connected to the open sea (edge_tile: 0). When that cell is also a
+        # partition-boundary node, edge_tile marks it 1 (partition border)
+        # instead, and fill_tile then never links its region to the outlet:
+        # whether a deep basin drains depended on where the partition
+        # boundaries fell (ubuntu CI np=3: a seafloor region at -5590 m filled
+        # to +317 m, 2026-11-24). Such a node is a seed first; as 0 it still
+        # takes part in combine_edges like any edge node.
+        ledges[(ledges == 1) & (hl < 0.0)] = 0
         out = np.where(ledges >= 0)[0]
         localEdges = np.empty((len(out), 2), dtype=int)
         localEdges[:, 0] = np.arange(self.lpoints)[out].astype(int)
@@ -636,10 +656,26 @@ class PITFill(object):
             nlab = int(label.max()) + 2 if label.size else 2
             graph = -np.ones((nlab, 5), dtype=float)
         else:
-            graph = -np.ones((total, 5), dtype=float)
+            # Column 5: input-mesh id (locID) of each edge's crossing node, the
+            # partition-invariant tie-break of _fillFromEdges (column 3 is the
+            # rank-local node index the owning rank needs later).
+            # Initialised BELOW any real value: the rows are merged on rank 0
+            # by Reduce(MAX), and each row is written by exactly one rank. With
+            # the former -1 initialisation every edge elevation below -1 (the
+            # fill runs in the frame h - level, so deep seafloor is negative)
+            # became -1 at np>1: deep connections between depressions were
+            # raised, which could leave a region of ocean enclosed and filled
+            # (ubuntu CI, np=3: seafloor at -5590 m filled to +317 m,
+            # 2026-11-24). np=1 was exact (nothing to reduce).
+            graph = np.full((total, 6), -1.0e300, dtype=float)
             if lgrph > 0:
                 graph[offset[MPIrank] : offset[MPIrank] + lgrph, :4] = cgraph
                 graph[offset[MPIrank] : offset[MPIrank] + lgrph, 4] = MPIrank
+                node = cgraph[:, 3].astype(np.int64)
+                ok = (node >= 0) & (node < self.lpoints)
+                lid = np.full(lgrph, -1.0)
+                lid[ok] = np.asarray(self.locIDs)[node[ok]]
+                graph[offset[MPIrank] : offset[MPIrank] + lgrph, 5] = lid
 
             # Build global spillover graph on master. SERIAL on rank 0 (the
             # depression-merge graph) + a Reduce-to-root and a bcast — the
@@ -648,7 +684,7 @@ class PITFill(object):
             # solves) drives the high-rank flow plateau.
             self.profiler.start("flow_pitgraph")
             if MPIrank == 0:
-                mgraph = -np.ones((total, 5), dtype=float)
+                mgraph = -np.ones((total, 6), dtype=float)
             else:
                 mgraph = None
             self.profiler.start("flow_pit_reduce")

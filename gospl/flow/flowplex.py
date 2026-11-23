@@ -4,6 +4,7 @@ import sys
 import petsc4py
 from gospl.tools.petscgc import safe_garbage_cleanup
 from gospl.tools import runsummary as _rs
+from gospl.tools.constants import FILL_LEVEL_TOL
 import numpy as np
 import numpy_indexed as npi
 
@@ -1047,7 +1048,7 @@ class FAMesh(object):
 
         return
 
-    def _routingSurface(self, h, tol=1.0e-9):
+    def _routingSurface(self, h, tol=FILL_LEVEL_TOL):
         """
         Surface used to route flow: ``h``, except that a cell within ``tol``
         (1 nm) of its depression-filled surface ``lFill`` takes ``lFill``.
@@ -1301,7 +1302,10 @@ class FAMesh(object):
                 self.dm.globalToLocal(self.tmp1, self.tmpL)
                 nFA = self.tmpL.getArray().copy() * self.dt
                 FA = nFA.copy()
-                FA[hl < self.waterFilled] = 0.0
+                # under water = more than FILL_LEVEL_TOL below the water level:
+                # a spill node IS at the level, and the 1-ulp fill noise
+                # decided its discharge per partition with a strict `<`
+                FA[hl < self.waterFilled - FILL_LEVEL_TOL] = 0.0
                 self.tmpL.setArray(FA / self.dt)
                 self.FAL.axpy(1.0, self.tmpL)
             else:
@@ -1650,7 +1654,11 @@ class FAMesh(object):
 
             # Get overall water flowing donwstream accounting for filled depressions
             FA = self.FAL.getArray().copy()
-            ids = (hl <= self.waterFilled) & (self.pitIDs > -1)
+            # lake cells: at (within FILL_LEVEL_TOL) or below the water level,
+            # as the inclusive `<=` always meant; without the tolerance a cell
+            # at the level (a spill node) was in or out of the lake on the
+            # 1-ulp fill noise, differently per partition
+            ids = (hl <= self.waterFilled + FILL_LEVEL_TOL) & (self.pitIDs > -1)
             FA[ids] = 0.0
             self.FAL.setArray(FA)
             self.dm.localToGlobal(self.FAL, self.FAG)

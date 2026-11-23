@@ -914,8 +914,12 @@ def test_groundwater_restart(tmp_path, monkeypatch):
     try:
         assert np.allclose(mr.headL.getArray(), h1, atol=1.0e-4), "head not restored"
         assert np.allclose(mr.duriHL.getArray(), d1, atol=1.0e-6), "duriH not restored"
+        # depth below the surface, floored at 0 like the model
+        # (gwplex: clip(z - h, 0, z - zbed)): where the water table stands
+        # above the ground (a lake) the depth is 0, not negative
         assert np.allclose(
-            mr.wtDepth, mr.hLocal.getArray() - mr.headL.getArray(), atol=1.0e-6
+            mr.wtDepth, np.maximum(mr.hLocal.getArray() - mr.headL.getArray(), 0.0),
+            atol=1.0e-6,
         )
         assert np.allclose(mr.duriKarmor, 1.0 - mr.duriArmorMax * mr.duriF)
     finally:
