@@ -6,7 +6,7 @@ of the tree. Update the relevant file when an invariant changes. Long-form ratio
 `REFACTOR_AUDIT.md`; past bugs and their guards: `docs/dev/FIXED_BUGS.md`; per-change
 history: `docs/dev/CHANGELOG_DEV.md`.
 
-Last reviewed 2026-11-19 on `dev` (after PR #491: the GMD-review fixes, `diffusion: channelQ`, `domain: interp_remap` with barycentric weights). In October 2026 this file
+Last reviewed 2026-11-23 on `dev` (after `c4c1ba3`: stratigraphic sections on global meshes, absolute output folders; goSPL-examples now has a `dev` branch and release-matched tags, see `docs/dev/RELEASE.md`). In October 2026 this file
 was split: it keeps only the rules that apply everywhere, and the subsystem detail
 moved verbatim into the files below.
 
@@ -36,7 +36,7 @@ agent.
 
 | Task | Command |
 |---|---|
-| Quick check (214 of 228 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
+| Quick check (229 of 248 tests, ~25 s) | `pytest tests/ -n 4 -m "not mpi"` |
 | One subsystem | `pytest tests/ -m flow` (markers: `tests/README.md`) |
 | Multi-rank guards (~70 s) | `pytest tests/ -m mpi` |
 | Full suite before a commit | `pytest tests/ -n 4` (CI runs it serially) |
@@ -347,7 +347,7 @@ The paper's scripts and review tests live outside the repository (paper folder, 
 - **Fortran `meshparams` allocatables** must be freed per mesh in `definetin`; see `fortran/AGENTS.md`.
 
 ## CI contract (summary)
-- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref dev`), the only way to run the FULL suite on `dev` in CI: the nightly `tests-slow` runs just the `slow` subset (42 of 228 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
+- `tests-pr.yml`: `pytest tests/` + the MPI lint on PRs and pushes to `master`/`release-candidate`, and on manual dispatch (`gh workflow run tests-pr.yml --ref <branch>`), the only way to run the FULL suite on `dev` or a feature branch in CI (a pull request into `dev` starts NO tests): the nightly `tests-slow` runs just the `slow` subset (50 of 248 tests) and never the benchmarks. **Pushes to `dev` run no CI**; the nightly cron (`tests-slow.yml`, `examples-smoke.yml`) runs from the default branch, which is `dev`. So `dev` is tested nightly, not per push: run the suite locally before pushing.
 - `tests-slow.yml`: slow tier nightly/tags/dispatch, benchmarks on `master`/`release-candidate` pushes. `examples-smoke.yml`: every local goSPL-examples input for 2 steps at np=2 (`scripts/examples_smoke.py`), nightly + dispatch. The Global-examples inputs are notebook products, gitignored in goSPL-examples, so CI cannot run them (a dispatch skips them all, and the script exits 2 when nothing ran): run `python scripts/examples_smoke.py <goSPL-examples> --only Global-examples` locally.
 - On a `v*` tag, `conda-build`, `pypi-publish` and `docker-build` each `needs:` the `_release-gate.yml` tests job, so nothing publishes unless the suite passes.
 - Matrix: `ubuntu-latest + macos-15 × Python 3.11 + 3.12`. macOS is pinned (not `macos-latest`) because the osx-arm64 OpenMPI 4.x / petsc4py 3.21 stack is validated per image.
