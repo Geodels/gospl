@@ -31,6 +31,10 @@ up to solver round-off):
   ``ksp_stale_guess_reset`` when a warm-start guess was worse than zero, cascade stop reasons
   and pass counts, SNES fallbacks and soil sub-stepping).
 
+* ``gravity`` (only with the ``gravity:`` block): the step's gravity-current
+  ``supplied``, ``deposited`` and ``exported`` volumes (m^3); supplied =
+  deposited + exported to the solver tolerance.
+
 A final ``{"end": true, ...}`` record carries the total wall time.
 
 Cost and MPI
@@ -200,6 +204,10 @@ class RunSummary(object):
         evap = getattr(model, "evapLoss", None)
         if evap is not None:
             rec["evap_loss_total"] = float(evap)
+        gb = getattr(model, "gravBudget", None)
+        if getattr(model, "gravOn", False) and gb is not None:
+            rec["gravity"] = {"supplied": float(gb[0]), "deposited": float(gb[1]),
+                              "exported": float(gb[2])}
         with open(self.path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         self.step += 1

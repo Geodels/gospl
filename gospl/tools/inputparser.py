@@ -1729,13 +1729,6 @@ class ReadYaml(object):
             if self.gravSigma <= 0.0 or self.gravCcrit <= 0.0 or self.gravRhoS <= 0.0:
                 raise ValueError("gravity: flood c_crit, sigma and rho_s must be positive")
 
-        if getattr(self, "provOn", False):
-            raise ValueError(
-                "gravity: provenance tracers are not supported yet with gravity "
-                "currents (phase G2 of docs/DESIGN_GRAVITY_CURRENTS.md); remove one "
-                "of the two blocks."
-            )
-
         self.gravOn = True
         return
 

@@ -18,7 +18,8 @@ blob that can be pasted from an HPC system):
   same step (a code change A/B, or np=1 vs np=N output);
 * ``--summary run.jsonl``: anomalies in a run summary written with
   ``gospl --summary`` (non-finite values, solver failures, aborts or ponded
-  regions, stalled cascades, elevation jumps, budget drift).
+  regions, stalled cascades, elevation jumps, budget drift, a gravity-current
+  budget that does not close).
 
 Node ids are INPUT-MESH ids when the mesh can be found (the YAML copied into the
 output directory names it via ``domain: npdata``; pass ``--mesh`` otherwise);
@@ -297,6 +298,12 @@ def inspect_summary(path, jump=0.25):
         if act > 0 and (net_rel > 0.05 or (head.get("closed") and abs(net_rel) > 0.05)):
             issues.append({"t": t, "issue": "volume_imbalance",
                            "detail": {**vol, "net_rel": net_rel}})
+        grav = r.get("gravity")
+        if grav and grav.get("supplied", 0.0) > 0.0:
+            gerr = (grav["supplied"] - grav["deposited"] - grav["exported"]) / grav["supplied"]
+            if abs(gerr) > 1.0e-6:
+                issues.append({"t": t, "issue": "gravity_budget",
+                               "detail": {**grav, "closure": gerr}})
         prev = r
     wall = [r["wall_s"] for r in steps]
     phase_tot = {}

@@ -1,6 +1,6 @@
 # Design: marine gravity currents (opt-in `gravity:` block)
 
-Status: phase G1 in progress on branch `feat/gravity-currents` (2026-11-23).
+Status: phases G1 and G2 done on branch `feat/gravity-currents` (2026-11-23); G3 to do.
 
 ## 1. Purpose and scope
 
@@ -107,8 +107,12 @@ only (optional `mdep` argument, unchanged call when off), and the node fine frac
 the volume-weighted blend of that deposit and the gravity coarse/fine deposits, so the
 fine volume is conserved exactly.
 
-Provenance (phase G2): the classes ride the same operator (one solve per class). Until
-then, `provenance` with `gravity` stops with a clear error at parse time.
+Provenance (phase G2, done): each class supply is the arriving composition (`provFrac`)
+times the gravity supply, shared between the coarse and fine parts (a passive label has
+no grain size). The classes are solved with the same operator as the total, so their
+deposits sum to it to the KSP tolerance, and `_gravProvFraction` blends the cascade
+composition with the per-class gravity deposits, volume-weighted (as for the fine
+fraction).
 
 ## 4. Inputs (YAML)
 
@@ -128,6 +132,8 @@ then, `provenance` with `gravity` stops with a clear error at parse time.
   restart (zero when absent from older outputs).
 - Verbose line per step: supplied, deposited and exported volumes (km3) and the
   closure error.
+- `--summary` record: a `gravity` entry (supplied, deposited, exported, m3) per step;
+  `gospl-inspect --summary` reports a `gravity_budget` issue when it does not close.
 
 ## 6. Tests (phase G1)
 
@@ -145,7 +151,7 @@ then, `provenance` with `gravity` stops with a clear error at parse time.
 
 - **G1 (this branch):** split + routed solve + run-out length + fixed/flood trigger,
   single fraction and dual lithology, `gravDep` output, tests, docs.
-- **G2:** provenance classes in lockstep; budget in the `--summary` JSON.
+- **G2 (done):** provenance classes in lockstep; budget in the `--summary` JSON.
 - **G3:** slope-failure trigger (remobilise sediment above a critical slope), optional
   slope-dependent deposition, catchment-area-dependent `sigma`; example in
   goSPL-examples (delta and slope, regional; one global run).

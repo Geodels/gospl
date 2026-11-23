@@ -94,7 +94,7 @@ class SEAMesh(object):
 
     def _gravRoute(self, supply, runout):
         r"""
-        Route a gravity-current supply down the marine flow network with a
+        Route gravity-current supplies down the marine flow network with a
         run-out length, ``(I - W^T diag(1 - Lambda)) q = s``, deposit
         ``Lambda q`` (``docs/DESIGN_GRAVITY_CURRENTS.md`` §2.1-2.2).
 
@@ -102,19 +102,27 @@ class SEAMesh(object):
         ``_matOcean``; call before it is destroyed). ``Lambda = 1 -
         exp(-sqrt(cell area)/runout)``, set to 1 at terminal sinks (they keep
         what reaches them) and 0 at open outlets (the flux leaves the domain).
-        The operator is a copy of ``dMat1`` scaled column-wise, solved with the
-        shared routing KSP (``_solve_KSP(route=True)``); a ponded region of a
-        failed solve deposits in place.
+        The operator is a copy of ``dMat1`` scaled column-wise, built once and
+        solved for every supply column (the total and, with provenance, each
+        source class: the operator is linear, so the class deposits sum to the
+        total) with the shared routing KSP (``_solve_KSP(route=True)``); a
+        ponded region of a failed solve deposits in place.
 
         Scratch Vecs: overwrites ``self.tmp``, ``self.tmp1`` and ``self.tmpL``
         (all free at this point of ``seaChange``). Collective.
 
-        :arg supply: gravity supply per node (m3 over the step, local array)
+        :arg supply: gravity supply per node (m3 over the step), local array of
+            shape ``(lpoints,)`` or ``(lpoints, k)`` for ``k`` supplies
         :arg runout: run-out length (m)
 
-        :return: deposited volume (m3, local array) and exported volume (m3,
-            local array, non-zero at outlets only)
+        :return: deposited and exported volumes (m3, local arrays of the same
+            shape as ``supply``; export is non-zero at outlets only)
         """
+        single = np.ndim(supply) == 1
+        sup = np.asarray(supply, dtype=np.float64)
+        if single:
+            sup = sup[:, None]
+
         lam = 1.0 - np.exp(-np.sqrt(self.larea) / runout)
         lam[self.is_sink_local] = 1.0
         lam[self.outletIDs] = 0.0
@@ -127,19 +135,22 @@ class SEAMesh(object):
         M.scale(-1.0)
         M.shift(1.0)
 
-        self.tmpL.setArray(supply)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
-        self._solve_KSP(False, M, self.tmp, self.tmp1, route=True)
+        dep = np.zeros_like(sup)
+        exported = np.zeros_like(sup)
+        for k in range(sup.shape[1]):
+            self.tmpL.setArray(sup[:, k])
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self._solve_KSP(False, M, self.tmp, self.tmp1, route=True)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            q = np.maximum(self.tmpL.getArray().copy(), 0.0)
+            dep[:, k] = lam * q
+            exported[self.outletIDs, k] = q[self.outletIDs]
+            pond = self._takeRoutingPond()
+            if pond is not None:
+                dep[:, k] += pond
         M.destroy()
-        self.dm.globalToLocal(self.tmp1, self.tmpL)
-        q = np.maximum(self.tmpL.getArray().copy(), 0.0)
-
-        dep = lam * q
-        exported = np.zeros(self.lpoints, dtype=np.float64)
-        exported[self.outletIDs] = q[self.outletIDs]
-        pond = self._takeRoutingPond()
-        if pond is not None:
-            dep += pond
+        if single:
+            return dep[:, 0], exported[:, 0]
         return dep, exported
 
     def _globalCoastsTree(self, coastXYZ, k_neighbors=1):
@@ -802,6 +813,28 @@ class SEAMesh(object):
             self.depoFineFrac[grav] = (ffc[grav] * casc[grav] + gF[grav]) / tot[grav]
         return
 
+    def _gravProvFraction(self):
+        """
+        Provenance with gravity currents: source composition of the combined
+        marine deposit. ``_marineProvFraction`` has set the composition of the
+        cascade + diffusion deposit; at nodes that also received a gravity
+        deposit, the composition becomes the volume-weighted blend of that
+        deposit and the per-class gravity deposit thicknesses
+        (``self._gravProvThick``), so each class volume is conserved.
+        ``deposeStrat`` then normalises the composition of every depositing
+        node. Rank-local.
+        """
+        casc, gC, gF = self._gravThick
+        gp = self._gravProvThick
+        grav = (gC + gF) > 0.0
+        if gp is None or not grav.any():
+            return
+        tot = casc + gC + gF
+        self.depoProvFrac[grav, :] = (
+            self.depoProvFrac[grav, :] * casc[grav, None] + gp[grav, :]
+        ) / tot[grav, None]
+        return
+
     def _marineFineFraction(self, hl, sedFlux, fineFlux, mdep=None):
         """
         Dual-lithology (3c): set the per-node fine fraction of the marine
@@ -1059,13 +1092,25 @@ class SEAMesh(object):
                 provFlux = vdep[:, None] * comp
             marDep = self._distOcean(vdep, provFlux=provFlux)
         if gravOn:
+            # Column 0: the supply; with provenance, one more column per source
+            # class (the arriving composition provFrac, which a passive label
+            # shares between the coarse and fine parts). Same operator, so the
+            # class deposits sum to the total.
+            comp = self.provFrac if provOn else None
+
+            def _cols(v):
+                if comp is None:
+                    return v[:, None]
+                return np.column_stack([v, comp * v[:, None]])
+
+            coarse = gravSed - gravFine if gravFine is not None else gravSed
+            dC, eC = self._gravRoute(_cols(coarse), self.gravRunout)
             if gravFine is not None:
-                gDepC, gExpC = self._gravRoute(gravSed - gravFine, self.gravRunout)
-                gDepF, gExpF = self._gravRoute(gravFine, self.gravRunoutFine)
+                dF, eF = self._gravRoute(_cols(gravFine), self.gravRunoutFine)
             else:
-                gDepC, gExpC = self._gravRoute(gravSed, self.gravRunout)
-                gDepF = np.zeros(self.lpoints, dtype=np.float64)
-                gExpF = np.zeros(self.lpoints, dtype=np.float64)
+                dF, eF = np.zeros_like(dC), np.zeros_like(eC)
+            gDepC, gExpC, gDepF, gExpF = dC[:, 0], eC[:, 0], dF[:, 0], eF[:, 0]
+            gravProvDep = (dC[:, 1:] + dF[:, 1:]) if comp is not None else None
         self.dMat1.destroy()
 
         # Diffuse downstream
@@ -1101,6 +1146,9 @@ class SEAMesh(object):
             gC = gDepC / self.larea
             gF = gDepF / self.larea
             self._gravThick = (gravCasc, gC, gF)
+            self._gravProvThick = (
+                gravProvDep / self.larea[:, None] if gravProvDep is not None else None
+            )
             self.tmpL.setArray(gravCasc + gC + gF)
             self.dm.localToGlobal(self.tmpL, self.tmp)
             self.gravDep += gC + gF
@@ -1156,6 +1204,8 @@ class SEAMesh(object):
                     self._marineFineFraction(hl, sedFlux, fineFlux)
             if getattr(self, "provOn", False):
                 self._marineProvFraction(sedFlux)
+                if gravOn:
+                    self._gravProvFraction()
             self.deposeStrat()
 
         if MPIrank == 0 and self.verbose:

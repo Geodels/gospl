@@ -732,8 +732,9 @@ Marine gravity currents
 
         .. note::
 
-            Provenance tracers are not yet routed by this pathway: a model with
-            both ``gravity`` and ``provenance`` stops with an error. On coarse
+            With a ``provenance`` block, the source classes travel with the
+            gravity currents, so the gravity deposits record their sources. With
+            ``--summary``, each step's record has a ``gravity`` budget. On coarse
             global meshes, small steep coastal catchments (the most hyperpycnal
             rivers) are merged into larger outlets, so their gravity currents
             are underestimated. Design: ``docs/DESIGN_GRAVITY_CURRENTS.md``.

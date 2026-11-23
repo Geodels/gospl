@@ -2,6 +2,7 @@
 Marine gravity currents (opt-in ``gravity:`` block), docs/DESIGN_GRAVITY_CURRENTS.md.
 
 Guards: parsing and input checks; ``fraction: 0`` bitwise identical to no block;
+provenance classes routed with the gravity pathway (phase G2);
 the routed budget (supplied = deposited + exported); dual-lithology fine
 conservation with the fine/coarse split between the two pathways; the routed
 solve against an explicit cascade of the same deposition law; the flood
@@ -110,20 +111,66 @@ def test_gravity_input_checks(tmp_path, block, msg):
         os.chdir(cwd)
 
 
-def test_gravity_rejects_provenance(tmp_path):
-    """Provenance tracers are not routed by the gravity pathway yet (phase G2):
-    the combination must stop instead of mislabelling deposits."""
+@pytest.mark.slow
+@pytest.mark.parametrize("dual", [False, True])
+def test_gravity_provenance(tmp_path, dual):
+    """Provenance classes ride the gravity pathway (phase G2): two classes from
+    a map, half the load as gravity currents, single fraction and dual
+    lithology. The per-class layer thicknesses partition the layer, the
+    deposited class ratio tracks the eroded one, the gravity class deposits sum
+    to the gravity deposit, and a node that received only a gravity deposit
+    records the gravity composition (``_gravProvFraction``), not the
+    domain-average fallback of ``_marineProvFraction``."""
+    from mpi4py import MPI
     from gospl.model import Model
 
-    yml = _write_case(
-        tmp_path, "prov", gravity=GRAV_BLOCK.format(frac=0.5),
-        extra="provenance:\n    classes: 2\n    uniform: 0\n\n",
-    )
+    src = FIXTURES_DIR / "minimal_prov2.yml"
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip("minimal_prov2.yml / mesh.npz not present")
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    v = np.load(tmp_path / "mesh.npz")["v"]
+    np.savez(tmp_path / "prov_src.npz", rock=(v[:, 0] > v[:, 0].mean()).astype(np.int64))
+    text = re.sub(r"dir: '[^']*'", "dir: 'out'", src.read_text())
+    block = GRAV_BLOCK.format(frac=0.5)
+    if dual:
+        block += ("strata:\n    dual: True\n    coarse: {phi0: 0.49, z0: 3700.}\n"
+                  "    fine: {phi0: 0.63, z0: 1960., k_factor: 1.5}\n"
+                  "    bedrock_coarse_frac: 0.6\n\n")
+    (tmp_path / "prov.yml").write_text(text.replace("output:", block + "output:", 1))
     cwd = os.getcwd()
     os.chdir(tmp_path)
     try:
-        with pytest.raises(ValueError, match="provenance"):
-            Model(yml, verbose=False, showlog=False)
+        m = Model("prov.yml", verbose=False, showlog=False)
+        try:
+            if m.flatModel:
+                pytest.skip("needs the closed sphere fixture")
+            assert m.gravOn and m.provOn and m.stratLith == dual
+            m.runProcesses()
+            top = m.stratStep + 1
+            H, P = m.stratH[:, :top], m.stratP[:, :top, :]
+            assert np.abs(P.sum(axis=2) - H).sum() / max(H.sum(), 1.0) < 1.0e-6
+
+            ero = MPI.COMM_WORLD.allreduce(m._provEroded, op=MPI.SUM)
+            dep = MPI.COMM_WORLD.allreduce(m._provDeposited, op=MPI.SUM)
+            assert ero.sum() > 0 and dep.sum() > 0
+            assert abs(dep[1] / dep.sum() - ero[1] / ero.sum()) < 1.0e-2
+
+            casc, gC, gF = m._gravThick
+            gp = m._gravProvThick
+            g = gC + gF
+            hit = g > 1.0e-6 * g.max()
+            assert hit.any()
+            # separate solves (classes, total) agree to the KSP tolerance
+            np.testing.assert_allclose(gp[hit].sum(axis=1), g[hit], rtol=0.0,
+                                       atol=1.0e-6 * g.max())
+
+            only = hit & (casc <= 0.0) & (m.inIDs == 1)
+            assert only.any(), "no gravity-only node: blend check is vacuous"
+            np.testing.assert_allclose(
+                m.depoProvFrac[only], gp[only] / g[only, None], atol=1.0e-9
+            )
+        finally:
+            m.destroy()
     finally:
         os.chdir(cwd)
 
@@ -273,3 +320,39 @@ def test_gravity_restart_restores_deposit(tmp_path):
             m.destroy()
     finally:
         os.chdir(cwd)
+
+
+@pytest.mark.slow
+def test_gravity_run_summary(tmp_path):
+    """The ``--summary`` record of every step carries the gravity budget, which
+    closes, and ``gospl-inspect`` reports no gravity issue; a tampered record
+    is flagged."""
+    import json
+    from gospl.analyse.runinspect import inspect_summary
+    from gospl.model import Model
+
+    yml = _write_case(tmp_path, "summ", GRAV_BLOCK.format(frac=0.5))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model(yml, verbose=False, showlog=False, summary="run.jsonl")
+        try:
+            m.runProcesses()
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+    recs = [json.loads(l) for l in open(tmp_path / "run.jsonl") if l.strip()]
+    steps = [r for r in recs if "step" in r and "elev" in r]
+    assert steps and all("gravity" in r for r in steps)
+    g = steps[-1]["gravity"]
+    assert g["supplied"] > 0.0
+    assert abs(g["supplied"] - g["deposited"] - g["exported"]) / g["supplied"] < 1e-6
+    rep = inspect_summary(str(tmp_path / "run.jsonl"))
+    assert not [i for i in rep["issues"] if i["issue"] == "gravity_budget"]
+
+    steps[-1]["gravity"]["deposited"] *= 0.9
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    rep = inspect_summary(str(bad))
+    assert [i for i in rep["issues"] if i["issue"] == "gravity_budget"]
