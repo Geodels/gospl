@@ -671,3 +671,48 @@ def test_gravity_erosion_length_below_cell_is_capped(tmp_path):
     sup, dep, exp, ero = out["gravBudget"]
     assert ero > 0.0, "no erosion: the erosion solve failed"
     assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-6
+
+
+ERO_ANY_BLOCK = (
+    "gravity:\n"
+    "    runout: 3.0e6\n"
+    "    runout_fine: 1.2e7\n"
+    "    fraction: 0.5\n"
+    "    erosion_length: 2.0e6\n"
+    "    erosion_slope: 0.002\n"
+    "    max_erosion: 2.0\n"
+    "    deposit_spread: 4.e5\n\n"
+)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("variant", ["dual", "single", "nostrat"])
+def test_gravity_erosion_any_lithology(tmp_path, variant):
+    """Gravity currents with slope erosion in the three sediment set-ups:
+    dual lithology, a single lithology with stratigraphy (the eroded
+    composition comes from erodeStrat with no fine part), and no stratigraphy
+    at all (the eroded bulk volume is routed directly). In each, erosion
+    acts, the budget (supplied + eroded = deposited + exported) closes, the
+    elevation stays finite and, with stratigraphy, no layer thickness is
+    negative."""
+    from mpi4py import MPI
+
+    yml = _write_case(tmp_path, variant, ERO_ANY_BLOCK)
+    text = (tmp_path / yml).read_text()
+    if variant != "dual":
+        text = re.sub(r"strata:\n(?:    .*\n)+", "", text)
+    if variant == "nostrat":
+        text = re.sub(r"    strat: .*\n", "", text)
+    (tmp_path / yml).write_text(text)
+    out = _run(tmp_path, yml, attrs=("gravBudget", "gravDep", "stratNb", "stratLith", "stratH"))
+    if out["flatModel"]:
+        pytest.skip("needs the closed sphere fixture")
+    assert out["stratLith"] == (variant == "dual")
+    assert (out["stratNb"] > 0) == (variant != "nostrat")
+    sup, dep, exp, ero = out["gravBudget"]
+    assert sup > 0.0 and ero > 0.0, "erosion not exercised"
+    assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-6
+    assert np.isfinite(out["elev"]).all()
+    assert MPI.COMM_WORLD.allreduce(float(out["gravDep"].min()), op=MPI.MIN) < 0.0
+    if out["stratNb"] > 0:
+        assert (out["stratH"] >= -1.0e-9).all() and np.isfinite(out["stratH"]).all()
