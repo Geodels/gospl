@@ -328,6 +328,9 @@ class SEAMesh(object):
             for c in range(out.shape[1]):
                 t = self._gravSync(out[:, c]) / a
                 out[:, c] = out[:, c] + (w * (t[nb] - t[:, None])).sum(axis=1)
+        # ghost rows were computed on truncated neighbourhoods: take the owners'
+        for c in range(out.shape[1]):
+            out[:, c] = self._gravSync(out[:, c])
         return out if two else out[:, 0]
 
     def _gravSlope(self, hl):
@@ -335,7 +338,9 @@ class SEAMesh(object):
         ``cellslope`` averaged ``slope_smooth`` times (``_gravSmooth``), so the
         deposition and erosion follow the slope at the scale of a few cells,
         not the cell-to-cell noise. Collective when smoothing."""
-        return self._gravSmooth(cellslope(self.lpoints, hl), self.gravSlopeSmooth)
+        # synced first: a ghost's cellslope uses its truncated neighbourhood
+        return self._gravSmooth(self._gravSync(cellslope(self.lpoints, hl)),
+                                self.gravSlopeSmooth)
 
     def _gravSync(self, arr):
         """Owner -> ghost copy of a local array (collective; scratch
@@ -426,7 +431,22 @@ class SEAMesh(object):
         routing KSP (``_solve_KSP(route=True)``); returns the local flux and the
         volume ponded by a failed solve (or None). Scratch ``self.tmp``,
         ``self.tmp1``, ``self.tmpL``. Collective.
+
+        Two guards keep the gravity solves from changing the river routing:
+        a supply that is zero on every rank returns ``q = 0`` without a solve
+        (the routing solver took a zero right-hand side for a failed solve and
+        ran its exact rescue), and the sticky exact-rescue switch of the flow
+        solver (``_ida_exact``) is restored after the solve. Before these,
+        ``fraction: 0`` (or a step with no supply) turned the switch on and
+        every later river/sediment routing solve of the run used the exact
+        path: ulp-level changes that broke bitwise identity on Linux.
         """
+        own = self.inIDs == 1
+        cmax = MPI.COMM_WORLD.allreduce(
+            float(np.abs(col[own]).max()) if own.any() else 0.0, op=MPI.MAX)
+        if cmax == 0.0:
+            return np.zeros(self.lpoints, dtype=np.float64), None
+        exact = getattr(self, "_ida_exact", None)
         self.tmpL.setArray(factor)
         self.dm.localToGlobal(self.tmpL, self.tmp1)
         M = self._gW.copy()
@@ -437,6 +457,8 @@ class SEAMesh(object):
         self.dm.localToGlobal(self.tmpL, self.tmp)
         self._solve_KSP(False, M, self.tmp, self.tmp1, route=True)
         M.destroy()
+        if exact is not None:
+            self._ida_exact = exact
         self.dm.globalToLocal(self.tmp1, self.tmpL)
         q = np.maximum(self.tmpL.getArray().copy(), 0.0)
         return q, self._takeRoutingPond()

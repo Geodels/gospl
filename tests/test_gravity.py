@@ -789,3 +789,27 @@ def test_gravity_slope_failure(tmp_path):
     finally:
         sp.SEAMesh._gravFailure = orig
         os.chdir(cwd)
+
+
+def test_gravity_does_not_switch_river_routing(tmp_path):
+    """Gravity solves must not change the river routing. With ``fraction: 0``
+    every gravity solve has a zero right-hand side, which the shared routing
+    solver took for a failed solve: its exact rescue ran and the sticky switch
+    (``_ida_exact``) stayed on for the rest of the run, so every river and
+    sediment routing solve used the exact path (ulp-level differences that
+    broke bitwise identity with no gravity block on Linux)."""
+    from gospl.model import Model
+
+    yml = _write_case(tmp_path, "nosw", GRAV_BLOCK.format(frac=0.0))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model(yml, verbose=False, showlog=False)
+        try:
+            for _ in range(2):
+                m.runProcesses()
+            assert m._ida_exact is False, "a gravity solve switched on the exact routing rescue"
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
