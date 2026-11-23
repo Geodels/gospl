@@ -24,3 +24,17 @@ The metadata version is driven by `meson.build` line 4 (`version: '2026.7.14'` a
 `docs/_static/version_switch.json` (stable + a new entry). `docs/conf.py` is the one
 that gets forgotten (the 2026.6.24 bump missed it, so Read the Docs rendered a stale
 version for `v2026.6.30`).
+
+## goSPL-examples follows the release tags
+
+goSPL-examples mirrors goSPL's branches (since 2026-11-23): its `dev` branch targets
+goSPL `dev` (its `environment.yml` builds goSPL from the GitHub `dev` branch, and the
+nightly `examples-smoke` workflow checks out that branch), `main` holds the examples of
+the latest release (`environment.yml` pins the conda package), and each goSPL release
+`v<v>` has a goSPL-examples tag with the same name, so users check out the tag matching
+their installed goSPL. At a release, after the conda package is published: merge the
+examples `dev` into `main`, restore the conda pin (`gospl=<v>`), run the examples smoke
+on a fresh environment, push `main`, and tag it `v<v>` (step 7 of the `release` skill).
+Pushing any tag to goSPL-examples builds and publishes its Docker image (a non-rc tag
+moves `latest`), so old tags are never re-pushed or renamed; the two oldest
+(`2026.06.08`, `2026.6.13`) keep their names without the `v` prefix.
