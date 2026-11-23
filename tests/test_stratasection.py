@@ -300,3 +300,65 @@ def test_stratasection_cli_figsize(tmp_path):
     assert abs(img.shape[1] - 1600) <= 2 and abs(img.shape[0] - 600) <= 2
     import os
     assert os.path.exists(out)
+
+
+def _synthetic_sphere(tmp_path, n=2000, L=4):
+    """A uniform layered pile on a spherical (Earth-radius) mesh, in goSPL's
+    output layout: surface at -100 m, three 10 m layers above the bedrock."""
+    h5py = pytest.importorskip("h5py")
+    spatial = pytest.importorskip("scipy.spatial")
+    i = np.arange(n) + 0.5
+    phi = np.arccos(1.0 - 2.0 * i / n)
+    theta = np.pi * (1.0 + 5.0 ** 0.5) * i
+    R = 6.371e6
+    v = R * np.column_stack([np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi),
+                             np.cos(phi)])
+    cells = spatial.ConvexHull(v).simplices.astype(np.int64)
+    elev = np.full(n, -100.0)
+    stratH = np.zeros((n, L))
+    stratH[:, 0] = 1.0e6
+    stratH[:, 1:] = 10.0
+    stratZ = np.zeros((n, L))
+    d = tmp_path / "h5"
+    d.mkdir()
+    np.savez(str(tmp_path / "s.npz"), v=v, c=cells)
+    with h5py.File(str(d / "topology.p0.h5"), "w") as f:
+        f["coords"] = v
+        f["cells"] = cells + 1
+    with h5py.File(str(d / "stratal.0.p0.h5"), "w") as f:
+        f["stratZ"] = stratZ
+        f["stratH"] = stratH
+        f["phiS"] = np.full((n, L), 0.49)
+        f["stratHf"] = 0.5 * stratH
+        f["phiF"] = np.full((n, L), 0.63)
+    with h5py.File(str(d / "gospl.0.p0.h5"), "w") as f:
+        f["elev"] = elev[:, None]
+    return str(d), str(tmp_path / "s.npz")
+
+
+def test_stratasection_global_mesh(tmp_path):
+    """
+    Sections on a spherical mesh. In longitude/latitude the triangles that
+    cross the antimeridian or surround a pole overlap the others, and
+    matplotlib rejected the whole triangulation ("Triangulation is invalid"):
+    no section could be drawn on a global run. They are now dropped (and a
+    transect keeps only nearby triangles); the interfaces of a uniform pile
+    are recovered along transects away from and near the antimeridian, and a
+    horizontal slice renders.
+    """
+    pytest.importorskip("matplotlib")
+    import matplotlib
+    matplotlib.use("Agg")
+    from gospl.analyse import stratasection as ss
+
+    h5dir, mesh = _synthetic_sphere(tmp_path)
+    data = ss.load_strata(h5dir, mesh, step=0)
+    assert data["geographic"]
+    for path in ([(-40.0, -20.0), (40.0, 20.0)], [(150.0, 0.0), (175.0, 10.0)]):
+        xs, ys, _ = ss._transect(data, path=path, npts=60)
+        iface = ss._interp_layers(data, data["interfaces"], xs, ys)
+        assert np.isfinite(iface).all()
+        expect = -100.0 - 10.0 * np.arange(data["nlayers"], -1, -1)
+        assert np.allclose(iface, expect[None, :], atol=1e-6)
+        ss.cross_section(data, path=path, color_by="lithology")
+    ss.horizontal_slice(data, -115.0, color_by="lithology")

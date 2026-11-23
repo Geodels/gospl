@@ -165,10 +165,12 @@ class WriteMesh(object):
         """
 
         # Get output directory
+        # os.path.join keeps an absolute `dir` as given (cwd + "/" + dir
+        # did not: "/data/run" became "<cwd>/data/run").
         if self.outputDir is not None:
-            self.outputDir = os.getcwd() + "/" + self.outputDir
+            self.outputDir = os.path.join(os.getcwd(), self.outputDir)
         else:
-            self.outputDir = os.getcwd() + "/output"
+            self.outputDir = os.path.join(os.getcwd(), "output")
 
         if self.rStep == 0:
             if self.makedir:

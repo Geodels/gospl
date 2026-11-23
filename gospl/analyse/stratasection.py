@@ -333,11 +333,38 @@ def _transect(data, kind="x", at=None, path=None, npts=None):
     return xs, ys, d
 
 
+def _triangulation(data, xs=None, ys=None, pad=5.0):
+    """
+    Matplotlib triangulation of the mesh in the plot coordinates. On a
+    geographic (spherical) mesh the coordinates are longitude/latitude, where
+    the triangles that cross the antimeridian or surround a pole span more
+    than 180 degrees of longitude and overlap the others: matplotlib then
+    rejects the whole triangulation ("Triangulation is invalid"). Those
+    triangles are dropped, and with transect points ``xs``/``ys`` only the
+    triangles within ``pad`` degrees of the transect are kept (faster, and
+    clear of the poles). Transects crossing the antimeridian are not
+    supported.
+    """
+    import matplotlib.tri as mtri
+
+    x, y, cells = data["x"], data["y"], data["cells"]
+    if data.get("geographic"):
+        cx, cy = x[cells], y[cells]
+        keep = (cx.max(axis=1) - cx.min(axis=1)) < 180.0
+        if xs is not None:
+            keep &= ((cx.max(axis=1) >= np.nanmin(xs) - pad)
+                     & (cx.min(axis=1) <= np.nanmax(xs) + pad)
+                     & (cy.max(axis=1) >= np.nanmin(ys) - pad)
+                     & (cy.min(axis=1) <= np.nanmax(ys) + pad))
+        cells = cells[keep]
+    return mtri.Triangulation(x, y, cells)
+
+
 def _interp_layers(data, arr, xs, ys):
     """Interpolate a per-(node, layer) array onto transect points -> (npts, L)."""
     import matplotlib.tri as mtri
 
-    tri = mtri.Triangulation(data["x"], data["y"], data["cells"])
+    tri = _triangulation(data, xs, ys)
     out = np.full((xs.size, arr.shape[1]), np.nan)
     for k in range(arr.shape[1]):
         out[:, k] = mtri.LinearTriInterpolator(tri, arr[:, k])(xs, ys)
@@ -494,7 +521,7 @@ def horizontal_slice(data, z, color_by="age", cmap=None, ax=None,
 
     if ax is None:
         _, ax = plt.subplots(figsize=figsize or (7, 5))
-    tri = mtri.Triangulation(data["x"], data["y"], data["cells"])
+    tri = _triangulation(data)
     tp = ax.tripcolor(tri, np.ma.masked_invalid(val), cmap=cmap or dcmap,
                       shading="gouraud")
     ax.figure.colorbar(tp, ax=ax, label=label, shrink=0.8)
