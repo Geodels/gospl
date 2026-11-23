@@ -55,6 +55,9 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Geodels/goSPL-examples
+          # goSPL dev is tested against the examples' dev branch (main holds the
+          # examples of the latest release, tags match goSPL release tags).
+          ref: dev
           path: goSPL-examples
 
       - name: Pin the x86_64 microarchitecture level (Linux)
