@@ -231,9 +231,7 @@ def test_gravity_route_matches_explicit_cascade(tmp_path):
             supply[sea[:: max(1, len(sea) // 20)]] = 1.0e9
             dep, exported = m._gravRoute(supply, m.gravRunout)
 
-            lam = 1.0 - np.exp(-np.sqrt(m.larea) / m.gravRunout)
-            lam[m.is_sink_local] = 1.0
-            lam[m.outletIDs] = 0.0
+            lam = m._gravLambda(m.gravRunout)
             ref = np.zeros(m.lpoints)
             cur = supply.copy()
             for _ in range(10000):
@@ -356,3 +354,41 @@ def test_gravity_run_summary(tmp_path):
     bad.write_text("".join(json.dumps(r) + "\n" for r in recs))
     rep = inspect_summary(str(bad))
     assert [i for i in rep["issues"] if i["issue"] == "gravity_budget"]
+
+
+@pytest.mark.slow
+def test_gravity_accommodation_cap(tmp_path):
+    """The accommodation cap of ``_gravRoute``: when each node has room for a
+    tenth of what it received uncapped, no non-sink node exceeds its room, the
+    cap is active, the budget still closes (supplied = deposited + exported)
+    and the capped volume moved on downstream instead of vanishing."""
+    from gospl.model import Model
+
+    yml = _write_case(tmp_path, "cap", GRAV_BLOCK.format(frac=0.5))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model(yml, verbose=False, showlog=False)
+        try:
+            m.runProcesses()
+            m.sinkIDs = m.lFill <= m.sealevel
+            m._matOcean()
+            supply = np.zeros(m.lpoints)
+            sea = np.where(m.sinkIDs & (m.inIDs == 1))[0]
+            supply[sea[:: max(1, len(sea) // 20)]] = 1.0e9
+            free, _ = m._gravRoute(supply, m.gravRunout)
+            room = 0.1 * free
+            dep, exp = m._gravRoute(supply, m.gravRunout, room=room)
+            m.dMat1.destroy()
+            owned = m.inIDs == 1
+            ok = owned & ~m.is_sink_local
+            assert (dep[ok] <= room[ok] * (1.0 + 1.0e-6) + 1.0e-3).all()
+            assert (free[ok] > room[ok] + 1.0).any(), "cap never active"
+            sup = supply[owned].sum()
+            assert abs(sup - dep[owned].sum() - exp[owned].sum()) / sup < 1.0e-6
+            # the capped volume went elsewhere (sinks, other nodes or export)
+            assert (dep[ok] < free[ok] - 1.0).any()
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)

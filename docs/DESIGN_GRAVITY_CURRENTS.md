@@ -1,6 +1,7 @@
 # Design: marine gravity currents (opt-in `gravity:` block)
 
-Status: phases G1 and G2 done on branch `feat/gravity-currents` (2026-11-23); G3 to do.
+Status: phases G1 and G2 done, bypass and accommodation cap added after the first
+regional test (2026-11-23); G3 to do.
 
 ## 1. Purpose and scope
 
@@ -60,6 +61,45 @@ break).
 With dual lithology the coarse and fine fractions each have their own run-out length
 (`runout`, `runout_fine`; coarse shorter), so a single flow builds a coarse proximal
 lobe and a finer distal one. Each fraction is one solve with the same `W^T`.
+
+### 2.2b Bypass and accommodation (added after the first regional test)
+
+With the run-out law alone, flows started at the river mouths deposited a fixed share per
+cell from the coast, so most of the load dropped on the inner shelf, starved the
+clinoform front (the shelf break retreated ~15 km on the `dual_lithology` margin) and
+built mounds up to sea level; and the deposit could only decrease away from the source,
+so no lobe could form at the base of the slope. Two changes, both setting `Lambda = 0`
+(so the solve stays linear and the budget exact):
+
+- **depth bypass** (`bypass_depth` = `d_b`, m below sea level, default 50; 0 = off):
+  `Lambda` is multiplied by `clip((d - d_b)/d_b, 0, 1)` (water depth `d`): no
+  deposition on the shelf above the wave base, full deposition from `2 d_b`.
+  Resolution-independent.
+- **slope bypass** (`bypass_slope` = `S_b`, off by default): `Lambda` is multiplied by
+  `1/(1 + (S/S_b)^4)` (gradient magnitude `cellslope`, synced owner -> ghost; one half
+  at `S_b`), so flows cross the foresets and deposit at their toe. Mesh-dependent: for
+  regional runs.
+
+The bypasses were first hard switches (`Lambda = 0` beyond the threshold). On a rough
+foreset the gradient is noisy from cell to cell, so neighbouring cells alternated
+between deposit and bypass and the deposits flattened their own cells: a speckled,
+lumpy deposit (seafloor roughness, RMS departure from a 2 km smoothed surface over the
+slope and basin, 6.4 m against 4.1 m without gravity currents; gravity deposit 9.6 m).
+The smooth tapers give 3.6 and 3.7 m with the same coarse toe deposit.
+
+And an **accommodation cap**: a gravity deposit cannot raise a cell above
+`sealevel - bypass_depth` (room = that height minus the cascade deposit, times the cell
+area; the fine fraction gets what the coarse one leaves). It is applied by iterating the
+total solve, setting `Lambda = room / q` wherever a node overfills, until none does
+(the provenance classes are then solved with the final `Lambda`). Terminal sinks are
+exempt (mass must stay in the domain).
+
+Regional test (`dual_lithology`, 250 kyr, run-out 5/20 km): with `fraction: 0.3` and
+both bypasses, a coarse body (coarse fraction ~0.6) forms at the foreset toe and a 5 to
+40 m deposit covers the basin floor; with the flood trigger (`sigma: 2.0`) the wedge is
+unchanged and a coarse bottomset (~0.58) forms at the toe. Depth bypass alone gives only
+a thin fine apron. With the default flood parameters (`sigma: 1.2`) the diverted share is
+0.005 to 0.2 % on this margin.
 
 ### 2.3 Trigger: which part of the river load becomes a gravity current
 

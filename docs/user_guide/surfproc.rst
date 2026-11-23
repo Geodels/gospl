@@ -695,6 +695,8 @@ Marine gravity currents
             gravity:
                 runout: 5.e4          # run-out length (m), coarse or single fraction
                 runout_fine: 2.e5     # run-out length of the fine fraction (m), dual lithology
+                bypass_depth: 50.     # no deposition shallower than this (m below sea level)
+                bypass_slope: 0.01    # no deposition on steeper gradients (optional)
                 # fraction: 0.2       # fixed fraction of the river load; if absent, flood trigger:
                 flood:
                     c_crit: 40.       # hyperpycnal threshold concentration (kg/m3)
@@ -715,10 +717,22 @@ Marine gravity currents
         b. ``runout_fine`` (m, default ``4 x runout``): the run-out length of the
            fine fraction under dual lithology; coarse sediment settles nearer the
            river mouth than fine sediment.
-        c. ``fraction`` (0 to 1, optional): a fixed fraction of the river load
+        c. ``bypass_depth`` (m below sea level, default ``50``; ``0`` turns it
+           off): gravity currents keep their load in water shallower than this
+           (wave base), so they cross the shelf; deposition then increases
+           gradually to its full rate at twice this depth. A gravity deposit can never
+           build a cell above this depth: what does not fit moves on.
+        d. ``bypass_slope`` (optional, off by default): deposition decreases
+           smoothly on gradients steeper than this (to one half at this value
+           and about 6 % at twice it), so flows cross the foresets and deposit
+           at their toe and on the basin floor, where coarse bottomsets and lobes
+           form. Gradients depend on the mesh resolution (a coarse mesh smears
+           the slope), so choose it from the gradients of your own mesh; it is
+           meant for regional runs.
+        e. ``fraction`` (0 to 1, optional): a fixed fraction of the river load
            entering the gravity pathway everywhere, useful to calibrate a
            regional case.
-        d. ``flood`` (used when ``fraction`` is absent): the fraction carried by
+        f. ``flood`` (used when ``fraction`` is absent): the fraction carried by
            floods whose concentration exceeds ``c_crit``, computed at each river
            mouth from its mean discharge and load, assuming log-normal daily
            discharges (``sigma``) and a rating curve ``Qs ~ Q^rating_exp``. The

@@ -33,7 +33,8 @@ up to solver round-off):
 
 * ``gravity`` (only with the ``gravity:`` block): the step's gravity-current
   ``supplied``, ``deposited`` and ``exported`` volumes (m^3); supplied =
-  deposited + exported to the solver tolerance.
+  deposited + exported to the solver tolerance (~1e-6 relative on long bypass
+  paths; ``gospl-inspect`` flags more than 1e-5).
 
 A final ``{"end": true, ...}`` record carries the total wall time.
 

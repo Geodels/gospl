@@ -26,6 +26,7 @@ from gospl.tools.constants import (
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import mfdrcvrs
     from gospl._fortran import epsfill
+    from gospl._fortran import cellslope
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIcomm = petsc4py.PETSc.COMM_WORLD
@@ -92,28 +93,76 @@ class SEAMesh(object):
         frac[ok] = ndtr((mu + b * sig * sig - lnX0) / sig)
         return frac
 
-    def _gravRoute(self, supply, runout):
+    def _gravLambda(self, runout):
+        r"""
+        Deposited fraction of the gravity flux at each node,
+        ``Lambda = 1 - exp(-sqrt(cell area)/runout)``, tapered where the flow
+        bypasses: by ``clip((d - d_b)/d_b, 0, 1)`` with ``d`` the water depth and
+        ``d_b = bypass_depth`` (wave base: no deposition on the shelf, full
+        deposition from twice that depth) and, when set, by
+        ``1/(1 + (S/S_b)^4)`` with ``S`` the gradient and ``S_b = bypass_slope``
+        (one half at ``S_b``: the flow crosses the foresets and deposits at
+        their toe). Smooth tapers, not switches, so that noisy gradients do not
+        make neighbouring cells alternate between deposit and bypass. Terminal sinks keep what reaches them (1) and open outlets
+        export it (0). Synced owner -> ghost (the gradient of a ghost node,
+        computed on its truncated neighbourhood, is not the owner's).
+
+        Scratch Vecs: ``self.tmpL``, ``self.tmp1``. Collective.
+
+        :arg runout: run-out length (m)
+
+        :return: local array of deposited fractions in [0, 1]
+        """
+        lam = 1.0 - np.exp(-np.sqrt(self.larea) / runout)
+        hl = self.hLocal.getArray().copy()
+        # Smooth tapers, not on/off switches: a hard threshold on a gradient
+        # that is noisy from cell to cell (or on the depth) made neighbouring
+        # cells alternate between deposit and bypass, and the deposits then
+        # flattened their own cells, giving a speckled, lumpy deposit.
+        if self.gravBypassDepth > 0.0:
+            depth = self.sealevel - hl
+            lam *= np.clip((depth - self.gravBypassDepth) / self.gravBypassDepth, 0.0, 1.0)
+        if self.gravBypassSlope is not None:
+            ratio = cellslope(self.lpoints, hl) / self.gravBypassSlope
+            lam *= 1.0 / (1.0 + ratio ** 4)
+        lam[self.is_sink_local] = 1.0
+        lam[self.outletIDs] = 0.0
+        self.tmpL.setArray(lam)
+        self.dm.localToGlobal(self.tmpL, self.tmp1)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return self.tmpL.getArray().copy()
+
+    def _gravRoute(self, supply, runout, room=None):
         r"""
         Route gravity-current supplies down the marine flow network with a
         run-out length, ``(I - W^T diag(1 - Lambda)) q = s``, deposit
         ``Lambda q`` (``docs/DESIGN_GRAVITY_CURRENTS.md`` §2.1-2.2).
 
         ``W^T`` is the marine routing matrix ``self.dMat1`` (built by
-        ``_matOcean``; call before it is destroyed). ``Lambda = 1 -
-        exp(-sqrt(cell area)/runout)``, set to 1 at terminal sinks (they keep
-        what reaches them) and 0 at open outlets (the flux leaves the domain).
-        The operator is a copy of ``dMat1`` scaled column-wise, built once and
-        solved for every supply column (the total and, with provenance, each
-        source class: the operator is linear, so the class deposits sum to the
-        total) with the shared routing KSP (``_solve_KSP(route=True)``); a
-        ponded region of a failed solve deposits in place.
+        ``_matOcean``; call before it is destroyed). ``Lambda`` comes from
+        ``_gravLambda`` (run-out length, bypass on the shelf and, optionally, on
+        steep slopes, 1 at terminal sinks, 0 at open outlets).
+
+        Accommodation: with ``room`` (m3 per node), a node cannot receive more
+        than its room. The first column (the total supply) is solved, every
+        node that overfills gets ``Lambda = room / q`` (it deposits exactly its
+        room and passes the rest on) and the solve is repeated until nothing
+        overfills (``Lambda`` only decreases, so a few passes suffice; at most
+        20). Terminal sinks keep everything whatever their room (mass must stay
+        in the domain). The remaining columns (provenance classes) are then
+        solved with the final ``Lambda``, so they sum to the total.
+
+        The operator is a copy of ``dMat1`` scaled column-wise and solved with
+        the shared routing KSP (``_solve_KSP(route=True)``); a ponded region of
+        a failed solve deposits in place.
 
         Scratch Vecs: overwrites ``self.tmp``, ``self.tmp1`` and ``self.tmpL``
         (all free at this point of ``seaChange``). Collective.
 
         :arg supply: gravity supply per node (m3 over the step), local array of
-            shape ``(lpoints,)`` or ``(lpoints, k)`` for ``k`` supplies
+            shape ``(lpoints,)`` or ``(lpoints, k)`` (column 0 = the total)
         :arg runout: run-out length (m)
+        :arg room: accommodation per node (m3, local array) or None
 
         :return: deposited and exported volumes (m3, local arrays of the same
             shape as ``supply``; export is non-zero at outlets only)
@@ -122,33 +171,52 @@ class SEAMesh(object):
         sup = np.asarray(supply, dtype=np.float64)
         if single:
             sup = sup[:, None]
+        lam = self._gravLambda(runout)
+        owned = self.inIDs == 1
 
-        lam = 1.0 - np.exp(-np.sqrt(self.larea) / runout)
-        lam[self.is_sink_local] = 1.0
-        lam[self.outletIDs] = 0.0
+        def _solve(lam, col):
+            """One routed solve; returns (q, pond) for supply column `col`."""
+            self.tmpL.setArray(1.0 - lam)
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            M = self.dMat1.copy()
+            M.diagonalScale(R=self.tmp1)
+            M.scale(-1.0)
+            M.shift(1.0)
+            self.tmpL.setArray(col)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self._solve_KSP(False, M, self.tmp, self.tmp1, route=True)
+            M.destroy()
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            q = np.maximum(self.tmpL.getArray().copy(), 0.0)
+            return q, self._takeRoutingPond()
 
-        # M = I - W^T diag(1 - Lambda): scale the columns of a copy of W^T.
-        self.tmpL.setArray(1.0 - lam)
-        self.dm.localToGlobal(self.tmpL, self.tmp1)
-        M = self.dMat1.copy()
-        M.diagonalScale(R=self.tmp1)
-        M.scale(-1.0)
-        M.shift(1.0)
+        q, pond = _solve(lam, sup[:, 0])
+        if room is not None:
+            cap = np.maximum(room, 0.0)
+            capped = ~self.is_sink_local
+            for _ in range(20):
+                over = capped & (lam * q > cap * (1.0 + 1.0e-9) + 1.0e-9) & (q > 0.0)
+                more = MPI.COMM_WORLD.allreduce(bool((over & owned).any()), op=MPI.LOR)
+                if not more:
+                    break
+                lam = lam.copy()
+                lam[over] = cap[over] / q[over]
+                # sync owner -> ghost so every rank scales the same columns
+                self.tmpL.setArray(lam)
+                self.dm.localToGlobal(self.tmpL, self.tmp1)
+                self.dm.globalToLocal(self.tmp1, self.tmpL)
+                lam = self.tmpL.getArray().copy()
+                q, pond = _solve(lam, sup[:, 0])
 
         dep = np.zeros_like(sup)
         exported = np.zeros_like(sup)
         for k in range(sup.shape[1]):
-            self.tmpL.setArray(sup[:, k])
-            self.dm.localToGlobal(self.tmpL, self.tmp)
-            self._solve_KSP(False, M, self.tmp, self.tmp1, route=True)
-            self.dm.globalToLocal(self.tmp1, self.tmpL)
-            q = np.maximum(self.tmpL.getArray().copy(), 0.0)
+            if k > 0:
+                q, pond = _solve(lam, sup[:, k])
             dep[:, k] = lam * q
             exported[self.outletIDs, k] = q[self.outletIDs]
-            pond = self._takeRoutingPond()
             if pond is not None:
                 dep[:, k] += pond
-        M.destroy()
         if single:
             return dep[:, 0], exported[:, 0]
         return dep, exported
@@ -1103,10 +1171,19 @@ class SEAMesh(object):
                     return v[:, None]
                 return np.column_stack([v, comp * v[:, None]])
 
+            # Accommodation: a gravity deposit cannot build a cell above the
+            # bypass depth (the fine fraction gets what the coarse one leaves).
+            room = None
+            if self.gravBypassDepth > 0.0:
+                room = np.maximum(
+                    (self.sealevel - self.gravBypassDepth - hl) * self.larea - marDep,
+                    0.0,
+                )
             coarse = gravSed - gravFine if gravFine is not None else gravSed
-            dC, eC = self._gravRoute(_cols(coarse), self.gravRunout)
+            dC, eC = self._gravRoute(_cols(coarse), self.gravRunout, room=room)
             if gravFine is not None:
-                dF, eF = self._gravRoute(_cols(gravFine), self.gravRunoutFine)
+                roomF = None if room is None else np.maximum(room - dC[:, 0], 0.0)
+                dF, eF = self._gravRoute(_cols(gravFine), self.gravRunoutFine, room=roomF)
             else:
                 dF, eF = np.zeros_like(dC), np.zeros_like(eC)
             gDepC, gExpC, gDepF, gExpF = dC[:, 0], eC[:, 0], dF[:, 0], eF[:, 0]

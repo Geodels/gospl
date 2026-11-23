@@ -1696,7 +1696,9 @@ class ReadYaml(object):
         Sets ``self.gravOn`` (master opt-in, False when the block is absent so
         every gravity path is gated out), the run-out lengths ``gravRunout``
         (coarse or single fraction, m) and ``gravRunoutFine`` (fine fraction
-        under dual lithology, m), and the trigger: a fixed fraction
+        under dual lithology, m), the bypass conditions ``gravBypassDepth`` (m
+        below sea level, default 50) and ``gravBypassSlope`` (off by default),
+        and the trigger: a fixed fraction
         ``gravFraction`` of the river load, or (when ``fraction`` is absent) the
         flood-fraction parameters ``gravCcrit`` (kg/m3), ``gravRating`` (b > 1),
         ``gravSigma`` (log-std of daily discharge) and ``gravRhoS`` (kg/m3).
@@ -1712,6 +1714,17 @@ class ReadYaml(object):
         self.gravRunoutFine = float(gravDict.get("runout_fine", 4.0 * self.gravRunout))
         if self.gravRunout <= 0.0 or self.gravRunoutFine <= 0.0:
             raise ValueError("gravity: runout and runout_fine must be positive (m)")
+
+        # Bypass: no deposition shallower than bypass_depth (m below sea level,
+        # e.g. storm wave base; 0 = off) or on slopes steeper than bypass_slope
+        # (dimensionless; None = off, slopes depend on the mesh resolution).
+        self.gravBypassDepth = float(gravDict.get("bypass_depth", 50.0))
+        bs = gravDict.get("bypass_slope")
+        self.gravBypassSlope = None if bs is None else float(bs)
+        if self.gravBypassDepth < 0.0:
+            raise ValueError("gravity: bypass_depth must be >= 0 (m below sea level)")
+        if self.gravBypassSlope is not None and self.gravBypassSlope <= 0.0:
+            raise ValueError("gravity: bypass_slope must be positive")
 
         frac = gravDict.get("fraction")
         self.gravFraction = None if frac is None else float(frac)

@@ -301,7 +301,9 @@ def inspect_summary(path, jump=0.25):
         grav = r.get("gravity")
         if grav and grav.get("supplied", 0.0) > 0.0:
             gerr = (grav["supplied"] - grav["deposited"] - grav["exported"]) / grav["supplied"]
-            if abs(gerr) > 1.0e-6:
+            # independent KSP solves (rtol 1e-8) along long bypass paths close
+            # to ~1e-6; a real leak is orders of magnitude larger
+            if abs(gerr) > 1.0e-5:
                 issues.append({"t": t, "issue": "gravity_budget",
                                "detail": {**grav, "closure": gerr}})
         prev = r
