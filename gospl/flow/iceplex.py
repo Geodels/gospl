@@ -247,7 +247,7 @@ class IceMesh(object):
         # ADDS, ablation below SUBTRACTS, so the routed `iceFA` is the cumulative
         # net ice flux through each cell. Where downstream ablation has eaten all
         # the upstream accumulation the flux goes <= 0 (clamped to 0 below) — that
-        # is the glacier snout, emerging from the mass balance rather than a hard
+        # is the toe of the glacier, emerging from the mass balance rather than a hard
         # cut-off. `melt` (in _iceMassBalance) scales the ablation, so it directly
         # controls how far/thick the tongue reaches.
         self._matrixIceFlow(self.iceDir, terminus)
@@ -673,7 +673,7 @@ class IceMesh(object):
           melts out** (fraction :math:`f`, forced to 1 at the margin/terminus),
           so :math:`\sum \mathrm{melt} = \sum \mathrm{accumulation}`. Over goSPL's
           long timesteps a land-terminating glacier is ~steady, so all the ice
-          that accumulates leaves as meltwater at the snout — this closes the
+          that accumulates leaves as meltwater at the toe — this closes the
           glacial water budget (the precipitation removed from runoff above the
           ELA returns downstream). Transport-with-loss on the ice network, same
           MPI-correct flow-matrix / KSP machinery as ``_routeTill``.

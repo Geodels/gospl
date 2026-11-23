@@ -65,7 +65,7 @@ that builds the river flow accumulation, with the number of directions set by
 ``icedir``. A single linear solve turns the per-cell net balance into an **ice
 discharge** :math:`Q` (m\ :sup:`3`/yr) at each cell: the volume of ice passing
 through it per year. Where downstream ablation has consumed all the upstream
-accumulation the flux falls to zero — that is the glacier snout, emerging from
+accumulation the flux falls to zero — that is the toe of the glacier, emerging from
 the mass balance rather than a hard cut-off. The ``melt`` factor sets how much
 ablation is subtracted (``0`` = accumulation-only, ``1`` = true net balance,
 ``> 1`` = shorter/thinner tongues). There is no time integration of an
@@ -105,12 +105,20 @@ kernel):
 
 .. math::
 
-   u_b \;\propto\; H^{\,n-1}\,|\nabla s|^{\,n-1}\,\nabla s,
+   u_b \;=\; -A_s\,H^{\,n-1}\,|\nabla s|^{\,n-1}\,\nabla s,
    \qquad s = z_\mathrm{bed} + H
 
-with sliding coefficient ``slide`` and Glen exponent :math:`n` = ``glen`` (usually
-3). The velocity is physically bounded. It is written to the output as ``iceUb``
-and drives glacial abrasion.
+with sliding coefficient :math:`A_s` = ``slide`` and Glen exponent :math:`n` = ``glen``
+(usually 3). The minus sign means that the ice slides down the surface gradient. This is a
+Budd-type sliding law, :math:`|u_b| \propto \tau_b^{\,n}/N`, with the basal shear stress
+:math:`\tau_b = \rho_i g H |\nabla s|` and the effective pressure :math:`N` taken as the
+ice overburden :math:`\rho_i g H`, so ``slide`` absorbs :math:`(\rho_i g)^{n-1}`. Choose
+it so that the sliding velocity (output ``iceUb``) matches observations, typically tens
+of m/yr for temperate valley glaciers (see *Tuning the glacial model* below). Within a
+step the velocity is bounded by the ice thickness and the surface slope, unlike a
+balance velocity :math:`Q/(HW)` that grows with the catchment size; across steps it can
+still grow if the abrasion steepens the bed (see *Numerical stability* below). It is
+written to the output as ``iceUb`` and drives glacial abrasion.
 
 Glacial abrasion (vertical and lateral)
 ---------------------------------------
@@ -248,8 +256,72 @@ directly through the SPL erosion path.)
 #. marine deposition and hillslope diffusion.
 
 So in one step the ice first redistributes the *water* (stronger rivers at the
-snout, weaker above the ELA), then redistributes *sediment* into moraines, and
+toe, weaker above the ELA), then redistributes *sediment* into moraines, and
 the rivers immediately act on both the new discharge field and the new moraine.
+
+Tuning the glacial model
+------------------------
+
+The parameters act on separate parts of the model, so they are best tuned in this
+order, each checked on the first outputs of a short run:
+
+1. **Ice extent**: ``hela``, ``hice`` and ``hterm`` (or their ``evol`` file), with
+   ``accum_factor``/``accum_max`` and ``melt``. Compare the ice-covered area
+   (``iceH`` > 0) with mapped or reconstructed glaciers. Raising ``melt`` shortens and
+   thins the tongues; ``accum_max`` prevents unrealistically thick ice under heavy
+   precipitation.
+2. **Ice thickness**: ``eheight`` and ``fwidth`` scale :math:`H` linearly. Compare
+   ``iceH`` with typical thicknesses (a few tens to a few hundred metres for valley
+   glaciers).
+3. **Sliding velocity**: ``slide`` scales :math:`u_b` linearly (for a given
+   thickness and slope), so a run whose ``iceUb`` is too low or too high by a factor
+   :math:`f` is corrected by multiplying ``slide`` by :math:`1/f`. Temperate valley
+   glaciers slide at tens of m/yr; compare with velocity maps where they exist.
+   Because the thickness and the slope are set by steps 1 and 2 and by the
+   topography, tune ``slide`` last of the three.
+4. **Erosion**: ``Kg`` and ``l`` (vertical abrasion) and ``Kl``/``lat_l`` (valley
+   walls). Field studies find the abrasion rate growing roughly linearly
+   (Humphrey and Raymond, 1994) to quadratically (Herman et al., 2015; Koppes et
+   al., 2015) with the sliding velocity. With the velocities fixed in step 3, choose
+   ``Kg`` from the target abrasion rate (output ``iceAbr``, m/yr) at the fastest
+   cells, and keep the stability condition below in mind.
+
+The ``glacial_erosion`` example of goSPL-examples uses ``slide: 0.3`` and
+``Kg = Kl = 3e-5`` with ``l = 1`` and ``dt = 5`` kyr: the ice slides at a few m/yr
+over most of the glaciers and up to about 60 m/yr in the steep outlet valleys, with
+abrasion of up to about 2 mm/yr.
+
+Numerical stability
+-------------------
+
+The glacial state is diagnosed at each step, so it does not need short steps itself.
+The **abrasion**, however, is applied explicitly, as :math:`E_g\,\Delta t` per step,
+and the sliding velocity grows with the cube of the surface slope (for ``glen = 3``).
+A step that erodes a lot compared with the local relief therefore steepens the bed,
+which accelerates the ice, which erodes more at the next step: a **runaway**. In the
+``glacial_erosion`` example with ``dt = 5`` kyr, ``Kg = 3e-5`` (peak abrasion of
+about 15 m per step) is stable over 100 kyr, while ``Kg = 1e-4`` (about 55 m per step
+at the start) runs away within 50 kyr.
+
+**How to recognise it.** The maximum of ``iceUb`` and ``iceAbr`` grows from one
+output to the next by large factors instead of settling (in the run above:
+110 m/yr at 10 kyr, 550 m/yr at 30 kyr, 77 km/yr at 50 kyr), followed in the log by
+``Non-linear hillslope SNES failed to converge``, a switch of the marine diffusion to
+the Picard solver, and finally an abort of the flow solve with
+``DIVERGED_NANORINF`` (the elevation has become non-finite).
+
+**What to do.** Keep the peak abrasion per step, ``max(iceAbr) * dt``, small compared
+with the relief of the glaciated valleys (in the example, up to about 15 m per step
+was stable). In practice:
+
+- reduce ``Kg`` (and ``Kl``), to which the abrasion is proportional;
+- or reduce ``dt``, to which the per-step erosion is proportional, at the cost of
+  more steps;
+- check the first one or two outputs of a new configuration: if ``max(iceAbr) * dt``
+  is already tens of metres, reduce one of the two before running further;
+- do **not** reduce ``slide`` to fix a runaway if the velocities are realistic: it
+  trades a numerical problem for unrealistic ice dynamics. Lower ``Kg`` instead, so
+  that the realistic velocities give realistic abrasion rates.
 
 Output
 ------
