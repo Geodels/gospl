@@ -384,6 +384,11 @@ class SEAMesh(object):
         slope = self._gravSlope(hl)
         ratio = (slope / self.gravErosionSlope) ** 4
         eps = np.sqrt(self.larea) / self.gravErosionLength * ratio / (1.0 + ratio)
+        # eps <= 1: a current at most doubles its load in one cell. With an
+        # erosion_length shorter than the cell size, eps reached ~18 per cell
+        # on a 360 km global mesh, the flux grew as prod(1 + eps) along a path
+        # (1e22) and every erosion solve failed and was discarded.
+        eps = np.minimum(eps, 1.0)
         if self.gravBypassDepth > 0.0:
             depth = self.sealevel - hl
             eps *= np.clip((depth - self.gravBypassDepth) / self.gravBypassDepth, 0.0, 1.0)

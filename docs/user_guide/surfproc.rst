@@ -809,7 +809,8 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
      - m
      - absent (off)
      - Slope erosion: the fraction of the flux picked up in a cell is
-       (cell size / ``erosion_length``) × (S/S_e)^4 / (1 + (S/S_e)^4).
+       (cell size / ``erosion_length``) × (S/S_e)^4 / (1 + (S/S_e)^4), at
+       most 1. Must be much larger than the cell size (tens of cells).
    * - ``erosion_slope``
      - gradient
      - 0.02
@@ -866,7 +867,11 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
 - *Slope erosion* needs channels resolved by the mesh and the time step. On a
   regional mesh of a few hundred metres with kyr steps it mostly roughens the
   toe of the slope (scours of tens of metres); leave it off unless the mesh
-  resolves the channels, and keep ``max_erosion`` small. ``erosion_exp``
+  resolves the channels, and keep ``max_erosion`` small. ``erosion_length``
+  must be many cell sizes: the pick-up compounds along a path, and with a
+  length shorter than a cell the flux grows so fast that the erosion solve
+  fails (``[flow] routing repair failed`` in the log) and no erosion is
+  applied that step. ``erosion_exp``
   has only been tested up to 2.
 - *Single-cell pathways.* A concentrated network (few receivers, high
   exponent) without ``deposit_spread`` builds ridges one cell wide.

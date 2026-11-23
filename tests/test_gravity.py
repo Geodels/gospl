@@ -648,3 +648,26 @@ def test_gravity_coarse_factor_scales_coarse_supply(tmp_path):
     assert res[1.0]["c"] > 0.0
     assert abs(res[0.25]["c"] / res[1.0]["c"] - 0.25) < 1.0e-6
     assert abs(res[0.25]["f"] / res[1.0]["f"] - 1.0) < 1.0e-9
+
+
+@pytest.mark.slow
+def test_gravity_erosion_length_below_cell_is_capped(tmp_path):
+    """An ``erosion_length`` shorter than the cell size gives a pick-up
+    fraction above 1 per cell; uncapped, the flux grew as prod(1 + eps) along a
+    path, every erosion solve failed and was discarded, and nothing eroded.
+    With ``eps <= 1`` the erosion acts and the budget closes."""
+    block = (
+        "gravity:\n"
+        "    runout: 3.0e6\n"
+        "    runout_fine: 1.2e7\n"
+        "    fraction: 0.5\n"
+        "    erosion_length: 1.0e4\n"
+        "    erosion_slope: 0.002\n"
+        "    max_erosion: 2.0\n\n"
+    )
+    out = _run(tmp_path, _write_case(tmp_path, "short", block), attrs=("gravBudget",))
+    if out["flatModel"]:
+        pytest.skip("needs the closed sphere fixture")
+    sup, dep, exp, ero = out["gravBudget"]
+    assert ero > 0.0, "no erosion: the erosion solve failed"
+    assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-6
