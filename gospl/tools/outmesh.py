@@ -260,26 +260,20 @@ class WriteMesh(object):
                     :, : self.stratStep + 1
                 ]
 
-            # Dual-lithology fine-fraction fields. Only written when the
-            # dual coarse/fine option is enabled (self.stratHf allocated in
-            # readStratLayers); single-fraction outputs are unchanged.
-            if self.stratHf is not None:
-                f.create_dataset(
-                    "stratHf",
-                    shape=(self.lpoints, self.stratStep + 1),
-                    dtype="float64",
-                    **self._h5opts,
-                )
-                f["stratHf"][:, : self.stratStep + 1] = self.stratHf[
-                    :, : self.stratStep + 1
-                ]
-                f.create_dataset(
-                    "phiF",
-                    shape=(self.lpoints, self.stratStep + 1),
-                    dtype="float64",
-                    **self._h5opts,
-                )
-                f["phiF"][:, : self.stratStep + 1] = self.phiF[:, : self.stratStep + 1]
+            # Lithology piles (dual-lithology fine fraction = lithology 0, as
+            # stratHf / phiF). Only written when the piles are allocated
+            # (readStratLayers); single-fraction outputs are unchanged.
+            if getattr(self, "stratHL", None) is not None:
+                for l in range(self.litNb):
+                    hk, pk = self._litOutKeys(l)
+                    for key, arr in ((hk, self.stratHL[l]), (pk, self.phiL[l])):
+                        f.create_dataset(
+                            key,
+                            shape=(self.lpoints, self.stratStep + 1),
+                            dtype="float64",
+                            **self._h5opts,
+                        )
+                        f[key][:, : self.stratStep + 1] = arr[:, : self.stratStep + 1]
 
             # Diagenetic induration archive (0..1 per layer). Only written when
             # the groundwater/duricrust feature is on (self.stratDuri allocated);
@@ -884,13 +878,13 @@ class WriteMesh(object):
                 # Dual-lithology fine-fraction fields. Restarting a dual run
                 # from a single-fraction output (no /stratHf dataset) falls
                 # back to all-coarse zeros, so the restore stays robust.
-                if self.stratHf is not None:
-                    self.stratHf.fill(0.0)
-                    if "/stratHf" in hf:
-                        self.stratHf[:, : self.stratStep] = np.array(hf["/stratHf"])
-                    self.phiF.fill(0.0)
-                    if "/phiF" in hf:
-                        self.phiF[:, : self.stratStep] = np.array(hf["/phiF"])
+                if getattr(self, "stratHL", None) is not None:
+                    for l in range(self.litNb):
+                        hk, pk = self._litOutKeys(l)
+                        for key, arr in ((hk, self.stratHL[l]), (pk, self.phiL[l])):
+                            arr.fill(0.0)
+                            if "/" + key in hf:
+                                arr[:, : self.stratStep] = np.array(hf["/" + key])
                 # Diagenetic induration archive. Restarting a groundwater run
                 # from an output without /stratDuri falls back to uncemented
                 # zeros (the readStratLayers init), so the restore stays robust.

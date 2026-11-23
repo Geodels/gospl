@@ -1636,7 +1636,75 @@ class ReadYaml(object):
         self.pit_inlet_bias_coarse = min(1.0, max(0.0, self.pit_inlet_bias_coarse))
         self.pit_inlet_bias_fine = min(1.0, max(0.0, self.pit_inlet_bias_fine))
 
+        self._readLithologies()
         self._extraProvenance()
+
+        return
+
+    def _readLithologies(self):
+        """
+        Build the lithology table (docs/DESIGN_CARBONATES.md, section 2.7).
+
+        Coarse clastic sediment is the implicit remainder of every layer. The
+        other lithologies each carry their own pile, porosity curve,
+        erodibility and diffusivity factors and grain-size behaviour
+        (``size``: ``fine`` or ``coarse``, which decides how pits, the marine
+        spreading and the gravity currents treat them). Under dual lithology
+        the fine sediment is lithology 0, built from the ``fine:`` block and
+        the dual keys, so a dual run is unchanged. An optional
+        ``strata: lithologies:`` list appends more entries::
+
+            lithologies:
+              - {name: carb_mud, size: fine, phi0: 0.7, z0: 1500.,
+                 k_factor: 1., diff_factor: 1., bedrock_frac: 0.}
+
+        Sets ``litNb`` (0 without dual lithology), ``litName``, ``litFine``
+        (bool, fine-like), ``litPhi0``, ``litZ0``, ``litK``, ``litD`` and
+        ``litBed`` (share of the infinite-bedrock sentinel).
+        """
+        self.litNb = 0
+        self.litName, self.litFine = [], []
+        self.litPhi0, self.litZ0, self.litK, self.litD, self.litBed = [], [], [], [], []
+        if not self.stratLith:
+            return
+
+        def add(name, fine, phi0, z0, k, d, bed):
+            self.litName.append(name)
+            self.litFine.append(bool(fine))
+            self.litPhi0.append(phi0)
+            self.litZ0.append(z0)
+            self.litK.append(k)
+            self.litD.append(d)
+            self.litBed.append(bed)
+
+        add("fine", True, self.phi0f, self.z0f, self.fine_k_factor,
+            self.fine_diff_factor, 1.0 - self.bedrock_coarse_frac)
+
+        extra = self.input["strata"].get("lithologies", None) or []
+        if not isinstance(extra, (list, tuple)):
+            raise ValueError("strata: lithologies must be a list of mappings.")
+        for k, ent in enumerate(extra):
+            if not isinstance(ent, dict) or "name" not in ent:
+                raise ValueError(
+                    "strata: lithologies entry %d needs at least a 'name'." % k
+                )
+            name = str(ent["name"])
+            if name in self.litName or name == "coarse":
+                raise ValueError("strata: lithology name '%s' is already used." % name)
+            size = str(ent.get("size", "fine")).lower()
+            if size not in ("fine", "coarse"):
+                raise ValueError(
+                    "strata: lithology '%s' size must be 'fine' or 'coarse'." % name
+                )
+            add(name, size == "fine", float(ent.get("phi0", self.phi0f)),
+                float(ent.get("z0", self.z0f)), float(ent.get("k_factor", 1.0)),
+                float(ent.get("diff_factor", 1.0)), float(ent.get("bedrock_frac", 0.0)))
+        if sum(self.litBed) > 1.0 + 1.0e-12:
+            raise ValueError(
+                "strata: the bedrock shares of the lithologies (fine: "
+                "1 - bedrock_coarse_frac, others: bedrock_frac) sum to more than 1."
+            )
+        self.litNb = len(self.litName)
 
         return
 

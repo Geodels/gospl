@@ -25,6 +25,105 @@ class STRAMesh(object):
 
     """
 
+    _LIT_TABLE = ("litNb", "litName", "litFine", "litPhi0", "litZ0", "litK",
+                  "litD", "litBed")
+
+    def __getattr__(self, name):
+        # Only reached when the attribute is missing: an object built without
+        # the parser (unit tests create a bare STRAMesh and set the dual
+        # attributes by hand) gets the one-lithology table of dual lithology.
+        if name in STRAMesh._LIT_TABLE or name in ("_litEroded", "_litDeposited",
+                                                    "litShare"):
+            self._defaultLithTable()
+            return self.__dict__[name]
+        raise AttributeError(name)
+
+    def _defaultLithTable(self):
+        """Lithology table from the dual-lithology attributes (lithology 0 =
+        fine), or an empty one without dual lithology."""
+        d = self.__dict__
+        if "litNb" not in d:
+            if d.get("stratLith", False):
+                d["litNb"] = 1
+                d["litName"] = ["fine"]
+                d["litFine"] = [True]
+                d["litPhi0"] = [d.get("phi0f", 0.63)]
+                d["litZ0"] = [d.get("z0f", 1960.0)]
+                d["litK"] = [d.get("fine_k_factor", 1.0)]
+                d["litD"] = [d.get("fine_diff_factor", 1.0)]
+                d["litBed"] = [1.0 - d.get("bedrock_coarse_frac", 0.5)]
+            else:
+                d["litNb"] = 0
+                for k in STRAMesh._LIT_TABLE[1:]:
+                    d[k] = []
+        d.setdefault("_litEroded", np.zeros(d["litNb"]))
+        d.setdefault("_litDeposited", np.zeros(d["litNb"]))
+        d.setdefault("litShare", None)
+
+    # Lithology 0 (the dual-lithology fine fraction) under its historical
+    # names. Reads and in-place writes go to stratHL[0] / phiL[0].
+    @property
+    def stratHf(self):
+        hl = self.__dict__.get("stratHL")
+        return None if hl is None else hl[0]
+
+    @stratHf.setter
+    def stratHf(self, value):
+        if value is None:
+            return
+        if self.__dict__.get("stratHL") is None:
+            self.stratHL = [value]
+            if self.__dict__.get("phiL") is None:
+                self.phiL = [None]
+        else:
+            self.stratHL[0] = value
+
+    @property
+    def phiF(self):
+        pl = self.__dict__.get("phiL")
+        return None if pl is None else pl[0]
+
+    @phiF.setter
+    def phiF(self, value):
+        if value is None:
+            return
+        if self.__dict__.get("phiL") is None:
+            self.phiL = [value]
+            if self.__dict__.get("stratHL") is None:
+                self.stratHL = [None]
+        else:
+            self.phiL[0] = value
+
+    def _lsum(self, arrays):
+        """Sum of a list of arrays; the single array itself when there is one
+        (so a one-lithology run does exactly the dual arithmetic)."""
+        if len(arrays) == 1:
+            return arrays[0]
+        out = arrays[0] + arrays[1]
+        for a in arrays[2:]:
+            out = out + a
+        return out
+
+    def _fineGroup(self, arrays):
+        """Sum over the fine-like lithologies of a per-lithology list."""
+        return self._lsum([a for a, f in zip(arrays, self.litFine) if f])
+
+    def _litSoleFine(self, l):
+        """True when lithology ``l`` is the only fine-like one: its share of
+        the fine group is exactly 1."""
+        return self.litFine[l] and sum(self.litFine) == 1
+
+    def _litDepoFrac(self, l, ff):
+        """Fraction of a deposit that is lithology ``l``, given the deposit's
+        fine-group fraction ``ff``: ``ff * share`` (fine-like) or
+        ``(1 - ff) * share`` (coarse-like), ``share`` being the lithology's
+        part of its group (``litShare``). Exactly ``ff`` for the sole fine
+        lithology (dual lithology)."""
+        if self._litSoleFine(l):
+            return ff
+        g = ff if self.litFine[l] else (1.0 - ff)
+        return g * self.litShare[l]
+
     def __init__(self):
         """
         The initialisation of `STRAMesh` class related to stratigraphic informations.
@@ -33,12 +132,19 @@ class STRAMesh(object):
         self.stratH = None
         self.stratZ = None
         self.phiS = None
-        # Dual-lithology (coarse/fine) layer fields. Allocated only when
-        # self.stratLith is True (see _extraStrata / DESIGN_DUAL_LITHOLOGY.md).
-        # stratHf = fine-fraction layer thickness (coarse = stratH - stratHf);
-        # phiF = fine porosity per layer (phiS then holds the coarse porosity).
-        self.stratHf = None
-        self.phiF = None
+        # Lithology piles (DESIGN_CARBONATES.md 2.7). Allocated only when
+        # self.stratLith is True. stratHL[l] = bulk thickness of lithology l
+        # per layer, phiL[l] its porosity; coarse clastic is the remainder
+        # (stratH - sum_l stratHL[l]) with porosity phiS. Lithology 0 is the
+        # dual-lithology fine fraction, also reachable as stratHf / phiF.
+        self.stratHL = None
+        self.phiL = None
+        # Per-lithology share of a deposit inside its size group (fine-like or
+        # coarse-like), (litNb, lpoints); None for a lithology alone in the
+        # fine group, whose share is exactly 1 (the dual case).
+        self.litShare = None
+        self._litEroded = None
+        self._litDeposited = None
         # Dual-lithology fine mass-balance diagnostics (m^3, owned-node running
         # totals over the run; reduced across ranks by the conservation test).
         # _fineEroded accumulates fine solid removed from the pile (erodeStrat);
@@ -143,26 +249,30 @@ class STRAMesh(object):
             # strataH - strataHf) and `phiF` (per-layer fine porosity). Absent
             # `strataHf` -> all-coarse, so a single-fraction file still loads.
             if self.stratLith:
-                self.stratHf = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-                if "strataHf" in fileData.files:
-                    stratVal = fileData["strataHf"]
-                    self.stratHf[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
-                    # Keep the partition physical: 0 <= fine <= total thickness.
-                    np.clip(
-                        self.stratHf[:, lo:hi],
-                        0.0,
-                        self.stratH[:, lo:hi],
-                        out=self.stratHf[:, lo:hi],
-                    )
-                self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-                if "phiF" in fileData.files:
-                    stratVal = fileData["phiF"]
-                    self.phiF[:, lo:hi] = stratVal[self.locIDs, 0:nlay]
-                else:
-                    # No fine porosity supplied: default to the fine surface
-                    # porosity so fine-bearing initial layers compact sensibly
-                    # (irrelevant where strataHf == 0).
-                    self.phiF[:, lo:hi] = self.phi0f
+                self._allocLithologies()
+                for l in range(self.litNb):
+                    hkey, pkey = self._litFileKeys(l)
+                    if hkey in fileData.files:
+                        stratVal = fileData[hkey]
+                        self.stratHL[l][:, lo:hi] = stratVal[self.locIDs, 0:nlay]
+                        # Keep the partition physical: 0 <= pile <= total thickness.
+                        np.clip(
+                            self.stratHL[l][:, lo:hi],
+                            0.0,
+                            self.stratH[:, lo:hi],
+                            out=self.stratHL[l][:, lo:hi],
+                        )
+                    if pkey in fileData.files:
+                        stratVal = fileData[pkey]
+                        self.phiL[l][:, lo:hi] = stratVal[self.locIDs, 0:nlay]
+                    else:
+                        # No porosity supplied: default to the lithology's
+                        # surface porosity so initial layers holding it compact
+                        # sensibly (irrelevant where its pile is empty).
+                        self.phiL[l][:, lo:hi] = self.litPhi0[l]
+                if self.litNb > 1:
+                    # The piles together cannot exceed the layer thickness.
+                    self._capLithologies(slice(lo, hi))
             elif "strataHf" in fileData.files and MPIrank == 0:
                 print(
                     "Warning: the npstrata file provides 'strataHf' (per-layer "
@@ -184,10 +294,9 @@ class STRAMesh(object):
                 self.stratH[:, 0] = BEDROCK_SENTINEL
                 self.phiS[:, 0] = self.phi0s
                 if self.stratLith:
-                    self.stratHf[:, 0] = BEDROCK_SENTINEL * (
-                        1.0 - self.bedrock_coarse_frac
-                    )
-                    self.phiF[:, 0] = self.phi0f
+                    for l in range(self.litNb):
+                        self.stratHL[l][:, 0] = BEDROCK_SENTINEL * self.litBed[l]
+                        self.phiL[l][:, 0] = self.litPhi0[l]
                 self.bedrockLay = 1
             else:
                 # All layers in the file are real sediment; no bedrock sentinel.
@@ -217,10 +326,10 @@ class STRAMesh(object):
             # sentinel layer is split into coarse/fine by bedrock_coarse_frac
             # so material eroded from bedrock inherits a defined composition.
             if self.stratLith:
-                self.stratHf = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-                self.phiF = np.zeros((self.lpoints, self.stratNb), dtype=np.float64)
-                self.stratHf[:, 0] = BEDROCK_SENTINEL * (1.0 - self.bedrock_coarse_frac)
-                self.phiF[:, 0] = self.phi0f
+                self._allocLithologies()
+                for l in range(self.litNb):
+                    self.stratHL[l][:, 0] = BEDROCK_SENTINEL * self.litBed[l]
+                    self.phiL[l][:, 0] = self.litPhi0[l]
 
             self._logStratInit()
 
@@ -248,6 +357,47 @@ class STRAMesh(object):
                 )
 
         return
+
+    def _allocLithologies(self):
+        """Allocate the lithology piles and their bookkeeping (zeroed)."""
+        shape = (self.lpoints, self.stratNb)
+        self.stratHL = [np.zeros(shape, dtype=np.float64) for _ in range(self.litNb)]
+        self.phiL = [np.zeros(shape, dtype=np.float64) for _ in range(self.litNb)]
+        self._litEroded = np.zeros(self.litNb)
+        self._litDeposited = np.zeros(self.litNb)
+        if self.litNb > 1:
+            self.litShare = np.zeros((self.litNb, self.lpoints), dtype=np.float64)
+
+    def _litFileKeys(self, l):
+        """npstrata / output dataset names of lithology ``l``'s pile and
+        porosity: the historical ``strataHf`` / ``phiF`` for lithology 0,
+        ``strataH_<name>`` / ``phi_<name>`` for the others."""
+        if l == 0:
+            return "strataHf", "phiF"
+        return "strataH_" + self.litName[l], "phi_" + self.litName[l]
+
+    def _litOutKeys(self, l):
+        """Output (and restart) dataset names of lithology ``l``: ``stratHf`` /
+        ``phiF`` for lithology 0, ``stratH_<name>`` / ``phi_<name>`` for the
+        others."""
+        if l == 0:
+            return "stratHf", "phiF"
+        return "stratH_" + self.litName[l], "phi_" + self.litName[l]
+
+    def _capLithologies(self, sl):
+        """Scale the lithology piles down where, together, they exceed the
+        layer thickness (columns ``sl``). Only used with several lithologies;
+        dual lithology keeps its own ``np.minimum``."""
+        tot = self._lsum([h[:, sl] for h in self.stratHL])
+        H = self.stratH[:, sl]
+        over = tot > H
+        if not over.any():
+            return
+        scale = np.ones_like(tot)
+        scale[over] = np.divide(H[over], tot[over], out=np.zeros_like(H[over]),
+                                where=tot[over] > 0)
+        for h in self.stratHL:
+            h[:, sl] *= scale
 
     def _checkStrataFile(self, fileData):
         """
@@ -286,7 +436,10 @@ class STRAMesh(object):
                 "(mesh_points=%d, n_layers); each row is one mesh vertex."
                 % (self.strataFile, ref, self.mpoints)
             )
-        for k in ("strataZ", "phiS", "stratK", "strataHf", "phiF"):
+        litKeys = []
+        for l in range(getattr(self, "litNb", 0)):
+            litKeys += list(self._litFileKeys(l))
+        for k in ("strataZ", "phiS", "stratK", "strataHf", "phiF", *litKeys):
             if k in avail and fileData[k].shape != ref:
                 raise ValueError(
                     "npstrata file '%s': field '%s' has shape %s but must "
@@ -401,7 +554,9 @@ class STRAMesh(object):
         # Pile fine share over the recorded (non-sentinel) layers.
         b = self.bedrockLay
         H = self.stratH[:, b : self.stratStep + 1].sum(axis=1)
-        Hf = self.stratHf[:, b : self.stratStep + 1].sum(axis=1)
+        Hf = self._fineGroup(
+            [h[:, b : self.stratStep + 1] for h in self.stratHL]
+        ).sum(axis=1)
         vH = comm.allreduce(float(np.sum((H * a)[owned])), op=MPI.SUM)
         vHf = comm.allreduce(float(np.sum((Hf * a)[owned])), op=MPI.SUM)
         if MPIrank == 0:
@@ -561,7 +716,7 @@ class STRAMesh(object):
             return np.ones(self.lpoints, dtype=np.float64)
 
         H = self.stratH[:, : self.stratStep + 1]
-        Hf = self.stratHf[:, : self.stratStep + 1]
+        Hf = self._fineGroup([h[:, : self.stratStep + 1] for h in self.stratHL])
         mask = H > 0
         # Topmost non-empty layer per node (reverse-then-argmax, as _surfaceK).
         rev = mask[:, ::-1]
@@ -577,6 +732,40 @@ class STRAMesh(object):
         fc[valid] = 1.0 - (Hftop[valid] / Htop[valid])
         np.clip(fc, 0.0, 1.0, out=fc)
         return fc
+
+    def _surfaceLithFractions(self):
+        """
+        Per-lithology bulk fraction of the topmost non-empty layer, a list of
+        ``litNb`` arrays (zeros where a node has no layer). The coarse clastic
+        fraction is ``1 - sum``. Used by the erodibility and diffusivity
+        blends when there are several lithologies.
+        """
+        top = self.stratStep + 1
+        H = self.stratH[:, :top]
+        mask = H > 0
+        rev = mask[:, ::-1]
+        any_valid = rev.any(axis=1)
+        top_idx = H.shape[1] - 1 - np.argmax(rev, axis=1)
+        rows = np.arange(H.shape[0])
+        Htop = H[rows, top_idx]
+        valid = any_valid & (Htop > 0)
+        out = []
+        for h in self.stratHL:
+            f = np.zeros(self.lpoints, dtype=np.float64)
+            f[valid] = h[rows, top_idx][valid] / Htop[valid]
+            np.clip(f, 0.0, 1.0, out=f)
+            out.append(f)
+        return out
+
+    def _surfaceLithoBlend(self, factors):
+        """``f_clastic + sum_l f_l * factors[l]`` on the surface layer, the
+        clastic fraction being the remainder (several lithologies)."""
+        fl = self._surfaceLithFractions()
+        fsum = self._lsum(fl)
+        out = np.clip(1.0 - fsum, 0.0, 1.0)
+        for f, k in zip(fl, factors):
+            out = out + f * k
+        return out
 
     def _surfaceArmoringK(self):
         """
@@ -607,7 +796,9 @@ class STRAMesh(object):
         with ``_surfaceK`` in the SPL flavours without altering single-fraction
         behaviour.
         """
-        if self.stratLith:
+        if self.stratLith and self.litNb > 1:
+            litho = self._surfaceLithoBlend(self.litK)
+        elif self.stratLith:
             fc = self._surfaceComposition()
             litho = fc + (1.0 - fc) * self.fine_k_factor
         else:
@@ -627,7 +818,9 @@ class STRAMesh(object):
         A cemented duricrust also resists creep when ``armor_diffusion`` is on
         (off by default), scaling ``Cd`` by the same ``1 − armor_max · duriF``.
         """
-        if self.stratLith:
+        if self.stratLith and self.litNb > 1:
+            litho = self._surfaceLithoBlend(self.litD)
+        elif self.stratLith:
             fc = self._surfaceComposition()
             litho = fc + (1.0 - fc) * self.fine_diff_factor
         else:
@@ -657,15 +850,23 @@ class STRAMesh(object):
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         if self.stratLith:
-            fineDepo = depo * self.depoFineFrac
-            self.stratHf[:, self.stratStep] += fineDepo
-            # Mass-balance diagnostic (owned nodes only, m^3).
-            self._fineDeposited += float(
-                np.sum((fineDepo * self.larea)[self.inIDs == 1])
-            )
+            # Each lithology's part of the deposit: the fine-group fraction
+            # depoFineFrac (or its complement for a coarse-like lithology)
+            # times its share of the group (exactly depoFineFrac for the
+            # dual-lithology fine fraction).
+            own = self.inIDs == 1
+            fineDepo = None
+            for l in range(self.litNb):
+                litDepo = depo * self._litDepoFrac(l, self.depoFineFrac)
+                self.stratHL[l][:, self.stratStep] += litDepo
+                vol = float(np.sum((litDepo * self.larea)[own]))
+                self._litDeposited[l] += vol
+                if self.litFine[l]:
+                    # Mass-balance diagnostic of the fine group (m^3).
+                    self._fineDeposited += vol
+                self.phiL[l][ids, self.stratStep] = self.litPhi0[l]
             # Fresh deposit carries each lithology's surface porosity.
             self.phiS[ids, self.stratStep] = self.phi0c
-            self.phiF[ids, self.stratStep] = self.phi0f
         else:
             self.phiS[ids, self.stratStep] = self.phi0s
         if getattr(self, "provOn", False):
@@ -753,6 +954,9 @@ class STRAMesh(object):
             ff = np.clip(self.depoFineFrac, 0.0, 1.0)
             self.thFine = self.thFine - dep * ff
             self.thCoarse = self.thCoarse - dep * (1.0 - ff)
+            if self.litNb > 1:
+                for l in range(self.litNb):
+                    self.thL[l] = self.thL[l] - dep * self._litDepoFrac(l, ff)
         else:
             self.thCoarse = self.thCoarse - dep
         if getattr(self, "provOn", False):
@@ -789,6 +993,7 @@ class STRAMesh(object):
             self.thCoarse = np.zeros(self.lpoints)
             if self.stratLith:
                 self.thFine = np.zeros(self.lpoints)
+                self.thL = [np.zeros(self.lpoints) for _ in range(self.litNb)]
             if getattr(self, "provOn", False):
                 self.provEro = np.zeros((self.lpoints, self.provNb))
             return
@@ -799,13 +1004,18 @@ class STRAMesh(object):
             # fraction so the sentinel never alters that layer's composition
             # (for the infinite-bedrock case this fraction is 1-bedrock_coarse_frac;
             # for a real basal layer it is its own fine ratio, i.e. 0 if all coarse).
+            # Same for every lithology pile.
             H0 = self.stratH[nids, 0]
-            sentFine = BEDROCK_SENTINEL * np.divide(
-                self.stratHf[nids, 0], H0, out=np.zeros_like(H0), where=H0 > 0
-            )
+            sentL = [
+                BEDROCK_SENTINEL * np.divide(
+                    h[nids, 0], H0, out=np.zeros_like(H0), where=H0 > 0
+                )
+                for h in self.stratHL
+            ]
         self.stratH[nids, 0] += BEDROCK_SENTINEL
         if self.stratLith:
-            self.stratHf[nids, 0] += sentFine
+            for h, sl in zip(self.stratHL, sentL):
+                h[nids, 0] += sl
         provOn = getattr(self, "provOn", False)
         if provOn:
             # The infinite-bedrock sentinel is pure bedrock -> the node's source
@@ -825,12 +1035,17 @@ class STRAMesh(object):
         if self.stratLith:
             # Each layer's bulk thickness splits into coarse and fine; each
             # fraction yields its own solid phase (1 - its own porosity).
-            fineTh = self.stratHf[nids, 0 : self.stratStep + 1]
-            coarseTh = thickS - fineTh
+            # Coarse clastic is the remainder of the lithology piles.
+            litTh = [h[nids, 0 : self.stratStep + 1] for h in self.stratHL]
+            coarseTh = thickS - self._lsum(litTh)
             thCoarse = coarseTh * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
-            thFine = fineTh * (1.0 - self.phiF[nids, 0 : self.stratStep + 1])
+            thLit = [
+                np.sum(
+                    (th * (1.0 - p[nids, 0 : self.stratStep + 1])) * mask, axis=1
+                )
+                for th, p in zip(litTh, self.phiL)
+            ]
             thCoarse = np.sum((thCoarse * mask), axis=1)
-            thFine = np.sum((thFine * mask), axis=1)
         else:
             thCoarse = thickS * (1.0 - self.phiS[nids, 0 : self.stratStep + 1])
             thCoarse = np.sum((thCoarse * mask), axis=1)
@@ -841,9 +1056,10 @@ class STRAMesh(object):
         tmp[boolMask] = 0
         self.stratH[nids, : self.stratStep + 1] = tmp
         if self.stratLith:
-            tmpf = self.stratHf[nids, : self.stratStep + 1]
-            tmpf[boolMask] = 0
-            self.stratHf[nids, : self.stratStep + 1] = tmpf
+            for h in self.stratHL:
+                tmpf = h[nids, : self.stratStep + 1]
+                tmpf[boolMask] = 0
+                h[nids, : self.stratStep + 1] = tmpf
         if provOn:
             tmpp = self.stratP[nids, : self.stratStep + 1, :]
             tmpp[boolMask] = 0.0
@@ -872,25 +1088,27 @@ class STRAMesh(object):
         tmp = H_old - eroVal
         tmp[tmp < 1.0e-8] = 0.0  # TODO-REFACTOR: value matches DISCHARGE_FLOOR but distinct role (thickness numerical-noise floor); do not replace
         if self.stratLith:
-            self.thFine = np.zeros(self.lpoints)
-            Hf_old = self.stratHf[nids, eroLayNb]
-            # Well-mixed layer: coarse/fine bulk are removed in proportion to
-            # the layer composition; the remainder keeps the same ratio.
+            Hl_old = [h[nids, eroLayNb] for h in self.stratHL]
+            # Well-mixed layer: each lithology's bulk is removed in proportion
+            # to the layer composition; the remainder keeps the same ratio.
             frac = np.divide(tmp, H_old, out=np.zeros_like(tmp), where=H_old > 0)
-            coarse_rm = (H_old - Hf_old) * frac
-            fine_rm = Hf_old * frac
+            coarse_rm = (H_old - self._lsum(Hl_old)) * frac
             thCoarse = thCoarse + coarse_rm * (1.0 - self.phiS[nids, eroLayNb])
-            thFine = thFine + fine_rm * (1.0 - self.phiF[nids, eroLayNb])
-            # Uncompacted thickness deposited downstream, per fraction, using
+            keep = np.divide(eroVal, H_old, out=np.zeros_like(eroVal), where=H_old > 0)
+            # Uncompacted thickness deposited downstream, per lithology, using
             # each lithology's surface porosity.
             self.thCoarse[nids] = thCoarse / (1.0 - self.phi0c)
-            self.thFine[nids] = thFine / (1.0 - self.phi0f)
             self.thCoarse[self.thCoarse < 0.0] = 0.0
-            self.thFine[self.thFine < 0.0] = 0.0
-            # Remaining fine in the partial layer scales with remaining total.
-            self.stratHf[nids, eroLayNb] = Hf_old * np.divide(
-                eroVal, H_old, out=np.zeros_like(eroVal), where=H_old > 0
-            )
+            self.thL = []
+            for l in range(self.litNb):
+                thl = thLit[l] + (Hl_old[l] * frac) * (1.0 - self.phiL[l][nids, eroLayNb])
+                th = np.zeros(self.lpoints)
+                th[nids] = thl / (1.0 - self.litPhi0[l])
+                th[th < 0.0] = 0.0
+                self.thL.append(th)
+                # Remaining pile in the partial layer scales with the remaining
+                # total.
+                self.stratHL[l][nids, eroLayNb] = Hl_old[l] * keep
         else:
             # Define the uncompacted sand thickness that will be deposited dowstream
             thCoarse += tmp * (1.0 - self.phiS[nids, eroLayNb])
@@ -912,7 +1130,8 @@ class STRAMesh(object):
         self.stratH[nids, eroLayNb] = eroVal
         self.stratH[nids, 0] -= BEDROCK_SENTINEL
         if self.stratLith:
-            self.stratHf[nids, 0] -= sentFine
+            for h, sl in zip(self.stratHL, sentL):
+                h[nids, 0] -= sl
         if provOn:
             self.stratP[nids, 0, self.source_class[nids]] -= BEDROCK_SENTINEL
         neg = self.stratH < 0
@@ -940,24 +1159,38 @@ class STRAMesh(object):
         )
         if self.stratLith:
             top = self.stratStep + 1
-            self.stratHf[neg] = 0.0
-            self.phiF[neg] = 0.0
-            np.clip(self.stratHf, 0.0, None, out=self.stratHf)
-            # Fine bulk can never exceed the layer total thickness.
-            np.minimum(
-                self.stratHf[:, :top], self.stratH[:, :top],
-                out=self.stratHf[:, :top],
-            )
-            self.phiF[:, :top] = self._fillZeroPorosity(self.phiF[:, :top])
+            for h, p in zip(self.stratHL, self.phiL):
+                h[neg] = 0.0
+                p[neg] = 0.0
+                np.clip(h, 0.0, None, out=h)
+            if self.litNb == 1:
+                # Fine bulk can never exceed the layer total thickness.
+                np.minimum(
+                    self.stratHf[:, :top], self.stratH[:, :top],
+                    out=self.stratHf[:, :top],
+                )
+            else:
+                self._capLithologies(slice(0, top))
+            for p in self.phiL:
+                p[:, :top] = self._fillZeroPorosity(p[:, :top])
         self.thCoarse /= self.dt
         if self.stratLith:
-            self.thFine /= self.dt
-            # Mass-balance diagnostic: fine solid removed this step (owned
-            # nodes, m^3). thFine is the uncompacted deposit-equivalent rate,
-            # the same basis transported and deposited downstream.
-            self._fineEroded += float(
-                np.sum((self.thFine * self.dt * self.larea)[self.inIDs == 1])
-            )
+            own = self.inIDs == 1
+            for l in range(self.litNb):
+                self.thL[l] /= self.dt
+                # Mass-balance diagnostic: solid removed this step (owned
+                # nodes, m^3), as the uncompacted deposit-equivalent rate, the
+                # same basis transported and deposited downstream.
+                vol = float(np.sum((self.thL[l] * self.dt * self.larea)[own]))
+                self._litEroded[l] += vol
+                if self.litFine[l]:
+                    self._fineEroded += vol
+            # Routed fractions: the fine group, and the coarse group (coarse
+            # clastic plus the coarse-like lithologies).
+            self.thFine = self._fineGroup(self.thL).copy()
+            for l in range(self.litNb):
+                if not self.litFine[l]:
+                    self.thCoarse = self.thCoarse + self.thL[l]
 
         if provOn:
             top = self.stratStep + 1
@@ -1067,55 +1300,65 @@ class STRAMesh(object):
 
         top = self.stratStep + 1
         phiS_cur = self.phiS[:, :top]
-        phiF_cur = self.phiF[:, :top]
+        phiL_cur = [p[:, :top] for p in self.phiL]
         H = self.stratH[:, :top]
-        Hf = self.stratHf[:, :top]
-        Hc = H - Hf
+        HL = [h[:, :top] for h in self.stratHL]
+        Hc = H - self._lsum(HL)
 
-        # Per-fraction depth-porosity, capped at the current value (porosity
+        # Per-lithology depth-porosity, capped at the current value (porosity
         # cannot increase on unloading — same assumption as single-fraction).
         phiS_new = np.minimum(self.phi0c * np.exp(depth / self.z0c), phiS_cur)
-        phiF_new = np.minimum(self.phi0f * np.exp(depth / self.z0f), phiF_cur)
+        phiL_new = [
+            np.minimum(self.litPhi0[l] * np.exp(depth / self.litZ0[l]), phiL_cur[l])
+            for l in range(self.litNb)
+        ]
 
-        # Solid phase preserved per fraction.
+        # Solid phase preserved per lithology.
         coarseSolid = Hc * (1.0 - phiS_cur)
-        fineSolid = Hf * (1.0 - phiF_cur)
+        litSolid = [HL[l] * (1.0 - phiL_cur[l]) for l in range(self.litNb)]
 
-        # Recompacted bulk thickness per fraction.
+        # Recompacted bulk thickness per lithology.
         totC = 1.0 - phiS_new
-        totF = 1.0 - phiF_new
         Hc_new = np.zeros_like(Hc)
-        Hf_new = np.zeros_like(Hf)
         idc = totC > 0.0
-        idf = totF > 0.0
         Hc_new[idc] = coarseSolid[idc] / totC[idc]
-        Hf_new[idf] = fineSolid[idf] / totF[idf]
         Hc_new[Hc_new <= 0] = 0.0
-        Hf_new[Hf_new <= 0] = 0.0
-        newH = Hc_new + Hf_new
+        HL_new = []
+        for l in range(self.litNb):
+            totL = 1.0 - phiL_new[l]
+            hn = np.zeros_like(HL[l])
+            idl = totL > 0.0
+            hn[idl] = litSolid[l][idl] / totL[idl]
+            hn[hn <= 0] = 0.0
+            HL_new.append(hn)
+        newH = Hc_new + HL_new[0]
+        for hn in HL_new[1:]:
+            newH = newH + hn
 
         # Emptied layers carry no porosity.
         empty = newH <= 0
         phiS_new[empty] = 0.0
-        phiF_new[empty] = 0.0
+        for pn in phiL_new:
+            pn[empty] = 0.0
 
         # Freeze the bedrock sentinel layers (thickness + porosities unchanged).
         if self.bedrockLay > 0:
             b = self.bedrockLay
             newH[:, :b] = H[:, :b]
-            Hf_new[:, :b] = Hf[:, :b]
             phiS_new[:, :b] = phiS_cur[:, :b]
-            phiF_new[:, :b] = phiF_cur[:, :b]
+            for l in range(self.litNb):
+                HL_new[l][:, :b] = HL[l][:, :b]
+                phiL_new[l][:, :b] = phiL_cur[l][:, :b]
 
         phiS_new = self._fillZeroPorosity(phiS_new)
-        phiF_new = self._fillZeroPorosity(phiF_new)
         self.phiS[:, :top] = phiS_new
-        self.phiF[:, :top] = phiF_new
-        self.stratHf[:, :top] = Hf_new
+        for l in range(self.litNb):
+            self.phiL[l][:, :top] = self._fillZeroPorosity(phiL_new[l])
+            self.stratHL[l][:, :top] = HL_new[l]
 
         if self.memclear:
-            del phiS_new, phiF_new, coarseSolid, fineSolid
-            del Hc, Hf, Hc_new, Hf_new, totC, totF
+            del phiS_new, phiL_new, coarseSolid, litSolid
+            del Hc, HL, Hc_new, HL_new, totC
             gc.collect()
 
         return newH
@@ -1198,8 +1441,9 @@ class STRAMesh(object):
         if getattr(self, "stratK", None) is not None:
             f["stratK"] = self.stratK[:, :top]
         if getattr(self, "stratLith", False):
-            f["stratHf"] = self.stratHf[:, :top]
-            f["phiF"] = self.phiF[:, :top]
+            for l in range(self.litNb):
+                f["stratHL%d" % l] = self.stratHL[l][:, :top]
+                f["phiL%d" % l] = self.phiL[l][:, :top]
         for name in ("stratDuri", "stratCrustType", "stratCrustSource"):
             if getattr(self, name, None) is not None:
                 f[name] = getattr(self, name)[:, :top]
@@ -1211,14 +1455,14 @@ class STRAMesh(object):
         """
         Once the interpolation has been performed, the following function updates the stratigraphic records based on the advected mesh.
 
-        The function relies on the fortran subroutine strataonesed. In
-        dual-lithology mode the fine pile (`stratHf`, `phiF`) is advected with
-        a second strataonesed call — `stratHf` is a bulk thickness, so the
+        The function relies on the fortran subroutine strataonesed. With
+        lithology piles each pile (`stratHL[l]`, `phiL[l]`) is advected with
+        its own strataonesed call — a pile is a bulk thickness, so the
         plain weighted interpolation applies directly (the unused `stratathreesed`
         kernel instead treats its extra fields as 0–1 fractions and renormalises
         them, which does not match the thickness representation here).
 
-        Intensive per-layer properties (`phiS`, `phiF`, `stratDuri`, `stratK`)
+        Intensive per-layer properties (`phiS`, `phiL`, `stratDuri`, `stratK`)
         are interpolated with the same weights; the categorical crust codes take
         the record of the primary (highest-weight) source node.
 
@@ -1267,13 +1511,17 @@ class STRAMesh(object):
             _, _, nK = interp(source["stratK"])
             pin(nK, source["stratK"])
 
-        if has("stratHf"):
-            # Advect the fine pile with the same interpolation (stratHf as
-            # thickness, phiF as porosity); the re-interpolated elevation is
-            # identical to nstratZ above and discarded.
-            nstratHf, _, nphiF = interp(source["phiF"], ref_h=source["stratHf"])
-            pin(nstratHf, source["stratHf"])
-            pin(nphiF, source["phiF"])
+        nlit = sum(1 for k in source if k.startswith("stratHL"))
+        nstratHL, nphiL = [], []
+        for l in range(nlit):
+            # Advect each lithology pile with the same interpolation (pile as
+            # thickness, its porosity as the intensive field); the
+            # re-interpolated elevation is identical to nstratZ above and
+            # discarded.
+            hk, pk = "stratHL%d" % l, "phiL%d" % l
+            nh, _, npl = interp(source[pk], ref_h=source[hk])
+            nstratHL.append(pin(nh, source[hk]))
+            nphiL.append(pin(npl, source[pk]))
 
         if has("stratDuri"):
             # Induration archive: an INTENSIVE per-layer property (like phiS).
@@ -1316,9 +1564,9 @@ class STRAMesh(object):
             sync(nphiS[:, k], self.phiS, k)
             if has("stratK"):
                 sync(nK[:, k], self.stratK, k)
-            if has("stratHf"):
-                sync(nstratHf[:, k], self.stratHf, k)
-                sync(nphiF[:, k], self.phiF, k)
+            for l in range(nlit):
+                sync(nstratHL[l][:, k], self.stratHL[l], k)
+                sync(nphiL[l][:, k], self.phiL[l], k)
             if has("stratDuri"):
                 sync(nDuri[:, k], self.stratDuri, k)
             if has("stratCrustType"):
