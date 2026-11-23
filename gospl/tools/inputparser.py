@@ -1701,7 +1701,8 @@ class ReadYaml(object):
         the routing network (``gravNetwork`` 'raw' or 'smoothed',
         ``gravReceivers``, ``gravFlowExp``), the slope erosion
         (``gravErosionLength``, off when absent, ``gravErosionSlope``,
-        ``gravMaxErosion`` m per step), and the trigger: a fixed fraction
+        ``gravMaxErosion`` m per step, ``gravErosionExp``/``gravErosionFlux`` non-linear flux
+        dependence), and the trigger: a fixed fraction
         ``gravFraction`` of the river load, or (when ``fraction`` is absent) the
         flood-fraction parameters ``gravCcrit`` (kg/m3), ``gravRating`` (b > 1),
         ``gravSigma`` (log-std of daily discharge) and ``gravRhoS`` (kg/m3).
@@ -1741,6 +1742,29 @@ class ReadYaml(object):
             raise ValueError("gravity: receivers must lie between 1 and 12")
         if self.gravFlowExp < 0.0:
             raise ValueError("gravity: flow_exp must be >= 0")
+        # Fine fraction on its own network (dual lithology): coarse sediment
+        # follows concentrated pathways (channel belts), fine spreads (lobes).
+        self.gravReceiversFine = int(gravDict.get("receivers_fine", self.gravReceivers))
+        self.gravFlowExpFine = float(gravDict.get("flow_exp_fine", self.gravFlowExp))
+        if not 1 <= self.gravReceiversFine <= 12 or self.gravFlowExpFine < 0.0:
+            raise ValueError("gravity: receivers_fine in 1..12 and flow_exp_fine >= 0")
+        # Smoothing passes of the routing surface and of the slope (tapers and
+        # erosion), so pathways and deposits follow the seafloor at the scale
+        # of a few cells rather than cell-to-cell noise.
+        self.gravNetworkSmooth = int(gravDict.get("network_smooth", 0))
+        self.gravSlopeSmooth = int(gravDict.get("slope_smooth", 0))
+        # Lateral spreading length (m) of each step's gravity deposit: gives
+        # concentrated belts a width (number of passes set from the cell size).
+        self.gravDepositSpread = float(gravDict.get("deposit_spread", 0.0))
+        if self.gravDepositSpread < 0.0:
+            raise ValueError("gravity: deposit_spread must be >= 0 (m)")
+        # Share of the diverted fraction applied to the coarse load (dual
+        # lithology): gravity currents carry mostly the suspended load.
+        self.gravCoarseFactor = float(gravDict.get("coarse_factor", 1.0))
+        if not 0.0 <= self.gravCoarseFactor <= 1.0:
+            raise ValueError("gravity: coarse_factor must lie between 0 and 1")
+        if self.gravNetworkSmooth < 0 or self.gravSlopeSmooth < 0:
+            raise ValueError("gravity: network_smooth and slope_smooth must be >= 0")
 
         # Slope erosion (phase G3b): off unless erosion_length (m) is given.
         el = gravDict.get("erosion_length")
@@ -1751,6 +1775,12 @@ class ReadYaml(object):
             raise ValueError("gravity: erosion_length must be positive (m)")
         if self.gravErosionSlope <= 0.0 or self.gravMaxErosion <= 0.0:
             raise ValueError("gravity: erosion_slope and max_erosion must be positive")
+        # Smoothed slope (passes of neighbour averaging) and non-linear flux
+        # dependence eps ~ (Q/Q_e)^(a-1) (a = erosion_exp, Q_e = erosion_flux m3/yr).
+        self.gravErosionExp = float(gravDict.get("erosion_exp", 1.0))
+        self.gravErosionFlux = float(gravDict.get("erosion_flux", 1.0e4))
+        if self.gravErosionExp < 1.0 or self.gravErosionFlux <= 0.0:
+            raise ValueError("gravity: erosion_exp must be >= 1 and erosion_flux positive (m3/yr)")
 
         frac = gravDict.get("fraction")
         self.gravFraction = None if frac is None else float(frac)

@@ -294,6 +294,36 @@ Three points differ from, or add to, the proposal above.
   the net change; giving `deposeStrat` the net change made the eroded fine count twice
   (5 % fine excess in the test).
 
+### Channel belts without resolved channels (2026-11-23, regional tests)
+
+Slope erosion (linear, on a smoothed slope, or non-linear in the flux) only roughened
+the toe of the slope on the 615 m regional mesh with 5 kyr steps: channels are not
+resolved there. What worked is to represent channelised transport by its deposits:
+
+- **Separate networks per fraction** (`receivers`/`flow_exp` for coarse,
+  `receivers_fine`/`flow_exp_fine` for fine): coarse belts along the main pathways
+  (2 receivers, exponent 4), fine lobes beyond (6, exponent 1).
+- **Smoothed routing surface and slope** (`network_smooth`, `slope_smooth`, passes of
+  area-weighted neighbour averaging, owner -> ghost sync per pass): removed the
+  hummocky toe.
+- **Lateral spreading of each step's deposit** (`deposit_spread`, a LENGTH in m; passes
+  `ceil(2 (L/dx)^2)`): a conservative diffusion of thickness with symmetric weights
+  `w_ij = 0.5 min(a_i, a_j)/max(n_i, n_j)`. A first donor-share operator (`v_j` split in
+  proportion to the recipients' areas) conserved volume but not a uniform thickness,
+  and grew chains of 2-5 m dots at odd-sized cells along the mesh seams (correlation
+  0.55 with the cell-area anomaly). Measured: dots 767 -> 65, cell-scale roughness
+  1.8 -> 0.5 m, spreading cost 37 ms/step.
+- **`coarse_factor`**: with a fixed 30 % fraction, 43 km3 of coarse per 100 kyr went
+  into the gravity currents and ~100 % of it deposited at the foot of the slope.
+  Turbidity currents carry mostly the suspended load; `coarse_factor: 0.3` brings the
+  lobes to a mixed composition.
+- Tried and dropped: pit filling by the currents (its iteration never converged, 21
+  solves per route, 64 % of the run time, no effect on the dots) and receiver weights
+  times the Voronoi face length (no effect).
+
+Cost (regional, 52,805 nodes, 4 ranks): 0.96 s/step without gravity, 1.25 s/step with
+(network 41 ms, routing 196 ms, spreading 37 ms).
+
 ### Expected behaviour and tests
 
 - inclined plane with a small gully: the flux concentrates, the gully deepens over steps

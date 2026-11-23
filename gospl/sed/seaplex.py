@@ -115,9 +115,10 @@ class SEAMesh(object):
         """
         if self.gravNetwork == "smoothed":
             self._gW, self._gSink, self._gWown = self.dMat1, self.is_sink_local, False
+            self._gWF, self._gSinkF = None, None
             return
         minh = max(self.hGlobal.min()[1] + 0.1, self.sealevel + self.oFill)
-        surf = hl.copy()
+        surf = self._gravSmooth(hl, self.gravNetworkSmooth)
         far = None
         if self.flatModel:
             surf[self.outletIDs] = BOUNDARY_FLOW_SENTINEL
@@ -129,8 +130,23 @@ class SEAMesh(object):
             fillz = epsfill(minh, fillz)
         fillz = MPI.COMM_WORLD.bcast(fillz, root=0)[self.locIDs]
         if far is not None:
-            fillz[far] = hl[far]
-        rcv, wght = self._gravReceivers(fillz)
+            fillz[far] = surf[far]
+        self._gW, self._gSink = self._gravAssemble(
+            fillz, self.gravReceivers, self.gravFlowExp)
+        self._gWown = True
+        # dual lithology with its own fine network (spreading lobes)
+        self._gWF, self._gSinkF = None, None
+        if self.stratLith and (self.gravReceiversFine, self.gravFlowExpFine) != (
+                self.gravReceivers, self.gravFlowExp):
+            self._gWF, self._gSinkF = self._gravAssemble(
+                fillz, self.gravReceiversFine, self.gravFlowExpFine)
+        return
+
+    def _gravAssemble(self, fillz, nrcv, fexp):
+        """Assemble one gravity network matrix ``W^T`` on the filled surface
+        ``fillz`` with ``nrcv`` receivers and weights ``S^fexp``; returns the
+        matrix and the sink mask. Collective (assembly)."""
+        rcv, wght = self._gravReceivers(fillz, nrcv, fexp)
         nodes = np.arange(self.lpoints)
         sink = wght.sum(axis=1) <= 0.0
         if self.flatModel:
@@ -155,10 +171,9 @@ class SEAMesh(object):
         W.axpy(1.0, off)
         off.destroy()
         W.transpose()
-        self._gW, self._gSink, self._gWown = W, sink, True
-        return
+        return W, sink
 
-    def _gravReceivers(self, fillz):
+    def _gravReceivers(self, fillz, nrcv, fexp):
         r"""
         Receivers and weights of the gravity network on the filled surface
         ``fillz``: the ``gravity: receivers`` steepest strictly-downhill
@@ -174,6 +189,8 @@ class SEAMesh(object):
         computed on a truncated neighbourhood but dropped at assembly.
 
         :arg fillz: eps-filled local elevation (partition invariant)
+        :arg nrcv: number of receivers
+        :arg fexp: flow-partition exponent (weights ``S^fexp``)
         :return: ``rcv`` (lpoints x 12, local ids, self-padded) and ``wght``
         """
         ngb = self.FVmesh_ngbID
@@ -188,10 +205,10 @@ class SEAMesh(object):
         key = np.where(down, slp * (1.0 - 1.0e-15 * self.gid[nb]), -1.0)
         order = np.argsort(-key, axis=1, kind="stable")
         keep = np.zeros_like(down)
-        nr = min(self.gravReceivers, ngb.shape[1])
+        nr = min(nrcv, ngb.shape[1])
         np.put_along_axis(keep, order[:, :nr], True, axis=1)
         keep &= down
-        w = np.where(keep, slp ** self.gravFlowExp, 0.0)
+        w = np.where(keep, slp ** fexp, 0.0)
         wsum = w.sum(axis=1)
         w = np.divide(w, wsum[:, None], out=np.zeros_like(w), where=wsum[:, None] > 0.0)
         rcv = np.where(keep, nb, nodes[:, None])
@@ -206,8 +223,96 @@ class SEAMesh(object):
         (collective)."""
         if getattr(self, "_gWown", False) and self._gW is not None:
             self._gW.destroy()
-        self._gW, self._gWown = None, False
+        if getattr(self, "_gWF", None) is not None:
+            self._gWF.destroy()
+        self._gW, self._gWown, self._gWF = None, False, None
         return
+
+    def _gravSmooth(self, arr, n):
+        """``n`` passes of area-weighted averaging of a local array over each
+        node and its neighbours, owner -> ghost sync after every pass (so the
+        owned values do not depend on the partition). ``n = 0`` returns a copy.
+        Collective when ``n > 0`` (YAML scalar: same on every rank)."""
+        out = np.array(arr, dtype=np.float64, copy=True)
+        if n <= 0:
+            return out
+        ngb = self.FVmesh_ngbID
+        valid = ngb >= 0
+        nb = np.where(valid, ngb, 0)
+        a = self.larea
+        wn = np.where(valid, a[nb], 0.0)
+        den = a + wn.sum(axis=1)
+        out = self._gravSync(out)
+        for _ in range(n):
+            out = self._gravSync((a * out + (wn * out[nb]).sum(axis=1)) / den)
+        return out
+
+    def _gravSpreadPasses(self):
+        """Number of ``_gravSpread`` passes for the spreading length
+        ``deposit_spread`` (m): each pass spreads a deposit by a variance of
+        about half a squared cell size, so ``n = ceil(2 (L / dx)^2)`` with
+        ``dx`` the mean cell size of the owned nodes (global reduction, the
+        same on every rank), and the same length smooths the same width at any
+        resolution. Collective."""
+        own = self.inIDs == 1
+        tot = MPI.COMM_WORLD.allreduce(
+            np.array([np.sqrt(self.larea[own]).sum(), float(own.sum())]), op=MPI.SUM)
+        dx = tot[0] / max(tot[1], 1.0)
+        return int(np.ceil(2.0 * (self.gravDepositSpread / dx) ** 2))
+
+    def _gravSpread(self, vol, n, hl):
+        r"""
+        Spread gravity deposits (m3 per node, ``(lpoints,)`` or
+        ``(lpoints, k)``) laterally by ``n`` passes of a conservative
+        diffusion of their thickness ``t = v / a``:
+
+        .. math::
+
+            v_i' = v_i + \sum_j w_{ij} (t_j - t_i), \qquad
+            w_{ij} = \frac{1}{2} \frac{\min(a_i, a_j)}{\max(n_i, n_j)}
+
+        (``n_i`` the number of neighbours). The exchange is antisymmetric, so
+        volume is conserved exactly, a uniform thickness is left unchanged on
+        any mesh, and ``sum_j w_ij <= a_i / 2`` keeps every pass positive.
+        Only cells deeper than the bypass depth (and not open outlets) take
+        part. The same operator for every column, so class columns still sum
+        to column 0. Gives the belts of a concentrated network a width of a
+        few cells. An earlier donor-share operator (``v_j`` split in
+        proportion to the recipients' areas) conserved volume but not a
+        uniform thickness: odd-sized cells gained or lost a little every
+        step, and chains of 2-5 m dots grew along the mesh seams.
+
+        Ghost thicknesses, areas and degrees are synced from their owners, so
+        owned values are partition independent. Collective when ``n > 0``.
+        """
+        out = np.array(vol, dtype=np.float64, copy=True)
+        if n <= 0:
+            return out
+        two = out.ndim == 2
+        if not two:
+            out = out[:, None]
+        ngb = self.FVmesh_ngbID
+        valid = ngb >= 0
+        nb = np.where(valid, ngb, 0)
+        ok = (self.sealevel - hl) > self.gravBypassDepth
+        ok[self.outletIDs] = False
+        okf = self._gravSync(ok.astype(np.float64)) > 0.5
+        a = self._gravSync(self.larea.copy())
+        deg = self._gravSync(valid.sum(axis=1).astype(np.float64))
+        w = 0.5 * np.minimum(a[:, None], a[nb]) / np.maximum(deg[:, None], deg[nb])
+        w = np.where(valid & okf[:, None] & okf[nb], w, 0.0)
+        for _ in range(n):
+            for c in range(out.shape[1]):
+                t = self._gravSync(out[:, c]) / a
+                out[:, c] = out[:, c] + (w * (t[nb] - t[:, None])).sum(axis=1)
+        return out if two else out[:, 0]
+
+    def _gravSlope(self, hl):
+        """Seafloor gradient used by the gravity tapers and erosion:
+        ``cellslope`` averaged ``slope_smooth`` times (``_gravSmooth``), so the
+        deposition and erosion follow the slope at the scale of a few cells,
+        not the cell-to-cell noise. Collective when smoothing."""
+        return self._gravSmooth(cellslope(self.lpoints, hl), self.gravSlopeSmooth)
 
     def _gravSync(self, arr):
         """Owner -> ghost copy of a local array (collective; scratch
@@ -249,7 +354,7 @@ class SEAMesh(object):
             depth = self.sealevel - hl
             lam *= np.clip((depth - self.gravBypassDepth) / self.gravBypassDepth, 0.0, 1.0)
         if self.gravBypassSlope is not None:
-            ratio = cellslope(self.lpoints, hl) / self.gravBypassSlope
+            ratio = self._gravSlope(hl) / self.gravBypassSlope
             lam *= 1.0 / (1.0 + ratio ** 4)
         lam[self._gSink] = 1.0
         lam[self.outletIDs] = 0.0
@@ -270,11 +375,14 @@ class SEAMesh(object):
         bypass depth). Zero at the network's sinks and at open outlets. Synced
         owner -> ghost. Collective.
 
+        The gradient is ``_gravSlope`` (smoothed ``slope_smooth`` times).
+
         :arg hl: pre-deposition local elevation
 
         :return: local array of erosion coefficients (>= 0)
         """
-        ratio = (cellslope(self.lpoints, hl) / self.gravErosionSlope) ** 4
+        slope = self._gravSlope(hl)
+        ratio = (slope / self.gravErosionSlope) ** 4
         eps = np.sqrt(self.larea) / self.gravErosionLength * ratio / (1.0 + ratio)
         if self.gravBypassDepth > 0.0:
             depth = self.sealevel - hl
@@ -325,6 +433,12 @@ class SEAMesh(object):
         The eroded volume then enters the deposition routing as an explicit
         source, so conservation is exact whatever the coupling error.
 
+        With ``erosion_exp: a > 1`` the pick-up grows with the flux,
+        ``eps = eps0 (Q / Q_e)^(a-1)`` (``erosion_flux`` ``Q_e`` in m3/yr), so
+        the strongest path erodes most and captures the flow (channel
+        selection); ``Q`` is the flux of the linear solve, evaluated once (a
+        fixed point within the step diverges), and ``eps <= 1``.
+
         Scratch ``self.tmp``, ``self.tmp1``, ``self.tmpL``. Collective.
 
         :arg supply: total gravity supply (m3 over the step, local array)
@@ -332,12 +446,27 @@ class SEAMesh(object):
 
         :return: eroded bulk volume (m3, local) and the eroding-node mask
         """
-        eps = self._gravEps(hl)
-        lam = self._gravLambda(self.gravRunout)
-        ero = eps > lam
-        eps[~ero] = 0.0
-        lam[ero] = 0.0
+        eps0 = self._gravEps(hl)
+        lam0 = self._gravLambda(self.gravRunout)
+        ero = eps0 > lam0
+        eps = np.where(ero, eps0, 0.0)
+        lam = np.where(ero, 0.0, lam0)
         Q, _ = self._gravSolve(1.0 - lam + eps, supply)
+        if self.gravErosionExp != 1.0:
+            # Non-linear flux dependence eps = eps0 (Q / Q_e)^(a-1), with Q the
+            # flux of the LINEAR solve above, evaluated once. Iterating on Q
+            # within a step diverges: the pick-up multiplies the flux along a
+            # path by prod(1 + eps) and eps grows with it (Q reached 1e10 Q_e
+            # in 4 passes on the regional margin, then the solve failed). The
+            # channel feedback acts between steps, through the topography.
+            # eps <= 1: a current at most doubles its load in one cell.
+            qe = self.gravErosionFlux * self.dt
+            epsk = eps0 * (np.maximum(Q, 0.0) / qe) ** (self.gravErosionExp - 1.0)
+            epsk = np.minimum(epsk, 1.0)
+            ero = epsk > lam0
+            eps = self._gravSync(np.where(ero, epsk, 0.0))
+            lam = np.where(ero, 0.0, lam0)
+            Q, _ = self._gravSolve(1.0 - lam + eps, supply)
         cap = self.gravMaxErosion * self.larea
         owned = self.inIDs == 1
         for _ in range(20):
@@ -1327,14 +1456,26 @@ class SEAMesh(object):
                     self.QsL.getArray().copy(), self.FAL.getArray().copy()
                 )
             fgrav[np.invert(self.sinkIDs)] = 0.0
-            gravSed = fgrav * sedFlux
-            sedFlux = sedFlux - gravSed
             gravFine = None
-            if self.stratNb > 0 and self.stratLith:
+            dual = self.stratNb > 0 and self.stratLith
+            if dual and self.gravCoarseFactor != 1.0:
+                # Gravity currents carry mostly the suspended (fine) load: the
+                # coarse part of the load is diverted with coarse_factor times
+                # the fraction (dual lithology only).
                 fineAll = self.vSedFLocal.getArray().copy() * self.dt
                 fineAll[np.invert(self.sinkIDs)] = 0.0
-                fineAll[fineAll < 0] = 0.0
-                gravFine = np.minimum(fgrav * fineAll, gravSed)
+                fineAll = np.clip(fineAll, 0.0, np.maximum(sedFlux, 0.0))
+                gravFine = fgrav * fineAll
+                gravSed = gravFine + self.gravCoarseFactor * fgrav * (sedFlux - fineAll)
+                sedFlux = sedFlux - gravSed
+            else:
+                gravSed = fgrav * sedFlux
+                sedFlux = sedFlux - gravSed
+                if dual:
+                    fineAll = self.vSedFLocal.getArray().copy() * self.dt
+                    fineAll[np.invert(self.sinkIDs)] = 0.0
+                    fineAll[fineAll < 0] = 0.0
+                    gravFine = np.minimum(fgrav * fineAll, gravSed)
 
         # Downstream direction matrix for ocean distribution
         self._matOcean()
@@ -1425,10 +1566,22 @@ class SEAMesh(object):
             if gravFine is not None:
                 roomF = None if room is None else np.maximum(room - dC[:, 0], 0.0)
                 fine = gravFine + eroF
+                if self._gWF is not None:
+                    # the fine fraction on its own (spreading) network
+                    self._gW, self._gWF = self._gWF, self._gW
+                    self._gSink, self._gSinkF = self._gSinkF, self._gSink
                 dF, eF = self._gravRoute(_cols(fine, eroF), self.gravRunoutFine,
                                          room=roomF, nodep=eroMask)
+                if self._gWF is not None:
+                    self._gW, self._gWF = self._gWF, self._gW
+                    self._gSink, self._gSinkF = self._gSinkF, self._gSink
             else:
                 dF, eF = np.zeros_like(dC), np.zeros_like(eC)
+            if self.gravDepositSpread > 0.0:
+                npass = self._gravSpreadPasses()
+                dC = self._gravSpread(dC, npass, hl)
+                if gravFine is not None:
+                    dF = self._gravSpread(dF, npass, hl)
             gDepC, gExpC, gDepF, gExpF = dC[:, 0], eC[:, 0], dF[:, 0], eF[:, 0]
             gravProvDep = (dC[:, 1:] + dF[:, 1:]) if comp is not None else None
             self._gravRelease()

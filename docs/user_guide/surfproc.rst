@@ -698,8 +698,14 @@ Marine gravity currents
                 bypass_depth: 50.     # no deposition shallower than this (m below sea level)
                 bypass_slope: 0.01    # no deposition on steeper gradients (optional)
                 network: raw          # routing surface: raw (default) or smoothed
-                receivers: 6          # receivers per node on the raw network (1 to 12)
-                flow_exp: 2.          # weights ~ slope^flow_exp on the raw network
+                receivers: 2          # receivers per node on the raw network (1 to 12)
+                flow_exp: 4.          # weights ~ slope^flow_exp on the raw network
+                receivers_fine: 6     # fine fraction on its own, spreading network
+                flow_exp_fine: 1.
+                network_smooth: 3     # smoothing passes of the routing surface
+                slope_smooth: 3       # smoothing passes of the slope (tapers, erosion)
+                deposit_spread: 1500. # lateral spreading length of the deposit (m)
+                coarse_factor: 0.3    # share of the fraction applied to the coarse load
                 erosion_length: 2.e5  # slope erosion (m; absent = no erosion)
                 erosion_slope: 0.02   # gradient at which erosion reaches half its rate
                 max_erosion: 10.      # maximum erosion per cell and step (m)
@@ -742,6 +748,22 @@ Marine gravity currents
            the flow (channels), on gentle floors it spreads (lobes). ``smoothed``
            reuses the clinoform network (smoothed seafloor, up to 12 receivers),
            which spreads the flow everywhere.
+           With dual lithology, ``receivers_fine`` and ``flow_exp_fine`` give the
+           fine fraction its own network (by default the same as the coarse one):
+           few receivers and a high exponent for the coarse load (narrow belts
+           along the main pathways), more receivers and a low exponent for the
+           fine load (broad lobes beyond). ``network_smooth`` and
+           ``slope_smooth`` (passes of neighbour averaging, default 0) make the
+           pathways and the slope tapers follow the seafloor at the scale of a
+           few cells rather than cell-to-cell noise. ``deposit_spread`` (m,
+           default 0) spreads each step's gravity deposit laterally over about
+           that distance, conserving volume and leaving an even layer even: it
+           gives the belts a width of a few cells and removes cell-scale bumps;
+           the same length gives the same width at any resolution (about 1 to
+           3 cells is enough). ``coarse_factor`` (0 to 1, default 1, dual
+           lithology) diverts that share of the fraction for the coarse load only:
+           gravity currents carry mostly the suspended load, so diverting as much
+           coarse as fine piles coarse lobes at the foot of the slope.
         f. ``erosion_length`` (m, optional; no erosion without it): the currents
            pick up sediment where the seafloor is steep, a volume proportional to
            the flux through the cell, (cell size / ``erosion_length``) times
@@ -749,7 +771,11 @@ Marine gravity currents
            shorter the length, the stronger the erosion. A cell either erodes or
            deposits, never erodes shallower than ``bypass_depth``, and loses at most
            ``max_erosion`` metres per step. The eroded sediment (with its fine
-           fraction and provenance) joins the current.
+           fraction and provenance) joins the current. With ``erosion_exp`` (a > 1,
+           default 1) and ``erosion_flux`` (Q_e, m3/yr), the pick-up grows as
+           (Q/Q_e)^(a-1). Slope erosion needs channels resolved by the mesh and
+           the time step; at a few hundred metres and kyr steps it mostly
+           roughens the toe of the slope, so it is best left off regionally.
         g. ``fraction`` (0 to 1, optional): a fixed fraction of the river load
            entering the gravity pathway everywhere, useful to calibrate a
            regional case.

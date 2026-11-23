@@ -536,3 +536,115 @@ def test_gravity_slope_erosion_provenance(tmp_path):
             m.destroy()
     finally:
         os.chdir(cwd)
+
+
+BELT_BLOCK = (
+    "gravity:\n"
+    "    runout: 3.0e5\n"
+    "    runout_fine: 1.2e6\n"
+    "    fraction: 0.5\n"
+    "    network_smooth: 2\n"
+    "    slope_smooth: 2\n"
+    "    receivers: 2\n"
+    "    flow_exp: 4.\n"
+    "    receivers_fine: 6\n"
+    "    flow_exp_fine: 1.\n"
+    "    deposit_spread: {spread}\n"
+    "    coarse_factor: {cf}\n\n"
+)
+
+
+@pytest.mark.slow
+def test_gravity_channel_belt_options_conserve(tmp_path):
+    """The channel-belt options (smoothed routing surface and slope, separate
+    coarse and fine networks, lateral spreading of the deposit, coarse factor):
+    the routed budget closes and the fine volume is conserved, as without
+    them. Guards the network swap between the fractions and the spreading."""
+    from mpi4py import MPI
+
+    out = _run(
+        tmp_path,
+        _write_case(tmp_path, "belt", BELT_BLOCK.format(spread=4.0e5, cf=0.3)),
+        attrs=("gravBudget", "_fineEroded", "_fineDeposited"),
+    )
+    if out["flatModel"]:
+        pytest.skip("needs the closed sphere fixture")
+    sup, dep, exp, ero = out["gravBudget"]
+    assert sup > 0.0
+    assert abs(sup - dep - exp) / sup < 1.0e-6
+    fe = MPI.COMM_WORLD.allreduce(out["_fineEroded"], op=MPI.SUM)
+    fd = MPI.COMM_WORLD.allreduce(out["_fineDeposited"], op=MPI.SUM)
+    assert abs(fe - fd) / fe < 5.0e-3, f"fine {fe:.4e} vs {fd:.4e}"
+
+
+def test_gravity_spread_conserves_and_keeps_uniform(tmp_path):
+    """``_gravSpread`` conserves volume exactly, leaves a uniform thickness
+    unchanged on the irregular mesh (the donor-share operator it replaced did
+    not, and grew chains of dots at odd-sized cells), and smooths a single
+    spike; ``_gravSpreadPasses`` turns the length into passes."""
+    from gospl.model import Model
+
+    yml = _write_case(tmp_path, "spread", BELT_BLOCK.format(spread=4.0e5, cf=1.0))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model(yml, verbose=False, showlog=False)
+        try:
+            hl = np.full(m.lpoints, m.sealevel - 1000.0)  # every cell deep
+            owned = m.inIDs == 1
+            ok = np.ones(m.lpoints, bool)
+            ok[m.outletIDs] = False
+            uni = 3.0 * m.larea
+            out = m._gravSpread(uni, 5, hl)
+            th = out / m.larea
+            assert np.abs(th[owned & ok] - 3.0).max() < 1.0e-10, "uniform layer changed"
+            rng = np.random.default_rng(1)
+            v = rng.random(m.lpoints) * m.larea
+            v2 = m._gravSync(v)
+            out = m._gravSpread(v2, 5, hl)
+            assert abs(out[owned].sum() - v2[owned].sum()) / v2[owned].sum() < 1.0e-12
+            spike = np.zeros(m.lpoints)
+            i = np.where(owned & ok)[0][0]
+            spike[i] = m.larea[i]
+            out = m._gravSpread(m._gravSync(spike), 3, hl)
+            assert out[i] < 0.9 * spike[i] and (out >= -1.0e-12).all()
+            cell = np.sqrt(m.larea[owned]).mean()
+            assert m._gravSpreadPasses() == int(np.ceil(2.0 * (4.0e5 / cell) ** 2))
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+
+
+def test_gravity_coarse_factor_scales_coarse_supply(tmp_path):
+    """``coarse_factor`` diverts that share of the fraction for the coarse
+    load only: on the first step (same state) the routed coarse supply scales
+    by the factor and the fine supply is unchanged."""
+    import gospl.sed.seaplex as sp
+    from mpi4py import MPI
+
+    seen = {}
+    orig = sp.SEAMesh._gravRoute
+
+    def spy(self, supply, runout, room=None, nodep=None):
+        key = "c" if runout == self.gravRunout else "f"
+        s0 = supply[:, 0] if np.ndim(supply) > 1 else supply
+        if key not in seen:
+            seen[key] = MPI.COMM_WORLD.allreduce(float(s0[self.inIDs == 1].sum()))
+        return orig(self, supply, runout, room, nodep)
+
+    res = {}
+    try:
+        sp.SEAMesh._gravRoute = spy
+        for cf in (1.0, 0.25):
+            seen.clear()
+            _run(tmp_path, _write_case(tmp_path, f"cf{int(cf*100)}",
+                                       BELT_BLOCK.format(spread=0.0, cf=cf)))
+            res[cf] = dict(seen)
+    finally:
+        sp.SEAMesh._gravRoute = orig
+    if "f" not in res[1.0]:
+        pytest.skip("fixture without dual lithology")
+    assert res[1.0]["c"] > 0.0
+    assert abs(res[0.25]["c"] / res[1.0]["c"] - 0.25) < 1.0e-6
+    assert abs(res[0.25]["f"] / res[1.0]["f"] - 1.0) < 1.0e-9
