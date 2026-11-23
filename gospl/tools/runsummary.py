@@ -209,7 +209,8 @@ class RunSummary(object):
         if getattr(model, "gravOn", False) and gb is not None:
             rec["gravity"] = {"supplied": float(gb[0]), "deposited": float(gb[1]),
                               "exported": float(gb[2]),
-                              "eroded": float(gb[3]) if len(gb) > 3 else 0.0}
+                              "eroded": float(gb[3]) if len(gb) > 3 else 0.0,
+                              "failed": float(gb[4]) if len(gb) > 4 else 0.0}
         with open(self.path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         self.step += 1

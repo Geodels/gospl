@@ -147,3 +147,10 @@ ICE_COVER_MIN = 1.0e-2
 # Magic numbers.
 ICE_DISCHARGE_REL_FLOOR = 1.0e-6
 
+# Mean cell size (m) above which goSPL warns that gravity-current slope erosion
+# (`gravity: erosion_length`) is not meaningful. Submarine channels are a few
+# hundred metres to a few kilometres wide and need several cells across to be
+# resolved; at 615 m cells (the regional example) the erosion only roughened
+# the toe of the slope. An estimate, not a measured threshold: no finer mesh has
+# been tested (2026-11-23).
+GRAVITY_EROSION_MAX_CELL = 200.0

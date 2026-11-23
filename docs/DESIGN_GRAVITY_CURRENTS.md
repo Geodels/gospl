@@ -1,7 +1,8 @@
 # Design: marine gravity currents (opt-in `gravity:` block)
 
-Status: phases G1 and G2 done, bypass and accommodation cap added after the first
-regional test (2026-11-23); G3 to do.
+Status (2026-11-23): phases G1, G2, G3b and G3 (slope failure) coded on
+`feat/gravity-currents`, with bypass, accommodation cap, channel-belt options, an
+analytical benchmark and regional and global examples. Not merged into `dev`.
 
 ## 1. Purpose and scope
 
@@ -341,12 +342,27 @@ extra serial fill on global meshes.
 
 ## 7. Phases
 
-- **G1 (this branch):** split + routed solve + run-out length + fixed/flood trigger,
+- **G1 (done):** split + routed solve + run-out length + fixed/flood trigger,
   single fraction and dual lithology, `gravDep` output, tests, docs.
 - **G2 (done):** provenance classes in lockstep; budget in the `--summary` JSON.
-- **G3b (coded, see 6c):** gravity network on the actual bathymetry, linear slope
-  erosion with limits, composition of the eroded material. Next: the regional
-  channel/lobe test.
-- **G3:** slope-failure trigger (remobilise sediment above a critical slope), optional
-  slope-dependent deposition, catchment-area-dependent `sigma`; example in
-  goSPL-examples (delta and slope, regional; one global run).
+- **G3b (done, see 6c):** gravity network on the actual bathymetry, slope erosion
+  with limits, composition of the eroded material. Slope erosion is kept as an
+  expert option: it needs channels resolved by the mesh, and goSPL warns on cells
+  coarser than 200 m (`GRAVITY_EROSION_MAX_CELL`, an estimate: at 615 m it only
+  roughened the toe). Channel belts and lobes are instead represented by the
+  deposits (separate networks, smoothing, deposit spreading, `coarse_factor`).
+- **G3 (done):** slope-failure trigger (`failure_slope`, `max_failure`,
+  `_gravFailure`): sediment deposited during the run on cells steeper than the
+  critical gradient fails down to it, `dz = T_d min((S - S_f) l / 2, max_failure,
+  D)`, and joins the currents through the slope-erosion path (stratigraphy,
+  composition, no deposit at failing cells); reported as `failed`. Regional
+  margin, `failure_slope: 0.02`: 0.95 km3 failed per step against 3.8 km3 of
+  river supply; cell-scale roughness 0.50 -> 0.63 m.
+- **Defaults changed (2026-11-23):** `coarse_factor` 0.3 (was 1), `deposit_spread`
+  two mean cell sizes when absent (was off).
+- **Benchmark:** `benchmarks/test_gravity.py`, exponential run-out on a uniform
+  slope, round-off at two spacings with 1 and 6 receivers. Edge cells are half
+  cells (smaller `l = sqrt(area)`), so flows along a domain wall deposit less.
+- **Deferred:** slope-dependent deposition beyond the bypass taper,
+  catchment-area-dependent `sigma`, the second serial depression fill of the raw
+  network on meshes of millions of nodes (`network: smoothed` avoids it).

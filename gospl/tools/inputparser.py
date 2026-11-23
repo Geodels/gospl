@@ -1755,12 +1755,14 @@ class ReadYaml(object):
         self.gravSlopeSmooth = int(gravDict.get("slope_smooth", 0))
         # Lateral spreading length (m) of each step's gravity deposit: gives
         # concentrated belts a width (number of passes set from the cell size).
-        self.gravDepositSpread = float(gravDict.get("deposit_spread", 0.0))
-        if self.gravDepositSpread < 0.0:
+        # Absent: two mean cell sizes (set at run time); 0 turns it off.
+        ds = gravDict.get("deposit_spread")
+        self.gravDepositSpread = None if ds is None else float(ds)
+        if self.gravDepositSpread is not None and self.gravDepositSpread < 0.0:
             raise ValueError("gravity: deposit_spread must be >= 0 (m)")
         # Share of the diverted fraction applied to the coarse load (dual
         # lithology): gravity currents carry mostly the suspended load.
-        self.gravCoarseFactor = float(gravDict.get("coarse_factor", 1.0))
+        self.gravCoarseFactor = float(gravDict.get("coarse_factor", 0.3))
         if not 0.0 <= self.gravCoarseFactor <= 1.0:
             raise ValueError("gravity: coarse_factor must lie between 0 and 1")
         if self.gravNetworkSmooth < 0 or self.gravSlopeSmooth < 0:
@@ -1781,6 +1783,15 @@ class ReadYaml(object):
         self.gravErosionFlux = float(gravDict.get("erosion_flux", 1.0e4))
         if self.gravErosionExp < 1.0 or self.gravErosionFlux <= 0.0:
             raise ValueError("gravity: erosion_exp must be >= 1 and erosion_flux positive (m3/yr)")
+
+        # Slope-failure trigger (phase G3): off unless failure_slope is given.
+        fs = gravDict.get("failure_slope")
+        self.gravFailureSlope = None if fs is None else float(fs)
+        self.gravMaxFailure = float(gravDict.get("max_failure", 10.0))
+        if self.gravFailureSlope is not None and self.gravFailureSlope <= 0.0:
+            raise ValueError("gravity: failure_slope must be positive")
+        if self.gravMaxFailure <= 0.0:
+            raise ValueError("gravity: max_failure must be positive (m per step)")
 
         frac = gravDict.get("fraction")
         self.gravFraction = None if frac is None else float(frac)

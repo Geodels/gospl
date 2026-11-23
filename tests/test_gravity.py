@@ -199,7 +199,7 @@ def test_gravity_budget_and_fine_conservation(tmp_path):
     )
     if out["flatModel"]:
         pytest.skip("needs the closed sphere fixture")
-    sup, dep, exp, ero = out["gravBudget"]
+    sup, dep, exp, ero, _ = out["gravBudget"]
     assert sup > 0.0 and ero == 0.0           # no slope erosion configured
     assert abs(sup - dep - exp) / sup < 1.0e-6
     assert MPI.COMM_WORLD.allreduce(float(out["gravDep"].max()), op=MPI.MAX) > 0.0
@@ -487,7 +487,7 @@ def test_gravity_slope_erosion(tmp_path):
         m = Model(yml, verbose=False, showlog=False)
         try:
             m.runProcesses()
-            sup, dep, exp, ero = m.gravBudget
+            sup, dep, exp, ero, _ = m.gravBudget
             assert ero > 0.0, "no slope erosion: test is vacuous"
             assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-5
             fe = MPI.COMM_WORLD.allreduce(m._fineEroded, op=MPI.SUM)
@@ -569,7 +569,7 @@ def test_gravity_channel_belt_options_conserve(tmp_path):
     )
     if out["flatModel"]:
         pytest.skip("needs the closed sphere fixture")
-    sup, dep, exp, ero = out["gravBudget"]
+    sup, dep, exp, ero, _ = out["gravBudget"]
     assert sup > 0.0
     assert abs(sup - dep - exp) / sup < 1.0e-6
     fe = MPI.COMM_WORLD.allreduce(out["_fineEroded"], op=MPI.SUM)
@@ -668,7 +668,7 @@ def test_gravity_erosion_length_below_cell_is_capped(tmp_path):
     out = _run(tmp_path, _write_case(tmp_path, "short", block), attrs=("gravBudget",))
     if out["flatModel"]:
         pytest.skip("needs the closed sphere fixture")
-    sup, dep, exp, ero = out["gravBudget"]
+    sup, dep, exp, ero, _ = out["gravBudget"]
     assert ero > 0.0, "no erosion: the erosion solve failed"
     assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-6
 
@@ -709,10 +709,83 @@ def test_gravity_erosion_any_lithology(tmp_path, variant):
         pytest.skip("needs the closed sphere fixture")
     assert out["stratLith"] == (variant == "dual")
     assert (out["stratNb"] > 0) == (variant != "nostrat")
-    sup, dep, exp, ero = out["gravBudget"]
+    sup, dep, exp, ero, _ = out["gravBudget"]
     assert sup > 0.0 and ero > 0.0, "erosion not exercised"
     assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-6
     assert np.isfinite(out["elev"]).all()
     assert MPI.COMM_WORLD.allreduce(float(out["gravDep"].min()), op=MPI.MIN) < 0.0
     if out["stratNb"] > 0:
         assert (out["stratH"] >= -1.0e-9).all() and np.isfinite(out["stratH"]).all()
+
+
+FAILURE_BLOCK = (
+    "gravity:\n"
+    "    runout: 3.0e6\n"
+    "    runout_fine: 1.2e7\n"
+    "    fraction: 0.5\n"
+    "    failure_slope: 0.001\n"
+    "    max_failure: 2.0\n\n"
+)
+
+
+@pytest.mark.slow
+def test_gravity_slope_failure(tmp_path):
+    """Slope-failure trigger (phase G3): sediment on cells steeper than
+    ``failure_slope`` and deeper than the bypass depth fails, at most
+    ``max_failure`` per step and never more than the sediment deposited during
+    the run, and joins the currents with its composition. The budget closes
+    with the failed volume counted as eroded (and reported apart), failing
+    cells receive no deposit, and the fine volume is conserved."""
+    import gospl.sed.seaplex as sp
+    from gospl.model import Model
+    from mpi4py import MPI
+
+    rec = {"n": 0, "ok": True, "msg": ""}
+    orig = sp.SEAMesh._gravFailure
+
+    def spy(self, hl):
+        avail = np.maximum(self.cumEDLocal.getArray().copy(), 0.0)
+        S = self._gravSlope(hl)
+        vol, mask = orig(self, hl)
+        own = self.inIDs == 1
+        dz = vol / self.larea
+        depth = self.sealevel - hl
+        bad = own & (dz > 0) & ((S <= self.gravFailureSlope)
+                                | (depth <= self.gravBypassDepth)
+                                | (dz > self.gravMaxFailure * (1 + 1e-9))
+                                | (dz > avail * (1 + 1e-9) + 1e-12))
+        if bad.any():
+            rec["ok"], rec["msg"] = False, "failure outside its conditions at %d cells" % bad.sum()
+        rec["n"] += 1
+        rec["mask"] = mask
+        return vol, mask
+
+    yml = _write_case(tmp_path, "fail", FAILURE_BLOCK)
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    sp.SEAMesh._gravFailure = spy
+    try:
+        m = Model(yml, verbose=False, showlog=False)
+        try:
+            if m.flatModel:
+                pytest.skip("needs the closed sphere fixture")
+            failed_any = 0.0
+            while m.tNow < m.tEnd:
+                m.runProcesses()
+                sup, dep, exp, ero, fail = m.gravBudget
+                failed_any += fail
+                assert fail <= ero * (1 + 1e-9) + 1.0
+                assert abs(sup + ero - dep - exp) / (sup + ero) < 1.0e-5
+            assert rec["n"] > 0 and rec["ok"], rec["msg"]
+            assert failed_any > 0.0, "no failure: test is vacuous"
+            casc, gC, gF = m._gravThick
+            owned = m.inIDs == 1
+            assert ((gC + gF)[rec["mask"] & owned] == 0.0).all()
+            fe = MPI.COMM_WORLD.allreduce(m._fineEroded, op=MPI.SUM)
+            fd = MPI.COMM_WORLD.allreduce(m._fineDeposited, op=MPI.SUM)
+            assert abs(fe - fd) / fe < 5.0e-3, f"fine {fe:.4e} vs {fd:.4e}"
+        finally:
+            m.destroy()
+    finally:
+        sp.SEAMesh._gravFailure = orig
+        os.chdir(cwd)

@@ -20,6 +20,7 @@ from vtk.util import numpy_support  # type: ignore
 from gospl.tools.constants import (
     BOUNDARY_FLOW_SENTINEL,
     DEPOSIT_FLOOR,
+    GRAVITY_EROSION_MAX_CELL,
     MISSING_DATA_SENTINEL,
 )
 
@@ -52,6 +53,22 @@ class SEAMesh(object):
         # thickness, numpy (no PETSc object, nothing to destroy).
         if getattr(self, "gravOn", False):
             self.gravDep = np.zeros(self.lpoints, dtype=np.float64)
+            if self.gravErosionLength is not None:
+                # Slope erosion needs channels resolved by the mesh: warn on
+                # meshes coarser than GRAVITY_EROSION_MAX_CELL (collective).
+                own = self.inIDs == 1
+                tot = MPI.COMM_WORLD.allreduce(
+                    np.array([np.sqrt(self.larea[own]).sum(), float(own.sum())]),
+                    op=MPI.SUM)
+                dx = tot[0] / max(tot[1], 1.0)
+                if MPIrank == 0 and dx > GRAVITY_EROSION_MAX_CELL:
+                    print(
+                        "[gravity] WARNING: slope erosion (erosion_length) on a "
+                        "mesh of %0.0f m cells; it needs channels resolved by the "
+                        "mesh (cells of %0.0f m or less) and otherwise mostly "
+                        "roughens the toe of the slope." % (dx, GRAVITY_EROSION_MAX_CELL),
+                        flush=True,
+                    )
 
         return
 
@@ -258,9 +275,11 @@ class SEAMesh(object):
         tot = MPI.COMM_WORLD.allreduce(
             np.array([np.sqrt(self.larea[own]).sum(), float(own.sum())]), op=MPI.SUM)
         dx = tot[0] / max(tot[1], 1.0)
-        return int(np.ceil(2.0 * (self.gravDepositSpread / dx) ** 2))
+        # default (key absent): two mean cell sizes
+        length = 2.0 * dx if self.gravDepositSpread is None else self.gravDepositSpread
+        return int(np.ceil(2.0 * (length / dx) ** 2))
 
-    def _gravSpread(self, vol, n, hl):
+    def _gravSpread(self, vol, n, hl, exclude=None):
         r"""
         Spread gravity deposits (m3 per node, ``(lpoints,)`` or
         ``(lpoints, k)``) laterally by ``n`` passes of a conservative
@@ -274,7 +293,8 @@ class SEAMesh(object):
         (``n_i`` the number of neighbours). The exchange is antisymmetric, so
         volume is conserved exactly, a uniform thickness is left unchanged on
         any mesh, and ``sum_j w_ij <= a_i / 2`` keeps every pass positive.
-        Only cells deeper than the bypass depth (and not open outlets) take
+        Only cells deeper than the bypass depth (not open outlets, not the
+        eroding or failing cells ``exclude``) take
         part. The same operator for every column, so class columns still sum
         to column 0. Gives the belts of a concentrated network a width of a
         few cells. An earlier donor-share operator (``v_j`` split in
@@ -296,6 +316,9 @@ class SEAMesh(object):
         nb = np.where(valid, ngb, 0)
         ok = (self.sealevel - hl) > self.gravBypassDepth
         ok[self.outletIDs] = False
+        if exclude is not None:
+            # eroding / failing cells receive no deposit in the step they erode
+            ok &= ~exclude
         okf = self._gravSync(ok.astype(np.float64)) > 0.5
         a = self._gravSync(self.larea.copy())
         deg = self._gravSync(valid.sum(axis=1).astype(np.float64))
@@ -417,6 +440,48 @@ class SEAMesh(object):
         self.dm.globalToLocal(self.tmp1, self.tmpL)
         q = np.maximum(self.tmpL.getArray().copy(), 0.0)
         return q, self._takeRoutingPond()
+
+    def _gravFailure(self, hl):
+        r"""
+        Slope-failure trigger of the gravity currents (phase G3). On marine
+        cells below the bypass depth whose gradient :math:`S` (``_gravSlope``,
+        smoothed ``slope_smooth`` times) exceeds ``failure_slope``
+        :math:`S_f`, the sediment fails down to the critical slope:
+
+        .. math::
+
+            \Delta z_i = T_d(d_i)\, \min\left(\frac{(S_i - S_f)\,\ell_i}{2},\;
+            z^{max}_f,\; D_i\right)
+
+        with :math:`\ell_i` the cell size, :math:`z^{max}_f` ``max_failure``
+        (m per step), :math:`D_i` the sediment deposited during the run
+        (positive cumulative erosion-deposition, so bedrock never fails) and
+        :math:`T_d` the depth taper of the deposition. Lowering a cell by
+        :math:`(S - S_f)\ell/2` takes about :math:`S - S_f` off its gradient.
+        The failed volume becomes a gravity-current source at that cell, with
+        the composition removed from the stratigraphy, exactly like the slope
+        erosion. Zero at the network's sinks and at open outlets. Collective
+        (slope smoothing).
+
+        :arg hl: pre-deposition local elevation
+
+        :return: failed bulk volume (m3, local) and the failing-node mask
+        """
+        S = self._gravSlope(hl)
+        dz = 0.5 * np.maximum(S - self.gravFailureSlope, 0.0) * np.sqrt(self.larea)
+        avail = np.maximum(self.cumEDLocal.getArray(), 0.0)
+        dz = np.minimum(np.minimum(dz, self.gravMaxFailure), avail)
+        depth = self.sealevel - hl
+        db = self.gravBypassDepth
+        if db > 0.0:
+            dz *= np.clip((depth - db) / db, 0.0, 1.0)
+        else:
+            dz[depth <= 0.0] = 0.0
+        dz[self._gSink] = 0.0
+        dz[self.outletIDs] = 0.0
+        dz = self._gravSync(dz)
+        vol = dz * self.larea
+        return vol, vol > 0.0
 
     def _gravErosion(self, supply, hl):
         r"""
@@ -1516,11 +1581,20 @@ class SEAMesh(object):
             # to the routed supply as an explicit source.
             eroMask = None
             eroBulk = np.zeros(self.lpoints, dtype=np.float64)
+            failBulk = np.zeros(self.lpoints, dtype=np.float64)
             eroC = np.zeros(self.lpoints, dtype=np.float64)
             eroF = np.zeros(self.lpoints, dtype=np.float64)
             eroP = None
-            if self.gravErosionLength is not None:
-                eroBulk, eroMask = self._gravErosion(gravSed, hl)
+            if self.gravErosionLength is not None or self.gravFailureSlope is not None:
+                eroMask = np.zeros(self.lpoints, dtype=bool)
+                if self.gravErosionLength is not None:
+                    eroBulk, eroMask = self._gravErosion(gravSed, hl)
+                # Slope failure (G3): failed sediment joins the currents at
+                # its cell, through the same stratigraphy/routing path.
+                if self.gravFailureSlope is not None:
+                    failBulk, failMask = self._gravFailure(hl)
+                    eroBulk = eroBulk + failBulk
+                    eroMask = eroMask | failMask
                 if self.stratNb > 0:
                     saved = {k: getattr(self, k).copy()
                              for k in ("thCoarse", "thFine", "provEro")
@@ -1538,6 +1612,9 @@ class SEAMesh(object):
                 else:
                     eroC = eroBulk.copy()
             eroTot = eroC + eroF
+            # share of the removed volume that failed (budget reporting)
+            failTot = eroTot * np.divide(failBulk, eroBulk, out=np.zeros_like(eroBulk),
+                                         where=eroBulk > 0.0)
 
             # Column 0: the supply; with provenance, one more column per source
             # class (the arriving composition provFrac, which a passive label
@@ -1581,11 +1658,11 @@ class SEAMesh(object):
                     self._gSink, self._gSinkF = self._gSinkF, self._gSink
             else:
                 dF, eF = np.zeros_like(dC), np.zeros_like(eC)
-            if self.gravDepositSpread > 0.0:
+            if self.gravDepositSpread is None or self.gravDepositSpread > 0.0:
                 npass = self._gravSpreadPasses()
-                dC = self._gravSpread(dC, npass, hl)
+                dC = self._gravSpread(dC, npass, hl, exclude=eroMask)
                 if gravFine is not None:
-                    dF = self._gravSpread(dF, npass, hl)
+                    dF = self._gravSpread(dF, npass, hl, exclude=eroMask)
             gDepC, gExpC, gDepF, gExpF = dC[:, 0], eC[:, 0], dF[:, 0], eF[:, 0]
             gravProvDep = (dC[:, 1:] + dF[:, 1:]) if comp is not None else None
             self._gravRelease()
@@ -1641,17 +1718,20 @@ class SEAMesh(object):
                 np.array([gravSed[owned].sum(),
                           (gDepC + gDepF)[owned].sum(),
                           (gExpC + gExpF)[owned].sum(),
-                          eroTot[owned].sum()]),
+                          eroTot[owned].sum(),
+                          failTot[owned].sum()]),
                 op=MPI.SUM,
             )
+            # (supplied, deposited, exported, eroded incl. failures, failed)
             self.gravBudget = sums
             if MPIrank == 0 and self.verbose:
                 err = (sums[0] + sums[3] - sums[1] - sums[2]) / max(sums[0] + sums[3], 1.0)
                 print(
-                    "[gravity] supplied %0.4g km3, eroded %0.4g km3, deposited "
-                    "%0.4g km3, exported %0.4g km3 (closure %0.1e)"
-                    % (sums[0] * 1e-9, sums[3] * 1e-9, sums[1] * 1e-9,
-                       sums[2] * 1e-9, err),
+                    "[gravity] supplied %0.4g km3, eroded %0.4g km3 (of which "
+                    "failed %0.4g km3), deposited %0.4g km3, exported %0.4g km3 "
+                    "(closure %0.1e)"
+                    % (sums[0] * 1e-9, sums[3] * 1e-9, sums[4] * 1e-9,
+                       sums[1] * 1e-9, sums[2] * 1e-9, err),
                     flush=True,
                 )
 

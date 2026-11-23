@@ -751,9 +751,10 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
      - Sediment density used to turn the load into a concentration.
    * - ``coarse_factor``
      - 0 to 1
-     - 1
+     - 0.3
      - Dual lithology only: the coarse load is diverted with this share of the
-       fraction (the fine load with the full fraction).
+       fraction (the fine load with the full fraction). Gravity currents carry
+       mostly the suspended load; 1 diverts as much coarse as fine.
    * - ``runout``
      - m
      - 5.e4
@@ -803,12 +804,24 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
      - Smoothing of the gradient used by ``bypass_slope`` and the erosion.
    * - ``deposit_spread``
      - m
-     - 0
-     - Lateral spreading length of each step's deposit (volume conserving).
+     - 2 × mean cell size
+     - Lateral spreading length of each step's deposit (volume conserving);
+       0 turns it off.
+   * - ``failure_slope``
+     - gradient
+     - absent (off)
+     - Slope failure: sediment deposited during the run fails where the
+       seafloor (deeper than ``bypass_depth``) is steeper than this, down to
+       this gradient, and joins the gravity currents.
+   * - ``max_failure``
+     - m per step
+     - 10
+     - Cap of the failed thickness in a cell and step.
    * - ``erosion_length``
      - m
      - absent (off)
-     - Slope erosion: the fraction of the flux picked up in a cell is
+     - Expert option, for meshes of 200 m cells or finer (see the cautions).
+       Slope erosion: the fraction of the flux picked up in a cell is
        (cell size / ``erosion_length``) × (S/S_e)^4 / (1 + (S/S_e)^4), at
        most 1. Must be much larger than the cell size (tens of cells).
    * - ``erosion_slope``
@@ -834,9 +847,9 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
    carry large loads for their discharge. Raise ``sigma`` (about 2) for small
    steep catchments with flashy floods.
 2. *Composition* (dual lithology). Gravity currents carry mostly the suspended
-   load: set ``coarse_factor`` to about 0.2 to 0.4. With 1, the coarse share of
-   the load is diverted as fully as the fine one and builds thick coarse lobes
-   at the foot of the slope.
+   load: the default ``coarse_factor`` of 0.3 diverts 0.3 x the fraction of the
+   coarse load. With 1, the coarse load is diverted as fully as the fine one and
+   builds thick coarse lobes at the foot of the slope.
 3. *Run-out lengths.* Choose them from the distance between the shelf edge and
    the basin floor you want to fill: most of the coarse deposit lies within a
    few run-out lengths of the slope base, and the fine one reaches further (on
@@ -849,14 +862,20 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
 5. *Belts and lobes* (regional, dual lithology). Use a concentrated coarse
    network (``receivers: 2``, ``flow_exp: 4``) and a spreading fine one
    (``receivers_fine: 6``, ``flow_exp_fine: 1``), smooth the routing surface
-   and the slope over a few cells (``network_smooth: 3``, ``slope_smooth: 3``)
-   and spread the deposit over 2 to 3 cell sizes (``deposit_spread``).
+   and the slope over a few cells (``network_smooth: 3``, ``slope_smooth: 3``).
+   The deposit is spread over two cell sizes by default (``deposit_spread``).
 6. *Global runs.* Use ``network: smoothed`` and leave the regional options
    (``bypass_slope``, the networks, the smoothing, the erosion) off; set the
    run-outs to several cell sizes (tens to hundreds of kilometres). This
    configuration has only been run on the test meshes so far.
-7. *Check the budget.* Run with ``-v`` (or ``--summary``): each step prints the
-   supplied, eroded, deposited and exported volumes; the closure must stay at
+7. *Slope failure* (optional). ``failure_slope`` remobilises sediment that
+   builds steeper than a critical gradient, typically the upper slope and the
+   foresets. Choose it from the gradients of your mesh (smoothed if
+   ``slope_smooth`` is set): on the regional margin of the examples (615 m
+   cells, foresets up to about 0.03), ``failure_slope: 0.02`` failed about
+   0.95 km³ per 5 kyr step, a quarter of the river supply to the currents.
+8. *Check the budget.* Run with ``-v`` (or ``--summary``): each step prints the
+   supplied, eroded (including failed), deposited and exported volumes; the closure must stay at
    the solver tolerance (below 1e-6). ``gospl-inspect`` flags a budget that does
    not close.
 
@@ -866,17 +885,27 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
   so ``bypass_slope``, ``erosion_slope`` and the network options must be chosen
   for each mesh. The smoothing keys are in passes, so their width scales with
   the cell size; ``deposit_spread`` and the run-outs are lengths and do not.
-- *Slope erosion* needs channels resolved by the mesh and the time step. On a
-  regional mesh of a few hundred metres with kyr steps it mostly roughens the
-  toe of the slope (scours of tens of metres); leave it off unless the mesh
-  resolves the channels, and keep ``max_erosion`` small. ``erosion_length``
+- *Slope erosion is an expert option: do not use it on meshes coarser than
+  about 200 m.* It needs the channels resolved by the mesh and the time step:
+  submarine channels are a few hundred metres to a few kilometres wide and
+  need several cells across. On the 615 m regional mesh with 5 kyr steps it
+  only roughened the toe of the slope (scours of tens of metres), and goSPL
+  prints a warning when it is used on cells coarser than 200 m (an estimate:
+  finer meshes have not been tested). Keep ``max_erosion`` small. ``erosion_length``
   must be many cell sizes: the pick-up compounds along a path, and with a
   length shorter than a cell the flux grows so fast that the erosion solve
   fails (``[flow] routing repair failed`` in the log) and no erosion is
   applied that step. ``erosion_exp``
   has only been tested up to 2.
 - *Single-cell pathways.* A concentrated network (few receivers, high
-  exponent) without ``deposit_spread`` builds ridges one cell wide.
+  exponent) with ``deposit_spread: 0`` builds ridges one cell wide.
+- *Slope failure* depends on the mesh gradients like ``bypass_slope``; it adds
+  some cell-scale roughness on the slope (on the regional margin, the
+  cell-scale roughness of the gravity deposit rose from 0.50 to 0.63 m), and
+  only sediment deposited during the run can fail.
+- *Domain walls.* Cells along a domain edge are half cells; their deposited
+  fraction, set by the cell size, is smaller, so flows running along a wall
+  deposit a little less.
 - *Open boundaries export.* Currents reaching an open or fixed edge leave the
   domain with their load (reported as exported). Place the basin floor inside
   the domain, or use walls, if the distal lobes matter.

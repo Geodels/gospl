@@ -38,6 +38,7 @@ Class SEAMesh
       ~SEAMesh._gravSlope
       ~SEAMesh._gravSpreadPasses
       ~SEAMesh._gravSpread
+      ~SEAMesh._gravFailure
       ~SEAMesh._gravErosion
       ~SEAMesh._gravRoute
       ~SEAMesh._gravFineFraction
@@ -67,6 +68,7 @@ Private functions
 .. automethod:: sed.seaplex.SEAMesh._gravSlope
 .. automethod:: sed.seaplex.SEAMesh._gravSpreadPasses
 .. automethod:: sed.seaplex.SEAMesh._gravSpread
+.. automethod:: sed.seaplex.SEAMesh._gravFailure
 .. automethod:: sed.seaplex.SEAMesh._gravErosion
 .. automethod:: sed.seaplex.SEAMesh._gravRoute
 .. automethod:: sed.seaplex.SEAMesh._gravFineFraction

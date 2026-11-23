@@ -124,7 +124,7 @@ At each marine node :math:`\mathrm{i}` reached by rivers, the load :math:`\mathr
 
   \mathrm{s_i^f = f_{h,i}\, Q_{s,i}^f}, \qquad \mathrm{s_i^c = \gamma\, f_{h,i}\, Q_{s,i}^c}
 
-and a remainder that goes to the clinoform cascade. :math:`\mathrm{\gamma}` is ``coarse_factor`` (1 by default; gravity currents carry mostly the suspended load). The fraction :math:`\mathrm{f_h}` is either fixed (``fraction``) or carried by floods. goSPL's discharge :math:`\mathrm{\bar Q}` and load :math:`\mathrm{\bar Q_s}` are long-term means, and the mean concentration :math:`\mathrm{\bar C = \rho_s \bar Q_s/\bar Q}` is almost always far below the hyperpycnal threshold :math:`\mathrm{C_c}` (about 40 kg/m³, Mulder and Syvitski, 1995). With log-normal daily discharges :math:`\mathrm{X = Q/\bar Q}` (log-standard deviation :math:`\mathrm{\sigma}`, mean 1, so :math:`\mathrm{\mu = -\sigma^2/2}`) and a rating curve :math:`\mathrm{Q_s \propto Q^b}`, the fraction of the load carried by days above the threshold is
+and a remainder that goes to the clinoform cascade. :math:`\mathrm{\gamma}` is ``coarse_factor`` (0.3 by default; gravity currents carry mostly the suspended load). The fraction :math:`\mathrm{f_h}` is either fixed (``fraction``) or carried by floods. goSPL's discharge :math:`\mathrm{\bar Q}` and load :math:`\mathrm{\bar Q_s}` are long-term means, and the mean concentration :math:`\mathrm{\bar C = \rho_s \bar Q_s/\bar Q}` is almost always far below the hyperpycnal threshold :math:`\mathrm{C_c}` (about 40 kg/m³, Mulder and Syvitski, 1995). With log-normal daily discharges :math:`\mathrm{X = Q/\bar Q}` (log-standard deviation :math:`\mathrm{\sigma}`, mean 1, so :math:`\mathrm{\mu = -\sigma^2/2}`) and a rating curve :math:`\mathrm{Q_s \propto Q^b}`, the fraction of the load carried by days above the threshold is
 
 .. math::
 
@@ -170,7 +170,7 @@ with
 
   \mathrm{\Lambda_i = \left(1 - e^{-\ell_i / L}\right)\, T_d(d_i)\, T_S(S_i)}, \qquad \mathrm{T_d(d) = \min\left(1, \max\left(0, \frac{d - d_b}{d_b}\right)\right)}, \qquad \mathrm{T_S(S) = \frac{1}{1 + (S/S_b)^4}}
 
-:math:`\mathrm{\ell_i = \sqrt{a_i}}` is the cell size, :math:`\mathrm{L}` the run-out length (``runout``, or ``runout_fine`` for the fine fraction), :math:`\mathrm{d_i}` the water depth, :math:`\mathrm{d_b}` ``bypass_depth``, :math:`\mathrm{S_i}` the seafloor gradient (Green-Gauss on the Voronoi cell, optionally smoothed ``slope_smooth`` times with the same average as above) and :math:`\mathrm{S_b}` ``bypass_slope`` (:math:`\mathrm{T_S = 1}` when it is not set). :math:`\mathrm{\Lambda = 1}` at terminal sinks (they keep what reaches them) and 0 at open boundaries (export). Along a path of cells the flux decays as :math:`\mathrm{e^{-x/L}}` whatever the mesh spacing, so :math:`\mathrm{L}` is resolution independent. The tapers are smooth on purpose: hard thresholds on a gradient that is noisy from cell to cell made neighbouring cells alternate between deposition and bypass.
+:math:`\mathrm{\ell_i = \sqrt{a_i}}` is the cell size, :math:`\mathrm{L}` the run-out length (``runout``, or ``runout_fine`` for the fine fraction), :math:`\mathrm{d_i}` the water depth, :math:`\mathrm{d_b}` ``bypass_depth``, :math:`\mathrm{S_i}` the seafloor gradient (Green-Gauss on the Voronoi cell, optionally smoothed ``slope_smooth`` times with the same average as above) and :math:`\mathrm{S_b}` ``bypass_slope`` (:math:`\mathrm{T_S = 1}` when it is not set). :math:`\mathrm{\Lambda = 1}` at terminal sinks (they keep what reaches them) and 0 at open boundaries (export). Along a path of cells the flux decays as :math:`\mathrm{e^{-x/L}}` whatever the mesh spacing, so :math:`\mathrm{L}` is resolution independent (``benchmarks/test_gravity.py`` checks it to round-off on square lattices at two spacings, with one and six receivers). The tapers are smooth on purpose: hard thresholds on a gradient that is noisy from cell to cell made neighbouring cells alternate between deposition and bypass.
 
 **Accommodation.** A gravity deposit cannot build a cell above :math:`\mathrm{\eta - d_b}` (:math:`\mathrm{\eta}` the sea level). With :math:`\mathrm{r_i = \max\left(0, (\eta - d_b - z_i)\, a_i - D^{cl}_i\right)}` the room left after the clinoform deposit :math:`\mathrm{D^{cl}_i}`, every node with :math:`\mathrm{\Lambda_i q_i > r_i}` gets :math:`\mathrm{\Lambda_i = r_i / q_i}` (it deposits exactly its room and passes the rest on) and the system is solved again, until no node overfills (:math:`\mathrm{\Lambda}` only decreases, so a few passes suffice). The fine fraction gets the room the coarse one leaves.
 
@@ -185,16 +185,29 @@ With ``erosion_length`` :math:`\mathrm{L_e}`, the currents pick up sediment wher
 
 with :math:`\mathrm{S_e}` ``erosion_slope``, :math:`\mathrm{a}` ``erosion_exp`` (1 by default) and :math:`\mathrm{Q_e}` ``erosion_flux`` (m³/yr). The total flux then solves :math:`\mathrm{\left(I - W^T \mathrm{diag}(1 - \Lambda + \epsilon)\right) q = s}`. A node either erodes (:math:`\mathrm{\epsilon_i > \Lambda_i}`, and then :math:`\mathrm{\Lambda_i = 0}`) or deposits (:math:`\mathrm{\epsilon_i = 0}`). Where :math:`\mathrm{E_i}` would exceed ``max_erosion`` × :math:`\mathrm{a_i}`, :math:`\mathrm{\epsilon_i}` is lowered to fit and the solve repeated. For :math:`\mathrm{a > 1}`, :math:`\mathrm{q^{(0)}}` is the flux of the linear solve and the factor is evaluated once per step: iterating on :math:`\mathrm{q}` within a step diverges, because the pick-up multiplies the flux by :math:`\mathrm{\prod (1 + \epsilon)}` along a path. For the same reason :math:`\mathrm{\epsilon_i \le 1}` and :math:`\mathrm{L_e}` must span many cells. The eroded volume is removed from the stratigraphy (which gives its fine fraction and provenance) and added, with that composition, to the supply of each fraction at the eroding node, so the routing below treats it as an explicit source.
 
+Slope erosion is an expert option: it needs submarine channels resolved by the mesh (several cells across channels a few hundred metres to a few kilometres wide), and goSPL warns when it is used on cells coarser than 200 m.
+
+Slope failure
+^^^^^^^^^^^^^
+
+With ``failure_slope`` :math:`\mathrm{S_f}`, sediment on marine cells steeper than :math:`\mathrm{S_f}` fails and joins the gravity currents. The failed thickness at node :math:`\mathrm{i}` brings its gradient back to about :math:`\mathrm{S_f}`:
+
+.. math::
+
+  \mathrm{\Delta z_i = T_d(d_i)\, \min\left(\frac{(S_i - S_f)\, \ell_i}{2},\; z^{max}_f,\; D_i\right)}
+
+with :math:`\mathrm{S_i}` the gradient (smoothed ``slope_smooth`` times), :math:`\mathrm{z^{max}_f}` ``max_failure`` (m per step) and :math:`\mathrm{D_i}` the sediment deposited during the run (the positive cumulative erosion-deposition, so bedrock never fails); lowering a cell by :math:`\mathrm{(S - S_f)\ell/2}` takes about :math:`\mathrm{S - S_f}` off its gradient. The depth taper keeps failures below the bypass depth. The failed volume follows the same path as the slope erosion: it is removed from the stratigraphy, which gives its composition, added to the supply at that node, and the node receives no gravity deposit in that step. It is reported apart (``failed``) and counted with the eroded volume in the budget below.
+
 Lateral spreading of the deposit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-A concentrated network delivers the coarse load along paths one cell wide, which would build one-cell ridges. With ``deposit_spread`` :math:`\mathrm{L_s}` (m), each step's gravity deposit :math:`\mathrm{v_i}` (m³) is spread by a conservative diffusion of its thickness :math:`\mathrm{t_i = v_i / a_i}`:
+A concentrated network delivers the coarse load along paths one cell wide, which would build one-cell ridges. With ``deposit_spread`` :math:`\mathrm{L_s}` (m; two mean cell sizes by default, 0 to turn it off), each step's gravity deposit :math:`\mathrm{v_i}` (m³) is spread by a conservative diffusion of its thickness :math:`\mathrm{t_i = v_i / a_i}`:
 
 .. math::
 
   \mathrm{v_i \leftarrow v_i + \sum_{j \in N(i)} w_{ij} (t_j - t_i)}, \qquad \mathrm{w_{ij} = w_{ji} = \frac{1}{2} \frac{\min(a_i, a_j)}{\max(n_i, n_j)}}
 
-repeated :math:`\mathrm{\lceil 2 (L_s / \overline{\ell})^2 \rceil}` times (:math:`\mathrm{n_i}` the number of neighbours, :math:`\mathrm{\overline{\ell}}` the mean cell size), only between cells deeper than :math:`\mathrm{d_b}`. The exchange is antisymmetric, so volume is conserved exactly; a uniform thickness is left unchanged on any mesh; and :math:`\mathrm{\sum_j w_{ij} \le a_i/2}` keeps every pass positive. Each pass widens a deposit by about half a cell size squared in variance, so the same :math:`\mathrm{L_s}` gives the same width at any resolution. (An operator that shares each donor's volume in proportion to its neighbours' areas also conserves volume but does not keep a uniform layer uniform: on an irregular mesh it grew chains of metre-scale bumps at cells larger or smaller than their neighbours.)
+repeated :math:`\mathrm{\lceil 2 (L_s / \overline{\ell})^2 \rceil}` times (:math:`\mathrm{n_i}` the number of neighbours, :math:`\mathrm{\overline{\ell}}` the mean cell size), only between cells deeper than :math:`\mathrm{d_b}` that are not eroding or failing in that step. The exchange is antisymmetric, so volume is conserved exactly; a uniform thickness is left unchanged on any mesh; and :math:`\mathrm{\sum_j w_{ij} \le a_i/2}` keeps every pass positive. Each pass widens a deposit by about half a cell size squared in variance, so the same :math:`\mathrm{L_s}` gives the same width at any resolution. (An operator that shares each donor's volume in proportion to its neighbours' areas also conserves volume but does not keep a uniform layer uniform: on an irregular mesh it grew chains of metre-scale bumps at cells larger or smaller than their neighbours.)
 
 Composition and budget
 ^^^^^^^^^^^^^^^^^^^^^^
