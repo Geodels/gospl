@@ -688,118 +688,210 @@ Marine gravity currents
 
     .. grid-item-card::
 
-        **Declaration example**:
+        **Declaration example** (the regional margin of ``dual_lithology``, 615 m
+        cells, ``dt`` = 5 kyr):
 
         .. code:: yaml
 
             gravity:
-                runout: 5.e4          # run-out length (m), coarse or single fraction
-                runout_fine: 2.e5     # run-out length of the fine fraction (m), dual lithology
-                bypass_depth: 50.     # no deposition shallower than this (m below sea level)
-                bypass_slope: 0.01    # no deposition on steeper gradients (optional)
-                network: raw          # routing surface: raw (default) or smoothed
-                receivers: 2          # receivers per node on the raw network (1 to 12)
-                flow_exp: 4.          # weights ~ slope^flow_exp on the raw network
-                receivers_fine: 6     # fine fraction on its own, spreading network
+                fraction: 0.3         # or a flood block (below)
+                runout: 1.e4          # coarse run-out length (m)
+                runout_fine: 2.e4     # fine run-out length (m)
+                bypass_depth: 50.     # m below sea level
+                bypass_slope: 0.01    # gradient
+                receivers: 2          # coarse network: narrow belts
+                flow_exp: 4.
+                receivers_fine: 6     # fine network: broad lobes
                 flow_exp_fine: 1.
-                network_smooth: 3     # smoothing passes of the routing surface
-                slope_smooth: 3       # smoothing passes of the slope (tapers, erosion)
-                deposit_spread: 1500. # lateral spreading length of the deposit (m)
-                coarse_factor: 0.3    # share of the fraction applied to the coarse load
-                erosion_length: 2.e5  # slope erosion (m; absent = no erosion)
-                erosion_slope: 0.02   # gradient at which erosion reaches half its rate
-                max_erosion: 10.      # maximum erosion per cell and step (m)
-                # fraction: 0.2       # fixed fraction of the river load; if absent, flood trigger:
-                flood:
-                    c_crit: 40.       # hyperpycnal threshold concentration (kg/m3)
-                    rating_exp: 1.8   # b in the rating curve Qs ~ Q^b (> 1)
-                    sigma: 1.2        # log-standard deviation of daily discharge
-                    rho_s: 2650.      # sediment density (kg/m3)
+                network_smooth: 3     # passes
+                slope_smooth: 3       # passes
+                deposit_spread: 1500. # m
+                coarse_factor: 0.3
 
         Adds a second pathway for the part of the river load that travels as a
         gravity current (hyperpycnal flow or turbidity current) instead of being
-        spread by the clinoform scheme. That part is routed down the seafloor
-        network and deposits gradually, so it builds lobes beyond the foresets.
-        Without the block, the marine deposition is unchanged.
+        spread by the clinoform scheme. That part is routed down the seafloor,
+        deposits gradually with a run-out length, and builds coarse belts at the
+        foot of the slope and finer lobes on the basin floor. Without the block,
+        the marine deposition is unchanged (bitwise).
 
-        a. ``runout`` (m, default ``5.e4``): the distance over which the gravity
-           deposit decays by a factor *e*. It does not depend on the mesh
-           resolution, so the same value works at regional and global scale (it
-           must be larger than the cell size).
-        b. ``runout_fine`` (m, default ``4 x runout``): the run-out length of the
-           fine fraction under dual lithology; coarse sediment settles nearer the
-           river mouth than fine sediment.
-        c. ``bypass_depth`` (m below sea level, default ``50``; ``0`` turns it
-           off): gravity currents keep their load in water shallower than this
-           (wave base), so they cross the shelf; deposition then increases
-           gradually to its full rate at twice this depth. A gravity deposit can never
-           build a cell above this depth: what does not fit moves on.
-        d. ``bypass_slope`` (optional, off by default): deposition decreases
-           smoothly on gradients steeper than this (to one half at this value
-           and about 6 % at twice it), so flows cross the foresets and deposit
-           at their toe and on the basin floor, where coarse bottomsets and lobes
-           form. Gradients depend on the mesh resolution (a coarse mesh smears
-           the slope), so choose it from the gradients of your own mesh; it is
-           meant for regional runs.
-        e. ``network`` (``raw`` or ``smoothed``, default ``raw``): the surface the
-           currents follow. ``raw`` is the actual seafloor (depressions filled),
-           with ``receivers`` downslope neighbours per node and a flow-partition
-           exponent ``flow_exp``: on steep slopes the steepest path takes most of
-           the flow (channels), on gentle floors it spreads (lobes). ``smoothed``
-           reuses the clinoform network (smoothed seafloor, up to 12 receivers),
-           which spreads the flow everywhere.
-           With dual lithology, ``receivers_fine`` and ``flow_exp_fine`` give the
-           fine fraction its own network (by default the same as the coarse one):
-           few receivers and a high exponent for the coarse load (narrow belts
-           along the main pathways), more receivers and a low exponent for the
-           fine load (broad lobes beyond). ``network_smooth`` and
-           ``slope_smooth`` (passes of neighbour averaging, default 0) make the
-           pathways and the slope tapers follow the seafloor at the scale of a
-           few cells rather than cell-to-cell noise. ``deposit_spread`` (m,
-           default 0) spreads each step's gravity deposit laterally over about
-           that distance, conserving volume and leaving an even layer even: it
-           gives the belts a width of a few cells and removes cell-scale bumps;
-           the same length gives the same width at any resolution (about 1 to
-           3 cells is enough). ``coarse_factor`` (0 to 1, default 1, dual
-           lithology) diverts that share of the fraction for the coarse load only:
-           gravity currents carry mostly the suspended load, so diverting as much
-           coarse as fine piles coarse lobes at the foot of the slope.
-        f. ``erosion_length`` (m, optional; no erosion without it): the currents
-           pick up sediment where the seafloor is steep, a volume proportional to
-           the flux through the cell, (cell size / ``erosion_length``) times
-           ``(S/S_e)^4 / (1 + (S/S_e)^4)`` with ``S_e`` = ``erosion_slope``. The
-           shorter the length, the stronger the erosion. A cell either erodes or
-           deposits, never erodes shallower than ``bypass_depth``, and loses at most
-           ``max_erosion`` metres per step. The eroded sediment (with its fine
-           fraction and provenance) joins the current. With ``erosion_exp`` (a > 1,
-           default 1) and ``erosion_flux`` (Q_e, m3/yr), the pick-up grows as
-           (Q/Q_e)^(a-1). Slope erosion needs channels resolved by the mesh and
-           the time step; at a few hundred metres and kyr steps it mostly
-           roughens the toe of the slope, so it is best left off regionally.
-        g. ``fraction`` (0 to 1, optional): a fixed fraction of the river load
-           entering the gravity pathway everywhere, useful to calibrate a
-           regional case.
-        h. ``flood`` (used when ``fraction`` is absent): the fraction carried by
-           floods whose concentration exceeds ``c_crit``, computed at each river
-           mouth from its mean discharge and load, assuming log-normal daily
-           discharges (``sigma``) and a rating curve ``Qs ~ Q^rating_exp``. The
-           long-term mean concentration is almost always far below the
-           hyperpycnal threshold, so floods carry the gravity currents: raise
-           ``sigma`` for flashy rivers.
+**Parameters**
 
-        The cumulative gravity deposit (net of the slope erosion) is written as
-        ``gravDep`` (m). With verbose output, each step prints the supplied,
-        eroded, deposited and exported volumes (the budget closes to the solver
-        tolerance).
+All keys are optional. Lengths are in metres, gradients are dimensionless
+(m/m), passes are numbers of neighbour-averaging sweeps.
 
-        .. note::
+.. list-table::
+   :header-rows: 1
+   :widths: 18 10 14 58
 
-            With a ``provenance`` block, the source classes travel with the
-            gravity currents, so the gravity deposits record their sources. With
-            ``--summary``, each step's record has a ``gravity`` budget. On coarse
-            global meshes, small steep coastal catchments (the most hyperpycnal
-            rivers) are merged into larger outlets, so their gravity currents
-            are underestimated. Design: ``docs/DESIGN_GRAVITY_CURRENTS.md``.
+   * - Key
+     - Unit
+     - Default
+     - Meaning
+   * - ``fraction``
+     - 0 to 1
+     - absent
+     - Fixed fraction of the river load reaching the sea that becomes a
+       gravity current. When absent, the ``flood`` trigger is used.
+   * - ``flood: c_crit``
+     - kg/m³
+     - 40
+     - Hyperpycnal threshold concentration (Mulder and Syvitski, 1995).
+   * - ``flood: rating_exp``
+     - -
+     - 1.8
+     - Exponent b of the rating curve Qs ~ Q^b (must be > 1).
+   * - ``flood: sigma``
+     - -
+     - 1.2
+     - Log-standard deviation of daily discharge; larger for flashy rivers.
+   * - ``flood: rho_s``
+     - kg/m³
+     - 2650
+     - Sediment density used to turn the load into a concentration.
+   * - ``coarse_factor``
+     - 0 to 1
+     - 1
+     - Dual lithology only: the coarse load is diverted with this share of the
+       fraction (the fine load with the full fraction).
+   * - ``runout``
+     - m
+     - 5.e4
+     - Distance over which the coarse (or single-fraction) deposit decays by
+       a factor *e*. Must exceed the cell size.
+   * - ``runout_fine``
+     - m
+     - 4 × ``runout``
+     - Same for the fine fraction (dual lithology).
+   * - ``bypass_depth``
+     - m below sea level
+     - 50
+     - No deposition (or erosion) shallower than this; full rate at twice
+       this depth. Also the accommodation limit: a gravity deposit never
+       builds a cell above it. 0 turns both off.
+   * - ``bypass_slope``
+     - gradient
+     - off
+     - Deposition decreases on steeper seafloor (one half at this value,
+       6 % at twice it), so flows cross the foresets.
+   * - ``network``
+     - ``raw`` / ``smoothed``
+     - ``raw``
+     - Surface the currents follow: the actual seafloor with its depressions
+       filled (``raw``), or the clinoform network (``smoothed``, which
+       ignores the five keys below).
+   * - ``receivers``
+     - 1 to 12
+     - 6
+     - Downslope neighbours sharing the coarse (or single) flux.
+   * - ``flow_exp``
+     - -
+     - 2
+     - Flux shared in proportion to slope^flow_exp: higher concentrates the
+       flow on the steepest path.
+   * - ``receivers_fine``, ``flow_exp_fine``
+     - as above
+     - coarse values
+     - Network of the fine fraction (dual lithology).
+   * - ``network_smooth``
+     - passes
+     - 0
+     - Smoothing of the routing surface before the depressions are filled.
+   * - ``slope_smooth``
+     - passes
+     - 0
+     - Smoothing of the gradient used by ``bypass_slope`` and the erosion.
+   * - ``deposit_spread``
+     - m
+     - 0
+     - Lateral spreading length of each step's deposit (volume conserving).
+   * - ``erosion_length``
+     - m
+     - absent (off)
+     - Slope erosion: the fraction of the flux picked up in a cell is
+       (cell size / ``erosion_length``) × (S/S_e)^4 / (1 + (S/S_e)^4).
+   * - ``erosion_slope``
+     - gradient
+     - 0.02
+     - S_e: gradient at which erosion reaches half its rate.
+   * - ``max_erosion``
+     - m per step
+     - 10
+     - Cap of the erosion in a cell and step.
+   * - ``erosion_exp``, ``erosion_flux``
+     - -, m³/yr
+     - 1, 1.e4
+     - Non-linear pick-up, multiplied by (Q / ``erosion_flux``)^(a - 1).
+
+**Setting it up**
+
+1. *Trigger.* Start with a fixed ``fraction`` (0.1 to 0.3) to see where the
+   currents go, then switch to ``flood`` for a process-based fraction. With the
+   default ``sigma`` the flood fraction is small (well below 1 % on most
+   margins); raise ``sigma`` (about 2) for small steep catchments with flashy
+   floods.
+2. *Composition* (dual lithology). Gravity currents carry mostly the suspended
+   load: set ``coarse_factor`` to about 0.2 to 0.4. With 1, the coarse share of
+   the load is diverted as fully as the fine one and builds thick coarse lobes
+   at the foot of the slope.
+3. *Run-out lengths.* Choose them from the distance between the shelf edge and
+   the basin floor you want to fill: most of the coarse deposit lies within a
+   few run-out lengths of the slope base, and the fine one reaches further (on
+   the margin above, a 10 km coarse run-out left about 80 % of the coarse
+   gravity deposit within 15 km of the slope base).
+4. *Where they deposit.* Keep ``bypass_depth`` near the storm wave base (about
+   50 m). On a regional mesh, read the seafloor gradients of your initial
+   surface and set ``bypass_slope`` between the shelf and the foreset
+   gradients, so the currents cross the foresets and deposit at their toe.
+5. *Belts and lobes* (regional, dual lithology). Use a concentrated coarse
+   network (``receivers: 2``, ``flow_exp: 4``) and a spreading fine one
+   (``receivers_fine: 6``, ``flow_exp_fine: 1``), smooth the routing surface
+   and the slope over a few cells (``network_smooth: 3``, ``slope_smooth: 3``)
+   and spread the deposit over 2 to 3 cell sizes (``deposit_spread``).
+6. *Global runs.* Use ``network: smoothed`` and leave the regional options
+   (``bypass_slope``, the networks, the smoothing, the erosion) off; set the
+   run-outs to several cell sizes (tens to hundreds of kilometres). This
+   configuration has only been run on the test meshes so far.
+7. *Check the budget.* Run with ``-v`` (or ``--summary``): each step prints the
+   supplied, eroded, deposited and exported volumes; the closure must stay at
+   the solver tolerance (below 1e-6). ``gospl-inspect`` flags a budget that does
+   not close.
+
+**Cautions**
+
+- *Resolution.* Gradients depend on the mesh (a coarse mesh smears the slope),
+  so ``bypass_slope``, ``erosion_slope`` and the network options must be chosen
+  for each mesh. The smoothing keys are in passes, so their width scales with
+  the cell size; ``deposit_spread`` and the run-outs are lengths and do not.
+- *Slope erosion* needs channels resolved by the mesh and the time step. On a
+  regional mesh of a few hundred metres with kyr steps it mostly roughens the
+  toe of the slope (scours of tens of metres); leave it off unless the mesh
+  resolves the channels, and keep ``max_erosion`` small. ``erosion_exp``
+  has only been tested up to 2.
+- *Single-cell pathways.* A concentrated network (few receivers, high
+  exponent) without ``deposit_spread`` builds ridges one cell wide.
+- *Open boundaries export.* Currents reaching an open or fixed edge leave the
+  domain with their load (reported as exported). Place the basin floor inside
+  the domain, or use walls, if the distal lobes matter.
+- *Global meshes.* Small steep coastal catchments (the most hyperpycnal
+  rivers) are merged into larger outlets, so their gravity currents are
+  underestimated. The ``raw`` network fills the seafloor depressions serially
+  on one processor every step, which becomes slow on meshes of millions of
+  nodes: use ``smoothed`` there.
+- *Calibration.* The module has been tested on one regional margin and on the
+  test meshes. Compare the deposit with the clinoform wedge without the block
+  (the gravity part moves sediment from the foresets to the basin floor) and
+  check that the result does not depend on ``dt``.
+
+**Outputs and cost**
+
+The cumulative gravity deposit (net of any slope erosion) is written as
+``gravDep`` (m). With a ``provenance`` block, the source classes travel with the
+currents. With ``--summary``, each step's record has a ``gravity`` budget. On the
+regional margin above (52,805 nodes, 4 processors) a step takes 1.25 s with the
+block and 0.96 s without, about 30 % more: the routing solves take most of it
+(about 0.2 s), the network about 0.04 s and the spreading about 0.04 s. Design
+and tests: ``docs/DESIGN_GRAVITY_CURRENTS.md``.
 
 
 Groundwater & duricrust
