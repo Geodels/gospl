@@ -1089,7 +1089,7 @@ def test_advection_partition_invariant(tmp_path):
     """IIOE2 advection + edge reset must not depend on the decomposition.
 
     Two partition bugs, both fixed 2026-10 and both guarded here (flat_advect
-    ridge, np=1 vs np=3, 3 steps, whole domain):
+    ridge, np=1 vs np=3, 2 steps, whole domain):
 
     * interior: an owned row's inflow weight is the GHOST neighbour's outflow
       weight, computed from the ghost's truncated local stencil (Fortran FVarea,
@@ -1121,7 +1121,7 @@ def test_advection_partition_invariant(tmp_path):
         keep = tmp_path / f"ab{nproc}"
         res = subprocess.run(
             [sys.executable, str(tool), "flat_advect.yml", "-n", str(nproc),
-             "--steps", "3", "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+             "--steps", "2", "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
             cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
             timeout=3 * MPI_TIMEOUT)
         a, b = keep / "ab_np1.npz", keep / f"ab_np{nproc}.npz"
@@ -1548,7 +1548,7 @@ def test_soil_diffusion_partition_invariant(tmp_path, channels):
     tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
     keep = tmp_path / "ab"
     res = subprocess.run(
-        [sys.executable, str(tool), "soil.yml", "-n", "3", "--steps", "5",
+        [sys.executable, str(tool), "soil.yml", "-n", "3", "--steps", "4",
          "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
         cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
         timeout=3 * MPI_TIMEOUT)
@@ -1565,7 +1565,7 @@ def test_channel_hillslope_partition_invariant(tmp_path, law):
     """
     Protects: `diffusion: channelQ` with deposition on (hillslopes run between
     the incision and the sediment routing, `hillslopeBeforeRouting`) is
-    partition-invariant at np=3: elevation within 1e-3 m of np=1 after 5 steps
+    partition-invariant at np=3: elevation within 1e-3 m of np=1 after 4 steps
     (1e-4 m measured, the level of the same case without the option). The
     threshold is off the discharge lattice of this regular mesh (multiples of
     625 m3/yr): at an exact multiple, solver round-off flips cells across it
@@ -1606,7 +1606,7 @@ def test_channel_hillslope_partition_invariant(tmp_path, law):
     tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
     keep = tmp_path / "ab"
     res = subprocess.run(
-        [sys.executable, str(tool), "chan.yml", "-n", "3", "--steps", "5",
+        [sys.executable, str(tool), "chan.yml", "-n", "3", "--steps", "4",
          "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
         cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
         timeout=3 * MPI_TIMEOUT)
@@ -1615,3 +1615,31 @@ def test_channel_hillslope_partition_invariant(tmp_path, law):
     a, b = np.load(a), np.load(b)
     d = np.abs(a["elev"] - b["elev"]).max()
     assert d < 1.0e-3, f"np=1 vs np=3 elevation difference {d:.3e} m"
+
+
+def test_ab_partition_runs_requested_steps(tmp_path):
+    """
+    Protects: `scripts/ab_partition.py --steps K` runs K time steps. Until
+    2026-11-23 it set the end time to start + (K-1) dt, so the default
+    (K = 1) ran no process step, compared the initial state and always passed.
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    for f in ("minimal.yml", "mesh.npz"):
+        if not (FIXTURES_DIR / f).exists():
+            pytest.skip(f"{f} not present")
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
+    res = subprocess.run(
+        [sys.executable, str(tool), "minimal.yml", "--json", "--timeout",
+         str(MPI_TIMEOUT)],
+        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+        timeout=3 * MPI_TIMEOUT)
+    out = res.stdout[res.stdout.index("{"):]
+    assert json.loads(out)["steps_run"] == 1, res.stdout[-2000:] + res.stderr[-2000:]

@@ -16,7 +16,10 @@ Usage::
     python scripts/ab_partition.py input.yml -n 4 --field iceHL --field soilH --json
     python scripts/ab_partition.py input.yml -n 4 --keep ab_out   # keep the npz dumps
 
-``--steps K`` runs only the first K time steps (default: 1). With ``--keep``
+``--steps K`` runs the first K time steps (default: 1; 0 = the full run), and the
+report states how many steps were run. (Until 2026-11-23 the tool ran K - 1 steps,
+so the default compared the initial state only and could not fail; results recorded
+before then as "K steps" were K - 1 steps.) With ``--keep``
 each npz also holds ``_rank``, the owning rank of every node, so differences
 can be tested for alignment with the partition seams. Each run executes
 in its own scratch directory whose entries are symlinks to the input's
@@ -27,7 +30,7 @@ Exit status: 0 if every field agrees within ``--rtol``/``--atol``, 1 otherwise,
 so it can gate a script. A difference is a lead, not a verdict. The default
 tolerances are strict on purpose, and a healthy model does NOT pass them
 node-by-node: KSP round-off is amplified by near-tie flow routing.
-Reference baseline (tests/fixtures/minimal.yml, np=1 vs np=2, 2 steps, after
+Reference baseline (tests/fixtures/minimal.yml, np=1 vs np=2, 1 step, after
 the 2026-10 mfdreceivers fix; it was ~1e-6 on elevation before):
 
     elev    max rel ~6e-9   (round-off level: healthy)
@@ -78,7 +81,8 @@ yml, out, steps, extra = sys.argv[1], sys.argv[2], int(sys.argv[3]), json.loads(
 model = Model(yml, verbose=False, showlog=False)
 try:
     if steps > 0:
-        model.tEnd = min(model.tEnd, model.tStart + (steps - 1) * model.dt)
+        model.tEnd = min(model.tEnd, model.tStart + steps * model.dt)
+    nsteps = int(round((model.tEnd - model.tStart) / model.dt))
     model.runProcesses()
     comm = MPI.COMM_WORLD
     owned = model.inIDs == 1
@@ -95,7 +99,7 @@ try:
     parts = comm.gather((gid, fields), root=0)
     if comm.rank == 0:
         n = model.mpoints
-        res = {"_coords": np.asarray(model.mCoords)}
+        res = {"_coords": np.asarray(model.mCoords), "_steps": np.array(nsteps)}
         # Owning rank of every node (input-mesh order): lets a comparison test
         # whether differences sit on the partition seams.
         own_rank = np.full(n, -1, dtype=np.int32)
@@ -260,6 +264,11 @@ def main(argv=None) -> int:
             interior = np.all((cc - lo[axes] > 1e-6 * span)
                               & (hi[axes] - cc > 1e-6 * span), axis=1)
         report = compare(a, b, args.rtol, args.atol, interior)
+        ran = int(a["_steps"]) if "_steps" in a.files else -1
+        if ran == 0:
+            sys.stderr.write("ab_partition: warning: no time step was run (end time "
+                             "equals start time); the comparison is of the initial "
+                             "state only.\n")
         if args.keep:
             args.keep.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ref, args.keep / ref.name)
@@ -267,9 +276,10 @@ def main(argv=None) -> int:
 
     if args.json:
         print(json.dumps({"input": str(yml), "ref_np": args.ref_np, "np": args.np,
-                          "steps": args.steps, "fields": report}, indent=1))
+                          "steps": args.steps, "steps_run": ran, "fields": report},
+                         indent=1))
     else:
-        print(f"{yml.name}: np={args.ref_np} vs np={args.np}, {args.steps or 'all'} step(s)")
+        print(f"{yml.name}: np={args.ref_np} vs np={args.np}, {ran} step(s) run")
         print(f"{'field':10s} {'max|d|':>11s} {'max rel':>9s} {'rel L2':>9s} "
               f"{'#differ':>8s}  worst node (input-mesh id)")
         for r in report:

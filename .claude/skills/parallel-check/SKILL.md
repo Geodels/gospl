@@ -33,8 +33,11 @@ python scripts/ab_partition.py <input.yml> -n 4 --steps 2        # np=1 vs np=4
 python scripts/ab_partition.py <input.yml> -n 4 --steps 6        # does it GROW?
 python scripts/ab_partition.py <input.yml> -n 4 --field iceHL --json
 ```
+`--steps K` runs K time steps (0 = full run) and the report says how many ran. Until
+2026-11-23 it ran K-1, so the default compared the initial state only and always
+passed: re-check any older "passed" result made without `--steps`.
 A healthy model does not agree node-by-node: KSP round-off flips near-tie routing.
-Baseline on `tests/fixtures/minimal.yml`, np=1 vs np=2, 2 steps: elevation max rel
+Baseline on `tests/fixtures/minimal.yml`, np=1 vs np=2, 1 step: elevation max rel
 ~4e-6, discharge max rel ~0.3 at ~175 nodes. Suspect a real bug when the difference
 is orders of magnitude above the baseline for your input, is localised along the
 partition boundary, appears as non-finite values on one side only, or grows with
