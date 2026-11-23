@@ -881,7 +881,8 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
 - *Global meshes.* Small steep coastal catchments (the most hyperpycnal
   rivers) are merged into larger outlets, so their gravity currents are
   underestimated. The seafloor depressions are filled on one processor (the
-  whole surface is gathered, filled and broadcast), as for the clinoform
+  whole surface is gathered on it and filled, then each processor receives
+  its own nodes), as for the clinoform
   network that goSPL builds anyway. ``network: smoothed`` reuses that fill;
   ``raw`` adds a second one every step, which costs time and memory on meshes
   of millions of nodes: prefer ``smoothed`` there.

@@ -73,6 +73,7 @@ class UnstMesh(object):
         # assembled owned global ids on rank 0) for `_gatherGlobalOnRoot`; the
         # partition is fixed for the run so it is computed once on first use.
         self._rootGather = None
+        self._rootScatter = None
 
         # Define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
@@ -741,6 +742,51 @@ class UnstMesh(object):
             gathered[all_gids] = recv
             return gathered
         return None
+
+    def _scatterFromRoot(self, full):
+        r"""
+        Inverse of ``_gatherGlobalOnRoot``: from a full-mesh (``mpoints``)
+        array held on rank 0, give every rank its LOCAL values (``lpoints``,
+        owned and ghost nodes, in local order) with one ``Scatterv``.
+
+        It replaces ``MPI.COMM_WORLD.bcast(full, root=0)[self.locIDs]``, which
+        put a whole-mesh array on every rank (memory per rank growing with the
+        mesh, against the "No whole-mesh arrays on every rank" rule) and moved
+        ``mpoints`` values to each of them; here each rank receives only its
+        ``lpoints`` values. Rank 0 caches the concatenated local ids of all
+        ranks (one int64 per local node of every rank, gathered once).
+
+        :arg full: the ``mpoints`` array on rank 0 (ignored elsewhere).
+
+        :return: the local ``lpoints`` array on every rank. Collective.
+        """
+        comm = MPI.COMM_WORLD
+        if self._rootScatter is None:
+            counts = np.array(comm.allgather(int(self.lpoints)), dtype="i")
+            displs = np.zeros_like(counts)
+            displs[1:] = np.cumsum(counts)[:-1]
+            ids = np.ascontiguousarray(self.locIDs, dtype=np.int64)
+            all_ids = (
+                np.empty(int(counts.sum()), dtype=np.int64) if MPIrank == 0 else None
+            )
+            comm.Gatherv(
+                ids,
+                [all_ids, counts, displs, MPI.INT64_T] if MPIrank == 0 else None,
+                root=0,
+            )
+            self._rootScatter = (counts, displs, all_ids)
+        counts, displs, all_ids = self._rootScatter
+        send = (
+            np.ascontiguousarray(np.asarray(full, dtype=np.float64)[all_ids])
+            if MPIrank == 0 else None
+        )
+        out = np.empty(self.lpoints, dtype=np.float64)
+        comm.Scatterv(
+            [send, counts, displs, MPI.DOUBLE] if MPIrank == 0 else None,
+            out,
+            root=0,
+        )
+        return out
 
     def _set_DMPlex_boundary_points(self, label):
         """

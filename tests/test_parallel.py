@@ -1694,3 +1694,70 @@ def test_ab_partition_runs_requested_steps(tmp_path):
         timeout=3 * MPI_TIMEOUT)
     out = res.stdout[res.stdout.index("{"):]
     assert json.loads(out)["steps_run"] == 1, res.stdout[-2000:] + res.stderr[-2000:]
+
+
+_SCATTER_SCRIPT = '''\
+"""Child for test_scatter_from_root (mpirun -n N)."""
+import json, sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False)
+try:
+    rng = np.random.default_rng(7)
+    full = rng.random(m.mpoints) if MPI.COMM_WORLD.rank == 0 else None
+    ref = MPI.COMM_WORLD.bcast(full, root=0)[m.locIDs]
+    got = m._scatterFromRoot(full)
+    # round trip through the gather of owned values
+    back = m._gatherGlobalOnRoot(got)
+    ok_back = bool(np.array_equal(back, full)) if MPI.COMM_WORLD.rank == 0 else True
+    stats = {"equal": bool(np.array_equal(got, ref)), "size_ok": got.size == m.lpoints,
+             "round_trip": ok_back}
+finally:
+    m.destroy()
+allst = MPI.COMM_WORLD.gather(stats, root=0)
+if MPI.COMM_WORLD.rank == 0:
+    json.dump(allst, open(sys.argv[2], "w"))
+'''
+
+
+def test_scatter_from_root(tmp_path):
+    """
+    Protects: `UnstMesh._scatterFromRoot` (used after the serial rank-0
+    depression fills of the marine and gravity networks, and the global
+    flexure) gives every rank exactly ``full[locIDs]``, owned and ghost
+    nodes, as the whole-mesh broadcast it replaced did, without putting an
+    ``mpoints`` array on every rank; and it inverts ``_gatherGlobalOnRoot``.
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    if _petsc4py_abi_mismatch():
+        pytest.skip("petsc4py ABI mismatch (nested mpirun segfault).")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH; cannot exercise MPI decomposition.")
+    needed = ["minimal.yml", "mesh.npz"]
+    if not all((FIXTURES_DIR / f).exists() for f in needed):
+        pytest.skip(f"missing one of {needed} in tests/fixtures.")
+    child = tmp_path / "_scatter.py"
+    child.write_text(_SCATTER_SCRIPT)
+    run = tmp_path / "n3"
+    run.mkdir()
+    for f in needed:
+        shutil.copy(FIXTURES_DIR / f, run / f)
+    out = run / "stats.json"
+    result = subprocess.run(
+        ["mpirun", "-n", "3", sys.executable, str(child), "minimal.yml", str(out)],
+        cwd=run, timeout=MPI_TIMEOUT, capture_output=True, text=True,
+        env=mpi_child_env(),
+    )
+    if result.returncode != 0 or not out.exists():
+        pytest.fail(f"`mpirun -n 3` subprocess failed (rc={result.returncode}).\n"
+                    f"stderr:\n{result.stderr[-2000:]}")
+    for r, s in enumerate(json.load(open(out))):
+        assert s["equal"], f"rank {r}: scatter != broadcast[locIDs]"
+        assert s["size_ok"], f"rank {r}: wrong local size"
+        assert s["round_trip"], "gather(scatter(x)) != x"

@@ -128,7 +128,7 @@ class SEAMesh(object):
         fillz = self._gatherGlobalOnRoot(surf)
         if MPIrank == 0:
             fillz = epsfill(minh, fillz)
-        fillz = MPI.COMM_WORLD.bcast(fillz, root=0)[self.locIDs]
+        fillz = self._scatterFromRoot(fillz)
         if far is not None:
             fillz[far] = surf[far]
         self._gW, self._gSink = self._gravAssemble(
@@ -705,9 +705,8 @@ class SEAMesh(object):
         fillz = self._gatherGlobalOnRoot(hsmth)
         if MPIrank == 0:
             fillz = epsfill(minh, fillz)
-        # Send elevation + eps to other processors
-        fillEPS = MPI.COMM_WORLD.bcast(fillz, root=0)
-        fillz = fillEPS[self.locIDs]
+        # Send each processor its local rows (not the whole mesh)
+        fillz = self._scatterFromRoot(fillz)
         if not self.flatModel:
             fillz[self.coastDist > self.offshore] = hl[self.coastDist > self.offshore]
         # Pass `self.gid` for deterministic exact-tie-break on slope —
@@ -768,7 +767,7 @@ class SEAMesh(object):
 
         if self.memclear:
             del data, indptr, nodes
-            del hl, fillz, fillEPS, rcv, wght
+            del hl, fillz, rcv, wght
             gc.collect()
 
         # Store flow direction matrix

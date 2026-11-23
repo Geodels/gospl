@@ -680,9 +680,8 @@ class GridProcess(object):
             )
             flexZ = self._dh2unstr(wflex_dh)
 
-        # Send flexural response globally
-        flexZ = MPI.COMM_WORLD.bcast(flexZ, root=0)
-        tmpFlex = flexZ[self.locIDs]
+        # Send each processor its local rows of the flexural response
+        tmpFlex = self._scatterFromRoot(flexZ if MPIrank == 0 else None)
 
         self.localFlex += tmpFlex
 
