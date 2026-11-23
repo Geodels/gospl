@@ -62,3 +62,33 @@ def test_cli_runs_minimal_model():
     finally:
         os.chdir(cwd)
     assert rc == 0
+
+
+def test_output_dir_absolute_path(tmp_path):
+    """An absolute ``output: dir:`` is used as given. It used to be appended
+    to the working directory (``cwd + "/" + dir``), so ``/data/run`` ended up in
+    ``<cwd>/data/run`` and an absolute path was never honoured."""
+    import re
+    import shutil
+
+    from gospl.model import Model
+
+    run = tmp_path / "run"
+    run.mkdir()
+    shutil.copy(FIXTURES / "mesh.npz", run / "mesh.npz")
+    out = tmp_path / "elsewhere" / "abs_out"
+    text = (FIXTURES / "minimal.yml").read_text()
+    text = re.sub(r"dir: '[^']*'", "dir: '%s'" % out, text)
+    (run / "abs.yml").write_text(text)
+    cwd = os.getcwd()
+    os.chdir(run)
+    try:
+        m = Model("abs.yml", verbose=False, showlog=False)
+        try:
+            assert os.path.realpath(m.outputDir) == os.path.realpath(str(out))
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)
+    assert out.is_dir()
+    assert not (run / str(out).lstrip("/")).exists()
