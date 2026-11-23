@@ -154,3 +154,14 @@ ICE_DISCHARGE_REL_FLOOR = 1.0e-6
 # the toe of the slope. An estimate, not a measured threshold: no finer mesh has
 # been tested (2026-11-23).
 GRAVITY_EROSION_MAX_CELL = 200.0
+# Tolerance (m) between an elevation and a depression-filled surface (lFill,
+# waterFilled). The fill leaves 1-ulp noise between them, and that noise
+# depends on the partition and the platform. A cell within this distance of the
+# filled surface is AT it: routing reads lFill there (FAMesh._routingSurface);
+# during an overflow pass it is not under water (_distributeDownstream, the
+# original strict `<`), and at the end of flowAccumulation it belongs to the
+# lake (the original inclusive `<=`). Without the tolerance a pit's spill
+# node, whose elevation IS the water level, kept or lost its whole discharge
+# on a 1-ulp coin flip that differed with the rank count (2026-11-24).
+FILL_LEVEL_TOL = 1.0e-9
+

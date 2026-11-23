@@ -1865,3 +1865,61 @@ def test_gravity_operator_partition_exact(tmp_path):
         assert rel < 1.0e-9, f"{k}: np=1 vs np=3 differ by {rel:.2e} of the max"
     assert res[1]["dep"][:, 0].sum() > 0.0
 
+
+
+@pytest.mark.slow
+def test_base_model_partition_exact(tmp_path):
+    """
+    Protects: the base model (flow, river incision, continental sediment and
+    depressions, marine deposition, dual lithology) is partition-exact on
+    minimal_dual: a full run at np=3 matches np=1 to solver round-off.
+
+    Until 2026-11-24 it differed by millimetres per step on macOS and by
+    tens of metres on the ubuntu CI runners (discharge 37 % of its maximum at a node,
+    sediment load 8.6 %), from five causes:
+    - a deep seed of the depression fill (below the fill level, next to a
+      cell above it) lost its link to the open sea when it was also a
+      partition-boundary node (`pitfilling._performFilling`): on the ubuntu
+      partition a seafloor region at -5590 m was filled to +317 m;
+    - the rank-0 spill-over graph was merged with Reduce(MAX) over a -1
+      initialisation, which raised every edge below -1 to -1;
+    - a depression's spill node, whose elevation IS the water level, was in or
+      out of the lake on the 1-ulp fill noise (`FILL_LEVEL_TOL`);
+    - the inlets of large depressions were read from ghost nodes' receivers
+      (`sedplex._identifyPitInlets`, owned donors + additive halo exchange);
+    - the river incision was solved for the absolute elevation, so rtol 1e-8
+      left ~1e-4 m that differed with the block-Jacobi partition (`SPL`
+      increment solve).
+    Asserted after the full run (10 steps): elevation within 1e-5 m,
+    discharge and sediment load within 1e-6 of their maxima.
+    """
+    import re
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import numpy as np
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    src = FIXTURES_DIR / "minimal_dual.yml"
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip("minimal_dual.yml / mesh.npz not present")
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    (tmp_path / "b.yml").write_text(re.sub(r"dir: '[^']*'", "dir: 'out'", src.read_text()))
+    tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
+    keep = tmp_path / "ab"
+    res = subprocess.run(
+        [sys.executable, str(tool), "b.yml", "-n", "3", "--steps", "0",
+         "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+        timeout=3 * MPI_TIMEOUT)
+    a, b = keep / "ab_np1.npz", keep / "ab_np3.npz"
+    assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
+    a, b = np.load(a), np.load(b)
+    de = np.nanmax(np.abs(a["elev"] - b["elev"]))
+    assert de < 1.0e-5, f"np=1 vs np=3 elevation differs by {de:.3e} m"
+    for k in ("FA", "sedLoad"):
+        rel = np.nanmax(np.abs(a[k] - b[k])) / np.nanmax(np.abs(a[k]))
+        assert rel < 1.0e-6, f"np=1 vs np=3 {k} differs by {rel:.2e} of its max"

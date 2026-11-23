@@ -310,8 +310,18 @@ class SPL(object):
         # Solve SPL erosion implicitly for fluvial and glacial erosion
         if self.fDepa == 0:
             t1 = process_time()
-            self._solve_KSP(True, eMat, self.hOld, self.stepED)
-            self.tmp.waxpy(-1.0, self.hOld, self.stepED)
+            # Solve for the elevation CHANGE, eMat d = hOld - eMat hOld, then
+            # stepED = hOld + d. The solver's relative tolerance then applies to
+            # one step's erosion, not to the whole elevation field: solved for
+            # the absolute elevation (thousands of metres), rtol 1e-8 left an
+            # error of ~1e-4 m that the partition-dependent block-Jacobi
+            # preconditioner made differ between rank counts (2026-11-24).
+            eMat.mult(self.hOld, self.tmp1)
+            self.tmp1.aypx(-1.0, self.hOld)
+            self.tmp.set(0.0)
+            self._solve_KSP(False, eMat, self.tmp1, self.tmp)
+            self.hOld.copy(result=self.stepED)
+            self.stepED.axpy(1.0, self.tmp)
             eMat.destroy()
             if MPIrank == 0 and self.verbose:
                 print(

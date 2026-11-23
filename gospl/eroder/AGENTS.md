@@ -27,3 +27,7 @@ the original section names (most now live in the files listed in the root
 See `gospl/tools/AGENTS.md` > Debugging an elevation spike for the full text. Rule of
 thumb: keep `spl: G ≲ rain/2` (rain in m/yr); at the 0.99 cap the coupled `(1−fDep)`
 block is near-singular and trunk-river loads land on a handful of cells.
+
+## Detachment-limited solve in increment form (`SPL._getEroDepRate`, 2026-11-24)
+
+With `fDepa == 0` the implicit SPL system `E h = hOld` is solved for the increment `dh = h - hOld` (`E dh = hOld - E hOld`, zero initial guess), then `h = hOld + dh`. Solving for the absolute elevation let the KSP `rtol` of 1e-8 act on elevations of thousands of metres: an error of ~1e-4 m that changed with the block-Jacobi partition. The increment form puts the tolerance on the erosion itself. Guard: `test_base_model_partition_exact`.
