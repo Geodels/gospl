@@ -32,6 +32,7 @@ Class SEAMesh
       ~SEAMesh._marineProvFraction
       ~SEAMesh._gravFloodFraction
       ~SEAMesh._gravNetwork
+      ~SEAMesh._gravReceivers
       ~SEAMesh._gravErosion
       ~SEAMesh._gravRoute
       ~SEAMesh._gravFineFraction
@@ -55,6 +56,7 @@ Private functions
 .. automethod:: sed.seaplex.SEAMesh._marineProvFraction
 .. automethod:: sed.seaplex.SEAMesh._gravFloodFraction
 .. automethod:: sed.seaplex.SEAMesh._gravNetwork
+.. automethod:: sed.seaplex.SEAMesh._gravReceivers
 .. automethod:: sed.seaplex.SEAMesh._gravErosion
 .. automethod:: sed.seaplex.SEAMesh._gravRoute
 .. automethod:: sed.seaplex.SEAMesh._gravFineFraction

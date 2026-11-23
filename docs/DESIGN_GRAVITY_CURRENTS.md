@@ -268,6 +268,14 @@ Three points differ from, or add to, the proposal above.
   neighbours kept 6 weights of 1/7 and 1/7 of its flux vanished (2 to 90 % of the
   supply lost on the test mesh). `_gravNetwork` points the padding at the node itself
   with zero weight and renormalises every row.
+- **Receivers in numpy, not `mfdrcvrs` (after the first regional run).** `mfdrcvrs`
+  gives every selected receiver the SAME weight `1/k` (the slope-weighted line is
+  commented out), so `flow_exp` had no effect and the flux spread evenly over up to 6
+  neighbours; and its branch for nodes with more downslope neighbours than receivers
+  left ~120 nodes with lower neighbours flagged as sinks. Sinks keep everything (no
+  cap), so they grew into isolated mounds up to 420 m in one step. `_gravReceivers`
+  now keeps the `receivers` steepest strictly-downhill neighbours with weights
+  `S^flow_exp`, normalised, with the same input-id tie break.
 - **Pits below the fill cut-off.** `epsfill` starts at `sealevel + oFill`, so a closed
   deep below it keeps its raw elevation, and `mfdrcvrs` hands its flux to all its
   (higher) neighbours: an uphill cycle and a singular solve. Only receivers strictly

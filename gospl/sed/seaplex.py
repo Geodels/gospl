@@ -103,7 +103,7 @@ class SEAMesh(object):
         ``self.dMat1`` (smoothed bathymetry, up to 12 receivers, made to SPREAD
         river sediment). The default ``raw`` builds a separate matrix on the
         eps-filled ACTUAL bathymetry with ``gravity: receivers`` receivers and a
-        flow-partition exponent ``gravity: flow_exp`` (``mfdrcvrs``): on steep
+        flow-partition exponent ``gravity: flow_exp`` (``_gravReceivers``): on steep
         slopes the steepest path takes most of the flux (channels), on gentle
         floors the gradients are alike and the flux spreads (lobes). Same
         construction as ``_matOcean`` (serial ``epsfill`` on rank 0 from the
@@ -130,31 +130,12 @@ class SEAMesh(object):
         fillz = MPI.COMM_WORLD.bcast(fillz, root=0)[self.locIDs]
         if far is not None:
             fillz[far] = hl[far]
-        rcv, _, wght = mfdrcvrs(
-            self.gravReceivers, self.gravFlowExp, fillz, BOUNDARY_FLOW_SENTINEL, self.gid,
-        )
-        # With fewer than 12 receivers, mfdrcvrs pads the unused slots with -1
-        # and keeps the first `receivers` weights WITHOUT renormalising them (a
-        # node with 7 downslope neighbours kept 6 weights of 1/7: 1/7 of its
-        # flux vanished). Point the padding at the node itself with zero weight
-        # and renormalise every row (below); a sink has no outgoing weight.
-        # A closed pit below the fill cut-off (sealevel + oFill) keeps its raw
-        # elevation, and mfdrcvrs then hands its flux to ALL its (higher)
-        # neighbours: the flux flowed uphill and came back, a cycle that left
-        # the solve singular. Keep only receivers strictly lower than the node;
-        # a node with none is a sink (a closed deep keeps what reaches it).
+        rcv, wght = self._gravReceivers(fillz)
         nodes = np.arange(self.lpoints)
-        pad = rcv < 0
-        rcv[pad] = np.broadcast_to(nodes[:, None], rcv.shape)[pad]
-        wght[pad] = 0.0
-        wght[fillz[rcv] >= fillz[:, None]] = 0.0
-        wsum = wght.sum(axis=1)
-        wght = np.divide(wght, wsum[:, None], out=np.zeros_like(wght),
-                         where=wsum[:, None] > 0.0)
+        sink = wght.sum(axis=1) <= 0.0
         if self.flatModel:
             rcv[self.outletIDs, :] = np.tile(self.outletIDs, (12, 1)).T
             wght[self.outletIDs, :] = 0.0
-        sink = (wsum <= 0.0) | np.all(rcv.astype(int) == nodes[:, None], axis=1)
         if self.flatModel:
             sink[self.outletIDs] = False
 
@@ -176,6 +157,49 @@ class SEAMesh(object):
         W.transpose()
         self._gW, self._gSink, self._gWown = W, sink, True
         return
+
+    def _gravReceivers(self, fillz):
+        r"""
+        Receivers and weights of the gravity network on the filled surface
+        ``fillz``: the ``gravity: receivers`` steepest strictly-downhill
+        neighbours of each node, weighted by :math:`\mathrm{S^{p}}` (``flow_exp``)
+        and normalised; a node with no lower neighbour is a sink (no weight).
+
+        Not ``mfdrcvrs``: that kernel gives every selected receiver the SAME
+        weight ``1/k`` (so the flow-partition exponent had no effect and the
+        flux could not concentrate), does not renormalise when it keeps fewer
+        receivers than it found (flux lost), and its ``k > receivers`` branch
+        left nodes with lower neighbours as sinks. Exact slope ties break on
+        the partition-invariant input id, as in ``mfdrcvrs``. Ghost rows are
+        computed on a truncated neighbourhood but dropped at assembly.
+
+        :arg fillz: eps-filled local elevation (partition invariant)
+        :return: ``rcv`` (lpoints x 12, local ids, self-padded) and ``wght``
+        """
+        ngb = self.FVmesh_ngbID
+        nodes = np.arange(self.lpoints)
+        valid = ngb >= 0
+        nb = np.where(valid, ngb, nodes[:, None])
+        dist = np.linalg.norm(self.lcoords[nb] - self.lcoords[:, None, :], axis=2)
+        drop = fillz[:, None] - fillz[nb]
+        down = valid & (drop > 0.0) & (dist > 0.0)
+        slp = np.where(down, drop / np.where(dist > 0.0, dist, 1.0), 0.0)
+        # deterministic exact-tie break (lower input id wins), as mfdrcvrs
+        key = np.where(down, slp * (1.0 - 1.0e-15 * self.gid[nb]), -1.0)
+        order = np.argsort(-key, axis=1, kind="stable")
+        keep = np.zeros_like(down)
+        nr = min(self.gravReceivers, ngb.shape[1])
+        np.put_along_axis(keep, order[:, :nr], True, axis=1)
+        keep &= down
+        w = np.where(keep, slp ** self.gravFlowExp, 0.0)
+        wsum = w.sum(axis=1)
+        w = np.divide(w, wsum[:, None], out=np.zeros_like(w), where=wsum[:, None] > 0.0)
+        rcv = np.where(keep, nb, nodes[:, None])
+        if rcv.shape[1] < 12:
+            pad = 12 - rcv.shape[1]
+            rcv = np.hstack([rcv, np.repeat(nodes[:, None], pad, axis=1)])
+            w = np.hstack([w, np.zeros((self.lpoints, pad))])
+        return rcv, w
 
     def _gravRelease(self):
         """Destroy the gravity network matrix if ``_gravNetwork`` built one

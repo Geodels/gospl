@@ -699,7 +699,7 @@ Marine gravity currents
                 bypass_slope: 0.01    # no deposition on steeper gradients (optional)
                 network: raw          # routing surface: raw (default) or smoothed
                 receivers: 6          # receivers per node on the raw network (1 to 12)
-                flow_exp: 2.          # flow-partition exponent on the raw network
+                flow_exp: 2.          # weights ~ slope^flow_exp on the raw network
                 erosion_length: 2.e5  # slope erosion (m; absent = no erosion)
                 erosion_slope: 0.02   # gradient at which erosion reaches half its rate
                 max_erosion: 10.      # maximum erosion per cell and step (m)
