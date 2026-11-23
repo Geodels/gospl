@@ -827,10 +827,12 @@ All keys are optional. Lengths are in metres, gradients are dimensionless
 **Setting it up**
 
 1. *Trigger.* Start with a fixed ``fraction`` (0.1 to 0.3) to see where the
-   currents go, then switch to ``flood`` for a process-based fraction. With the
-   default ``sigma`` the flood fraction is small (well below 1 % on most
-   margins); raise ``sigma`` (about 2) for small steep catchments with flashy
-   floods.
+   currents go, then switch to ``flood`` for a process-based fraction. The
+   flood fraction depends on how concentrated the rivers are: with the default
+   ``sigma`` it was below 1 % on the regional margin of the examples (dilute
+   rivers) and about a fifth of the load on the global example, whose rivers
+   carry large loads for their discharge. Raise ``sigma`` (about 2) for small
+   steep catchments with flashy floods.
 2. *Composition* (dual lithology). Gravity currents carry mostly the suspended
    load: set ``coarse_factor`` to about 0.2 to 0.4. With 1, the coarse share of
    the load is diverted as fully as the fine one and builds thick coarse lobes
