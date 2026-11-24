@@ -101,7 +101,9 @@ def test_carbonate_budget(tmp_path, monkeypatch):
         assert abs(P - F - L) < 1e-9 * P
         assert abs(dep["reef"] - F) < 1e-9 * F
         loose = dep["carb_sand"] + dep["carb_mud"]
-        assert 0.98 * L < loose <= L * (1 + 1e-9), (loose, L)
+        # the marine lithology balancing blends 1e-6 of the domain mix into
+        # every deposit (robustness on degenerate mixes): a ~1e-6 excess
+        assert 0.98 * L < loose <= L * (1 + 1e-5), (loose, L)
         assert abs(ero["fine"] - dep["fine"]) < 2e-3 * ero["fine"]
         assert np.all(m.carbProd >= 0.0)
     finally:
@@ -297,7 +299,12 @@ def test_carbonate_partition_invariant(tmp_path, pel):
     a, b = out[1], out[3]
     assert np.array_equal(a[:, 0], b[:, 0])
     d = np.max(np.abs(a[:, 1:] - b[:, 1:]))
-    assert d < 1.0e-5, f"np=1 vs np=3 differ by {d:.3e} m"
+    # With the rain resuspended, more (and thinner) sediment goes through the
+    # marine diffusion, whose stage solve stops at ~5e-3 m per node: since
+    # thin deposits are no longer discarded (DEPOSIT_FLOOR 1 nm) its
+    # partition noise shows (8.6e-5 m; it passed at 1e-5 with the 1 mm floor).
+    tol = 2.0e-4 if pel == "resuspend" else 1.0e-5
+    assert d < tol, f"np=1 vs np=3 differ by {d:.3e} m"
 
 
 PEL = ("pelagic:\n  - start: 0.\n    carbonate: 50.\n    lysocline: 3500.\n"
@@ -371,18 +378,20 @@ def test_pelagic_settling_exact(tmp_path, monkeypatch):
         assert np.allclose(carb, exp, rtol=1e-12, atol=1e-15)
         assert np.allclose(clay, 20.0e-6 * m.dt, rtol=1e-12)
         assert np.allclose(m.hLocal.getArray() - h, exp + 20.0e-6 * m.dt, rtol=1e-12)
-        # a tiny rate: carried over until it reaches the 0.1 mm floor
-        m.pelEvents[0]["carb"] = m._pelMaps[0]["carb"] = 1.0e-7
+        # a tiny rate: carried over until it reaches the deposit floor
+        from gospl.tools.constants import DEPOSIT_FLOOR
+        rate = 0.013 * DEPOSIT_FLOOR / m.dt     # not a divisor of the floor
+        m.pelEvents[0]["carb"] = m._pelMaps[0]["carb"] = rate
         m.pelEvents[0]["clay"] = m._pelMaps[0]["clay"] = 0.0
         before = m.stratHL[1][:, top].copy()
         nstep = 0
         while nstep < 200 and np.all(m.stratHL[1][::3, top] == before[::3]):
             m.pelagicRain()
             nstep += 1
-        need = int(np.ceil(1.0e-4 / (1.0e-7 * m.dt)))
+        need = int(np.ceil(DEPOSIT_FLOOR / (rate * m.dt)))
         assert nstep == need, (nstep, need)
         got = m.stratHL[1][::3, top] - before[::3]
-        assert np.allclose(got, need * 1.0e-7 * m.dt, rtol=1e-9)
+        assert np.allclose(got, need * rate * m.dt, rtol=1e-9)
     finally:
         m.destroy()
 
@@ -479,7 +488,8 @@ def test_pelagic_resuspension(tmp_path, monkeypatch):
     assert out["set"][1] == 0.0
     assert out["res"][0] > 5.0 * out["set"][0], (out["res"][0], out["set"][0])
     handed, laid = out["res"][2], out["res"][3]
-    assert 0.99 * handed < laid <= handed * (1 + 1e-9), (laid, handed)
+    # (1e-6 domain-mix blend of the marine lithology balancing)
+    assert 0.99 * handed < laid <= handed * (1 + 1e-5), (laid, handed)
 
 
 def test_sst_temperature(tmp_path, monkeypatch):
@@ -528,7 +538,8 @@ def test_sst_temperature(tmp_path, monkeypatch):
         m.pelagicRain()
         got = m.stratHL[m.carbLit["carb_mud"]][:, top] - c0
         exp = 50.0e-6 * m.dt * np.interp(t0, [10.0, 30.0], [0.0, 1.0])
-        lay = exp >= 1.0e-4
+        from gospl.tools.constants import DEPOSIT_FLOOR
+        lay = exp >= DEPOSIT_FLOOR
         assert np.allclose(got[lay], exp[lay], rtol=1e-12)
     finally:
         m.destroy()
@@ -543,7 +554,7 @@ def test_carbonate_provenance_marine_class(tmp_path, monkeypatch):
     loose carbonate, pelagic carbonate and clay) gets one extra class after
     the user's: every layer stays exactly partitioned by class, the user
     classes keep their eroded/deposited balance (the carbonate used to be
-    counted in them), and the marine class is deposited but never eroded."""
+    counted in them), and the marine class is deposited more than eroded."""
     from mpi4py import MPI
     from gospl.model import Model
 
@@ -573,7 +584,9 @@ def test_carbonate_provenance_marine_class(tmp_path, monkeypatch):
         assert np.abs(P.sum(axis=2) - H).sum() / max(H.sum(), 1.0) < 1.0e-9
         ero = MPI.COMM_WORLD.allreduce(m._provEroded, op=MPI.SUM)
         dep = MPI.COMM_WORLD.allreduce(m._provDeposited, op=MPI.SUM)
-        assert ero[2] == 0.0 and dep[2] > 0.0
+        # made in the sea, so deposited more than eroded (deposited marine
+        # sediment can be eroded again and redeposited, which counts both ways)
+        assert dep[2] > ero[2] >= 0.0
         for c in (0, 1):
             assert abs(dep[c] - ero[c]) < 1.0e-3 * ero[c]
         reef = m.stratHL[m.litName.index("reef")][:, :top]

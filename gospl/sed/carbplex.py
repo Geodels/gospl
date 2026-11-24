@@ -3,7 +3,7 @@ import petsc4py
 from mpi4py import MPI
 from time import process_time
 
-from gospl.tools.constants import CARB_SUBSTEP_GROWTH
+from gospl.tools.constants import CARB_SUBSTEP_GROWTH, DEPOSIT_FLOOR
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
@@ -384,8 +384,9 @@ class CarbMesh(object):
 
         Settled (default): called after the marine step; laid into the
         stratigraphy (``carb_mud`` and ``fine``, ``depoFineFrac = 1``) and the
-        elevation. A node's deposit thinner than the stratigraphic floor
-        (0.1 mm) is carried over to the next steps (``_pelCarry``).
+        elevation. A node's deposit thinner than the deposit floor
+        (``DEPOSIT_FLOOR``, round-off) is carried over to the next steps
+        (``_pelCarry``).
 
         Resuspended (``resuspend`` event, ``resuspend=True``): called before
         the marine step; the volumes are kept in ``_pelHand`` and
@@ -464,7 +465,7 @@ class CarbMesh(object):
         self._pelCarry[:, 0] += carb
         self._pelCarry[:, 1] += clay
         tot = self._pelCarry.sum(axis=1)
-        lay = tot >= 1.0e-4
+        lay = tot >= DEPOSIT_FLOOR
         c = np.where(lay, self._pelCarry[:, 0], 0.0)
         k = np.where(lay, self._pelCarry[:, 1], 0.0)
         self._pelCarry[lay] = 0.0
@@ -704,10 +705,10 @@ class CarbMesh(object):
             total += p
             frame += f["phi"] * p
             sand += (1.0 - f["phi"]) * f["sand"] * p
-        # Framework thinner than the stratigraphic floor of deposeStrat
-        # (0.1 mm) would raise the elevation without being recorded: it joins
-        # the loose sand instead (conservative).
-        thin = frame < 1.0e-4
+        # Framework thinner than the deposit floor of deposeStrat (round-off)
+        # would raise the elevation without being recorded: it joins the
+        # loose sand instead (conservative).
+        thin = frame < DEPOSIT_FLOOR
         sand[thin] += frame[thin]
         frame[thin] = 0.0
         loose = total - frame

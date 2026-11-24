@@ -297,16 +297,12 @@ def test_coastal_erosion_provenance(tmp_path, monkeypatch):
     """With provenance on, the material eroded at the coast keeps the
     composition of the layers it came from (not the river mix at the node,
     which is empty where no river arrives): every layer stays exactly
-    partitioned and each source class deposits what it lost. (The routed
-    marine deposit drops cells thinner than DEPOSIT_FLOOR without putting
-    the volume back, ~5 % here where the eroded material spreads thinly; it
-    is switched off so the balance tests the labelling alone.)"""
+    partitioned and each source class deposits what it lost (it lost ~5 %
+    more while DEPOSIT_FLOOR discarded sub-mm routed marine deposits)."""
     from mpi4py import MPI
-    import gospl.sed.seaplex as seaplex
     from gospl.model import Model
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(seaplex, "DEPOSIT_FLOOR", 0.0)
     yml = _flat_case(tmp_path, WAVES, COAST.replace("rate: 1.e-3", "rate: 1.e-2"))
     v = np.load(tmp_path / "flatw.npz")["v"]
     np.savez(tmp_path / "src.npz", rock=(v[:, 0] > 15.0e3).astype(np.int64))
