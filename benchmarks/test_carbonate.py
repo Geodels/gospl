@@ -199,3 +199,72 @@ def test_carbonate_exposure_ridge(tmp_path, monkeypatch, dx, L):
         assert err < 1.0e-5
     finally:
         m.destroy()
+
+
+def _strip_case(path, dx, L):
+    """Square lattice: land for x < 5 L (h = +10 m), sea beyond (h = -1000 m),
+    walls on every side, a pelagic block with clay decaying over L."""
+    lx, ly = 40.0 * L, 4.0 * L
+    nx, ny = int(round(lx / dx)) + 1, int(round(ly / dx)) + 1
+    X, Y = np.meshgrid(np.arange(nx) * dx, np.arange(ny) * dx)
+    x, y = X.ravel(), Y.ravel()
+    cells = []
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            a = j * nx + i
+            cells += [[a, a + 1, a + nx + 1], [a, a + nx + 1, a + nx]]
+    xc = 5.0 * L
+    z = np.where(x < xc - 0.5 * dx, 10.0, -1000.0)
+    np.savez(path / "strip.npz", v=np.column_stack([x, y, np.zeros_like(x)]),
+             c=np.array(cells, dtype=np.int64), z=z)
+    (path / "strip.yml").write_text(
+        "name: clay decay\n"
+        "domain:\n    npdata: ['strip','v','c','z']\n    flowdir: 1\n    bc: 'wwww'\n"
+        "    seadepo: True\n"
+        "time:\n    start: 0.\n    end: 10.\n    tout: 10.\n    dt: 10.\n    strat: 10.\n"
+        "spl:\n    K: 1.0e-20\n    d: 0.\n    m: 0.5\n"
+        "diffusion:\n    hillslopeKa: 0.\n    hillslopeKm: 0.\n"
+        "sea:\n    position: 0.\n"
+        "climate:\n  - start: 0.\n    uniform: 1.\n"
+        "strata:\n    dual: True\n"
+        "pelagic:\n  - start: 0.\n    clay: 10.\n    clay_decay: %r\n"
+        "output:\n    dir: 'strip_out'\n" % L)
+    return xc
+
+
+@pytest.mark.benchmark
+@pytest.mark.slow
+@pytest.mark.parametrize("dx", [400.0, 200.0])
+def test_pelagic_clay_decay(tmp_path, monkeypatch, dx):
+    """Clay decaying away from the coast on a 1-D strip: exactly the discrete
+    solution lambda^i of (I - L^2 lap) c = 0 (lambda from
+    cosh(dx/L') = 1 + dx^2/(2 L^2)), and exp(-x/L) to second order in dx/L."""
+    from mpi4py import MPI
+
+    L = 2000.0
+    monkeypatch.chdir(tmp_path)
+    xc = _strip_case(tmp_path, dx, L)
+    m = Model("strip.yml", verbose=False, showlog=False)
+    try:
+        m.sealevel = 0.0
+        c = m._clayDecay(L)
+        x = m.lcoords[:, 0]
+        x0 = (np.ceil((xc - 0.5 * dx) / dx) - 1) * dx      # last land column
+        i = np.rint((x - x0) / dx)
+        sea = (i >= 1) & (x <= x0 + 10.0 * L) & (m.inIDs == 1)
+        r = (L / dx) ** 2
+        lam = ((1 + 2 * r) - np.sqrt((1 + 2 * r) ** 2 - 4 * r * r)) / (2 * r)
+        disc = np.max(np.abs(c[sea] - lam ** i[sea])) if sea.any() else 0.0
+        near = sea & (x - x0 <= 3.0 * L)
+        cont = np.max(np.abs(c[near] / np.exp(-(x[near] - x0) / L) - 1.0)) \
+            if near.any() else 0.0
+        disc = MPI.COMM_WORLD.allreduce(disc, op=MPI.MAX)
+        cont = MPI.COMM_WORLD.allreduce(cont, op=MPI.MAX)
+        print("\n[clay decay] dx=%g L=%g: vs lambda^i %.2e, vs exp(-x/L) (x<3L) %.2e"
+              % (dx, L, disc, cont))
+        assert disc < 1.0e-8
+        assert cont < 0.6 * (dx / L) ** 2
+        land = (x < x0 + 0.5 * dx) & (m.inIDs == 1)
+        assert np.allclose(c[land], 1.0)
+    finally:
+        m.destroy()

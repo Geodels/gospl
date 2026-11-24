@@ -188,6 +188,38 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
 
             Learn more about the water table & duricrust.
 
+    .. grid-item-card::
+        :text-align: center
+
+        **Gravity currents**
+        ^^^
+
+        Routing of the gravity-current load down the seafloor with deposition over a run-out length, slope failure and erosion.
+
+        +++
+
+        .. button-ref:: tech_gravity
+            :color: secondary
+            :click-parent:
+
+            Learn more about gravity currents.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Carbonate platforms and reefs**
+        ^^^
+
+        Lithology list, Bosscher and Schlager production, open-water index, pelagic rain, lysocline and CCD.
+
+        +++
+
+        .. button-ref:: carb
+            :color: secondary
+            :click-parent:
+
+            Learn more about the carbonates.
+
 
 .. toctree::
     :maxdepth: 3
@@ -202,4 +234,5 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     ice
     provenance
     groundwater
+    gravity
     carb

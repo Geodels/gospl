@@ -1882,13 +1882,16 @@ class ReadYaml(object):
                 lysocline: 3500.     # depth (m) where dissolution starts
                 ccd: 4500.           # carbonate compensation depth (m)
                 clay: 1.             # hemipelagic clay (m/Myr) or [file, key]
+                clay_decay: 5.e4     # optional: clay * exp(-d/L) from the coast (m)
+                resuspend: False     # optional: rain into the marine diffusion
 
         The carbonate rain settles as ``carb_mud`` with the fraction
         preserved going linearly from 1 at the lysocline to 0 at the CCD; the
         clay settles as ``fine``. Adds ``carb_mud`` to the lithology table if
         the carbonate block did not. Sets ``pelOn`` and ``pelEvents`` (list of
         dicts: ``start``, ``carb``/``clay`` (m/yr scalar or [file, key] with
-        the m/Myr scale), ``lys``, ``ccd``).
+        the m/Myr scale), ``lys``, ``ccd``, ``decay`` (m or None) and
+        ``resuspend``).
         """
         ev = self.input.get("pelagic", None)
         if ev is None:
@@ -1927,8 +1930,16 @@ class ReadYaml(object):
                 raise ValueError(
                     "pelagic: event %d needs ccd >= lysocline (depths in m)." % k)
             anyCarb = anyCarb or hasCarb
+            decay = e.get("clay_decay", None)
+            if decay is not None:
+                decay = float(decay)
+                if decay <= 0.0:
+                    raise ValueError(
+                        "pelagic: event %d clay_decay must be a positive length (m)." % k)
             self.pelEvents.append({"start": float(e["start"]), "carb": carb,
-                                   "clay": clay, "lys": lys, "ccd": ccd})
+                                   "clay": clay, "lys": lys, "ccd": ccd,
+                                   "decay": decay,
+                                   "resuspend": bool(e.get("resuspend", False))})
         self.pelOn = True
         if anyCarb and "carb_mud" not in self.litName:
             prop = self.CARB_LITHOLOGIES["carb_mud"]

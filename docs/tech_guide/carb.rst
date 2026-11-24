@@ -1,12 +1,78 @@
 .. _carb:
 
 ==============================
-Carbonate production
+Carbonate platforms and reefs
 ==============================
 
-Benthic carbonate production (``carbonate:`` block) follows Bosscher and
-Schlager (1992), with one or more carbonate factories as in CarboKitten
-(Hidding et al., 2026). Below sea level, factory :math:`f` produces at
+This page gives the equations behind the carbonate options: the lithology
+list they rely on, benthic production (``carbonate:``), the open-water index,
+and the pelagic rain (``pelagic:``). The user keys and the set-up by
+resolution are in :ref:`the user guide <carbonates>`. Design notes and the
+history of the choices: ``docs/DESIGN_CARBONATES.md``.
+
+.. contents:: On this page
+   :local:
+   :depth: 1
+
+
+Lithologies
+-----------
+
+With dual lithology a layer holds coarse and fine sediment. The lithology
+list generalises it: a layer's bulk thickness :math:`H` is shared between
+lithologies :math:`l = 1 \dots n` with piles :math:`H_l` (the dual-lithology
+fine fraction is the first one), and coarse clastic sediment takes the rest,
+:math:`H_c = H - \sum_l H_l`. Each lithology has
+
+- a porosity-depth curve :math:`\phi_l(z) = \phi_{0,l}\, e^{-z/z_{0,l}}`, so
+  each pile compacts on its own: the solid volume
+  :math:`H_l (1 - \phi_l)` is kept and the pile recomputed with the porosity
+  at its new depth (porosity never increases on unloading);
+- factors on the river erodibility and the hillslope diffusivity, applied in
+  proportion to its share of the surface layer,
+  :math:`K = K_0 \left(f_c + \sum_l f_l k_l\right)`;
+- a **size**, fine-like or coarse-like, which decides how it is sorted.
+
+**Sorting by group.** The sorting rules of dual lithology (a filled pit keeps
+coarse sediment first and lets fine overspill; the marine fine fraction
+increases with water depth; coarse and fine gravity currents have their own
+run-out) act on two groups: the fine group (the fine-like lithologies) and
+the coarse group (coarse clastic and the coarse-like lithologies). Each
+deposit has a fine-group fraction :math:`F`, and lithology :math:`l` takes the
+share :math:`s_l` of its group:
+
+.. math::
+
+    \Delta H_l = \Delta H \times \begin{cases} F\, s_l & l \ \text{fine-like}
+    \\ (1 - F)\, s_l & l \ \text{coarse-like} \end{cases},
+    \qquad \sum_{l\ \text{fine}} s_l = 1, \quad \sum_{l\ \text{coarse}} s_l \le 1 .
+
+The shares are the composition of what arrived, inside its group:
+
+- *rivers*: each lithology's eroded volume is routed with the same implicit
+  operator as the total, :math:`s_l = q_l / \sum_{\text{group}} q`;
+- *pits*: a pit retains the same fraction of each lithology as of its group,
+  so its deposit has the mix of its retained volumes;
+- *marine*: each lithology is carried through the marine cascade and
+  diffusion with the total (the same machinery as the provenance classes), so
+  carbonate from a platform stays on its margin instead of being averaged with
+  a delta's mud across the ocean. The depth-biased fine fraction then fixes
+  each cell's fine and coarse volumes, and the routed mix is balanced by
+  iterative proportional fitting so that each cell keeps its group volume and
+  each lithology deposits its share of the group input (what leaves through
+  open edges carries the same mix);
+- *gravity currents*: each lithology rides its group's route;
+- *hillslope creep and channel supply*: the donors' eroded lithologies,
+  weighted by their creep flux into the cell and their group volume.
+
+Every lithology is conserved. A fraction split into two identical lithologies
+reproduces the dual-lithology run to round-off, which is how this is tested.
+
+
+Benthic production
+------------------
+
+Below sea level, factory :math:`f` produces (Bosscher and Schlager, 1992)
 
 .. math::
 
@@ -17,7 +83,8 @@ where :math:`w` is the water depth, :math:`g_f` the maximum growth rate,
 :math:`I_0` the surface light, :math:`k_f` the extinction coefficient,
 :math:`I_{k,f}` the saturating light, :math:`M_f` an optional habitat map and
 :math:`R_{fj}` piecewise-linear response factors on the depth, the seafloor
-slope and the clastic deposition rate of the previous step.
+slope, the clastic deposition rate of the previous step and the open-water
+index.
 
 **Integration over a step.** Each cell grows with the depth it creates,
 
@@ -26,50 +93,60 @@ slope and the clastic deposition rate of the previous step.
     \frac{dh}{dt} = \sum_f P_f(\eta - h), \qquad h \le \eta - w_{min},
 
 with :math:`\eta` the sea level. The step is split into second-order (Heun)
-sub-steps of about 0.25 m of growth at the largest possible rate, so the result
-does not depend on the model time step: at 1 and 10 kyr steps it matches the
-exact solution of this ODE to :math:`10^{-4}` (``benchmarks/test_carbonate.py``).
+sub-steps of about 0.25 m of growth at the largest possible rate (the same
+number on every processor, from the inputs only), so the result does not
+depend on the model time step: at 1 and 10 kyr steps it matches the exact
+solution of this equation to :math:`10^{-4}`.
 
-**Keep-up and give-up.** Under a relative sea-level rise :math:`\sigma`, the
-depth evolves as :math:`dw/dt = \sigma - P(w)`. Because production grows as the
-water shallows, the depth :math:`w^*` where :math:`P(w^*) = \sigma`,
+**Keep-up and give-up.** Under a relative sea-level rise :math:`\sigma` the
+depth evolves as :math:`dw/dt = \sigma - P(w)`. Production grows as the water
+shallows, so the depth where :math:`P(w^*) = \sigma`,
 
 .. math::
 
     w^* = \frac{1}{k} \ln\left(\frac{I_0}{I_k\, \mathrm{atanh}(\sigma/g)}\right),
 
 is unstable: a platform shallower than :math:`w^*` reaches sea level and keeps
-up with it (growth limited to :math:`\sigma` by the accommodation), a deeper
-one drowns. The benchmark checks both sides of :math:`w^*` and the drowning rate.
+up with it (its growth then limited to :math:`\sigma` by the accommodation); a
+deeper one drowns, and its depth eventually increases at the rate
+:math:`\sigma`.
 
 **Framework and loose sediment.** A fraction :math:`\phi_f` of each factory's
 production is built in place (lithology ``reef``); the rest is split into
-carbonate sand (coarse-like) and mud (fine-like) and added to the marine
-routing of the same step, so carbonate and river sediment share the marine
-cascade, diffusion and stratigraphy. Each carbonate lithology keeps its own
-compaction curve and erodibility.
+carbonate sand (coarse-like, fraction :math:`\sigma_f`) and mud (fine-like)
+and added to the marine cascade of the same step, after the gravity supply is
+taken from the river load. Framework thinner than the stratigraphic floor
+(0.1 mm) joins the loose sand, so elevation, stratigraphy and budget stay
+consistent.
 
-**Open-water index** (response control ``exposure``). Reefs grow best at the
-platform margin, facing open water, and less in lagoons and behind barriers
-(the distance-to-open-water penalty of Pastier et al., 2019, or the wave-energy
-control of pyBadlands). goSPL measures this with the elevation minus its
-smoothing over a length :math:`L` (``exposure_length``),
+
+Open-water index
+----------------
+
+Reefs grow best at the platform margin, facing open water, and less in
+lagoons and behind barriers (the distance-to-open-water penalty of Pastier et
+al., 2019, the wave-energy control of pyBadlands). goSPL measures this with
+the elevation minus its smoothing over a length :math:`L`
+(``exposure_length``):
 
 .. math::
 
-    E = h - s, \qquad (I - L^2 \nabla^2)\, s = h,
+    E = h - s, \qquad (I - L^2 \nabla^2)\, s = h .
 
-positive on margins, rims and highs, negative in lagoons. It is solved for
-:math:`E` directly, :math:`(I - L^2 \nabla^2) E = -L^2 \nabla^2 h`, so the solver
-tolerance applies to the relief. For a parabolic ridge :math:`h = -b x^2` the
-index is exactly :math:`2 b L^2`; the benchmark recovers it to
-:math:`2 \times 10^{-6}` at two spacings and two lengths. Unlike a smoothing set
-in cells, the index does not change with the mesh resolution.
+:math:`E` is positive on margins, rims and highs and negative in lagoons. It
+is solved for :math:`E` directly, :math:`(I - L^2 \nabla^2) E = -L^2 \nabla^2 h`,
+so the solver tolerance applies to the relief rather than to the elevation.
+For a parabolic ridge :math:`h = -b x^2` the index is exactly :math:`2 b L^2`.
+Because :math:`L` is a length, the index does not change with the mesh
+resolution (a smoothing set in numbers of cells would).
 
-**Pelagic carbonate and hemipelagic clay** (``pelagic:`` block). A carbonate
-rain :math:`R_c` (export production, uniform or a map) and a clay rain
-:math:`R_k` settle on the marine cells each step. The fraction of the carbonate
-preserved at water depth :math:`w` is
+
+Pelagic rain
+------------
+
+A carbonate rain :math:`R_c` (export production, uniform or a map) and a clay
+rain :math:`R_k` settle on the marine cells each step. The fraction of the
+carbonate preserved at water depth :math:`w` is
 
 .. math::
 
@@ -78,7 +155,73 @@ preserved at water depth :math:`w` is
                          0 & w \ge z_{ccd} \end{cases}
 
 with :math:`z_{lys}` the lysocline and :math:`z_{ccd}` the carbonate
-compensation depth. The settled thickness over a step is
-:math:`(R_c f(w) + R_k)\,\Delta t`, capped at the water depth; the dissolved
-volume :math:`R_c (1 - f)\,\Delta t` is kept in the budget. A deposit thinner
+compensation depth, both given per event. The settled thickness over a step
+is :math:`(R_c f(w) + R_k)\, \Delta t`, capped at the water depth; the dissolved
+volume :math:`R_c (1 - f)\, \Delta t` is kept in the budget. A deposit thinner
 than the stratigraphic floor (0.1 mm) is carried over to the next steps.
+
+**Clay decreasing away from the coast** (``clay_decay``: :math:`L`). The clay
+rate is the coastal rate times :math:`c`, the solution of
+
+.. math::
+
+    (I - L^2 \nabla^2)\, c = 0 \ \text{in the sea}, \qquad c = 1 \ \text{on land},
+
+which is :math:`e^{-x/L}` at a distance :math:`x` from a straight coast and
+follows the coastline around headlands and islands. On a lattice of spacing
+:math:`\Delta x` the discrete solution is exactly :math:`\lambda^i` with
+:math:`\cosh(\Delta x / L') = 1 + \Delta x^2 / (2 L^2)`. The operator is rebuilt
+each step, as the coastline moves.
+
+**Resuspension** (``resuspend``). The settled thickness is added to the input
+of the marine diffusion of the same step instead of being laid in place; the
+carbonate mud and the clay keep their lithology through the diffusion (their
+own columns of the lithology transport) and are counted in the inputs of the
+marine composition, so both are conserved with the rest of the marine
+deposit.
+
+
+Numerics and parallel consistency
+---------------------------------
+
+Production and the pelagic rain are computed node by node, so they do not
+depend on the number of processors. The open-water index and the clay decay
+are linear solves on the mesh (``fgmres`` with block Jacobi), assembled on
+owned rows; the index operator is built once, the clay operator every step.
+The per-lithology routing adds one solve per lithology to each river and
+cascade routing solve. With one lithology (dual lithology) none of this runs
+and the results are unchanged bit for bit.
+
+
+Benchmarks
+----------
+
+``benchmarks/test_carbonate.py``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 44 30
+
+   * - Test
+     - Exact solution
+     - Result
+   * - Keep-up / give-up
+     - half a metre above :math:`w^*` the platform reaches sea level and keeps
+       up; half a metre below it drowns
+     - both sides as predicted
+   * - Drowning
+     - depth increases at :math:`\sigma` once production has stopped
+     - rate within 2 %
+   * - Time-step independence
+     - ODE :math:`dw/dt = -P(w)` (tight-tolerance reference)
+     - :math:`10^{-4}` at 1 and 10 kyr
+   * - Open-water index
+     - parabolic ridge, :math:`E = 2 b L^2`
+     - :math:`2 \times 10^{-6}` at two spacings and lengths
+   * - Clay decay
+     - 1-D strip, :math:`\lambda^i` and :math:`e^{-x/L}`
+     - :math:`10^{-10}`; second order in :math:`\Delta x/L`
+
+``tests/test_lithologies.py`` and ``tests/test_carbonate.py`` check the
+lithology split against dual lithology, the conservation of every lithology,
+the carbonate and pelagic budgets, and the agreement of 1 and 3 processors.

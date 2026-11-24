@@ -489,6 +489,10 @@ class Model(
                     _probeZ(self, "after continental sed")
                     if self.seaDepo:
                         # Downstream sediment deposition in marine environments
+                        if getattr(self, "pelOn", False) and _CarbMesh._pelResuspend(self):
+                            # Pelagic rain handed to this marine step's diffusion
+                            with self.profiler.phase("pelagic"), self._phase("pelagic"):
+                                _CarbMesh.pelagicRain(self, resuspend=True)
                         if getattr(self, "carbOn", False):
                             # Carbonate production: framework in place, loose
                             # sediment into this marine step

@@ -1907,6 +1907,31 @@ class SEAMesh(object):
         if tracers:
             comp = self._tracerComp(self._marDepProv, marDep)
             provThick = comp * dh[:, None]
+
+        # Resuspended pelagic rain (carbplex.pelagicRain, `resuspend`): joins
+        # the diffusion input after the routing, carb_mud and fine in their
+        # lithology columns, the provenance classes in the local routed mix
+        # (the bedrock class where none arrived).
+        pelC = pelK = None
+        pel = getattr(self, "_pelHand", None)
+        if pel is not None:
+            self._pelHand = None
+            pelC, pelK = pel
+            pelTh = (pelC + pelK) / self.larea
+            if tracers:
+                npc = self.provNb if provOn else 0
+                if provOn:
+                    cp = comp[:, :npc].copy()
+                    none = cp.sum(axis=1) <= 0.0
+                    cp[none] = 0.0
+                    cp[none, self.source_class[none]] = 1.0
+                    provThick[:, :npc] += cp * pelTh[:, None]
+                if lit:
+                    cm = getattr(self, "carbLit", {}).get("carb_mud")
+                    if cm is not None:
+                        provThick[:, npc + cm] += pelC / self.larea
+                    provThick[:, npc] += pelK / self.larea
+            dh = dh + pelTh
         self._diffuseOcean(dh, provThick=provThick)
         if lit:
             # split the carried columns: provenance classes first, then the
@@ -2003,12 +2028,23 @@ class SEAMesh(object):
                 fineFlux[fineFlux < 0] = 0.0
                 if carbMud is not None:
                     fineFlux = fineFlux + carbMud
-                litArgs = (casL, sedFlux, fineFlux - (gravFine if gravOn else 0.0)) if lit else None
+                sedIn = sedFlux
+                if pelC is not None:
+                    # the resuspended rain is fine-group input of this deposit
+                    sedIn = sedFlux + pelC + pelK
+                    fineFlux = fineFlux + pelC + pelK
+                    if lit:
+                        casL = casL.copy()
+                        cm = getattr(self, "carbLit", {}).get("carb_mud")
+                        if cm is not None:
+                            casL[:, cm] += pelC
+                        casL[:, 0] += pelK
+                litArgs = (casL, sedIn, fineFlux - (gravFine if gravOn else 0.0)) if lit else None
                 if gravOn:
-                    self._gravFineFraction(hl, sedFlux, fineFlux - gravFine,
+                    self._gravFineFraction(hl, sedIn, fineFlux - gravFine,
                                            litArgs=litArgs)
                 else:
-                    self._marineFineFraction(hl, sedFlux, fineFlux)
+                    self._marineFineFraction(hl, sedIn, fineFlux)
                     if lit:
                         self.dm.globalToLocal(self.tmp, self.tmpL)
                         self._marineLitShare(self.tmpL.getArray().copy(), *litArgs)

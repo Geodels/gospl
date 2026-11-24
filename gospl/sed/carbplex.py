@@ -49,6 +49,10 @@ class CarbMesh(object):
         self._ksp_carb = None
         self.pelDep = None
         self.pelBudget = None
+        # clay decay from the coast: operator rebuilt each step (the coast
+        # moves), solver cached; both in destroy_DMPlex
+        self._clayMat = None
+        self._ksp_clay = None
         if getattr(self, "pelOn", False):
             self._initPelagic()
         if not getattr(self, "carbOn", False):
@@ -88,6 +92,8 @@ class CarbMesh(object):
         self._pelPreserved = 0.0
         self._pelDissolved = 0.0
         self._pelClay = 0.0
+        self._pelHand = None
+        self._pelHanded = False
         self._pelMaps = []
         for e in self.pelEvents:
             m = {}
@@ -114,6 +120,47 @@ class CarbMesh(object):
                 k = i
         return k
 
+    def _clayDecay(self, L):
+        """
+        Fraction ``c`` of the coastal clay rain reaching each node, from
+        ``(I - L^2 lap) c = 0`` on the sea with ``c = 1`` on land (``h`` at or
+        above sea level, identity rows of the operator; open edges of a flat
+        mesh are identity rows with ``c = 0``, the open ocean). In 1-D it is
+        ``exp(-x/L)`` at distance ``x`` from the coast (exactly ``lambda^i``
+        on a lattice, ``cosh(dx/L') = 1 + dx^2 / (2 L^2)``), and it goes around
+        headlands and islands. All sea, no land: ``c = 0``. The operator is
+        rebuilt every call (the coast moves); the solver is cached
+        (``_ksp_clay``, prefix ``claydecay_``). Collective. Scratch: ``tmp``,
+        ``tmpL``, ``tmp1``.
+
+        :arg L: decay length (m)
+        :return: local ``c`` in [0, 1]
+        """
+        land = self.hLocal.getArray() >= self.sealevel
+        kd = np.full(self.lpoints, L * L, dtype=np.float64)
+        if self._clayMat is not None:
+            self._clayMat.destroy()
+        self._clayMat = self._buildDiffMat(kd, fixed=land)
+        if self._ksp_clay is None:
+            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+            ksp.setType("fgmres")
+            ksp.getPC().setType("bjacobi")
+            ksp.setTolerances(rtol=1.0e-10, atol=1.0e-14, max_it=2000)
+            ksp.setOptionsPrefix("claydecay_")
+            petsc4py.PETSc.Options()["claydecay_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setFromOptions()
+            self._ksp_clay = ksp
+        self._ksp_clay.setOperators(self._clayMat, self._clayMat)
+        self.tmpL.setArray(np.where(land, 1.0, 0.0))
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp1.set(0.0)
+        self._ksp_clay.solve(self.tmp, self.tmp1)
+        if self._ksp_clay.getConvergedReason() < 0 and MPIrank == 0:
+            print("[pelagic] clay decay solve did not converge (%d)"
+                  % self._ksp_clay.getConvergedReason(), flush=True)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return np.clip(self.tmpL.getArray().copy(), 0.0, 1.0)
+
     def _pelPreservedFraction(self, depth, lys, ccd):
         """Fraction of the pelagic carbonate rain preserved at water depth
         ``depth``: 1 above the lysocline, 0 below the CCD, linear between."""
@@ -121,23 +168,40 @@ class CarbMesh(object):
             return np.where(depth <= lys, 1.0, 0.0)
         return np.clip((ccd - depth) / (ccd - lys), 0.0, 1.0)
 
-    def pelagicRain(self):
+    def _pelResuspend(self):
+        """True when the event in force hands the rain to the marine
+        diffusion (``resuspend``) and the marine step runs."""
+        e = self.pelEvents[self._pelEvent()]
+        return bool(e["resuspend"]) and getattr(self, "seaDepo", False) \
+            and not getattr(self, "nodep", False)
+
+    def pelagicRain(self, resuspend=False):
         """
-        Settle the pelagic carbonate and the hemipelagic clay of the step on
-        the marine nodes (``lFill`` at or below sea level).
+        Pelagic carbonate and hemipelagic clay of the step on the marine nodes
+        (``lFill`` at or below sea level).
 
         The carbonate rain (event rate, uniform or map) is preserved by the
         fraction set by the water depth (``_pelPreservedFraction``), the rest
-        dissolves (budget only); the clay settles entirely. The deposit never
-        builds above sea level. Both are laid into the stratigraphy (``carb_mud``
-        and ``fine``, so ``depoFineFrac = 1``) and raise the elevation. A
-        node's deposit thinner than the stratigraphic floor of ``deposeStrat``
-        (0.1 mm) is carried over to the next steps (``_pelCarry``) instead of
-        being lost.
+        dissolves (budget only); the clay (optionally decaying away from the
+        coast, ``_clayDecay``) settles entirely. The rain never builds above
+        sea level (the excess is the ``bypassed`` budget item).
 
-        Scratch Vecs: ``self.tmp`` / ``self.tmpL`` (the deposit on exit).
-        Collective (halo sync, budget).
+        Settled (default): called after the marine step; laid into the
+        stratigraphy (``carb_mud`` and ``fine``, ``depoFineFrac = 1``) and the
+        elevation. A node's deposit thinner than the stratigraphic floor
+        (0.1 mm) is carried over to the next steps (``_pelCarry``).
+
+        Resuspended (``resuspend`` event, ``resuspend=True``): called before
+        the marine step; the volumes are kept in ``_pelHand`` and
+        ``seaChange`` adds them to its diffusion input, each part in its
+        lithology column. The call after the marine step is then skipped.
+
+        Scratch Vecs: ``self.tmp`` / ``self.tmpL``. Collective (halo sync,
+        budget, the clay decay solve).
         """
+        if not resuspend and getattr(self, "_pelHanded", False):
+            self._pelHanded = False
+            return
         ev = self._pelMaps[self._pelEvent()]
         e = self.pelEvents[self._pelEvent()]
         hl = self.hLocal.getArray().copy()
@@ -148,6 +212,9 @@ class CarbMesh(object):
         carb0 = rain * keep
         dissolved = rain - carb0
         clay0 = np.where(marine, ev["clay"] * self.dt, 0.0) * np.ones(self.lpoints)
+        if e["decay"] is not None:
+            # clay rain decreasing away from the coast
+            clay0 = clay0 * self._clayDecay(e["decay"])
         # never above sea level: what does not fit is bypassed (budget)
         tot = carb0 + clay0
         scale = np.divide(np.minimum(tot, np.maximum(depth, 0.0)), tot,
@@ -156,7 +223,41 @@ class CarbMesh(object):
         clay = clay0 * scale
         bypass = tot - carb - clay
 
-        # carry-over of sub-floor deposits
+        if resuspend:
+            # handed to this step's marine diffusion (seaChange)
+            self._pelHand = (carb * self.larea, clay * self.larea)
+            self._pelHanded = True
+            self.pelDep = (carb + clay) / self.dt
+        else:
+            self._pelSettle(carb, clay)
+
+        own = self.inIDs == 1
+        a = self.larea
+        b = MPI.COMM_WORLD.allreduce(
+            np.array([(rain * a)[own].sum(), (carb * a)[own].sum(),
+                      (dissolved * a)[own].sum(), (clay * a)[own].sum(),
+                      (bypass * a)[own].sum()]), op=MPI.SUM)
+        # (carbonate rain, carbonate settled or resuspended, dissolved, clay,
+        #  bypassed above sea level), m3 over the step
+        self.pelBudget = b
+        self._pelRain += b[0]
+        self._pelPreserved += b[1]
+        self._pelDissolved += b[2]
+        self._pelClay += b[3]
+        self._pelBypass = getattr(self, "_pelBypass", 0.0) + b[4]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "[pelagic] carbonate rain %0.4g km3 (preserved %0.4g, dissolved "
+                "%0.4g), clay %0.4g km3%s" % (b[0] * 1e-9, b[1] * 1e-9, b[2] * 1e-9,
+                                              b[3] * 1e-9,
+                                              " (resuspended)" if resuspend else ""),
+                flush=True,
+            )
+        return
+
+    def _pelSettle(self, carb, clay):
+        """Lay the settled rain (thicknesses ``carb``, ``clay``) into the
+        elevation and the stratigraphy, carrying over sub-floor deposits."""
         self._pelCarry[:, 0] += carb
         self._pelCarry[:, 1] += clay
         tot = self._pelCarry.sum(axis=1)
@@ -193,29 +294,6 @@ class CarbMesh(object):
             self.depoFineFrac = ff
             if sh is not None:
                 self.litShare = sh
-
-        own = self.inIDs == 1
-        a = self.larea
-        b = MPI.COMM_WORLD.allreduce(
-            np.array([(rain * a)[own].sum(), (carb * a)[own].sum(),
-                      (dissolved * a)[own].sum(), (clay * a)[own].sum(),
-                      (bypass * a)[own].sum()]), op=MPI.SUM)
-        # (carbonate rain, carbonate settled, dissolved, clay settled,
-        #  bypassed above sea level), m3 over the step
-        self.pelBudget = b
-        self._pelRain += b[0]
-        self._pelPreserved += b[1]
-        self._pelDissolved += b[2]
-        self._pelClay += b[3]
-        self._pelBypass = getattr(self, "_pelBypass", 0.0) + b[4]
-        if MPIrank == 0 and self.verbose:
-            print(
-                "[pelagic] carbonate rain %0.4g km3 (preserved %0.4g, dissolved "
-                "%0.4g), clay %0.4g km3" % (b[0] * 1e-9, b[1] * 1e-9, b[2] * 1e-9,
-                                            b[3] * 1e-9),
-                flush=True,
-            )
-        return
 
     def _carbSlope(self, h):
         """Seafloor gradient magnitude per node: the steepest drop or rise to

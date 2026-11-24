@@ -163,13 +163,17 @@ finally:
 
 @pytest.mark.mpi
 @pytest.mark.slow
-def test_carbonate_partition_invariant(tmp_path):
+@pytest.mark.parametrize("pel", ["decay", "resuspend"])
+def test_carbonate_partition_invariant(tmp_path, pel):
     """Carbonate production (with the open-water index, a parallel solve),
-    framework, the routed loose sediment and the pelagic rain give the same
-    elevation and lithology piles at np=1 and np=3."""
+    framework, the routed loose sediment and the pelagic rain (clay decaying
+    from the coast, another solve; settled or resuspended into the marine
+    diffusion) give the same elevation and lithology piles at np=1 and
+    np=3."""
     if shutil.which("mpirun") is None:
         pytest.skip("mpirun not on PATH")
-    yml = _case(tmp_path, "part", block=CARB_EXP + PEL)
+    yml = _case(tmp_path, "part",
+                block=CARB_EXP + (PEL_DECAY if pel == "decay" else PEL_RESUSP))
     child = tmp_path / "_c.py"
     child.write_text(_CHILD)
     out = {}
@@ -188,6 +192,10 @@ def test_carbonate_partition_invariant(tmp_path):
 
 PEL = ("pelagic:\n  - start: 0.\n    carbonate: 50.\n    lysocline: 3500.\n"
        "    ccd: 4500.\n    clay: 20.\n\n")
+# clay decaying from the coast (C2b), settled in place / resuspended
+PEL_DECAY = PEL.replace("    clay: 20.\n", "    clay: 20.\n    clay_decay: 3.e5\n")
+PEL_RESUSP = PEL_DECAY.replace("    clay_decay: 3.e5\n",
+                               "    clay_decay: 3.e5\n    resuspend: True\n")
 
 
 def test_pelagic_parse(tmp_path, monkeypatch):
@@ -311,3 +319,54 @@ def test_carbonate_exposure_response(tmp_path, monkeypatch):
         assert np.allclose(st[0], exp) and np.all(st[1] == 1.0)
     finally:
         m.destroy()
+
+
+def test_pelagic_parse_c2b(tmp_path, monkeypatch):
+    """clay_decay and resuspend are read per event; a non-positive decay
+    length is refused."""
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    m = Model(_case(tmp_path, "q", block=PEL_RESUSP), verbose=False, showlog=False)
+    try:
+        e = m.pelEvents[0]
+        assert e["decay"] == 3.0e5 and e["resuspend"] is True
+        assert m._pelResuspend()
+    finally:
+        m.destroy()
+    with pytest.raises(ValueError, match="clay_decay"):
+        Model(_case(tmp_path, "qb", block=PEL.replace("    clay: 20.\n",
+                                                      "    clay: 20.\n    clay_decay: 0.\n")),
+              verbose=False, showlog=False)
+
+
+@pytest.mark.slow
+def test_pelagic_resuspension(tmp_path, monkeypatch):
+    """
+    Protects: the rain handed to the marine diffusion. Settled in place the
+    carbonate mud is at most the rain of the run at a node, and none lies
+    below the CCD; resuspended, the diffusion gathers it into the lows (its
+    thickest cell several times the settled maximum), and the carb_mud of the
+    stratigraphy is the rain handed over, to the marine floors and the open
+    edges (1 %).
+    """
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    out = {}
+    for name, block in (("set", PEL_DECAY), ("res", PEL_RESUSP)):
+        m = Model(_case(tmp_path, name, block=block), verbose=False, showlog=False)
+        try:
+            m.runProcesses()
+            top = m.stratStep + 1
+            cm = m.carbLit["carb_mud"]
+            cmud = m.stratHL[cm][:, 1:top].sum(axis=1)
+            deep = (m.sealevel - m.hLocal.getArray()) > 4600.0
+            out[name] = (cmud.max(), cmud[deep].sum(), m._pelPreserved,
+                         dict(zip(m.litName, m._litDeposited))["carb_mud"])
+        finally:
+            m.destroy()
+    assert out["set"][1] == 0.0
+    assert out["res"][0] > 5.0 * out["set"][0], (out["res"][0], out["set"][0])
+    handed, laid = out["res"][2], out["res"][3]
+    assert 0.99 * handed < laid <= handed * (1 + 1e-9), (laid, handed)

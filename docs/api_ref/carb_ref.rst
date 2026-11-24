@@ -35,6 +35,9 @@ Class CarbMesh
       ~CarbMesh._initPelagic
       ~CarbMesh._pelEvent
       ~CarbMesh._pelPreservedFraction
+      ~CarbMesh._clayDecay
+      ~CarbMesh._pelResuspend
+      ~CarbMesh._pelSettle
 
 
 Public functions
@@ -57,3 +60,6 @@ Private functions
 .. automethod:: sed.carbplex.CarbMesh._carbBuildOp
 .. automethod:: sed.carbplex.CarbMesh._carbScreened
 .. automethod:: sed.carbplex.CarbMesh._carbExposure
+.. automethod:: sed.carbplex.CarbMesh._clayDecay
+.. automethod:: sed.carbplex.CarbMesh._pelResuspend
+.. automethod:: sed.carbplex.CarbMesh._pelSettle

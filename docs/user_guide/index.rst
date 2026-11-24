@@ -89,6 +89,30 @@ Parameters related to surface processes
             Learn more.
 
 
+Marine sedimentary systems
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Gravity currents, carbonate platforms and reefs**
+        ^^^
+
+        Turbidity currents beyond the clinoforms, benthic carbonate production,
+        pelagic carbonate and hemipelagic clay, with set-up by mesh resolution.
+
+        +++
+
+        .. button-ref:: marine_systems
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
+
 Optional parameters related to climate
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -210,6 +234,7 @@ Performance on HPC
 
     inputfile
     surfproc
+    marine
     optfile1
     optfile2
     running
