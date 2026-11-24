@@ -20,7 +20,7 @@ from gospl.tools.constants import DISCHARGE_FLOOR
 # whole run, diverged after a restart (2026-11-24). The other outputs are for
 # viewing and stay single precision.
 _RESTART_F64 = ("elev", "erodep", "EDrate", "sedLoad", "sedLoadF", "FA", "fillFA",
-                "iceH", "flexIso", "soilH", "wtable", "duricrust")
+                "iceH", "flexIso", "gravDep", "soilH", "wtable", "duricrust")
 _F64_XMF = re.compile(r'Precision="4" (Dimensions="[^"]*">[^<]*:/(?:%s)</DataItem>)'
                       % "|".join(_RESTART_F64))
 
@@ -530,7 +530,7 @@ class WriteMesh(object):
                 f.create_dataset(
                     "gravDep",
                     shape=(self.lpoints, 1),
-                    dtype="float32",
+                    dtype="float64",
                     **self._h5opts,
                 )
                 f["gravDep"][:, 0] = self.gravDep
