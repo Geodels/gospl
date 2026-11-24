@@ -7,7 +7,7 @@ import numpy as np
 from mpi4py import MPI
 from time import process_time
 
-from gospl.tools.constants import BEDROCK_SENTINEL
+from gospl.tools.constants import BEDROCK_SENTINEL, DEPOSIT_FLOOR
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import strataonesed
@@ -653,7 +653,10 @@ class STRAMesh(object):
 
         self.dm.globalToLocal(self.tmp, self.tmpL)
         depo = self.tmpL.getArray().copy()
-        depo[depo < 1.0e-4] = 0.0
+        # Record every deposit above round-off: the callers have already raised
+        # the surface by it. (A 0.1 mm floor here left thinner deposits in the
+        # elevation but out of the stratigraphy; 2026-11-25.)
+        depo[depo < DEPOSIT_FLOOR] = 0.0
         self.stratH[:, self.stratStep] += depo
         ids = np.where(depo > 0)[0]
         if self.stratLith:

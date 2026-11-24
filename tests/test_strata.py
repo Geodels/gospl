@@ -1325,3 +1325,22 @@ def test_dual_fine_conservation_strong_hillslope(tmp_path):
     assert ero > 0.0
     rel = abs(ero - dep) / ero
     assert rel < 5.0e-3, f"fine eroded {ero:.4e} vs deposited {dep:.4e} ({rel:+.2e})"
+
+
+def test_thin_deposit_is_recorded(minimal_dual_model):
+    """
+    Protects: deposeStrat records every deposit above round-off. Its callers
+    have already raised the surface by the deposit; a 0.1 mm floor here left
+    thinner deposits in the elevation but out of the stratigraphy (3 % of
+    the loose carbonate of a carbonate run once the marine DEPOSIT_FLOOR
+    became 1 nm).
+    """
+    m = minimal_dual_model
+    top = m.stratStep
+    before = m.stratH[:, top].copy()
+    fine_before = m.stratHf[:, top].copy()
+    m.tmpL.setArray(np.full(m.lpoints, 5.0e-5))
+    m.dm.localToGlobal(m.tmpL, m.tmp)
+    m.deposeStrat()
+    np.testing.assert_allclose(m.stratH[:, top] - before, 5.0e-5, rtol=1e-12)
+    assert np.all(m.stratHf[:, top] - fine_before >= 0.0)
