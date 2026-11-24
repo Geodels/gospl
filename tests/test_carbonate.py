@@ -536,3 +536,49 @@ def test_sst_temperature(tmp_path, monkeypatch):
     carb_only = "carbonate:" + block.split("carbonate:")[1].split("pelagic:")[0]
     with pytest.raises(ValueError, match="sst"):
         Model(_case(tmp_path, "nosst", block=carb_only), verbose=False, showlog=False)
+
+
+def test_carbonate_provenance_marine_class(tmp_path, monkeypatch):
+    """With provenance on, sediment made in the sea (carbonate framework and
+    loose carbonate, pelagic carbonate and clay) gets one extra class after
+    the user's: every layer stays exactly partitioned by class, the user
+    classes keep their eroded/deposited balance (the carbonate used to be
+    counted in them), and the marine class is deposited but never eroded."""
+    from mpi4py import MPI
+    from gospl.model import Model
+
+    src = FIXTURES_DIR / "minimal_prov2.yml"
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip("minimal_prov2.yml / mesh.npz not present")
+    monkeypatch.chdir(tmp_path)
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    v = np.load(tmp_path / "mesh.npz")["v"]
+    np.savez(tmp_path / "prov_src.npz", rock=(v[:, 0] > v[:, 0].mean()).astype(np.int64))
+    block = ("strata:\n    dual: True\n    coarse: {phi0: 0.49, z0: 3700.}\n"
+             "    fine: {phi0: 0.63, z0: 1960., k_factor: 1.5}\n"
+             "    bedrock_coarse_frac: 0.6\n\n"
+             "carbonate:\n    factories:\n"
+             "      - {name: reef, growth: 2000., extinction: 0.1, framework: 0.5, sand: 0.7}\n"
+             "      - {name: deep, growth: 200., extinction: 0.005, sand: 0.3}\n\n"
+             + PEL)
+    text = re.sub(r"dir: '[^']*'", "dir: 'out'", src.read_text())
+    (tmp_path / "p.yml").write_text(text.replace("output:", block + "output:", 1))
+    m = Model("p.yml", verbose=False, showlog=False)
+    try:
+        assert m.provOn and m.provUserNb == 2 and m.provMarine == 2 and m.provNb == 3
+        assert np.all(m.source_class < m.provUserNb)
+        m.runProcesses()
+        top = m.stratStep + 1
+        H, P = m.stratH[:, :top], m.stratP[:, :top, :]
+        assert np.abs(P.sum(axis=2) - H).sum() / max(H.sum(), 1.0) < 1.0e-9
+        ero = MPI.COMM_WORLD.allreduce(m._provEroded, op=MPI.SUM)
+        dep = MPI.COMM_WORLD.allreduce(m._provDeposited, op=MPI.SUM)
+        assert ero[2] == 0.0 and dep[2] > 0.0
+        for c in (0, 1):
+            assert abs(dep[c] - ero[c]) < 1.0e-3 * ero[c]
+        reef = m.stratHL[m.litName.index("reef")][:, :top]
+        cell = (reef > 0.99 * H) & (H > 1.0e-3)
+        if cell.any():
+            np.testing.assert_allclose(P[:, :, 2][cell], H[cell], rtol=1.0e-9)
+    finally:
+        m.destroy()

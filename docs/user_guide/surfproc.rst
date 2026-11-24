@@ -668,6 +668,11 @@ Sediment provenance tracers
            in ``[0, classes)``), **or**
         c. ``uniform`` — a single source class everywhere.
 
+        With carbonate production or pelagic rain, one more class is added
+        after yours (index ``classes``) for the sediment made in the sea
+        (reef, carbonate sand and mud, pelagic carbonate and clay), which has
+        no source region; ``stratP`` then has ``classes + 1`` columns.
+
         The per-layer composition is written to the stratal output (``stratP``).
         The optional **copper-fertility weighting** is *not* a model input: it
         is supplied at post-processing to the standalone

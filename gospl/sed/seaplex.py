@@ -1767,8 +1767,10 @@ class SEAMesh(object):
         # and each part in its lithology.
         carbMud = None
         carbL = None
+        carbIn = None
         if getattr(self, "carbOn", False) and getattr(self, "_carbDet", None) is not None:
             carbDet = np.where(self.sinkIDs, self._carbDet, 0.0)
+            carbIn = carbDet
             carbMud = np.where(self.sinkIDs, self._carbMud, 0.0)
             carbL = np.where(self.sinkIDs[:, None], self._carbL, 0.0)
             sedFlux = sedFlux + carbDet
@@ -1784,6 +1786,11 @@ class SEAMesh(object):
             self._coastDet = None
         provOn = getattr(self, "provOn", False)
         provFlux = (self.provFrac * sedFlux[:, None]) if provOn else None
+        if provOn and carbIn is not None and getattr(self, "provMarine", None) is not None:
+            # the loose carbonate is made in the sea: its own class, not the
+            # composition of the river load at the node
+            provFlux = self.provFrac * (sedFlux - carbIn)[:, None]
+            provFlux[:, self.provMarine] += carbIn
         if lit:
             # the lithologies ride the same lockstep as extra columns
             casL = litM - gravL
@@ -1966,7 +1973,10 @@ class SEAMesh(object):
             pelTh = (pelC + pelK) / self.larea
             if tracers:
                 npc = self.provNb if provOn else 0
-                if provOn:
+                if provOn and getattr(self, "provMarine", None) is not None:
+                    # resuspended pelagic sediment: made in the sea
+                    provThick[:, self.provMarine] += pelTh
+                elif provOn:
                     cp = comp[:, :npc].copy()
                     none = cp.sum(axis=1) <= 0.0
                     cp[none] = 0.0

@@ -198,6 +198,15 @@ How it works:
   A depositing node left with no arriving composition falls back to its bedrock
   source class, and every depositing node is renormalised so the layer is
   exactly partitioned (no missing-source cells).
+- **Sediment made in the sea** — with carbonate production (``carbonate:``)
+  or pelagic rain (``pelagic:``) on, one class is added after the user's
+  (index ``classes``, ``provMarine``): the reef framework, the loose carbonate
+  routed in the sea and the pelagic carbonate and hemipelagic clay (settled or
+  resuspended) are recorded in it. It has no source region, so it is deposited
+  but never eroded from bedrock, and the user classes keep their eroded /
+  deposited balance (before, the carbonate took the composition of the river
+  load or of the bedrock under it). ``stratP`` then has ``classes + 1``
+  columns.
 - **Advection, compaction & I/O** — ``stratP`` is advected with the pile under
   horizontal tectonics, rescaled by ``getCompaction`` when burial compacts the
   layer (compaction is composition-neutral), and written to / restored from the

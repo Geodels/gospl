@@ -669,7 +669,8 @@ class STRAMesh(object):
             self.source_class = np.full(
                 self.lpoints, int(self._provSourceUniform), dtype=np.int64
             )
-        np.clip(self.source_class, 0, self.provNb - 1, out=self.source_class)
+        np.clip(self.source_class, 0, getattr(self, "provUserNb", self.provNb) - 1,
+                out=self.source_class)
 
         # Per-layer per-class thickness; each initial layer's full thickness is
         # assigned to the node's bedrock source class.
@@ -679,6 +680,23 @@ class STRAMesh(object):
         self.stratP[np.arange(self.lpoints), :, self.source_class] = self.stratH
 
         self._logProvInit()
+        return
+
+    def _deposeMarineProv(self):
+        """``deposeStrat`` for sediment made in the sea (carbonate framework,
+        settled pelagic carbonate and clay): with provenance on, the deposit
+        gets the marine class (``provMarine``) instead of the last routed
+        composition; ``depoProvFrac`` is restored after. The deposit thickness
+        is in ``self.tmp`` as for ``deposeStrat``."""
+        m = getattr(self, "provMarine", None)
+        if not getattr(self, "provOn", False) or m is None:
+            self.deposeStrat()
+            return
+        keep = self.depoProvFrac.copy()
+        self.depoProvFrac[:] = 0.0
+        self.depoProvFrac[:, m] = 1.0
+        self.deposeStrat()
+        self.depoProvFrac = keep
         return
 
     def _fillZeroPorosity(self, phiS):

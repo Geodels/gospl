@@ -2276,6 +2276,15 @@ class ReadYaml(object):
         # Default to a single source class everywhere if none specified.
         if self.provOn and self._provSourceUniform is None and self._provSourceMap is None:
             self._provSourceUniform = 0
+        # Sediment made in the sea (carbonate production, pelagic carbonate and
+        # hemipelagic clay) has no source region: it gets one extra class,
+        # after the user's (`provMarine`), so the user classes keep an exact
+        # eroded/deposited balance. The source map uses the user classes only.
+        self.provUserNb = self.provNb
+        self.provMarine = None
+        if self.provOn and (getattr(self, "carbOn", False) or getattr(self, "pelOn", False)):
+            self.provMarine = self.provNb
+            self.provNb += 1
         return
 
     def _readGravity(self):

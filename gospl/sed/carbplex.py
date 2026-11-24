@@ -493,7 +493,7 @@ class CarbMesh(object):
                                              where=depo > 0.0)
             self.tmpL.setArray(depo)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.deposeStrat()
+            self._deposeMarineProv()
             self.depoFineFrac = ff
             if sh is not None:
                 self.litShare = sh
@@ -737,7 +737,7 @@ class CarbMesh(object):
             self.litShare[self.carbLit["reef"]][:] = 1.0
             self.tmpL.setArray(frame)
             self.dm.localToGlobal(self.tmpL, self.tmp)
-            self.deposeStrat()
+            self._deposeMarineProv()
             self.depoFineFrac, self.litShare = ff, sh
 
         own = self.inIDs == 1
