@@ -337,6 +337,7 @@ API reference
     sed_ref
     sea_ref
     carb_ref
+    wave_ref
     hill_ref
     plate_ref
     ice_ref

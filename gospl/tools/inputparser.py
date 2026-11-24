@@ -1637,6 +1637,7 @@ class ReadYaml(object):
         self.pit_inlet_bias_fine = min(1.0, max(0.0, self.pit_inlet_bias_fine))
 
         self._readLithologies()
+        self._readWaves()
         self._extraProvenance()
 
         return
@@ -1748,7 +1749,55 @@ class ReadYaml(object):
         "reef": {"size": "coarse", "phi0": 0.2, "z0": 5000.0, "k_factor": 0.1,
                  "diff_factor": 0.1},
     }
-    CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure", "temperature")
+    CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure", "temperature", "wave")
+
+    def _readWaves(self):
+        """
+        Parse the optional ``waves:`` block (wave energy and shadows,
+        docs/DESIGN_CARBONATES.md 2.10, phase C7)::
+
+            waves:
+                climate:                         # directions the waves come FROM
+                  - {from: 90., weight: 0.7}     # degrees, 0 = N, 90 = E
+                  - {from: 180., weight: 0.3}
+                decay: 1.e5          # attenuation length in deep water (m)
+                shoal_depth: 20.     # depth below which the waves feel the bottom (m)
+                shoal_length: 2.e3   # attenuation length at the shoreline (m)
+
+        The weights are normalised to sum to 1. Sets ``waveOn``,
+        ``waveClimate`` (list of ``(from, weight)``), ``waveDecay``,
+        ``waveShoalDepth`` and ``waveShoalLength``.
+        """
+        self.waveOn = False
+        wd = self.input.get("waves", None)
+        if wd is None:
+            return
+        if not isinstance(wd, dict):
+            raise ValueError("waves: must be a mapping with a `climate` list.")
+        clim = wd.get("climate", None)
+        if not isinstance(clim, (list, tuple)) or len(clim) == 0:
+            raise ValueError("waves: `climate` must be a non-empty list of "
+                             "{from: degrees, weight: w}.")
+        out = []
+        for k, c in enumerate(clim):
+            if not isinstance(c, dict) or "from" not in c:
+                raise ValueError("waves: climate entry %d needs `from` (degrees)." % k)
+            w = float(c.get("weight", 1.0))
+            if w < 0.0:
+                raise ValueError("waves: climate entry %d weight must be >= 0." % k)
+            out.append((float(c["from"]) % 360.0, w))
+        tot = sum(w for _, w in out)
+        if tot <= 0.0:
+            raise ValueError("waves: the climate weights sum to zero.")
+        self.waveClimate = [(f, w / tot) for f, w in out]
+        self.waveDecay = float(wd.get("decay", 1.0e5))
+        self.waveShoalDepth = float(wd.get("shoal_depth", 20.0))
+        self.waveShoalLength = float(wd.get("shoal_length", 2.0e3))
+        for key, v in (("decay", self.waveDecay), ("shoal_depth", self.waveShoalDepth),
+                       ("shoal_length", self.waveShoalLength)):
+            if v <= 0.0:
+                raise ValueError("waves: %s must be positive (m)." % key)
+        self.waveOn = True
 
     def _readSST(self):
         """
@@ -1903,6 +1952,11 @@ class ReadYaml(object):
                 "carbonate: a response uses `exposure`; set carbonate: "
                 "exposure_length (m), the length over which the open-water "
                 "index compares the seafloor with its surroundings.")
+        if "waves" not in self.input and any(
+                ctl == "wave" for f in self.carbFact for ctl, _, _ in f["resp"]):
+            raise ValueError(
+                "carbonate: a response uses `wave`; add a `waves:` block (the "
+                "wave climate).")
         if not self.sstOn and any(
                 ctl == "temperature" for f in self.carbFact for ctl, _, _ in f["resp"]):
             raise ValueError(

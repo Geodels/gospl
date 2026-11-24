@@ -257,6 +257,11 @@ Parameters
      - m
      - Open-water index (needs ``exposure_length``): positive on margins.
        ``x: [-5., 5.], f: [0.2, 1.]`` favours the margin over the lagoon.
+   * - ``wave``
+     - 0 to 1
+     - Relative wave energy from the ``waves`` block (below): 1 in the open
+       ocean, 0 on land and in the lee of islands and headlands.
+       ``x: [0., 0.5], f: [0.1, 1.]`` keeps reef builders on exposed margins.
    * - ``temperature``
      - °C
      - Sea-surface temperature from the ``sst`` block (below). For reef
@@ -311,6 +316,32 @@ boundstone), to adapt to your system::
         lithologies:
             reef: {phi0: 0.1, k_factor: 0.05}
 
+
+.. _carb_waves:
+
+Wave energy and shadows
+-----------------------
+
+.. code:: yaml
+
+    waves:
+        climate:                       # directions the waves come FROM
+          - {from: 90., weight: 0.7}   # degrees: 0 = north, 90 = east
+          - {from: 180., weight: 0.3}
+        decay: 1.e5                    # attenuation length in deep water (m)
+        shoal_depth: 20.               # waves feel the bottom shallower than this (m)
+        shoal_length: 2.e3             # attenuation length at the shoreline (m)
+
+The ``waves`` block computes a relative wave energy (0 to 1, output
+``waveE``): for each direction of the climate the energy enters through the
+domain edges facing the waves, travels across the sea, is lost in shallow
+water (more and more as the depth drops below ``shoal_depth``) and stops on
+land, so islands, headlands and barriers cast a shadow behind them. The
+directions are combined with their weights (normalised to 1). It is the
+``wave`` response control of the factories, and the energy of the coastal
+erosion planned in phase C4. Flat meshes only for now. Choose ``decay`` much
+longer than the domain if the open ocean should keep its energy, and
+``shoal_length`` of the width of the surf zone to the reef flat.
 
 .. _carb_sst:
 
@@ -443,8 +474,9 @@ Setting it up for your resolution
      - Platforms with a margin, an interior and a slope, carbonate aprons,
        mixed carbonate-clastic shelves, drowning and backstepping. Reefs are
        a margin facies a few cells wide.
-     - ``exposure`` with ``exposure_length`` of 3-10 cells to concentrate the
-       euphotic factory on the margin; ``sedrate`` to stop production near
+     - ``exposure`` with ``exposure_length`` of 3-10 cells, or a ``waves``
+       climate with a ``wave`` response, to concentrate the euphotic factory on
+       exposed margins; ``sedrate`` to stop production near
        deltas; an ``sst`` curve with a ``temperature`` response for climatic
        changes through time; framework 0.3-0.6 for the euphotic factory; ``dt`` of 1-10 kyr.
    * - Local, 50-200 m cells
@@ -526,6 +558,8 @@ Outputs
 - ``carbProd`` (m/yr): carbonate production rate of the step (all factories).
 - ``pelDep`` (m/yr): settled (or resuspended) pelagic thickness rate.
 - ``sst`` (°C): sea-surface temperature of the step (with an ``sst`` block).
+- ``waveE`` (0 to 1): relative wave energy (with a ``waves`` block, when a
+  factory uses it).
 - Stratigraphy: one pile per lithology, ``stratH_<name>`` and ``phi_<name>``
   (``stratHf``/``phiF`` for the dual-lithology fine fraction), in the
   ``stratal`` files.

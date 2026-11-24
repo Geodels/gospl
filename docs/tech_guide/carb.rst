@@ -151,6 +151,31 @@ Because :math:`L` is a length, the index does not change with the mesh
 resolution (a smoothing set in numbers of cells would).
 
 
+Wave energy and shadows
+-----------------------
+
+For each direction :math:`\hat{\mathbf{d}}` of the wave climate a relative
+energy :math:`E` is carried across the sea,
+
+.. math::
+
+    (\hat{\mathbf{d}} \cdot \nabla + \kappa)\, E = 0, \qquad
+    \kappa = \frac{1}{L_d} + \frac{1}{L_s}\max\left(0, 1 - \frac{w}{w_s}\right),
+
+with :math:`E = 1` on the domain edges where the waves enter, :math:`E = 0`
+on land (the shadow), :math:`L_d` the attenuation length in deep water,
+:math:`w_s` the depth below which the waves feel the bottom and :math:`L_s`
+the attenuation length at the shoreline (the shoreward dissipation of Pastier
+et al., 2019). It is the first-order upwind finite-volume scheme of the
+orographic rain shadow; the coefficients of each direction are computed once,
+the matrix every step (the coastline moves). The climate is
+:math:`E = \sum_k w_k E_k`. Along a mesh axis with a constant :math:`\kappa`
+the scheme gives exactly :math:`E_i = (1 + \kappa\Delta x)^{-i}`, which tends
+to :math:`e^{-\kappa x}` at first order; the benchmark recovers it to
+:math:`10^{-14}` (away from the half cells of the walls and outflow edge), no
+energy at all behind an island, and the weighted sum of two directions.
+
+
 Pelagic rain
 ------------
 
@@ -231,6 +256,9 @@ Benchmarks
    * - Clay decay
      - 1-D strip, :math:`\lambda^i` and :math:`e^{-x/L}`
      - :math:`10^{-10}`; second order in :math:`\Delta x/L`
+   * - Wave energy
+     - strip :math:`(1 + \kappa\Delta x)^{-i}`; island shadow; two directions
+     - :math:`10^{-14}`; nothing in the lee (``benchmarks/test_waves.py``)
 
 ``tests/test_lithologies.py`` and ``tests/test_carbonate.py`` check the
 lithology split against dual lithology, the conservation of every lithology,

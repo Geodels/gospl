@@ -16,6 +16,7 @@ if "READTHEDOCS" not in os.environ:
     from .sed import hillSLP as _hillSLP
     from .sed import SEAMesh as _SEAMesh
     from .sed import CarbMesh as _CarbMesh
+    from .sed import WaveMesh as _WaveMesh
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
@@ -97,6 +98,10 @@ else:
             pass
 
     class _CarbMesh(object):
+        def __init__(self):
+            pass
+
+    class _WaveMesh(object):
         def __init__(self):
             pass
 
@@ -213,6 +218,7 @@ class Model(
     _hillSLP,
     _SEAMesh,
     _CarbMesh,
+    _WaveMesh,
     _STRAMesh,
 ):
     """
@@ -314,6 +320,9 @@ class Model(
         # Benthic carbonate production (opt-in `carbonate:`; needs the
         # lithology table, the stratigraphy and the marine step above)
         _CarbMesh.__init__(self)
+
+        # Wave energy and shadows (opt-in `waves:`; flat meshes)
+        _WaveMesh.__init__(self)
 
         # Define additional grid processes (flexure, orographic rain)
         _GridProcess.__init__(self)

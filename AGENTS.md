@@ -116,7 +116,7 @@ Rule: use `MPI.COMM_WORLD` for raw collectives (Allreduce/bcast/Allgatherv); use
 ## KSP / SNES / TS lifecycle contract
 PETSc solvers follow two intentional patterns. **Use the right one for new code.** Full per-solver notes (prefixes, why each PC, failure modes) are in the subsystem files.
 
-### CACHED — hot-path solvers (16 sites)
+### CACHED — hot-path solvers (17 sites)
 Created lazily on first use, stored as `self._X`, reused for the whole run (avoids ~5–10 ms create/destroy per call).
 
 | File | Method | Cached attribute | Solver |
@@ -137,6 +137,7 @@ Created lazily on first use, stored as `self._X`, reused for the whole run (avoi
 | `sed/hillslope.py` | `_diffuseProvTracers` | `_ksp_provdiff` | KSP (only when `provOn`) |
 | `sed/carbplex.py` | `_carbBuildOp` / `_carbScreened` | `_ksp_carb` (+`_carbMat`) | KSP `fgmres`+`bjacobi` (`carbsmooth_`), screened Poisson `I - L^2 lap` of the carbonate open-water index; only when a factory uses `exposure` |
 | `sed/carbplex.py` | `_clayDecay` | `_ksp_clay` (+`_clayMat`, rebuilt every call: the coast moves) | KSP `fgmres`+`bjacobi` (`claydecay_`), `(I - L^2 lap) c = 0` with land as identity rows (c = 1); only with a pelagic event's `clay_decay` |
+| `sed/waveplex.py` | `_waveSolve` | `_ksp_wave` (+`_waveMat`, rebuilt every call: the coast moves) | KSP `gmres`+`bjacobi` (`wave_`), upwind `(d.grad + kappa) E = 0` per wave direction; only with a `waves:` block |
 
 **CRITICAL — collective rebuild decision.** Both coastline-gated caches above (`_smoothMat`/`_hillMat`) rebuild the operator (and redo `PCSetUp`) only when `seaID` moves. `seaID` is **rank-local**, but `_buildDiffMat` assembly and `PCSetUp` are **collective** — so the "did the coastline move?" test MUST be reduced across ranks (`rebuild = MPI.COMM_WORLD.allreduce(local_changed, op=MPI.LOR)`) before it gates those calls. Without the reduce, one rank rebuilds while another reuses, the two take different collective paths, and the run **deadlocks at np>1** (it ran fine until the per-partition coastlines drifted apart, then hung). A rank forced to rebuild with an unchanged mask reproduces its own cached matrix, so the reduce stays bit-faithful. Any future cached operator gated on a rank-local condition needs the same reduce.
 
@@ -173,7 +174,7 @@ If a future contributor wants to convert one of these to CACHED, the obstacle is
 The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment cascade. Its non-convergence is the most common symptom of trouble at scale. Know before touching it: the primary is `fgmres` (stationary Richardson diverges partition-dependently); a failed routing solve is first retried with exact block factors (`_solveIDAExact`, sticky once it works: long drainage chains are well posed, just beyond ILU/Richardson); the main discharge solve is `fatal=True` but **ponds** a small finite un-drained region instead of aborting (cap `GOSPL_UNDRAINED_CAP`); a failed iterate is never accepted; the outer cascade loop is bounded (stagnation break, relative floor, `_cascade_max_steps`); a reachability pin was tried and rejected. All of it, with the reasons: `gospl/flow/AGENTS.md`. Since 2026-11-12: routing reads `lFill` for cells within 1 nm of it (`FAMesh._routingSurface`; the shifted-frame fill leaves 1-ulp noise between `h` and `lFill`, and flat routing on `lFill` vs MFD on `h` formed 2-cycles; clamping `lFill >= h` instead split DEM plateaus into ~1e5 isolated flat sinks, do not); a routing solve's primary is accepted only on its true residual (`_trueResidualOK`, fgmres reported convergence on a 2-cycle with x = 2e13); and a non-fatal routing solve that fails on a small region is repaired, not zeroed (`_pondRoutingRegion`: those cells become sinks, the rest is re-solved, the trapped volume is deposited), with a `[flow] routing repair region` diagnostic listing the cells.
 
 ## The Model god-class
-`gospl/model.py` declares `Model` (`class Model(`) as multi-inheritance of 18 mixins. `Model.__init__` calls each parent's `__init__` **by name, not via `super()`**. The init order is load-bearing and differs from the MRO declaration order — adding `super().__init__()` will break the chain. Line numbers below are as of 2026-10-03; search for the call if they have drifted.
+`gospl/model.py` declares `Model` (`class Model(`) as multi-inheritance of 19 mixins. `Model.__init__` calls each parent's `__init__` **by name, not via `super()`**. The init order is load-bearing and differs from the MRO declaration order — adding `super().__init__()` will break the chain. Line numbers below are as of 2026-10-03; search for the call if they have drifted.
 
 | # | Init call (model.py line) | Assumes already populated | Allocates / sets |
 |---|---|---|---|
@@ -193,9 +194,10 @@ The IDA system `(I − Wᵀ) q = b` drives discharge and every water/sediment ca
 | 14 | `_hillSLP()` :294 | SEDMesh | **`h`, `hl`, `dh`**, `mat`, `Dlimit/dexp/minDiff`, lazy `_snes_hill`, `_ts_marine` |
 | 15 | `_SEAMesh()` :297 | FAMesh | `zMat` |
 | 16 | `_CarbMesh()` | ReadYaml (`carbOn`, lithology table) + SEAMesh + STRAMesh | `carbProd`, `_carbSedRate`, habitat maps (only if `carbOn`; raises without marine deposition) |
-| 17 | `_GridProcess()` :300 | ReadYaml + UnstMesh | `localFlex`, cached FEM operator/KSP (flat `fem`) or DH grid (`global`); cached orography advection operators if orography on |
-| 18 | `_UnstMesh.applyForces(self)` :303 | everything above | `rainVal`, `upsub`, `sealevel` |
-| 19 | `_Tectonics()` :306 | UnstMesh (`hGlobal`) | `fiso`, `tecNb=-1` |
+| 17 | `_WaveMesh()` | ReadYaml (`waveOn`) + SEDMesh (`tmp`) + GridProcess helpers (`_oroInflowBorders`, `_assembleDiffMatCSR`) | `waveE` (only if `waveOn`; raises on a global mesh) |
+| 18 | `_GridProcess()` :300 | ReadYaml + UnstMesh | `localFlex`, cached FEM operator/KSP (flat `fem`) or DH grid (`global`); cached orography advection operators if orography on |
+| 19 | `_UnstMesh.applyForces(self)` :303 | everything above | `rainVal`, `upsub`, `sealevel` |
+| 20 | `_Tectonics()` :306 | UnstMesh (`hGlobal`) | `fiso`, `tecNb=-1` |
 
 Permuting any line silently uses an unallocated attribute or overwrites one another mixin has already set.
 
@@ -253,6 +255,7 @@ Each is gated by a flag and must stay **byte-identical when off** (guard that wi
 - **Several lithologies** (`strata: lithologies:`, branch `feat/carbonates`, carbonates phase C0): the dual fine fraction is lithology 0 of a list; more lithologies (fine-like or coarse-like, own compaction, K, diffusivity) each get their share of their size group at every deposit, conserved per lithology. Dual lithology stays bitwise identical: every multi-lithology path is gated on `litNb > 1`. Detail: `gospl/sed/AGENTS.md`, `docs/DESIGN_CARBONATES.md`.
 - **Carbonate production** (`carbonate:`, `carbOn`, branch `feat/carbonates`, phase C1; needs dual lithology and marine deposition): Bosscher & Schlager factories integrated per node over the step (second order, sea-level cap), framework built in place as `reef`, loose `carb_sand`/`carb_mud` into the same step's marine routing (after the gravity split), response tables on depth/slope/previous clastic deposition rate/open-water index (`exposure`, phase C3)/sea-surface temperature (`temperature`, top-level `sst:` block of maps through time and/or a curve, phase C5), habitat maps. Runs between `sedChange` and `seaChange` (`carbProduction`), `carbClasticRate` after. Detail: `gospl/sed/AGENTS.md`, `docs/DESIGN_CARBONATES.md`; docs pages `docs/user_guide/carbonates.rst` (parameters, set-up by resolution) and `docs/tech_guide/carb.rst` (equations, benchmarks); benchmark `benchmarks/test_carbonate.py`.
 - **Pelagic rain** (`pelagic:`, `pelOn`, branch `feat/carbonates`, phase C2; needs dual lithology): events (like `climate:`) of pelagic carbonate rain (uniform or map) preserved linearly between lysocline and CCD, recorded as `carb_mud`, and hemipelagic clay as `fine` (optionally `exp(-d/L)` from the coast, `clay_decay`, phase C2b); settled in place after the marine step (`CarbMesh.pelagicRain`, sub-floor deposits carried over in `_pelCarry`), or with `resuspend` handed to the same step's marine diffusion (C2b). Detail: `gospl/sed/AGENTS.md`, `docs/tech_guide/carb.rst`.
+- **Wave energy and shadows** (`waves:`, `waveOn`, branch `feat/carbonates`, phase C7; flat meshes): relative energy `waveE` per wave direction from `(d.grad + kappa(depth)) E = 0` (the orographic upwind operator; E = 1 on inflow edges, 0 on land), weighted climate; `wave` response control of the carbonate factories, energy of the future coastal erosion (C4). `WaveMesh` mixin (#17). Benchmark `benchmarks/test_waves.py`; tests `tests/test_waves.py`.
 - **In-model provenance tracers** (`provenance:`, `provOn`): a passive label carried through erosion, transport, deposition and stratigraphy; conservation is machine-exact. Detail: `gospl/sed/AGENTS.md`, `docs/DESIGN_PROVENANCE.md`.
 - **Diagnostic glacial model** (`ice:`, `iceOn`): routed discharge → Bahr thickness → sliding → abrasion/till/meltwater. There is no SIA solver; do not reintroduce a serial epsfill for the ice routing surface. Detail: `gospl/flow/AGENTS.md`, `docs/DESIGN_ICE_SHEET.md`.
 - **Groundwater, duricrust, Level-B geochemistry** (`groundwater:`, `gwOn`/`duriOn`/`gwGeochemOn`): implicit Dupuit head (hypre), duricrust armoring via `_surfaceLithoK`, conservative multi-species solutes (direct LU). Detail: `docs/DESIGN_WATERTABLE_DURICRUST.md`, `docs/DESIGN_WATERTABLE_GEOCHEM.md`, `docs/tech_guide/groundwater.rst`.

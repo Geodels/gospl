@@ -410,6 +410,7 @@ class CarbMesh(object):
         slope = None
         expo = None
         sst = None
+        wave = None
         if any(ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):
             expo = self._carbExposure(h)
         self.carbExpo = expo
@@ -430,6 +431,10 @@ class CarbMesh(object):
                     if sst is None:
                         sst = self._sst()
                     m = m * np.interp(sst, x, fv)
+                elif ctl == "wave":
+                    if wave is None:
+                        wave = self.waveEnergy()
+                    m = m * np.interp(wave, x, fv)
             out.append(m)
         return out
 

@@ -1399,6 +1399,8 @@ class UnstMesh(object):
             "_gwMat", "_ksp_gw",
             # carbonate open-water index (carbplex._carbBuildOp)
             "_carbMat", "_ksp_carb", "_clayMat", "_ksp_clay",
+            # wave energy (waveplex)
+            "_waveMat", "_ksp_wave",
             "_soluteMat", "_ksp_solute",
         ):
             obj = getattr(self, name, None)
