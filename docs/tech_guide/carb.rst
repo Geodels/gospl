@@ -222,7 +222,9 @@ energy of its sea neighbours, at most down to sea level; both are capped per
 step (``max_erosion``). This is the depth-decaying wave erosion of Pastier et
 al. (2019) on a 2-D mesh, with the shoreward dissipation carried by the wave
 energy itself. The eroded material is removed with the stratigraphic erosion
-and added to the marine cascade of the step with its composition. Benchmarks:
+and added to the marine cascade of the step with its composition. With
+``rubble`` the eroded reef volume :math:`V_r` joins the rubble lithology at the
+same solid volume, :math:`V_r (1 - \phi_{0,reef}) / (1 - \phi_{0,rubble})`. Benchmarks:
 the abrasion of a seafloor at three depths in uniform wave energy is exact to
 :math:`10^{-15}` m; a low cliff retreats by :math:`r E \Delta t` and stops at
 sea level; nothing erodes in the lee of an island.

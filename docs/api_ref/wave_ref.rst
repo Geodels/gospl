@@ -34,6 +34,7 @@ Class WaveMesh
       ~WaveMesh._waveGradient
       ~WaveMesh._waveRefract
       ~WaveMesh._waveSmooth
+      ~WaveMesh._coastToRubble
 
 
 Public functions
@@ -55,3 +56,4 @@ Private functions
 .. automethod:: sed.waveplex.WaveMesh._waveGradient
 .. automethod:: sed.waveplex.WaveMesh._waveRefract
 .. automethod:: sed.waveplex.WaveMesh._waveSmooth
+.. automethod:: sed.waveplex.WaveMesh._coastToRubble

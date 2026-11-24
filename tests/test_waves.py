@@ -232,6 +232,67 @@ def test_coastal_erosion_parse_and_run(tmp_path, monkeypatch):
         m.destroy()
 
 
+REEF = ("carbonate:\n    factories:\n      - {name: reef, growth: 5000., framework: 0.8, "
+        "response: [{control: depth, x: [0., 20., 25.], f: [1., 1., 0.]}]}\n")
+
+
+def test_coastal_erosion_rubble(tmp_path, monkeypatch):
+    """`rubble: carb_sand` routes the eroded reef framework as carbonate sand
+    at the same solid volume: the reef column of the routed volumes is empty,
+    the sand column gains the reef solid at its own porosity, the other
+    lithologies are unchanged and the routed bulk changes by the porosity
+    ratio. The first erosion step (no reef yet) is identical with and
+    without the option; the second one erodes the reef built in the first."""
+    from gospl.model import Model
+    from gospl.sed.waveplex import WaveMesh
+
+    monkeypatch.chdir(tmp_path)
+    orig = WaveMesh.coastalErosion
+    calls = []
+
+    def spy(self):
+        orig(self)
+        calls.append((self._coastL.copy(), self._coastDet.copy(), self._coastFine.copy(),
+                      self.coastBudget.copy()))
+
+    monkeypatch.setattr(WaveMesh, "coastalErosion", spy)
+    rec = {}
+    for tag, extra in (("off", ""), ("on", "    rubble: carb_sand\n")):
+        calls.clear()
+        m = Model(_flat_case(tmp_path, WAVES, REEF + COAST + extra), verbose=False,
+                  showlog=False)
+        try:
+            m.runProcesses()
+            names = list(m.litName)
+            phi = np.array(m.litPhi0)
+            rec[tag] = list(calls)
+            if tag == "on":
+                assert m.coastRubble == (names.index("reef"), names.index("carb_sand"))
+                assert m._coastRubbleVol > 0.0
+        finally:
+            m.destroy()
+    ir, it = names.index("reef"), names.index("carb_sand")
+    off, on = rec["off"], rec["on"]
+    assert len(off) == len(on) == 2
+    for a, b in zip(off[0], on[0][:3]):
+        assert np.array_equal(a, b)
+    Lf, Df, Ff, _ = off[1]
+    Ln, Dn, Fn, Bn = on[1]
+    assert Lf[:, ir].sum() > 0.0 and np.all(Ln[:, ir] == 0.0)
+    conv = Lf[:, ir] * (1.0 - phi[ir]) / (1.0 - phi[it])
+    np.testing.assert_allclose(Ln[:, it], Lf[:, it] + conv, rtol=1e-12, atol=1e-12)
+    rest = [k for k in range(len(names)) if k not in (ir, it)]
+    assert np.array_equal(Ln[:, rest], Lf[:, rest])
+    np.testing.assert_allclose(Dn, Df + conv - Lf[:, ir], rtol=1e-12, atol=1e-9)
+    assert np.array_equal(Fn, Ff)
+    with pytest.raises(ValueError, match="rubble"):
+        Model(_flat_case(tmp_path, WAVES, REEF + COAST + "    rubble: reef\n"),
+              verbose=False, showlog=False)
+    with pytest.raises(ValueError, match="reef"):
+        Model(_flat_case(tmp_path, WAVES, COAST + "    rubble: carb_sand\n"),
+              verbose=False, showlog=False)
+
+
 _CCHILD = '''\
 import sys
 import numpy as np

@@ -84,6 +84,7 @@ class WaveMesh(object):
                     "routing.")
             self.coastEro = np.zeros(self.lpoints, dtype=np.float64)
             self._coastEroded = 0.0
+            self._coastRubbleVol = 0.0
         return
 
     def _waveBearings(self, frm):
@@ -344,6 +345,26 @@ class WaveMesh(object):
                   flush=True)
         return E
 
+    def _coastToRubble(self, litv, det, fine):
+        """Route the eroded reef framework as the ``rubble`` lithology: moves
+        column ``reef`` of ``litv`` (deposit-equivalent volumes per lithology,
+        m^3, modified in place) to the rubble column at the same solid volume,
+        ``V_r (1 - phi0_reef) / (1 - phi0_rubble)``, and corrects the routed
+        bulk ``det`` and fine-group ``fine`` volumes. Returns ``(det, fine,
+        solid)`` with ``solid`` the reef solid volume converted per node (m^3).
+        Rank-local."""
+        ir, it = self.coastRubble
+        vr = litv[:, ir].copy()
+        solid = vr * (1.0 - self.litPhi0[ir])
+        conv = solid / (1.0 - self.litPhi0[it])
+        litv[:, ir] = 0.0
+        litv[:, it] += conv
+        det = det + conv - vr
+        if self.stratLith:
+            fine = fine + (conv if self.litFine[it] else 0.0) \
+                - (vr if self.litFine[ir] else 0.0)
+        return det, fine, solid
+
     def coastalErosion(self):
         """
         Wave erosion of the coast and the shallow seafloor (phase C4), after
@@ -361,8 +382,11 @@ class WaveMesh(object):
         both capped at ``max_erosion`` per step. The eroded material is taken
         from the stratigraphy (``erodeStrat``, its deposit-equivalent volume and
         composition) and handed to this step's marine routing (``seaChange``),
-        like the loose carbonate. Elevation, cumulative erosion and the rate
-        field are updated. Collective (wave solve, halo sync, budget).
+        like the loose carbonate. With ``rubble`` the eroded reef framework is
+        routed as that lithology (reef rubble, usually ``carb_sand``): the same
+        solid volume, re-expressed at the rubble's surface porosity, so the
+        routed deposit-equivalent volume changes by the porosity ratio.
+        Elevation, cumulative erosion and the rate field are updated. Collective (wave solve, halo sync, budget).
         Scratch: ``tmp``, ``tmpL``.
         """
         E = self.waveEnergy()
@@ -416,6 +440,9 @@ class WaveMesh(object):
                 setattr(self, k, v)
         else:
             det, fine, litv = vol.copy(), np.zeros(self.lpoints), None
+        rubble = 0.0
+        if litv is not None and getattr(self, "coastRubble", None) is not None:
+            det, fine, rubble = self._coastToRubble(litv, det, fine)
         self._coastDet = det
         self._coastFine = fine
         self._coastL = litv
@@ -432,10 +459,13 @@ class WaveMesh(object):
         self.coastEro += ero
 
         own = self.inIDs == 1
-        b = MPI.COMM_WORLD.allreduce(np.array([vol[own].sum(), det[own].sum()]),
+        rub = rubble[own].sum() if np.ndim(rubble) else 0.0
+        b = MPI.COMM_WORLD.allreduce(np.array([vol[own].sum(), det[own].sum(), rub]),
                                      op=MPI.SUM)
-        self.coastBudget = b                     # (bulk eroded, routed deposit-equivalent)
+        # (bulk eroded, routed deposit-equivalent, reef solid routed as rubble)
+        self.coastBudget = b
         self._coastEroded += b[0]
+        self._coastRubbleVol += b[2]
         if MPIrank == 0 and self.verbose:
             print("[coast] eroded %0.4g km3 (routed %0.4g km3)" % (b[0] * 1e-9, b[1] * 1e-9),
                   flush=True)

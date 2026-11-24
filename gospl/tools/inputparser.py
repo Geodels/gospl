@@ -1876,11 +1876,16 @@ class ReadYaml(object):
                 depth_scale: 5.      # seafloor erosion decays as exp(-depth/this)
                 cliff_height: 10.    # land up to this height next to the sea erodes
                 max_erosion: 5.      # cap per step (m)
+                rubble: carb_sand    # optional: eroded reef framework is
+                                     # routed as this lithology
 
         Sets ``coastOn``, ``coastRate`` (m/yr), ``coastDepth``,
-        ``coastCliff`` and ``coastMax``.
+        ``coastCliff``, ``coastMax`` and ``coastRubble`` (``(index of reef,
+        index of the rubble lithology)`` or None: without ``rubble`` the
+        eroded framework keeps its lithology).
         """
         self.coastOn = False
+        self.coastRubble = None
         cd = self.input.get("coastal_erosion", None)
         if cd is None:
             return
@@ -1899,6 +1904,17 @@ class ReadYaml(object):
                 raise ValueError("coastal_erosion: %s must be positive." % key)
         if self.coastCliff < 0.0:
             raise ValueError("coastal_erosion: cliff_height must be >= 0 (m).")
+        self.coastRubble = None
+        rub = cd.get("rubble", None)
+        if rub is not None:
+            names = list(getattr(self, "litName", []) or [])
+            if "reef" not in names:
+                raise ValueError("coastal_erosion: rubble needs a `reef` lithology "
+                                 "(a carbonate factory with framework).")
+            if str(rub) not in names or str(rub) == "reef":
+                raise ValueError("coastal_erosion: rubble must name another "
+                                 "lithology (e.g. carb_sand), got '%s'." % rub)
+            self.coastRubble = (names.index("reef"), names.index(str(rub)))
         self.coastOn = True
 
     def _readSST(self):

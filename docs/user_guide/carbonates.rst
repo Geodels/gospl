@@ -386,6 +386,7 @@ Coastal erosion
         depth_scale: 5.      # seafloor erosion decays as exp(-depth / depth_scale)
         cliff_height: 10.    # land up to this height next to the sea is a cliff
         max_erosion: 5.      # cap per step (m)
+        rubble: carb_sand    # optional: eroded reef is routed as carbonate sand
 
 With a ``waves`` block, the waves erode the coast and the shallow seafloor
 (after Pastier et al., 2019). A marine cell erodes at ``rate`` times the wave
@@ -397,7 +398,11 @@ multiplied by the erodibility of the exposed layer (``stratK`` and the
 lithology ``k_factor``: a ``reef`` layer with ``k_factor: 0.1`` erodes ten
 times slower than clastic sediment), and capped at ``max_erosion`` per step.
 The eroded material is removed from the stratigraphy and spread by the marine
-transport of the same step. Sheltered coasts (in the wave shadow, or with
+transport of the same step. It keeps its lithology unless ``rubble`` names
+another one: with ``rubble: carb_sand`` the eroded reef framework becomes reef
+rubble, routed and deposited as carbonate sand (the same solid volume, at the
+sand's porosity), so the fore-reef and the lagoon collect sand rather than
+detached pieces of reef. Sheltered coasts (in the wave shadow, or with
 ``refraction`` turning the waves away) erode less. The cumulative erosion is
 written as ``coastEro`` (m); with ``--summary`` each step has a
 ``coastal_erosion`` record (eroded, routed). Reef terraces form from the
