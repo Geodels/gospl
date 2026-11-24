@@ -299,13 +299,10 @@ def test_carbonate_partition_invariant(tmp_path, pel):
     a, b = out[1], out[3]
     assert np.array_equal(a[:, 0], b[:, 0])
     d = np.max(np.abs(a[:, 1:] - b[:, 1:]))
-    # KNOWN BUG (AGENTS.md > Known bugs): with the rain resuspended, the
-    # lithology split of sub-millimetre marine deposits depends on the
-    # partition (carb_sand 0.18 vs 0.27 mm in one layer, 8.6e-5 m; elevation
-    # and layer totals agree to 1e-7). Hidden while thin deposits were
-    # discarded. Not the marine diffusion tolerance (unchanged down to 1e-5 m).
-    # Pinned at the current behaviour; tighten to 1e-5 once fixed.
-    tol = 2.0e-4 if pel == "resuspend" else 1.0e-5
+    # With the rain resuspended this was 8.6e-5 m (carb_sand of a 0.5 mm
+    # deep deposit split by round-off in _marineLitShare); fixed by
+    # LITH_PRIOR_REL_FLOOR (2026-11-25), now 4e-7 m.
+    tol = 1.0e-5
     assert d < tol, f"np=1 vs np=3 differ by {d:.3e} m"
 
 

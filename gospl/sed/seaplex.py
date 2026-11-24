@@ -20,6 +20,7 @@ from vtk.util import numpy_support  # type: ignore
 from gospl.tools.constants import (
     BOUNDARY_FLOW_SENTINEL,
     DEPOSIT_FLOOR,
+    LITH_PRIOR_REL_FLOOR,
     GRAVITY_EROSION_MAX_CELL,
     MISSING_DATA_SENTINEL,
 )
@@ -1411,7 +1412,11 @@ class SEAMesh(object):
             Pn = np.divide(P, ps[:, None], out=np.zeros_like(P), where=ps[:, None] > 0.0)
             Pn[Pn < 1.0e-12] = 0.0
             ps = Pn.sum(axis=1)
-            empty = ps <= 0.0
+            # a routed group mix negligible next to the group volume the node
+            # must take is round-off (the difference of nearly equal columns):
+            # such a node starts from the domain mix, or its split follows
+            # the partition (LITH_PRIOR_REL_FLOOR)
+            empty = (ps <= 0.0) | (P.sum(axis=1) < LITH_PRIOR_REL_FLOOR * rows)
             Pn[empty] = T / T.sum()
             Pn /= Pn.sum(axis=1)[:, None]
             # a millionth of the domain mix in every node: a node whose routed

@@ -174,3 +174,13 @@ FILL_LEVEL_TOL = 1.0e-9
 # number. 0.25 m matches the exact Bosscher & Schlager ODE to 1e-4 relative
 # at 1 and 10 kyr steps (benchmarks/test_carbonate.py).
 CARB_SUBSTEP_GROWTH = 0.25
+
+# Fraction of a node's size-group volume below which the routed lithology mix
+# of that group is not used to split it (seaplex._marineLitShare): the node
+# starts from the domain mix instead. A deep node fed only by resuspended
+# pelagic rain must put the depth-biased coarse part of its deposit in the
+# coarse group, but its routed coarse mix was ~1e-6 of that volume, the
+# difference of two nearly equal columns: diffusion round-off then set the
+# carb_sand share (0.01 vs 0.15 at np=1 vs np=3, 2026-11-25). 1e-2 left 4e-7 m
+# of difference (elevation: 1.2e-7), 1e-3 left 1.5e-6 m.
+LITH_PRIOR_REL_FLOOR = 1.0e-2
