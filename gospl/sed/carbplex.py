@@ -53,6 +53,9 @@ class CarbMesh(object):
         # moves), solver cached; both in destroy_DMPlex
         self._clayMat = None
         self._ksp_clay = None
+        self._sstMaps = None
+        if getattr(self, "sstOn", False):
+            self._initSST()
         if getattr(self, "pelOn", False):
             self._initPelagic()
         if not getattr(self, "carbOn", False):
@@ -81,6 +84,39 @@ class CarbMesh(object):
         self._carbFramework = 0.0
         self._carbLoose = 0.0
         return
+
+    def _initSST(self):
+        """Load the sea-surface temperature event maps (local slices)."""
+        self._sstMaps = []
+        for e in self.sstEvents:
+            v = e["val"]
+            if isinstance(v, tuple):
+                d = np.load(v[0] + ".npz")
+                arr = np.asarray(d[v[1]], dtype=np.float64)
+                if arr.shape[0] != self.mpoints:
+                    raise ValueError("sst: map %s has %d values, the mesh %d."
+                                     % (list(v), arr.shape[0], self.mpoints))
+                self._sstMaps.append(arr[self.locIDs])
+            else:
+                self._sstMaps.append(float(v))
+
+    def _sst(self):
+        """
+        Sea-surface temperature (deg C) at ``tNow`` on the local nodes: the
+        event in force (the last that has started; the first before it
+        starts), plus the curve interpolated in time as an anomaly; or the
+        curve alone (uniform). Rank-local.
+        """
+        out = np.zeros(self.lpoints, dtype=np.float64)
+        if self.sstEvents:
+            k = 0
+            for i, e in enumerate(self.sstEvents):
+                if e["start"] <= self.tNow + 1.0e-6:
+                    k = i
+            out = out + self._sstMaps[k]
+        if self.sstCurve is not None:
+            out = out + float(np.interp(self.tNow, self.sstCurve[0], self.sstCurve[1]))
+        return out
 
     def _initPelagic(self):
         """Allocate the pelagic rain state: deposit rate output, the per-node
@@ -208,6 +244,9 @@ class CarbMesh(object):
         depth = self.sealevel - hl
         marine = (self.lFill <= self.sealevel) & (depth > 0.0)
         rain = np.where(marine, ev["carb"] * self.dt, 0.0) * np.ones(self.lpoints)
+        if e.get("temp") is not None:
+            # pelagic production scaled by the sea-surface temperature
+            rain = rain * np.interp(self._sst(), e["temp"][0], e["temp"][1])
         keep = self._pelPreservedFraction(depth, e["lys"], e["ccd"])
         carb0 = rain * keep
         dissolved = rain - carb0
@@ -364,11 +403,13 @@ class CarbMesh(object):
 
     def _carbStatic(self, h):
         """Per-factory factor that does not change within the step: habitat
-        map times the ``slope``, ``sedrate`` and ``exposure`` responses
+        map times the ``slope``, ``sedrate``, ``exposure`` and ``temperature``
+        responses
         (the open-water index is solved once per step, only when used)."""
         out = []
         slope = None
         expo = None
+        sst = None
         if any(ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):
             expo = self._carbExposure(h)
         self.carbExpo = expo
@@ -385,6 +426,10 @@ class CarbMesh(object):
                     m = m * np.interp(self._carbSedRate, x, fv)
                 elif ctl == "exposure":
                     m = m * np.interp(expo, x, fv)
+                elif ctl == "temperature":
+                    if sst is None:
+                        sst = self._sst()
+                    m = m * np.interp(sst, x, fv)
             out.append(m)
         return out
 

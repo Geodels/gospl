@@ -174,7 +174,7 @@ place (resuspension); first version deposits in place.
 
 ## 2.9 Revised phases
 
-**Status (2026-11-24): C0, C1, C2, C2b and C3 done** (C3: `exposure` response control, screened-Poisson open-water index over a length in metres, not the marine smoother whose strength is in cells) (C2: `pelagic:` block, `CarbMesh.pelagicRain`; C2b: `clay_decay` and `resuspend`) (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
+**Status (2026-11-24): C0, C1, C2, C2b, C3 and C5 done** (C3: `exposure` response control, screened-Poisson open-water index over a length in metres, not the marine smoother whose strength is in cells) (C2: `pelagic:` block, `CarbMesh.pelagicRain`; C2b: `clay_decay` and `resuspend`) (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
 deposition, compaction, blends, advection, outputs; stage B: the routed composition
 at every deposit). Checks: dual lithology bitwise identical on 13 variants; a fine or
 coarse fraction split into two identical lithologies reproduces the dual run to
@@ -193,6 +193,49 @@ round-off (a base-model fix for `dev`).
 | C2b | Hemipelagic clay decreasing away from the coast (`decay` length L: `exp(-d/L)` from a screened-Poisson solve `(L^2 lap - 1) c = 0`, c = 1 at the coast, one cached KSP per step, parallel; reuses the clinoform coast distance if it is already computed); optional hand-over of the settled rain to the marine diffusion (resuspension), each part riding the lithology lockstep of `_diffuseOcean` | 1-D strip against exp(-x/L); volume and per-lithology conservation through the diffusion; np=1 vs np=3 |
 | C4 | Coastal wave erosion (own opt-in block) | Pastier-type terrace example |
 | later | Karst of exposed carbonate through the geochemistry | |
+
+## 2.10 Requested extensions (2026-11-24, proposals)
+
+**C5, temperature (done: a top-level `sst:` block, so the pelagic rain can use it without the carbonate block).** A `sst:` forcing, read in the
+carbonate module (local slices, like the pelagic maps, so no new dispatcher in
+`unstructuredmesh`): events `{start, uniform | map: [file, key]}` (global: SST
+maps through time), or `curve: file` (two columns, time and SST in degrees C,
+linearly interpolated; regional), optionally both (map shifted by the curve).
+A new response control `temperature` per factory, e.g. reef builders
+`x: [16, 18, 28, 32], f: [0, 1, 1, 0]`. It is also available to the pelagic
+rain (`carbonate_temperature` table on the rain rate). Pointwise, cheap.
+
+**C6, link to the geochemistry** (needs `groundwater:` with Level-B
+geochemistry and `marine_coupling`). Two couplings, both optional:
+- regional, coastal plume: the river dissolved load delivered at the coast
+  (`marineSoluteInput`, per species) spread offshore with the screened-Poisson
+  operator of C2b (`(I - L^2 lap) c = input`), giving a plume concentration;
+  a response control `solute: <species>` lets it raise production (alkalinity,
+  Ca) or cut it (nutrients, terrigenous input) near river mouths;
+- global, supply-limited burial: the marine reservoir of a species
+  (`marineSolute`, fed by weathering through the rivers) caps the carbonate
+  buried in a step (benthic + pelagic), with a `yield` (m3 of carbonate per
+  unit of solute); production is scaled down uniformly when it would exceed
+  the reservoir, and burial is removed from it. This closes the weathering to
+  burial loop of the carbonate system; optionally the CCD responds to the
+  reservoir (deeper when supply exceeds burial). Units and the stoichiometric
+  yield must be settled with the maintainer before coding.
+
+**C7, wave energy and shadows.** A wave energy field `E` (0 to 1) carried
+from the open ocean along the wave directions, absorbed by land and dissipated
+in shallow water, solved like the orographic rain shadow (same upwind
+advection-relaxation operators, `getfacevelocity` + `advecupwind`, cached):
+`(v . grad + kappa(h)) E = 0`, `E = 1` on the inflow edges, `kappa` large on
+land (shadow behind islands and headlands) and growing as the water shallows
+(friction, Pastier's shoreward dissipation). A wave climate is a list of
+directions with weights, `E = sum_k w_k E_k`. A response control `wave`
+(0 to 1) concentrates reefs on exposed margins and keeps lagoons and lee sides
+sheltered; C4 (coastal wave erosion) then uses the same `E` as its erosional
+power. Flat meshes first (the orographic operator is flat-only); on a global
+mesh the directions would be a field (e.g. trade winds by latitude), later.
+
+Proposed order: C5 (small, independent), C7 (also prepares C4), C6 (after the
+units are agreed), then C4.
 
 ## 3. Outputs, tests, benchmarks
 

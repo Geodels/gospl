@@ -257,6 +257,11 @@ Parameters
      - m
      - Open-water index (needs ``exposure_length``): positive on margins.
        ``x: [-5., 5.], f: [0.2, 1.]`` favours the margin over the lagoon.
+   * - ``temperature``
+     - °C
+     - Sea-surface temperature from the ``sst`` block (below). For reef
+       builders ``x: [16., 18., 28., 32.], f: [0., 1., 1., 0.]``: no growth
+       below 16 °C or above 32 °C, full growth between 18 and 28 °C.
 
 **Carbonate lithologies** (``carbonate: lithologies:``)
 
@@ -307,6 +312,35 @@ boundstone), to adapt to your system::
             reef: {phi0: 0.1, k_factor: 0.05}
 
 
+.. _carb_sst:
+
+Sea-surface temperature
+-----------------------
+
+.. code:: yaml
+
+    sst:
+        events:                         # global: maps through time
+          - {start: 0., map: ['sst_0Ma', 't']}
+          - {start: 5.e6, map: ['sst_5Ma', 't']}
+        curve: 'sst_anomaly.csv'        # optional: time (yr), SST (°C)
+
+The ``sst`` block gives the sea-surface temperature used by the
+``temperature`` response of the factories and by the ``temperature`` table of
+the pelagic rain. Events hold until the next one starts; a map has one value
+per mesh vertex (°C). The curve (two columns, time in years and SST in °C,
+comma-separated for a ``.csv`` file) is interpolated linearly in time and
+constant beyond its ends. With events and a curve, the curve is an anomaly
+added to the event values (for instance glacial cooling on top of a present-day
+map); with a curve alone it is the SST everywhere, which suits a regional
+model::
+
+    sst:
+        curve: 'sst_regional.csv'
+
+Each event can also be uniform (``{start: 0., uniform: 26.}``). The SST is
+written as the output ``sst``.
+
 .. _carb_pelagic:
 
 Pelagic carbonate and hemipelagic clay
@@ -322,6 +356,7 @@ Pelagic carbonate and hemipelagic clay
         clay: 1.              # hemipelagic clay (m/Myr) or [file, key]
         clay_decay: 5.e4      # optional: clay * exp(-d/L) from the coast (m)
         resuspend: False      # optional: hand the rain to the marine diffusion
+        temperature: {x: [5., 25.], f: [0.2, 1.]}   # optional, needs `sst`
       - start: 2.e6           # a later event replaces the earlier one
         carbonate: ['prod2Ma', 'p']
         lysocline: 3800.
@@ -369,6 +404,11 @@ Pelagic carbonate and hemipelagic clay
      - false
      - Hand the settled rain to the marine diffusion of the same step instead
        of laying it in place: it gathers into the lows of the seafloor.
+   * - ``temperature``
+     - table
+     - none
+     - ``{x: [...], f: [...]}``: the carbonate rain is multiplied by ``f``
+       interpolated at the sea-surface temperature (``sst`` block).
 
 The rain settles on marine cells only and never builds above sea level (the
 excess is reported as bypassed). Thin deposits (below 0.1 mm per step) are
@@ -393,8 +433,9 @@ Setting it up for your resolution
        level; pelagic carbonate and clay in the ocean basins. A reef is
        smaller than a cell: ``reef`` is the framework share of a cell's
        carbonate (a margin facies), not a resolved reef.
-     - ``habitat`` maps from the sea-surface temperature or latitude (no reef
-       outside the tropics); a ``pelagic`` block with a productivity map and
+     - an ``sst`` block with SST maps through time and a ``temperature``
+       response (no reef outside the warm belt), or ``habitat`` maps; a
+       ``pelagic`` block with a productivity map and
        a lysocline and CCD per event; ``clay_decay`` of tens to hundreds of
        km; usually no ``exposure`` (cells are wider than lagoons); time steps
        of 10-100 kyr are fine (the production does not depend on ``dt``).
@@ -404,7 +445,8 @@ Setting it up for your resolution
        a margin facies a few cells wide.
      - ``exposure`` with ``exposure_length`` of 3-10 cells to concentrate the
        euphotic factory on the margin; ``sedrate`` to stop production near
-       deltas; framework 0.3-0.6 for the euphotic factory; ``dt`` of 1-10 kyr.
+       deltas; an ``sst`` curve with a ``temperature`` response for climatic
+       changes through time; framework 0.3-0.6 for the euphotic factory; ``dt`` of 1-10 kyr.
    * - Local, 50-200 m cells
      - Rimmed platforms, barriers and lagoons, patch reefs several cells
        wide; reef terraces with coastal erosion (planned, phase C4).
@@ -483,6 +525,7 @@ Outputs
 
 - ``carbProd`` (m/yr): carbonate production rate of the step (all factories).
 - ``pelDep`` (m/yr): settled (or resuspended) pelagic thickness rate.
+- ``sst`` (°C): sea-surface temperature of the step (with an ``sst`` block).
 - Stratigraphy: one pile per lithology, ``stratH_<name>`` and ``phi_<name>``
   (``stratHf``/``phiF`` for the dual-lithology fine fraction), in the
   ``stratal`` files.

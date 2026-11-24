@@ -83,8 +83,8 @@ where :math:`w` is the water depth, :math:`g_f` the maximum growth rate,
 :math:`I_0` the surface light, :math:`k_f` the extinction coefficient,
 :math:`I_{k,f}` the saturating light, :math:`M_f` an optional habitat map and
 :math:`R_{fj}` piecewise-linear response factors on the depth, the seafloor
-slope, the clastic deposition rate of the previous step and the open-water
-index.
+slope, the clastic deposition rate of the previous step, the open-water
+index and the sea-surface temperature.
 
 **Integration over a step.** Each cell grows with the depth it creates,
 
@@ -118,6 +118,16 @@ and added to the marine cascade of the same step, after the gravity supply is
 taken from the river load. Framework thinner than the stratigraphic floor
 (0.1 mm) joins the loose sand, so elevation, stratigraphy and budget stay
 consistent.
+
+
+Sea-surface temperature
+-----------------------
+
+The ``sst`` block gives :math:`T(\mathbf{x}, t)`: event maps (or uniform
+values) as a step function in time, plus a curve interpolated linearly in time
+(an anomaly when both are given). The ``temperature`` response is a
+piecewise-linear factor :math:`R(T)` on a factory's production, and on the
+pelagic carbonate rain. It is evaluated once per step, node by node.
 
 
 Open-water index

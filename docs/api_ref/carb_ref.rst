@@ -29,6 +29,8 @@ Class CarbMesh
       ~CarbMesh._carbStatic
       ~CarbMesh._carbRates
       ~CarbMesh._carbSubsteps
+      ~CarbMesh._initSST
+      ~CarbMesh._sst
       ~CarbMesh._carbBuildOp
       ~CarbMesh._carbScreened
       ~CarbMesh._carbExposure
@@ -63,3 +65,5 @@ Private functions
 .. automethod:: sed.carbplex.CarbMesh._clayDecay
 .. automethod:: sed.carbplex.CarbMesh._pelResuspend
 .. automethod:: sed.carbplex.CarbMesh._pelSettle
+.. automethod:: sed.carbplex.CarbMesh._initSST
+.. automethod:: sed.carbplex.CarbMesh._sst

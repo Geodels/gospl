@@ -501,6 +501,14 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["flexIso"][:, 0] = self.localFlex
+            if getattr(self, "sstOn", False) and getattr(self, "_sstMaps", None) is not None:
+                f.create_dataset(
+                    "sst",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["sst"][:, 0] = self._sst()
             if getattr(self, "pelOn", False):
                 f.create_dataset(
                     "pelDep",
@@ -1080,6 +1088,16 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/flexIso</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+            if getattr(self, "sstOn", False) and getattr(self, "_sstMaps", None) is not None:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="sst">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/sst</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

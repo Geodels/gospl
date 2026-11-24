@@ -1667,6 +1667,7 @@ class ReadYaml(object):
         self.litPhi0, self.litZ0, self.litK, self.litD, self.litBed = [], [], [], [], []
         self.carbOn = False
         self.pelOn = False
+        self.sstOn = False
         if not self.stratLith:
             if "pelagic" in self.input:
                 raise ValueError(
@@ -1713,6 +1714,7 @@ class ReadYaml(object):
             add(name, size == "fine", float(ent.get("phi0", self.phi0f)),
                 float(ent.get("z0", self.z0f)), float(ent.get("k_factor", 1.0)),
                 float(ent.get("diff_factor", 1.0)), float(ent.get("bedrock_frac", 0.0)))
+        self._readSST()
         self._readCarbonate(add)
         self._readPelagic(add)
         if sum(self.litBed) > 1.0 + 1.0e-12:
@@ -1746,7 +1748,61 @@ class ReadYaml(object):
         "reef": {"size": "coarse", "phi0": 0.2, "z0": 5000.0, "k_factor": 0.1,
                  "diff_factor": 0.1},
     }
-    CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure")
+    CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure", "temperature")
+
+    def _readSST(self):
+        """
+        Parse the optional ``sst:`` block (sea-surface temperature, degrees C,
+        docs/DESIGN_CARBONATES.md 2.10, phase C5), used by the ``temperature``
+        response of the carbonate factories and the pelagic rain::
+
+            sst:
+              events:                       # maps (global) or uniform values
+                - {start: 0., map: ['sst0', 't']}
+                - {start: 1.e6, uniform: 24.}
+              curve: 'sst_curve.csv'        # time (yr), SST (deg C)
+
+        The events are a step function in time (each holds until the next
+        starts); the curve is interpolated linearly (constant beyond its
+        ends). With both, the curve is an anomaly added to the event values;
+        with the curve alone it is the (uniform) SST. Sets ``sstOn``,
+        ``sstEvents`` (list of ``{start, val}``, ``val`` a float or
+        ``(file, key)``) and ``sstCurve`` (``(t, v)`` or None).
+        """
+        sd = self.input.get("sst", None)
+        self.sstEvents, self.sstCurve = [], None
+        if sd is None:
+            return
+        if not isinstance(sd, dict):
+            raise ValueError("sst: must be a mapping with `events` and/or `curve`.")
+        for k, e in enumerate(sorted(sd.get("events", None) or [],
+                                     key=lambda x: float(x.get("start", 0.0)))):
+            if not isinstance(e, dict) or "start" not in e:
+                raise ValueError("sst: event %d needs a start time." % k)
+            if "map" in e:
+                mp = e["map"]
+                if not isinstance(mp, (list, tuple)) or len(mp) != 2:
+                    raise ValueError("sst: event %d map must be [file, key]." % k)
+                val = (str(mp[0]), str(mp[1]))
+            elif "uniform" in e:
+                val = float(e["uniform"])
+            else:
+                raise ValueError("sst: event %d needs `uniform` or `map`." % k)
+            self.sstEvents.append({"start": float(e["start"]), "val": val})
+        if sd.get("curve", None) is not None:
+            try:
+                data = np.loadtxt(str(sd["curve"]), delimiter=None if not
+                                  str(sd["curve"]).endswith(".csv") else ",", ndmin=2)
+            except Exception as exc:
+                raise ValueError("sst: cannot read the curve %s (%s)." % (sd["curve"], exc))
+            if data.shape[1] < 2 or data.shape[0] < 1 or np.any(np.diff(data[:, 0]) <= 0.0):
+                raise ValueError(
+                    "sst: the curve needs two columns (time in yr, increasing; SST "
+                    "in deg C).")
+            self.sstCurve = (data[:, 0].copy(), data[:, 1].copy())
+        if not self.sstEvents and self.sstCurve is None:
+            raise ValueError("sst: give `events`, a `curve`, or both.")
+        self.sstOn = True
 
     def _readCarbonate(self, add):
         """
@@ -1847,6 +1903,11 @@ class ReadYaml(object):
                 "carbonate: a response uses `exposure`; set carbonate: "
                 "exposure_length (m), the length over which the open-water "
                 "index compares the seafloor with its surroundings.")
+        if not self.sstOn and any(
+                ctl == "temperature" for f in self.carbFact for ctl, _, _ in f["resp"]):
+            raise ValueError(
+                "carbonate: a response uses `temperature`; add an `sst:` block "
+                "(sea-surface temperature maps or curve).")
         over = cdict.get("lithologies", None) or {}
         if not isinstance(over, dict):
             raise ValueError("carbonate: lithologies must be a mapping by name.")
@@ -1936,9 +1997,23 @@ class ReadYaml(object):
                 if decay <= 0.0:
                     raise ValueError(
                         "pelagic: event %d clay_decay must be a positive length (m)." % k)
+            temp = e.get("temperature", None)
+            if temp is not None:
+                if not self.sstOn:
+                    raise ValueError(
+                        "pelagic: event %d has a temperature table; add an `sst:` "
+                        "block." % k)
+                tx = np.asarray(temp.get("x", []), dtype=float)
+                tf = np.asarray(temp.get("f", []), dtype=float)
+                if tx.size < 2 or tx.size != tf.size or np.any(np.diff(tx) <= 0.0) \
+                        or np.any(tf < 0.0):
+                    raise ValueError(
+                        "pelagic: event %d temperature needs x (increasing) and f "
+                        "(>= 0) of the same length (>= 2)." % k)
+                temp = (tx, tf)
             self.pelEvents.append({"start": float(e["start"]), "carb": carb,
                                    "clay": clay, "lys": lys, "ccd": ccd,
-                                   "decay": decay,
+                                   "decay": decay, "temp": temp,
                                    "resuspend": bool(e.get("resuspend", False))})
         self.pelOn = True
         if anyCarb and "carb_mud" not in self.litName:

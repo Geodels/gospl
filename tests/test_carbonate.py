@@ -370,3 +370,59 @@ def test_pelagic_resuspension(tmp_path, monkeypatch):
     assert out["res"][0] > 5.0 * out["set"][0], (out["res"][0], out["set"][0])
     handed, laid = out["res"][2], out["res"][3]
     assert 0.99 * handed < laid <= handed * (1 + 1e-9), (laid, handed)
+
+
+def test_sst_temperature(tmp_path, monkeypatch):
+    """
+    Protects: the sea-surface temperature (phase C5). Events are a step
+    function, the curve is interpolated in time and added to the event map
+    as an anomaly (or used alone); the ``temperature`` response scales a
+    factory and the pelagic rain; temperature without an ``sst`` block is
+    refused.
+    """
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    n = np.load(tmp_path / "mesh.npz")["v"].shape[0]
+    np.savez(tmp_path / "sst0.npz", t=np.linspace(10.0, 30.0, n))
+    np.savetxt(tmp_path / "anom.csv", np.array([[0.0, 0.0], [100.0, -4.0]]), delimiter=",")
+    block = ("sst:\n    events:\n      - {start: 50., uniform: 20.}\n"
+             "      - {start: 0., map: ['sst0', 't']}\n    curve: 'anom.csv'\n\n"
+             "carbonate:\n    factories:\n      - {name: reef, growth: 500., "
+             "response: [{control: temperature, x: [16., 18., 28., 32.], "
+             "f: [0., 1., 1., 0.]}]}\n\n"
+             "pelagic:\n  - start: 0.\n    carbonate: 50.\n    lysocline: 3500.\n"
+             "    ccd: 4500.\n    temperature: {x: [10., 30.], f: [0., 1.]}\n\n")
+    m = Model(_case(tmp_path, "sst", block=block), verbose=False, showlog=False)
+    try:
+        assert m.sstOn and [e["start"] for e in m.sstEvents] == [0.0, 50.0]
+        t0 = np.asarray(m._sstMaps[0])
+        m.tNow = 25.0                                   # map + (-1) anomaly
+        assert np.allclose(m._sst(), t0 - 1.0)
+        m.tNow = 75.0                                   # uniform 20 + (-3)
+        assert np.allclose(m._sst(), 17.0)
+        m.tNow = 200.0                                  # curve constant beyond its end
+        assert np.allclose(m._sst(), 16.0)
+        m.tNow = 0.0
+        st = m._carbStatic(m.hLocal.getArray())
+        assert np.allclose(st[0], np.interp(t0, [16., 18., 28., 32.], [0., 1., 1., 0.]))
+        # pelagic rain scaled by the temperature table
+        m.sealevel = 0.0
+        h = np.full(m.lpoints, -1000.0)
+        m.hLocal.setArray(h)
+        m.dm.localToGlobal(m.hLocal, m.hGlobal)
+        m.lFill = h.copy()
+        top = m.stratStep
+        c0 = m.stratHL[m.carbLit["carb_mud"]][:, top].copy()
+        m.pelagicRain()
+        got = m.stratHL[m.carbLit["carb_mud"]][:, top] - c0
+        exp = 50.0e-6 * m.dt * np.interp(t0, [10.0, 30.0], [0.0, 1.0])
+        lay = exp >= 1.0e-4
+        assert np.allclose(got[lay], exp[lay], rtol=1e-12)
+    finally:
+        m.destroy()
+    # the same factory without an sst block
+    carb_only = "carbonate:" + block.split("carbonate:")[1].split("pelagic:")[0]
+    with pytest.raises(ValueError, match="sst"):
+        Model(_case(tmp_path, "nosst", block=carb_only), verbose=False, showlog=False)
