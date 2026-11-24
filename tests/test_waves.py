@@ -293,6 +293,42 @@ def test_coastal_erosion_rubble(tmp_path, monkeypatch):
               verbose=False, showlog=False)
 
 
+def test_coastal_erosion_provenance(tmp_path, monkeypatch):
+    """With provenance on, the material eroded at the coast keeps the
+    composition of the layers it came from (not the river mix at the node,
+    which is empty where no river arrives): every layer stays exactly
+    partitioned and each source class deposits what it lost. (The routed
+    marine deposit drops cells thinner than DEPOSIT_FLOOR without putting
+    the volume back, ~5 % here where the eroded material spreads thinly; it
+    is switched off so the balance tests the labelling alone.)"""
+    from mpi4py import MPI
+    import gospl.sed.seaplex as seaplex
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(seaplex, "DEPOSIT_FLOOR", 0.0)
+    yml = _flat_case(tmp_path, WAVES, COAST.replace("rate: 1.e-3", "rate: 1.e-2"))
+    v = np.load(tmp_path / "flatw.npz")["v"]
+    np.savez(tmp_path / "src.npz", rock=(v[:, 0] > 15.0e3).astype(np.int64))
+    text = (tmp_path / yml).read_text().replace(
+        "output:", "provenance:\n    classes: 2\n    source: ['src', 'rock']\n\noutput:", 1)
+    (tmp_path / yml).write_text(text)
+    m = Model(yml, verbose=False, showlog=False)
+    try:
+        assert m.provOn and m.coastOn and m.provNb == 2
+        m.runProcesses()
+        assert m._coastEroded > 0.0
+        top = m.stratStep + 1
+        H, P = m.stratH[:, :top], m.stratP[:, :top, :]
+        assert np.abs(P.sum(axis=2) - H).sum() / max(H.sum(), 1.0) < 1.0e-9
+        ero = MPI.COMM_WORLD.allreduce(m._provEroded, op=MPI.SUM)
+        dep = MPI.COMM_WORLD.allreduce(m._provDeposited, op=MPI.SUM)
+        assert ero.min() > 0.0
+        np.testing.assert_allclose(dep, ero, rtol=1.0e-3)
+    finally:
+        m.destroy()
+
+
 _CCHILD = '''\
 import sys
 import numpy as np

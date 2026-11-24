@@ -1777,7 +1777,11 @@ class SEAMesh(object):
             self._carbDet = None
         # Material eroded at the coast this step (waveplex.coastalErosion):
         # into the cascade input too, its fine part and lithologies with it.
+        coastIn = coastProv = None
         if getattr(self, "coastOn", False) and getattr(self, "_coastDet", None) is not None:
+            coastIn = self._coastDet
+            coastProv = getattr(self, "_coastProv", None)
+            self._coastProv = None
             sedFlux = sedFlux + self._coastDet
             cf = self._coastFine
             carbMud = cf if carbMud is None else carbMud + cf
@@ -1791,6 +1795,10 @@ class SEAMesh(object):
             # composition of the river load at the node
             provFlux = self.provFrac * (sedFlux - carbIn)[:, None]
             provFlux[:, self.provMarine] += carbIn
+        if provOn and coastIn is not None and coastProv is not None:
+            # the material eroded at the coast keeps the composition of the
+            # layers it came from, not the river mix at the node
+            provFlux = provFlux - self.provFrac * coastIn[:, None] + coastProv
         if lit:
             # the lithologies ride the same lockstep as extra columns
             casL = litM - gravL

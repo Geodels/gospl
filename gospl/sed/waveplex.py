@@ -60,6 +60,7 @@ class WaveMesh(object):
         self.coastEro = None
         self.coastBudget = None
         self._coastDet = None
+        self._coastProv = None
         self._waveCoef = None
         self._waveMat = None
         self._ksp_wave = None
@@ -436,16 +437,26 @@ class WaveMesh(object):
             if lit:
                 litv = np.column_stack([self.thL[l] * self.dt * self.larea
                                         for l in range(self.litNb)])
+            # provenance of what was eroded (per-class volumes, sum == det)
+            provc = None
+            if getattr(self, "provOn", False) and getattr(self, "provEro", None) is not None:
+                provc = self.provEro * self.dt * self.larea[:, None]
             for k, v in saved.items():
                 setattr(self, k, v)
         else:
-            det, fine, litv = vol.copy(), np.zeros(self.lpoints), None
+            det, fine, litv, provc = vol.copy(), np.zeros(self.lpoints), None, None
         rubble = 0.0
         if litv is not None and getattr(self, "coastRubble", None) is not None:
+            det0 = det.copy()
             det, fine, rubble = self._coastToRubble(litv, det, fine)
+            if provc is not None:
+                # same composition, volume re-expressed at the rubble porosity
+                provc = provc * np.divide(det, det0, out=np.ones_like(det),
+                                          where=det0 > 0.0)[:, None]
         self._coastDet = det
         self._coastFine = fine
         self._coastL = litv
+        self._coastProv = provc
 
         # elevation, cumulative erosion, rate
         self.tmpL.setArray(-ero)
