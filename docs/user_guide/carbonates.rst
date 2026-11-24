@@ -270,6 +270,16 @@ Parameters
        (m). ``{control: solute, species: carbonate, length: 5.e4, x: [...],
        f: [...]}`` raises production near river mouths (alkalinity) or cuts it
        (nutrients, terrigenous input).
+   * - ``turbidity``
+     - m/yr
+     - Turbid plume of the river fine (suspended) load delivered to the sea
+       this step, spread along and off the coast over ``length`` (m): about
+       the local fine supply per unit area near a river mouth, decaying as
+       ``exp(-d / length)`` away from it. Unlike ``sedrate`` it does not need
+       the mud to settle where the factory is, so it also acts where the river
+       load crosses the shallow water and is deposited further out.
+       ``{control: turbidity, length: 1.e4, x: [0., 1.e-4], f: [1., 0.]}``
+       stops production where the plume carries 0.1 mm/yr of mud.
    * - ``temperature``
      - °C
      - Sea-surface temperature from the ``sst`` block (below). For reef

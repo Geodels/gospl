@@ -1752,7 +1752,7 @@ class ReadYaml(object):
                  "diff_factor": 0.1},
     }
     CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure", "temperature", "wave",
-                     "solute")
+                     "solute", "turbidity")
 
     def _readWaves(self):
         """
@@ -2040,6 +2040,7 @@ class ReadYaml(object):
                     "0 and 1." % name)
             resp = []
             solute = None
+            turb = None
             for r in f.get("response", None) or []:
                 ctl = str(r.get("control", ""))
                 if ctl not in self.CARB_CONTROLS:
@@ -2067,6 +2068,17 @@ class ReadYaml(object):
                             "carbonate: factory '%s' solute response needs a "
                             "`species` and a positive `length` (m)." % name)
                     solute = (str(r["species"]), float(r["length"]))
+                if ctl == "turbidity":
+                    # turbid plume of the river fine load
+                    if turb is not None:
+                        raise ValueError(
+                            "carbonate: factory '%s' has more than one turbidity "
+                            "response." % name)
+                    if float(r.get("length", 0.0)) <= 0.0:
+                        raise ValueError(
+                            "carbonate: factory '%s' turbidity response needs a "
+                            "positive `length` (m), the plume decay length." % name)
+                    turb = float(r["length"])
                 resp.append((ctl, x, fv))
             hab = f.get("habitat", None)
             if hab is not None and (not isinstance(hab, (list, tuple)) or len(hab) != 2):
@@ -2074,7 +2086,7 @@ class ReadYaml(object):
                     "carbonate: factory '%s' habitat must be [file, key]." % name)
             self.carbFact.append({"name": name, "g": g * 1.0e-6, "k": kx, "Ik": ik,
                                   "phi": phi, "sand": sand, "habitat": hab,
-                                  "resp": resp, "solute": solute})
+                                  "resp": resp, "solute": solute, "turbidity": turb})
 
         if self.carbExpLength is None and any(
                 ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):

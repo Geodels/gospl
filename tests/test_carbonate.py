@@ -139,6 +139,56 @@ def test_carbonate_responses(tmp_path, monkeypatch):
         m.destroy()
 
 
+def test_carbonate_turbidity(tmp_path, monkeypatch):
+    """The turbidity plume spreads the river fine load delivered to the sea:
+    from a point source far from land it keeps the delivered volume (the
+    finite-volume operator is conservative), peaks at the source and falls
+    with distance; in a run it is zero on land and drives the response. A
+    turbidity response without a length is refused."""
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    L = 4.0e5
+    block = ("carbonate:\n    factories:\n      - {name: a, growth: 500., response: "
+             "[{control: turbidity, length: %g, x: [0., 1.e-4], f: [1., 0.]}]}\n\n" % L)
+    m = Model(_case(tmp_path, "t", block), verbose=False, showlog=False)
+    try:
+        assert m.carbFact[0]["turbidity"] == L
+        h = m.hLocal.getArray()
+        xyz = m.lcoords
+        land = h >= m.sealevel
+        sea = (~land) & (m.lFill <= m.sealevel)
+        # the sea cell farthest from land
+        d = np.min(np.linalg.norm(xyz[sea][:, None, :] - xyz[land][None, ::4, :], axis=2),
+                   axis=1)
+        i = np.where(sea)[0][np.argmax(d)]
+        assert d.max() > 6 * L
+        v = np.zeros(m.lpoints)
+        v[i] = 1.0e9                                     # m3/yr of fine load
+        m.vSedFLocal.setArray(v)
+        c = m._carbTurbidity(L)
+        assert np.all(c >= 0.0) and np.all(c[land] == 0.0)
+        # conservative: only the tail reaching land (> 6 L away, ~exp(-6)
+        # times the coastal cells' share) is absorbed by its identity rows
+        np.testing.assert_allclose((c * m.larea).sum(), 1.0e9, rtol=1.0e-5)
+        assert np.argmax(c) == i
+        r = np.linalg.norm(xyz - xyz[i], axis=1)
+        near, far = (r > 0) & (r < 1.5 * L), (r > 3 * L) & (r < 4.5 * L)
+        assert c[near].mean() > 3.0 * c[far].mean() > 0.0
+        st = m._carbStatic(h)
+        assert np.allclose(st[0], np.interp(c, [0.0, 1.0e-4], [1.0, 0.0]))
+
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()                                 # river load routed
+        c = m._carbTurbidity(L)
+        assert np.all(c[m.hLocal.getArray() >= m.sealevel] == 0.0) and c.max() > 0.0
+    finally:
+        m.destroy()
+    bad = block.replace("length: %g, " % L, "")
+    with pytest.raises(ValueError, match="turbidity response needs"):
+        Model(_case(tmp_path, "t2", bad), verbose=False, showlog=False)
+
+
 _CHILD = '''\
 import sys
 import numpy as np
@@ -163,7 +213,7 @@ finally:
 
 @pytest.mark.mpi
 @pytest.mark.slow
-@pytest.mark.parametrize("pel", ["decay", "resuspend"])
+@pytest.mark.parametrize("pel", ["decay", "resuspend", "turbidity"])
 def test_carbonate_partition_invariant(tmp_path, pel):
     """Carbonate production (with the open-water index, a parallel solve),
     framework, the routed loose sediment and the pelagic rain (clay decaying
@@ -172,8 +222,15 @@ def test_carbonate_partition_invariant(tmp_path, pel):
     np=3."""
     if shutil.which("mpirun") is None:
         pytest.skip("mpirun not on PATH")
+    carb = CARB_EXP
+    if pel == "turbidity":
+        # the turbid plume of the river fine load (another parallel solve)
+        carb = CARB_EXP.replace(
+            "response: [{control: exposure,",
+            "response: [{control: turbidity, length: 4.e5, x: [0., 1.e-3], "
+            "f: [1., 0.2]}, {control: exposure,")
     yml = _case(tmp_path, "part",
-                block=CARB_EXP + (PEL_DECAY if pel == "decay" else PEL_RESUSP))
+                block=carb + (PEL_RESUSP if pel == "resuspend" else PEL_DECAY))
     child = tmp_path / "_c.py"
     child.write_text(_CHILD)
     out = {}

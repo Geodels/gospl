@@ -83,8 +83,19 @@ where :math:`w` is the water depth, :math:`g_f` the maximum growth rate,
 :math:`I_0` the surface light, :math:`k_f` the extinction coefficient,
 :math:`I_{k,f}` the saturating light, :math:`M_f` an optional habitat map and
 :math:`R_{fj}` piecewise-linear response factors on the depth, the seafloor
-slope, the clastic deposition rate of the previous step, the open-water
-index and the sea-surface temperature.
+slope, the clastic deposition rate of the previous step, the turbid plume of
+the river fine load, the open-water index and the sea-surface temperature.
+
+*Turbid plume* (``turbidity`` response). With :math:`q` the fine sediment the
+rivers deliver to the sea during the step, per unit area (m/yr, at the marine
+cells the river routing reaches), the plume is
+:math:`(I - L^2 \nabla^2)\, c = q` with land as identity rows (:math:`c = 0`
+there), the operator of the clay decay and of the solute plume. The
+finite-volume operator is conservative: away from land
+:math:`\sum c\, a = \sum q\, a` (checked to :math:`10^{-5}`, the tail that
+reaches land being absorbed), and :math:`c` decays as :math:`e^{-d/L}` from a
+river mouth. The plume is computed after the river routing of the same step,
+before the production, so it sees the current supply.
 
 **Integration over a step.** Each cell grows with the depth it creates,
 

@@ -136,6 +136,32 @@ class CarbMesh(object):
         else:
             exits = self.lFill <= self.sealevel
         q = np.where(exits, self.riverSoluteSp[:, k], 0.0) / self.larea
+        return self._carbPlumeSolve(q, L)
+
+    def _carbTurbidity(self, L):
+        """
+        Turbid plume of the river fine load (``turbidity`` response): the fine
+        (suspended) sediment the rivers deliver to the sea this step
+        (``vSedFLocal`` at the marine cells the river routing reaches, per
+        unit area, m/yr) spread along and off the coast by ``(I - L^2 lap) c
+        = q``, land as identity rows. ``c`` is in m/yr of fine sediment per
+        unit area: near a river mouth it approaches the local supply, and it
+        decays as ``exp(-d / L)`` away from it. Read after this step's river
+        routing (the production runs before the marine deposition), so it
+        sees the current supply even where the load bypasses the shallow
+        water without settling (unlike ``sedrate``). Collective. Scratch:
+        ``tmp``, ``tmpL``, ``tmp1``.
+        """
+        sea = self.lFill <= self.sealevel
+        q = np.where(sea, np.maximum(self.vSedFLocal.getArray(), 0.0), 0.0) / self.larea
+        return self._carbPlumeSolve(q, L)
+
+    def _carbPlumeSolve(self, q, L):
+        """Solve ``(I - L^2 lap) c = q`` with land as identity rows (the
+        operator rebuilt each call, the coast moves; cached solver
+        ``_ksp_plume``) and return the local ``max(c, 0)``. Shared by the
+        ``solute`` and ``turbidity`` plumes. Collective. Scratch: ``tmp``,
+        ``tmpL``, ``tmp1``."""
         land = self.hLocal.getArray() >= self.sealevel
         kd = np.full(self.lpoints, L * L, dtype=np.float64)
         if self._plumeMat is not None:
@@ -532,8 +558,8 @@ class CarbMesh(object):
 
     def _carbStatic(self, h):
         """Per-factory factor that does not change within the step: habitat
-        map times the ``slope``, ``sedrate``, ``exposure`` and ``temperature``
-        responses
+        map times the ``slope``, ``sedrate``, ``exposure``, ``temperature``,
+        ``wave``, ``solute`` and ``turbidity`` responses
         (the open-water index is solved once per step, only when used)."""
         out = []
         slope = None
@@ -569,6 +595,11 @@ class CarbMesh(object):
                     key = f["solute"]
                     if key not in plume:
                         plume[key] = self._carbPlume(*key)
+                    m = m * np.interp(plume[key], x, fv)
+                elif ctl == "turbidity":
+                    key = ("turbidity", f["turbidity"])
+                    if key not in plume:
+                        plume[key] = self._carbTurbidity(f["turbidity"])
                     m = m * np.interp(plume[key], x, fv)
             out.append(m)
         return out

@@ -34,6 +34,8 @@ Class CarbMesh
       ~CarbMesh._carbFinish
       ~CarbMesh._initGeoLink
       ~CarbMesh._carbPlume
+      ~CarbMesh._carbTurbidity
+      ~CarbMesh._carbPlumeSolve
       ~CarbMesh._carbDrawdown
       ~CarbMesh._initSST
       ~CarbMesh._sst
@@ -78,4 +80,6 @@ Private functions
 .. automethod:: sed.carbplex.CarbMesh._carbFinish
 .. automethod:: sed.carbplex.CarbMesh._initGeoLink
 .. automethod:: sed.carbplex.CarbMesh._carbPlume
+.. automethod:: sed.carbplex.CarbMesh._carbTurbidity
+.. automethod:: sed.carbplex.CarbMesh._carbPlumeSolve
 .. automethod:: sed.carbplex.CarbMesh._carbDrawdown
