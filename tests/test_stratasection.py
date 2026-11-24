@@ -362,6 +362,11 @@ def test_stratasection_global_mesh(tmp_path):
         assert np.allclose(iface, expect[None, :], atol=1e-6)
         ss.cross_section(data, path=path, color_by="lithology")
     ss.horizontal_slice(data, -115.0, color_by="lithology")
+    # a full parallel (kind="x", -180 to 180): its ends fall on the dropped
+    # antimeridian triangles; the section takes the nearest node's values
+    # there instead of failing on non-finite coordinates
+    ax = ss.cross_section(data, kind="x", at=10.0, color_by="lithology")
+    assert all(np.isfinite(l.get_ydata()).all() for l in ax.get_lines())
 
 
 def test_stratasection_lithologies(tmp_path):

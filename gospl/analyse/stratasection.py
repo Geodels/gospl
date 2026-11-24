@@ -430,6 +430,19 @@ def _triangulation(data, xs=None, ys=None, pad=5.0):
     return mtri.Triangulation(x, y, cells)
 
 
+def _fill_nearest(data, arr, xs, ys, vals):
+    """Where the linear interpolation of ``arr`` along the transect is not
+    finite (a point outside every kept triangle: on a global mesh the
+    triangles across the antimeridian or around the poles are dropped, and
+    only those near the transect are kept), take the nearest node's value,
+    so the section's coordinates are always defined."""
+    bad = ~np.isfinite(vals)
+    if bad.any():
+        near = _nearest_layers(data, arr, xs, ys)
+        vals = np.where(bad, near, vals)
+    return vals
+
+
 def _interp_layers(data, arr, xs, ys):
     """Interpolate a per-(node, layer) array onto transect points -> (npts, L)."""
     import matplotlib.tri as mtri
@@ -489,7 +502,8 @@ def cross_section(data, kind="x", at=None, path=None, color_by="lithology",
     litho = color_by == "lithologies"
 
     xs, ys, dist = _transect(data, kind, at, path, npts)
-    iface = _interp_layers(data, data["interfaces"], xs, ys)        # (npts, L+1)
+    iface = _fill_nearest(data, data["interfaces"], xs, ys,
+                          _interp_layers(data, data["interfaces"], xs, ys))
     if facies:
         cfld = facies_field(data, sea_level, facies_depths)
         label = _LABEL["facies"]
