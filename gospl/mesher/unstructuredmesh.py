@@ -881,10 +881,16 @@ class UnstMesh(object):
         """
 
         t0 = process_time()
-        # Sea level
-        if self.tNow == self.tStart:
+        # Sea level: the first call (model set-up, at the start time or at a
+        # restart) takes the level of the current time; every later call runs
+        # at the end of a step, before the time advances, and takes the level
+        # of the next step. (The test was tNow == tStart: a restarted run took
+        # the level one step ahead, and the step after the start reused the
+        # start level; 2026-11-24.)
+        if not getattr(self, "_seaInit", False):
             self.sealevel = self.seafunction(self.tNow)
             self.oldsealevel = self.sealevel.copy()
+            self._seaInit = True
         else:
             self.oldsealevel = self.sealevel.copy()
             self.sealevel = self.seafunction(self.tNow + self.dt)
