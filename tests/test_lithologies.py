@@ -203,3 +203,45 @@ def test_lithology_partition_invariant(tmp_path):
         cols = slice(1 + l * nlay + 1, 1 + (l + 1) * nlay)
         d = np.max(np.abs(a[:, cols] - b[:, cols]))
         assert d < 1.0e-5, f"lithology {l}: np=1 vs np=3 differ by {d:.3e} m"
+
+
+def test_marine_balancing_degenerate_priors(tmp_path):
+    """
+    Protects: the marine balancing of the lithologies (``_marineLitShare``)
+    on degenerate routed mixes. A node whose routed mix holds only a
+    lithology with no input, and priors of ~1e-310 (subnormal), made the
+    former in-place rescaling overflow; the NaN shares collapsed a whole
+    carbonate run to a flat surface (2026-11-24). The shares must stay finite
+    in [0, 1] and every lithology must deposit its share of the group input.
+    """
+    from gospl.model import Model
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        m = Model(_case(tmp_path, "deg", split="fine"), verbose=False, showlog=False)
+        try:
+            n = m.lpoints
+            mdep = np.full(n, 0.5)
+            m.depoFineFrac[:] = 0.6
+            prior = np.zeros((n, m.litNb))
+            prior[:, 0] = 1.0
+            prior[::3, 0] = 0.0
+            prior[::3, 1] = 1.0              # only the lithology with no input
+            prior[1::5, 0] = 1.0e-310        # subnormal priors
+            m._marDiffLit = prior
+            casIn = np.zeros((n, m.litNb))
+            casIn[:, 0] = 1.0                # fine2 has no input at all
+            sed = np.full(n, 2.0)
+            m._marineLitShare(mdep, casIn, sed, casIn[:, 0].copy())
+            sh = np.asarray(m.litShare)
+            assert np.all(np.isfinite(sh)) and sh.min() >= 0.0 and sh.max() <= 1.0 + 1e-12
+            own = m.inIDs == 1
+            vol = mdep * m.larea * m.depoFineFrac
+            dep = [(vol * sh[l])[own].sum() for l in range(m.litNb)]
+            assert dep[1] <= 1.0e-6 * dep[0]       # no input, (almost) nothing deposited
+            assert np.isclose(dep[0] + dep[1], vol[own].sum(), rtol=1e-9)
+        finally:
+            m.destroy()
+    finally:
+        os.chdir(cwd)

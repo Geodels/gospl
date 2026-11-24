@@ -1390,21 +1390,39 @@ class SEAMesh(object):
                     self.litShare[l][dep] = 0.0
                 continue
             T = T * (Rsum / Tsum)
-            # nodes without a routed mix start from the domain mix
-            empty = P.sum(axis=1) <= 0.0
-            P[empty] = T / T.sum()
-            X = P.copy()
+            # The prior as fractions per node (sum 1), negligible parts set to
+            # zero; nodes without a routed mix start from the domain mix. The
+            # balancing then works on one factor per lithology (b), so no
+            # value grows without bound: rescaling the volumes in place
+            # overflowed on nodes whose prior was tiny but not zero, and the
+            # NaN shares collapsed the whole model (2026-11-24).
+            P = np.where(np.isfinite(P), np.maximum(P, 0.0), 0.0)
+            ps = P.sum(axis=1)
+            Pn = np.divide(P, ps[:, None], out=np.zeros_like(P), where=ps[:, None] > 0.0)
+            Pn[Pn < 1.0e-12] = 0.0
+            ps = Pn.sum(axis=1)
+            empty = ps <= 0.0
+            Pn[empty] = T / T.sum()
+            Pn /= Pn.sum(axis=1)[:, None]
+            # a millionth of the domain mix in every node: a node whose routed
+            # mix holds only lithologies with no input (zero target) would
+            # make the balancing infeasible (its factor -> 0, rows / R -> inf);
+            # with it every node can take what the domain supplies, and the
+            # per-lithology totals are still met exactly
+            Pn = (1.0 - 1.0e-6) * Pn + 1.0e-6 * (T / T.sum())[None, :]
+            b = np.ones(len(T))
             for _ in range(50):
-                rs = X.sum(axis=1)
-                X *= np.divide(rows, rs, out=np.zeros_like(rs), where=rs > 0.0)[:, None]
-                cs = comm.allreduce(X[owned].sum(axis=0), op=MPI.SUM)
-                X *= np.divide(T, cs, out=np.ones_like(T), where=cs > 0.0)[None, :]
-            rs = X.sum(axis=1)
-            X *= np.divide(rows, rs, out=np.zeros_like(rs), where=rs > 0.0)[:, None]
+                R = (Pn * b[None, :]).sum(axis=1)
+                W = np.divide(rows, R, out=np.zeros_like(R), where=R > 0.0)
+                cs = comm.allreduce((Pn[owned] * W[owned, None]).sum(axis=0) * b, op=MPI.SUM)
+                b = b * np.divide(T, cs, out=np.ones_like(T), where=cs > 0.0)
+                b = np.where(np.isfinite(b) & (b > 0.0), b, 0.0)
+            R = (Pn * b[None, :]).sum(axis=1)
+            frac = np.divide(Pn * b[None, :], R[:, None], out=np.zeros_like(Pn),
+                             where=R[:, None] > 0.0)
             for k, l in enumerate(idx):
-                self.litShare[l][dep] = np.divide(
-                    X[:, k], rows, out=np.zeros_like(rows), where=rows > 0.0
-                )[dep]
+                self.litShare[l][dep] = np.nan_to_num(frac[:, k], nan=0.0, posinf=0.0,
+                                                      neginf=0.0)[dep]
         return
 
     def _gravLitShare(self, ffc):
