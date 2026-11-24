@@ -881,6 +881,14 @@ class soilSPL(object):
             fc = np.divide((w * ff[nb]).sum(axis=1), ws, out=ff[ids].copy(),
                            where=ws > 0.0)
             self._hillDelivFine[ids] += rate[ids] * fc
+            if getattr(self, "_hillDelivL", None) is not None:
+                # several lithologies: the donors' surface mix in each group
+                S = self._litNodeShares(None)
+                wn = np.divide(w, ws[:, None], out=np.zeros_like(w), where=ws[:, None] > 0.0)
+                sh = self._litMix(wn, ff[nb], S, nb, ids)
+                for l in range(self.litNb):
+                    g = fc if self.litFine[l] else (1.0 - fc)
+                    self._hillDelivL[ids, l] += rate[ids] * g * sh[:, l]
         if self._hillDelivProv is not None:
             self._hillDelivProv[ids, self.source_class[ids]] += rate[ids]
         return

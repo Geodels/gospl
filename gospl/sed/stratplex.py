@@ -113,16 +113,37 @@ class STRAMesh(object):
         the fine group is exactly 1."""
         return self.litFine[l] and sum(self.litFine) == 1
 
-    def _litDepoFrac(self, l, ff):
+    def _groupShares(self):
+        """``litShare`` made consistent: the fine-like shares of a node sum to
+        exactly 1 (equal split where they carry nothing), the coarse-like ones
+        to at most 1 (coarse clastic takes the rest). ``None`` for dual
+        lithology. Rank-local."""
+        if self.litNb <= 1:
+            return None
+        sh = np.clip(self.litShare, 0.0, None)
+        fine = np.array(self.litFine)
+        fsum = sh[fine].sum(axis=0)
+        nf = int(fine.sum())
+        if nf > 0:
+            sh[fine] = np.where(fsum > 0.0, sh[fine] / np.where(fsum > 0.0, fsum, 1.0),
+                                1.0 / nf)
+        if (~fine).any():
+            csum = sh[~fine].sum(axis=0)
+            sh[~fine] /= np.maximum(csum, 1.0)
+        return sh
+
+    def _litDepoFrac(self, l, ff, sh=None):
         """Fraction of a deposit that is lithology ``l``, given the deposit's
         fine-group fraction ``ff``: ``ff * share`` (fine-like) or
         ``(1 - ff) * share`` (coarse-like), ``share`` being the lithology's
-        part of its group (``litShare``). Exactly ``ff`` for the sole fine
-        lithology (dual lithology)."""
+        part of its group (``sh`` from ``_groupShares``). Exactly ``ff`` for
+        the sole fine lithology (dual lithology)."""
         if self._litSoleFine(l):
             return ff
+        if sh is None:
+            sh = self._groupShares()
         g = ff if self.litFine[l] else (1.0 - ff)
-        return g * self.litShare[l]
+        return g * sh[l]
 
     def __init__(self):
         """
@@ -855,9 +876,9 @@ class STRAMesh(object):
             # times its share of the group (exactly depoFineFrac for the
             # dual-lithology fine fraction).
             own = self.inIDs == 1
-            fineDepo = None
+            sh = self._groupShares()
             for l in range(self.litNb):
-                litDepo = depo * self._litDepoFrac(l, self.depoFineFrac)
+                litDepo = depo * self._litDepoFrac(l, self.depoFineFrac, sh)
                 self.stratHL[l][:, self.stratStep] += litDepo
                 vol = float(np.sum((litDepo * self.larea)[own]))
                 self._litDeposited[l] += vol
@@ -955,8 +976,9 @@ class STRAMesh(object):
             self.thFine = self.thFine - dep * ff
             self.thCoarse = self.thCoarse - dep * (1.0 - ff)
             if self.litNb > 1:
+                sh = self._groupShares()
                 for l in range(self.litNb):
-                    self.thL[l] = self.thL[l] - dep * self._litDepoFrac(l, ff)
+                    self.thL[l] = self.thL[l] - dep * self._litDepoFrac(l, ff, sh)
         else:
             self.thCoarse = self.thCoarse - dep
         if getattr(self, "provOn", False):

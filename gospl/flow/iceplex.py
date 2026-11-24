@@ -590,6 +590,10 @@ class IceMesh(object):
             else None
         )
         saved_depoFineFrac = self.depoFineFrac.copy()
+        lit = getattr(self, "_litMulti", False)
+        if lit:
+            saved_thL = list(self.thL) if getattr(self, "thL", None) is not None else None
+            saved_share = self.litShare.copy()
 
         # --- Erosion: remove the abraded bulk from the stratigraphic pile. ---
         self.tmpL.setArray(dz_ero)
@@ -617,6 +621,9 @@ class IceMesh(object):
             if saved_thFine is not None:
                 self.thFine = saved_thFine
             self.depoFineFrac = saved_depoFineFrac
+            if lit:
+                self.thL = saved_thL
+                self.litShare = saved_share
             self.dm.globalToLocal(self.cumED, self.cumEDLocal)
             self.dm.globalToLocal(self.hGlobal, self.hLocal)
             self._tillEroded += 0.0
@@ -629,6 +636,18 @@ class IceMesh(object):
         dz_dep = (Vsolid * dep_w) / self.larea            # bulk till thickness (m)
         self.depoFineFrac = np.zeros(self.lpoints, dtype=np.float64)
         self.depoFineFrac[dz_dep > 0.0] = ffrac
+        if lit:
+            # The moraine carries the abraded mix of lithologies: each one's
+            # share of its group's abraded volume (one composition everywhere).
+            litV = np.array([
+                MPI.COMM_WORLD.allreduce(
+                    float(np.sum((self.thL[l] * self.dt * self.larea)[owned])),
+                    op=MPI.SUM)
+                for l in range(self.litNb)
+            ])
+            for l in range(self.litNb):
+                den = fineV if self.litFine[l] else coarseV
+                self.litShare[l][:] = litV[l] / den if den > 0.0 else 0.0
         # Snapshot the current layer so the bed/cumED update uses the thickness
         # deposeStrat ACTUALLY laid down (it floors sub-1e-4 m deposits), keeping
         # elevation, the stratigraphic pile and the diagnostics consistent.
@@ -658,6 +677,9 @@ class IceMesh(object):
         if saved_thFine is not None:
             self.thFine = saved_thFine
         self.depoFineFrac = saved_depoFineFrac
+        if lit:
+            self.thL = saved_thL
+            self.litShare = saved_share
 
         return
 

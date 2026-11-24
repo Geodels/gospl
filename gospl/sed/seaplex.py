@@ -1084,7 +1084,9 @@ class SEAMesh(object):
         # `vdepP[:, c]` accumulates its deposited volume (Σ_c vdepP == vdep).
         prov = provFlux is not None
         if prov:
-            nC = self.provNb
+            # one column per carried tracer (provenance classes, then the
+            # lithologies when there are several)
+            nC = provFlux.shape[1]
             sinkVolP = provFlux.copy()
             vdepP = np.zeros((self.lpoints, nC), dtype=float)
             pvCur = [self.tmp.duplicate() for _ in range(nC)]
@@ -1279,7 +1281,7 @@ class SEAMesh(object):
 
         return vdep
 
-    def _gravFineFraction(self, hl, sedFlux, fineFlux):
+    def _gravFineFraction(self, hl, sedFlux, fineFlux, litArgs=None):
         """
         Dual lithology with gravity currents: fine fraction of the combined
         marine deposit. ``_marineFineFraction`` sets the fine fraction of the
@@ -1295,11 +1297,138 @@ class SEAMesh(object):
         """
         casc, gC, gF = self._gravThick
         self._marineFineFraction(hl, sedFlux, fineFlux, mdep=casc)
+        if litArgs is not None:
+            self._marineLitShare(casc, *litArgs)
+            self._gravLitShare(np.where(casc > 0.0, self.depoFineFrac, 0.0))
         grav = (gC + gF) > 0.0
         if grav.any():
             ffc = np.where(casc > 0.0, self.depoFineFrac, 0.0)
             tot = casc + gC + gF
             self.depoFineFrac[grav] = (ffc[grav] * casc[grav] + gF[grav]) / tot[grav]
+        return
+
+    def _tracerComp(self, mdp, total):
+        """
+        Per-node composition of the columns carried through the marine
+        routing (``_marDepProv``): the provenance classes over their own sum
+        (they make up the whole deposit), the lithologies over the routed
+        total ``total`` (they make up only part of it, coarse clastic being
+        the rest; capped so they never exceed it together). Rank-local.
+
+        :arg mdp: carried volumes (lpoints, provNb [+ litNb])
+        :arg total: routed total volume (lpoints)
+        """
+        npc = self.provNb if getattr(self, "provOn", False) else 0
+        comp = np.zeros_like(mdp)
+        if npc:
+            P = mdp[:, :npc]
+            denom = P.sum(axis=1)
+            comp[:, :npc] = np.divide(
+                P, denom[:, None], out=np.zeros_like(P), where=denom[:, None] > 0.0
+            )
+        if mdp.shape[1] > npc:
+            c = np.divide(mdp[:, npc:], total[:, None], out=np.zeros_like(mdp[:, npc:]),
+                          where=total[:, None] > 0.0)
+            c = np.clip(c, 0.0, None)
+            c /= np.maximum(c.sum(axis=1), 1.0)[:, None]
+            comp[:, npc:] = c
+        return comp
+
+    def _marineLitShare(self, mdep, casIn, sedCas, fineCas):
+        """
+        Several lithologies: share of each lithology in its size group for the
+        marine (cascade + diffusion) deposit ``mdep`` (thickness, local).
+
+        The deposit's fine-group fraction is ``depoFineFrac`` (depth-biased by
+        ``_marineFineFraction``), so each node's fine and coarse volumes are
+        fixed. Inside each group the lithologies start from where the marine
+        routing and diffusion carried them (``_marDiffLit``, else
+        ``_marDepLit``: the lockstep columns), coarse clastic being the rest
+        of the routed total. The mix is then balanced (iterative proportional
+        fitting) so each node keeps its group volume and each lithology's
+        deposited volume is its share of the group input (``casIn``, the
+        cascade input per lithology) times the group volume deposited:
+        what reaches the open edges carries the same mix. Nodes the routing
+        did not reach start from the domain mix. Collective (a fixed number
+        of reductions).
+
+        :arg mdep: marine cascade deposit thickness (local)
+        :arg casIn: cascade input per lithology, (lpoints, litNb) volumes
+        :arg sedCas: cascade input, total (volume)
+        :arg fineCas: cascade input, fine group (volume)
+        """
+        comm = MPI.COMM_WORLD
+        owned = self.inIDs == 1
+        prior = getattr(self, "_marDiffLit", None)
+        if prior is None:
+            prior = self._marDepLit / np.where(self.larea > 0, self.larea, 1.0)[:, None]
+        prior = np.maximum(prior, 0.0) * self.larea[:, None]           # volumes
+        vol = np.maximum(mdep, 0.0) * self.larea
+        ff = np.clip(self.depoFineFrac, 0.0, 1.0)
+        fine = np.array(self.litFine)
+        inTot = comm.allreduce(casIn[owned].sum(axis=0), op=MPI.SUM)
+        clasIn = comm.allreduce(float(np.sum((sedCas - fineCas)[owned])), op=MPI.SUM)
+        clasIn = max(clasIn - float(inTot[~fine].sum()), 0.0)
+        dep = mdep > 0.0
+
+        for isFine in (True, False):
+            idx = [l for l in range(self.litNb) if self.litFine[l] == isFine]
+            if not idx:
+                continue
+            rows = vol * (ff if isFine else 1.0 - ff)
+            P = prior[:, idx]
+            T = inTot[idx].astype(float)
+            if not isFine:
+                # coarse clastic: the routed total not taken by a lithology
+                clas = np.maximum(vol - prior.sum(axis=1), 0.0)
+                P = np.column_stack([P, clas])
+                T = np.append(T, clasIn)
+            Tsum = T.sum()
+            Rsum = comm.allreduce(float(np.sum(rows[owned])), op=MPI.SUM)
+            if Tsum <= 0.0 or Rsum <= 0.0:
+                for l in idx:
+                    self.litShare[l][dep] = 0.0
+                continue
+            T = T * (Rsum / Tsum)
+            # nodes without a routed mix start from the domain mix
+            empty = P.sum(axis=1) <= 0.0
+            P[empty] = T / T.sum()
+            X = P.copy()
+            for _ in range(50):
+                rs = X.sum(axis=1)
+                X *= np.divide(rows, rs, out=np.zeros_like(rs), where=rs > 0.0)[:, None]
+                cs = comm.allreduce(X[owned].sum(axis=0), op=MPI.SUM)
+                X *= np.divide(T, cs, out=np.ones_like(T), where=cs > 0.0)[None, :]
+            rs = X.sum(axis=1)
+            X *= np.divide(rows, rs, out=np.zeros_like(rs), where=rs > 0.0)[:, None]
+            for k, l in enumerate(idx):
+                self.litShare[l][dep] = np.divide(
+                    X[:, k], rows, out=np.zeros_like(rows), where=rows > 0.0
+                )[dep]
+        return
+
+    def _gravLitShare(self, ffc):
+        """
+        Several lithologies with gravity currents: blend each node's cascade
+        shares (``litShare`` from ``_marineLitShare``, with the cascade fine
+        fraction ``ffc``) with the per-lithology gravity deposits
+        (``self._gravLitThick``), as ``_gravFineFraction`` blends the fine
+        fraction. Rank-local.
+        """
+        casc, gC, gF = self._gravThick
+        gl = self._gravLitThick
+        grav = (gC + gF) > 0.0
+        if gl is None or not grav.any():
+            return
+        for l in range(self.litNb):
+            if self.litFine[l]:
+                cg, gg = ffc * casc, gF
+            else:
+                cg, gg = (1.0 - ffc) * casc, gC
+            num = cg * self.litShare[l] + gl[:, l]
+            den = cg + gg
+            self.litShare[l][grav] = np.divide(
+                num, den, out=np.zeros_like(den), where=den > 0.0)[grav]
         return
 
     def _gravProvFraction(self):
@@ -1536,6 +1665,16 @@ class SEAMesh(object):
         sedFlux[np.invert(self.sinkIDs)] = 0.0
         sedFlux[sedFlux < 0] = 0.0
 
+        # Several lithologies: each one's volume reaching the sea (same mask
+        # as sedFlux), threaded through the marine routing below.
+        lit = self.stratNb > 0 and getattr(self, "_litMulti", False)
+        sedTot = sedFlux.copy()
+        litM = None
+        if lit:
+            litM = self._litFlux * self.dt
+            litM[np.invert(self.sinkIDs), :] = 0.0
+            np.maximum(litM, 0.0, out=litM)
+
         # Gravity currents (opt-in): divert a fraction of the arriving load to
         # the routed gravity pathway; the clinoform cascade gets the rest.
         gravOn = getattr(self, "gravOn", False)
@@ -1568,6 +1707,26 @@ class SEAMesh(object):
                     fineAll[fineAll < 0] = 0.0
                     gravFine = np.minimum(fgrav * fineAll, gravSed)
 
+        # Per-lithology split of the gravity supply: each lithology goes with
+        # its size group, in proportion to its part of the group's input.
+        gravL = None
+        if lit:
+            gravL = np.zeros_like(litM)
+            if gravOn and gravFine is not None:
+                fineIn = np.clip(self.vSedFLocal.getArray() * self.dt, 0.0, None)
+                fineIn[np.invert(self.sinkIDs)] = 0.0
+                fineIn = np.minimum(fineIn, sedTot)
+                coarseIn = sedTot - fineIn
+                gCoarse = gravSed - gravFine
+                for l in range(self.litNb):
+                    num, den = (gravFine, fineIn) if self.litFine[l] else (gCoarse, coarseIn)
+                    gravL[:, l] = litM[:, l] * np.divide(
+                        num, den, out=np.zeros_like(den), where=den > 0.0)
+            elif gravOn:
+                gravL = litM * np.divide(gravSed, sedTot, out=np.zeros_like(sedTot),
+                                         where=sedTot > 0.0)[:, None]
+            gravL = np.minimum(gravL, litM)
+
         # Downstream direction matrix for ocean distribution
         self._matOcean()
         # In-model provenance (B2b-marine): the per-class incoming marine flux
@@ -1576,20 +1735,20 @@ class SEAMesh(object):
         # each offshore deposit carries the source that drained to it.
         provOn = getattr(self, "provOn", False)
         provFlux = (self.provFrac * sedFlux[:, None]) if provOn else None
+        if lit:
+            # the lithologies ride the same lockstep as extra columns
+            casL = litM - gravL
+            provFlux = casL if provFlux is None else np.column_stack([provFlux, casL])
+        tracers = provFlux is not None
         marDep = self._distOcean(sedFlux, provFlux=provFlux)
         reportVolume(self, "marine routed deposit", marDep / self.larea)
         if not self.flatModel and self.Gmar > 0.:
             vdep = self._depMarineSystem(marDep)
-            if provOn:
+            if tracers:
                 # The coupled deposition solve re-distributes the routed volume;
                 # carry the pass-1 per-node composition onto it (passive label),
                 # so the second routing pass keeps tracking provenance.
-                mdp = self._marDepProv
-                denom = mdp.sum(axis=1)
-                comp = np.divide(
-                    mdp, denom[:, None],
-                    out=np.zeros_like(mdp), where=denom[:, None] > 0.0,
-                )
+                comp = self._tracerComp(self._marDepProv, marDep)
                 provFlux = vdep[:, None] * comp
             marDep = self._distOcean(vdep, provFlux=provFlux)
         if gravOn:
@@ -1607,6 +1766,7 @@ class SEAMesh(object):
             eroC = np.zeros(self.lpoints, dtype=np.float64)
             eroF = np.zeros(self.lpoints, dtype=np.float64)
             eroP = None
+            eroL = np.zeros((self.lpoints, self.litNb)) if lit else None
             if self.gravErosionLength is not None or self.gravFailureSlope is not None:
                 eroMask = np.zeros(self.lpoints, dtype=bool)
                 if self.gravErosionLength is not None:
@@ -1619,7 +1779,7 @@ class SEAMesh(object):
                     eroMask = eroMask | failMask
                 if self.stratNb > 0:
                     saved = {k: getattr(self, k).copy()
-                             for k in ("thCoarse", "thFine", "provEro")
+                             for k in ("thCoarse", "thFine", "provEro", "thL")
                              if getattr(self, k, None) is not None}
                     self.tmpL.setArray(-eroBulk / self.larea)
                     self.dm.localToGlobal(self.tmpL, self.tmp)
@@ -1629,6 +1789,9 @@ class SEAMesh(object):
                         eroF = self.thFine * self.dt * self.larea
                     if provOn:
                         eroP = self.provEro * self.dt * self.larea[:, None]
+                    if lit:
+                        eroL = np.column_stack(
+                            [self.thL[l] * self.dt * self.larea for l in range(self.litNb)])
                     for k, v in saved.items():
                         setattr(self, k, v)
                 else:
@@ -1645,15 +1808,24 @@ class SEAMesh(object):
             # class deposits sum to the total.
             comp = self.provFrac if provOn else None
 
-            def _cols(v, eroPart):
-                if comp is None:
-                    return v[:, None]
-                cls = comp * (v - eroPart)[:, None]
-                if eroP is not None:
-                    cls = cls + eroP * np.divide(
-                        eroPart, eroTot, out=np.zeros_like(eroTot), where=eroTot > 0
-                    )[:, None]
-                return np.column_stack([v, cls])
+            def _cols(v, eroPart, fineRoute):
+                cols = [v[:, None]]
+                if comp is not None:
+                    cls = comp * (v - eroPart)[:, None]
+                    if eroP is not None:
+                        cls = cls + eroP * np.divide(
+                            eroPart, eroTot, out=np.zeros_like(eroTot), where=eroTot > 0
+                        )[:, None]
+                    cols.append(cls)
+                if lit:
+                    # the lithologies of this route's size group (supply +
+                    # eroded); the coarse route also carries the fine ones
+                    # when the fine fraction has no route of its own
+                    sel = [l for l in range(self.litNb)
+                           if self.litFine[l] == fineRoute or
+                           (gravFine is None and not fineRoute)]
+                    cols.append((gravL + eroL)[:, sel])
+                return np.column_stack(cols) if len(cols) > 1 else cols[0]
 
             # Accommodation: a gravity deposit cannot build a cell above the
             # bypass depth (the fine fraction gets what the coarse one leaves).
@@ -1664,7 +1836,7 @@ class SEAMesh(object):
                     0.0,
                 )
             coarse = (gravSed - gravFine if gravFine is not None else gravSed) + eroC
-            dC, eC = self._gravRoute(_cols(coarse, eroC), self.gravRunout,
+            dC, eC = self._gravRoute(_cols(coarse, eroC, False), self.gravRunout,
                                      room=room, nodep=eroMask)
             if gravFine is not None:
                 roomF = None if room is None else np.maximum(room - dC[:, 0], 0.0)
@@ -1673,7 +1845,7 @@ class SEAMesh(object):
                     # the fine fraction on its own (spreading) network
                     self._gW, self._gWF = self._gWF, self._gW
                     self._gSink, self._gSinkF = self._gSinkF, self._gSink
-                dF, eF = self._gravRoute(_cols(fine, eroF), self.gravRunoutFine,
+                dF, eF = self._gravRoute(_cols(fine, eroF, True), self.gravRunoutFine,
                                          room=roomF, nodep=eroMask)
                 if self._gWF is not None:
                     self._gW, self._gWF = self._gWF, self._gW
@@ -1686,7 +1858,21 @@ class SEAMesh(object):
                 if gravFine is not None:
                     dF = self._gravSpread(dF, npass, hl, exclude=eroMask)
             gDepC, gExpC, gDepF, gExpF = dC[:, 0], eC[:, 0], dF[:, 0], eF[:, 0]
-            gravProvDep = (dC[:, 1:] + dF[:, 1:]) if comp is not None else None
+            npc = self.provNb if comp is not None else 0
+            gravProvDep = (
+                (dC[:, 1 : 1 + npc] + (dF[:, 1 : 1 + npc] if gravFine is not None else 0.0))
+                if comp is not None else None
+            )
+            gravLitDep = None
+            if lit:
+                # per-lithology gravity deposit volume, from each route's columns
+                gravLitDep = np.zeros((self.lpoints, self.litNb))
+                selC = [l for l in range(self.litNb)
+                        if not self.litFine[l] or gravFine is None]
+                gravLitDep[:, selC] += dC[:, 1 + npc :]
+                if gravFine is not None:
+                    selF = [l for l in range(self.litNb) if self.litFine[l]]
+                    gravLitDep[:, selF] += dF[:, 1 + npc :]
             self._gravRelease()
         self.dMat1.destroy()
 
@@ -1705,14 +1891,22 @@ class SEAMesh(object):
         # so each class is spread by the SAME marine diffusion as the total and
         # the source label follows the sediment into the diffused far field.
         provThick = None
-        if provOn:
-            mdp = self._marDepProv
-            denom = mdp.sum(axis=1)
-            comp = np.divide(
-                mdp, denom[:, None], out=np.zeros_like(mdp), where=denom[:, None] > 0.0
-            )
+        if tracers:
+            comp = self._tracerComp(self._marDepProv, marDep)
             provThick = comp * dh[:, None]
         self._diffuseOcean(dh, provThick=provThick)
+        if lit:
+            # split the carried columns: provenance classes first, then the
+            # lithologies
+            npc = self.provNb if provOn else 0
+            self._marDepLit = self._marDepProv[:, npc:]
+            self._marDepProv = self._marDepProv[:, :npc]
+            mdl = getattr(self, "_marDiffProv", None)
+            if mdl is not None and mdl.shape[1] == npc + self.litNb:
+                self._marDiffLit = mdl[:, npc:]
+                self._marDiffProv = mdl[:, :npc]
+            else:
+                self._marDiffLit = None
 
         if gravOn:
             # Add the gravity deposit (not diffused this step) to the marine
@@ -1725,6 +1919,9 @@ class SEAMesh(object):
             self._gravThick = (gravCasc, gC, gF)
             self._gravProvThick = (
                 gravProvDep / self.larea[:, None] if gravProvDep is not None else None
+            )
+            self._gravLitThick = (
+                gravLitDep / self.larea[:, None] if gravLitDep is not None else None
             )
             eTh = eroBulk / self.larea
             # The stratigraphy gets the DEPOSITS only (cascade + gravity): the
@@ -1791,10 +1988,15 @@ class SEAMesh(object):
                 fineFlux = self.vSedFLocal.getArray().copy() * self.dt
                 fineFlux[np.invert(self.sinkIDs)] = 0.0
                 fineFlux[fineFlux < 0] = 0.0
+                litArgs = (casL, sedFlux, fineFlux - (gravFine if gravOn else 0.0)) if lit else None
                 if gravOn:
-                    self._gravFineFraction(hl, sedFlux, fineFlux - gravFine)
+                    self._gravFineFraction(hl, sedFlux, fineFlux - gravFine,
+                                           litArgs=litArgs)
                 else:
                     self._marineFineFraction(hl, sedFlux, fineFlux)
+                    if lit:
+                        self.dm.globalToLocal(self.tmp, self.tmpL)
+                        self._marineLitShare(self.tmpL.getArray().copy(), *litArgs)
             if getattr(self, "provOn", False):
                 self._marineProvFraction(sedFlux)
                 if gravOn:

@@ -174,6 +174,16 @@ place (resuspension); first version deposits in place.
 
 ## 2.9 Revised phases
 
+**Status (2026-11-24): C0 done** on `feat/carbonates` (stage A: table, piles, erosion,
+deposition, compaction, blends, advection, outputs; stage B: the routed composition
+at every deposit). Checks: dual lithology bitwise identical on 13 variants; a fine or
+coarse fraction split into two identical lithologies reproduces the dual run to
+round-off on all of them, with each lithology conserved; np=1 vs np=3. The check
+harness lives in `.c0/` in the working copy (not in git: `baseline.py`, `split.py`).
+Found on the way, not part of C0: the groundwater recharge and seepage gates test
+`lFill > h` without `FILL_LEVEL_TOL`, so a lake cell at its own surface flips on
+round-off (a base-model fix for `dev`).
+
 | Phase | Content | Check |
 |---|---|---|
 | C0 | Lithology list refactor (fine pile generalised) | dual bitwise identical, full suite, `-m mpi` |

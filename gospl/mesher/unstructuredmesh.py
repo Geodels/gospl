@@ -1316,6 +1316,11 @@ class UnstMesh(object):
         self.vSedLocal.destroy()
         self.vSedF.destroy()
         self.vSedFLocal.destroy()
+        # Several lithologies: the per-lithology routing vectors.
+        for name in ("vSedLG", "vSedLL"):
+            v = getattr(self, name, None)
+            if v is not None:
+                v.destroy()
         if getattr(self, "provOn", False):
             for v in self.vSedP:
                 v.destroy()

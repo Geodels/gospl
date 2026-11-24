@@ -106,6 +106,7 @@ class hillSLP(object):
         self._hillDelivG = None
         self._hillDelivFine = None   # fine part (dual lithology), local m/yr
         self._hillDelivProv = None   # per-class part (provenance), local m/yr
+        self._hillDelivL = None      # per-lithology part (several lithologies)
         self._chanIds = None         # owned channel cells of the last solve
         # owner -> ghost sync pair for `_hillslopeFineFraction` (dual only)
         self._ffG = None
@@ -123,8 +124,54 @@ class hillSLP(object):
                 self._hillDelivFine = np.zeros(self.lpoints)
             if getattr(self, "provOn", False):
                 self._hillDelivProv = np.zeros((self.lpoints, self.provNb))
+            if getattr(self, "_litMulti", False):
+                self._hillDelivL = np.zeros((self.lpoints, self.litNb))
 
         return
+
+    def _litNodeShares(self, eroded):
+        """
+        Several lithologies: each node's share of every lithology in its size
+        group, ``(lpoints, litNb)``, from what the node eroded in this step
+        (``thL`` over the fine or coarse group eroded) where ``eroded`` is True
+        and the group eroded something, else from its surface layer. Synced
+        from the owners. Collective. Scratch: ``tmpL`` / ``tmp1``.
+        """
+        fl = self._surfaceLithFractions()
+        fsurf = self._fineGroup(fl)
+        csurf = np.clip(1.0 - fsurf, 0.0, 1.0)
+        S = np.zeros((self.lpoints, self.litNb))
+        for l in range(self.litNb):
+            sden = fsurf if self.litFine[l] else csurf
+            surf = np.divide(fl[l], sden, out=np.zeros(self.lpoints), where=sden > 0.0)
+            if eroded is not None:
+                eden = self.thFine if self.litFine[l] else self.thCoarse
+                ero = np.divide(self.thL[l], eden, out=np.zeros(self.lpoints),
+                                where=eden > 0.0)
+                S[:, l] = np.where(eroded & (eden > 0.0), ero, surf)
+            else:
+                S[:, l] = surf
+            self.tmpL.setArray(S[:, l])
+            self.dm.localToGlobal(self.tmpL, self.tmp1)
+            self.dm.globalToLocal(self.tmp1, self.tmpL)
+            S[:, l] = self.tmpL.getArray()
+        return S
+
+    def _litMix(self, wn, ffn, S, nb, own):
+        """
+        Several lithologies: group shares of a mix of donors. ``wn`` (n, k)
+        donor weights, ``ffn`` (n, k) the donors' fine fractions, ``S`` the
+        node shares (``_litNodeShares``), ``nb`` (n, k) donor ids and ``own``
+        (n,) the receiving nodes (their own shares where no donor carries the
+        group). Returns ``(n, litNb)``. Rank-local.
+        """
+        out = np.zeros((len(own), self.litNb))
+        for l in range(self.litNb):
+            wg = wn * (ffn if self.litFine[l] else (1.0 - ffn))
+            ws = wg.sum(axis=1)
+            out[:, l] = np.divide((wg * S[nb, l]).sum(axis=1), ws,
+                                  out=S[own, l].copy(), where=ws > 0.0)
+        return out
 
     def _hillSlope(self, smooth=0):
         r"""
@@ -441,6 +488,12 @@ class hillSLP(object):
             own_f = 1.0 - self._surfaceComposition()[ids]
             fcell = np.where(has, (wn * ff[nb]).sum(axis=1), own_f)
             self._hillDelivFine[ids] += srate * fcell
+            if self._hillDelivL is not None:
+                S = self._litNodeShares(eroding)
+                sh = self._litMix(wn, ff[nb], S, nb, ids)
+                for l in range(self.litNb):
+                    g = fcell if self.litFine[l] else (1.0 - fcell)
+                    self._hillDelivL[ids, l] += srate * g * sh[:, l]
         if prov:
             pcell = (wn[:, :, None] * pf[nb]).sum(axis=1)
             none = ~has | (pcell.sum(axis=1) <= 0.0)
@@ -923,6 +976,14 @@ class hillSLP(object):
                         out=surf.copy(), where=wsum > 0.0)
         dep = dz > 0.0
         self.depoFineFrac[dep] = np.clip(mix[dep], 0.0, 1.0)
+        if getattr(self, "_litMulti", False):
+            S = self._litNodeShares(None if not eroded else
+                                    (self.thCoarse + self.thFine) > 0.0)
+            own = np.arange(self.lpoints)
+            wsum_ = np.where(wsum > 0.0, wsum, 1.0)
+            sh = self._litMix(w / wsum_[:, None], ff[nb], S, nb, own)
+            for l in range(self.litNb):
+                self.litShare[l][dep] = np.clip(sh[dep, l], 0.0, 1.0)
         return
 
     def _hillslopeProvFraction(self):
@@ -1067,7 +1128,7 @@ class hillSLP(object):
         """
         saved = {}
         if self.stratNb > 0:
-            for key in ("thCoarse", "thFine", "provEro"):
+            for key in ("thCoarse", "thFine", "provEro", "thL"):
                 val = getattr(self, key, None)
                 if val is not None:
                     saved[key] = val.copy()

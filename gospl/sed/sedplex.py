@@ -76,6 +76,24 @@ class SEDMesh(object):
         self._pitRetFine = np.zeros(1, dtype=np.float64)
         self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
 
+        # Several lithologies (DESIGN_CARBONATES.md 2.7, `strata: lithologies:`):
+        # each lithology's flux is routed and threaded through the cascade like
+        # the fine flux, so each one gets its share of its size group (fine-like
+        # or coarse-like) at every deposit. _litFlux (lpoints, litNb, m3/yr)
+        # mirrors vSedFLocal per lithology; _pitRetL is the per-pit retained
+        # volume per lithology and _routedL the routed overspill. vSedLG/vSedLL
+        # are the solve's vectors (registered in destroy_DMPlex). Dual
+        # lithology (one lithology) never uses them.
+        self._litMulti = bool(self.stratLith) and getattr(self, "litNb", 0) > 1
+        self.vSedLG = None
+        self.vSedLL = None
+        if self._litMulti:
+            self.vSedLG = self.hGlobal.duplicate()
+            self.vSedLL = self.hLocal.duplicate()
+            self._litFlux = np.zeros((self.lpoints, self.litNb), dtype=np.float64)
+            self._pitRetL = np.zeros((1, self.litNb), dtype=np.float64)
+            self._routedL = np.zeros((self.lpoints, self.litNb), dtype=np.float64)
+
         # In-model provenance tracers (opt-in `provenance:`; DESIGN_PROVENANCE.md
         # §6). One routed sub-flux per source class (vSedP[c], mirroring vSedF),
         # the arriving/deposited per-node composition (provFrac/depoProvFrac),
@@ -187,6 +205,8 @@ class SEDMesh(object):
             # fraction; _updateSinks (pits, coarse-settles-first) and seaChange
             # (marine) refine it.
             self.depoFineFrac = self.fineFrac.copy()
+            if getattr(self, "_litMulti", False):
+                self._routeLithologies(vtot, vfin)
 
         # Provenance: route each source class's eroded sub-flux through the SAME
         # operator (linear, exact, Σ over classes == total). provFrac is the
@@ -228,7 +248,55 @@ class SEDMesh(object):
 
         return
 
-    def _moveDownstream(self, vSed, vSedF, step, vSedP=None):
+    def _routeLithologies(self, vtot, vfin):
+        """
+        Several lithologies: route each lithology's eroded flux (``thL``, plus
+        its part of the hillslope supply to channel cells, ``_hillDelivL``)
+        through the same operator as the total, keep it in ``_litFlux`` and set
+        the arriving share of each lithology in its size group (``litShare``).
+        Collective (one routing solve per lithology). Call inside
+        ``_getSedFlux``, while ``fMati`` exists.
+
+        :arg vtot: routed total flux (local, m3/yr)
+        :arg vfin: routed fine flux (local, m3/yr)
+        """
+        hdl = getattr(self, "_hillDelivL", None)
+        self._litFlux = np.zeros((self.lpoints, self.litNb), dtype=np.float64)
+        for l in range(self.litNb):
+            src = self.thL[l] if hdl is None else self.thL[l] + hdl[:, l]
+            self.tmpL.setArray(src)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.pointwiseMult(self.tmp, self.areaGlobal)
+            self._solve_KSP(False, self.fMati, self.tmp, self.vSedLG, route=True)
+            self.dm.globalToLocal(self.vSedLG, self.vSedLL)
+            self._litFlux[:, l] = self.vSedLL.getArray()
+        np.maximum(self._litFlux, 0.0, out=self._litFlux)
+        if hdl is not None:
+            hdl[:] = 0.0
+        self._setLitShare(self._litFlux, vtot - vfin)
+
+    def _setLitShare(self, vol, coarse, sel=None):
+        """
+        Share of each lithology in its size group from per-lithology volumes
+        ``vol`` (n, litNb): fine-like over the sum of the fine-like ones
+        (exactly 1 in total wherever they carry anything), coarse-like over
+        the coarse group volume ``coarse`` (coarse clastic + coarse-like),
+        capped so the coarse-like shares never exceed 1 together. Written into
+        ``litShare`` at the nodes ``sel`` (all by default). Rank-local.
+        """
+        if sel is None:
+            sel = slice(None)
+        fine = np.array(self.litFine)
+        fsum = vol[:, fine].sum(axis=1)
+        csum = vol[:, ~fine].sum(axis=1)
+        cden = np.maximum(coarse, csum)
+        for l in range(self.litNb):
+            den = fsum if self.litFine[l] else cden
+            self.litShare[l][sel] = np.divide(
+                vol[:, l], den, out=np.zeros_like(den), where=den > 0.0
+            )
+
+    def _moveDownstream(self, vSed, vSedF, step, vSedP=None, vSedL=None):
         """
         In cases where river sediment fluxes drain into depressions, they might fill the sink completely and overspill or be deposited in it. This function computes the excess of sediment (if any) able to flow dowstream.
 
@@ -258,6 +326,7 @@ class SEDMesh(object):
         sedFilled_changed = False
         dual = self.stratLith
         prov = getattr(self, "provOn", False)
+        lit = vSedL is not None
 
         # Remove points belonging to other processors
         vSed = np.multiply(vSed, self.inIDs)
@@ -265,6 +334,8 @@ class SEDMesh(object):
             vSedF = np.multiply(vSedF, self.inIDs)
         if prov:
             vSedP = vSedP * self.inIDs[:, None]
+        if lit:
+            vSedL = vSedL * self.inIDs[:, None]
 
         # Flow-TERMINAL stray sinks: flow-terminal nodes that are not a labelled
         # depression (and, via `lsink`, not an outlet or below sea level) — e.g.
@@ -291,6 +362,9 @@ class SEDMesh(object):
                 if prov:
                     vSedP = vSedP.copy()
                     vSedP[csink, :] = 0.0
+                if lit:
+                    vSedL = vSedL.copy()
+                    vSedL[csink, :] = 0.0
 
         # Get volume incoming in each depression
         grp = npi.group_by(self.pitIDs[self.lsink])
@@ -317,6 +391,16 @@ class SEDMesh(object):
                 inVp[uID[ids], c] = volp[ids]
             MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inVp, op=MPI.SUM)
 
+        # Each lithology entering each pit; it follows its size group (the
+        # pit keeps the same fraction of it as of its group).
+        if lit:
+            inVl = np.zeros((len(self.pitParams), self.litNb), dtype=np.float64)
+            for l in range(self.litNb):
+                _, voll = grp.sum(vSedL[self.lsink, l])
+                inVl[uID[ids], l] = voll[ids]
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inVl, op=MPI.SUM)
+            nvSedL = np.zeros((self.lpoints, self.litNb), dtype=np.float64)
+
         nvSed = np.zeros(self.lpoints, dtype=np.float64)
         nvSedF = np.zeros(self.lpoints, dtype=np.float64)
         nvSedP = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
@@ -339,6 +423,14 @@ class SEDMesh(object):
                 ovf_fine = inVf - ret_fine
                 self._pitRetFine[eIDs] += ret_fine[eIDs]
                 nvSedF[localPts] = ovf_fine[eIDs][localSpill]
+                if lit:
+                    rf = np.divide(ret_fine, inVf, out=np.zeros_like(inVf), where=inVf > 0.0)
+                    rc = np.divide(ret_coarse, coarse_in, out=np.zeros_like(inVf),
+                                   where=coarse_in > 0.0)
+                    rl = np.where(np.array(self.litFine)[None, :], rf[:, None], rc[:, None])
+                    retL = inVl * np.clip(rl, 0.0, 1.0)
+                    self._pitRetL[eIDs] += retL[eIDs]
+                    nvSedL[localPts] = (inVl - retL)[eIDs][localSpill]
             if prov:
                 # Proportional: retained = pitVol fraction of the incoming mix,
                 # overspill = the rest (each class in the pit's composition).
@@ -362,9 +454,13 @@ class SEDMesh(object):
             self._pitRetFine[eIDs] += inVf[eIDs]
         if prov:
             self._pitRetProv[eIDs] += inVp[eIDs]      # unfilled pits retain all
+        if lit:
+            self._pitRetL[eIDs] += inVl[eIDs]
 
         self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
         self._routedProv = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
+        if lit:
+            self._routedL = np.zeros((self.lpoints, self.litNb), dtype=np.float64)
         # In case there is still remaining sediment flux to distribute downstream
         if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (sediment-routing convergence threshold); do not replace  # mpi-lint: ok eV = inV - pitVol is global (inV Allreduced, pitVol from pitParams)
             # Only rebuild the flow direction matrix when the topography has
@@ -410,6 +506,14 @@ class SEDMesh(object):
                         self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
                         self.dm.globalToLocal(self.tmp1, self.nQs)
                         self._routedProv[:, c] = self.nQs.getArray().copy()
+                if lit:
+                    # Route each lithology's overspill through the SAME matrix.
+                    for l in range(self.litNb):
+                        self.nQs.setArray(nvSedL[:, l])
+                        self.dm.localToGlobal(self.nQs, self.tmp)
+                        self._solve_KSP(True, self.fMat, self.tmp, self.tmp1, seed=True)
+                        self.dm.globalToLocal(self.tmp1, self.nQs)
+                        self._routedL[:, l] = self.nQs.getArray().copy()
             # Note: matrix lifecycle moved to _distributeSediment so we don't
             # destroy/rebuild on every iteration when the topography is stable.
 
@@ -457,6 +561,13 @@ class SEDMesh(object):
         else:
             vSedP = None
 
+        # Several lithologies: thread each lithology's volume like the fine.
+        if getattr(self, "_litMulti", False):
+            vSedL = self._litFlux * self.dt
+            self._pitRetL = np.zeros((len(self.pitParams), self.litNb), dtype=np.float64)
+        else:
+            vSedL = None
+
         # Drop any matrix from the prior context; _moveDownstream will rebuild
         # on iteration 0 and only rebuild thereafter when sedFilled changes.
         self.fMat.destroy()
@@ -485,7 +596,8 @@ class SEDMesh(object):
                     )
                 break
             t1 = process_time()
-            excess, _ = self._moveDownstream(vSed, vSedF, step, vSedP=vSedP)
+            excess, _ = self._moveDownstream(vSed, vSedF, step, vSedP=vSedP,
+                                             vSedL=vSedL)
             if excess:
                 vSed = self.tmpL.getArray().copy()
                 nvSed = vSed.copy()
@@ -506,6 +618,13 @@ class SEDMesh(object):
                     # (downstream-lake chains), matching the total's treatment.
                     vSedP = self._routedProv.copy()
                     vSedP[self.outletIDs, :] = 0.0
+                if vSedL is not None:
+                    # Mirror the fine's residual-flux accumulation per lithology.
+                    vSedL = self._routedL.copy()
+                    nvL = vSedL.copy()
+                    nvL[hl < self.sedFilled, :] = 0.0
+                    self._litFlux += nvL / self.dt
+                    vSedL[self.outletIDs, :] = 0.0
             if MPIrank == 0 and self.verbose:
                 print(
                     "Downstream sediment flux computation step %d (%0.02f seconds)"
@@ -1008,7 +1127,31 @@ class SEDMesh(object):
         np.clip(ffrac, 0.0, 1.0, out=ffrac)
         self.depoFineFrac[in_pit] = ffrac[in_pit]
 
+        if getattr(self, "_litMulti", False):
+            # Each pit's retained mix of lithologies, uniform within the pit:
+            # each lithology's part of its group's retained volume.
+            self._setPitLitShare(depo, pit_safe, in_pit)
+
         return
+
+    def _setPitLitShare(self, depo, pit_safe, in_pit):
+        """
+        Several lithologies: share of each lithology in its size group for the
+        deposit of every pit, from the per-pit retained volumes ``_pitRetL``
+        (global per pit). The coarse group retained is the pit deposit minus
+        its retained fine. Rank-local.
+        """
+        coarse = np.maximum(depo - self._pitRetFine, 0.0)
+        share = np.zeros((len(depo), self.litNb), dtype=np.float64)
+        fine = np.array(self.litFine)
+        fsum = self._pitRetL[:, fine].sum(axis=1)
+        cden = np.maximum(coarse, self._pitRetL[:, ~fine].sum(axis=1))
+        for l in range(self.litNb):
+            den = fsum if self.litFine[l] else cden
+            share[:, l] = np.divide(self._pitRetL[:, l], den, out=np.zeros_like(den),
+                                    where=den > 0.0)
+        for l in range(self.litNb):
+            self.litShare[l][in_pit] = share[pit_safe, l][in_pit]
 
     def _pitProvFraction(self, depo):
         """
