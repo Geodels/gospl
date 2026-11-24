@@ -154,26 +154,36 @@ resolution (a smoothing set in numbers of cells would).
 Wave energy and shadows
 -----------------------
 
-For each direction :math:`\hat{\mathbf{d}}` of the wave climate a relative
-energy :math:`E` is carried across the sea,
+For each direction of the wave climate a relative energy :math:`E` travels
+along the local wave direction :math:`\hat{\mathbf{d}}`,
 
 .. math::
 
-    (\hat{\mathbf{d}} \cdot \nabla + \kappa)\, E = 0, \qquad
+    \left(\hat{\mathbf{d}} \cdot \nabla + \frac{1}{L_f} + \kappa\right) E
+    = \frac{1}{L_f}, \qquad
     \kappa = \frac{1}{L_d} + \frac{1}{L_s}\max\left(0, 1 - \frac{w}{w_s}\right),
 
-with :math:`E = 1` on the domain edges where the waves enter, :math:`E = 0`
-on land (the shadow), :math:`L_d` the attenuation length in deep water,
-:math:`w_s` the depth below which the waves feel the bottom and :math:`L_s`
-the attenuation length at the shoreline (the shoreward dissipation of Pastier
-et al., 2019). It is the first-order upwind finite-volume scheme of the
-orographic rain shadow; the coefficients of each direction are computed once,
-the matrix every step (the coastline moves). The climate is
-:math:`E = \sum_k w_k E_k`. Along a mesh axis with a constant :math:`\kappa`
-the scheme gives exactly :math:`E_i = (1 + \kappa\Delta x)^{-i}`, which tends
-to :math:`e^{-\kappa x}` at first order; the benchmark recovers it to
-:math:`10^{-14}` (away from the half cells of the walls and outflow edge), no
-energy at all behind an island, and the weighted sum of two directions.
+with :math:`E = 0` on land (the shadow), :math:`L_f` the fetch over which the
+waves grow to full energy (no growth term without it), :math:`L_d` the
+attenuation length in deep water, :math:`w_s` the depth below which the waves
+feel the bottom and :math:`L_s` the attenuation length at the shoreline (the
+shoreward dissipation of Pastier et al., 2019). On a flat mesh the domain edges
+facing the waves impose :math:`E = 1`; a global mesh has none and relies on the
+fetch. Far from land the energy tends to
+:math:`E_\infty = (1/L_f) / (1/L_f + 1/L_d)`; behind an island it grows again
+from zero over the fetch.
+
+The direction is a bearing turned into a tangent vector with the local east
+and north (on the sphere) or :math:`x, y` (flat): one bearing, a map, or the
+zonal belts. The scheme is the first-order upwind finite-volume operator of the
+orographic rain and of the tectonic advection, with a velocity per node; the
+coefficients of each direction are computed once, the matrix every step (the
+coastline moves). The climate is :math:`E = \sum_k w_k E_k`. Along a mesh axis
+the scheme is the recurrence
+:math:`E_i = (E_{i-1} + \Delta x / L_f) / (1 + (1/L_f + \kappa)\Delta x)`;
+the benchmark recovers it to :math:`10^{-14}` from the inflow edge and behind
+an island (away from the half cells of the walls and outflow edge), and
+:math:`(1 + \kappa\Delta x)^{-i}` without fetch.
 
 
 Pelagic rain

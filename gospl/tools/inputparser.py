@@ -1759,14 +1759,20 @@ class ReadYaml(object):
             waves:
                 climate:                         # directions the waves come FROM
                   - {from: 90., weight: 0.7}     # degrees, 0 = N, 90 = E
-                  - {from: 180., weight: 0.3}
+                  - {from: 180., weight: 0.3}    # or from: zonal (global belts),
+                                                 # or from_map: [file, key] (degrees)
+                fetch: 3.e5          # growth to full energy over open water (m);
+                                     # required on a global mesh
                 decay: 1.e5          # attenuation length in deep water (m)
                 shoal_depth: 20.     # depth below which the waves feel the bottom (m)
                 shoal_length: 2.e3   # attenuation length at the shoreline (m)
 
         The weights are normalised to sum to 1. Sets ``waveOn``,
         ``waveClimate`` (list of ``(from, weight)``), ``waveDecay``,
-        ``waveShoalDepth`` and ``waveShoalLength``.
+        ``waveShoalDepth``, ``waveShoalLength`` and ``waveFetch`` (m or None).
+        A climate entry's direction is a bearing (degrees), ``"zonal"`` (trade
+        winds, westerlies, polar easterlies by latitude; global meshes) or a
+        ``(file, key)`` map of bearings per vertex.
         """
         self.waveOn = False
         wd = self.input.get("waves", None)
@@ -1780,12 +1786,23 @@ class ReadYaml(object):
                              "{from: degrees, weight: w}.")
         out = []
         for k, c in enumerate(clim):
-            if not isinstance(c, dict) or "from" not in c:
-                raise ValueError("waves: climate entry %d needs `from` (degrees)." % k)
+            if not isinstance(c, dict) or ("from" not in c and "from_map" not in c):
+                raise ValueError("waves: climate entry %d needs `from` (degrees, or "
+                                 "`zonal`) or `from_map` ([file, key])." % k)
             w = float(c.get("weight", 1.0))
             if w < 0.0:
                 raise ValueError("waves: climate entry %d weight must be >= 0." % k)
-            out.append((float(c["from"]) % 360.0, w))
+            if "from_map" in c:
+                fm = c["from_map"]
+                if not isinstance(fm, (list, tuple)) or len(fm) != 2:
+                    raise ValueError("waves: climate entry %d from_map must be "
+                                     "[file, key]." % k)
+                frm = (str(fm[0]), str(fm[1]))
+            elif str(c["from"]).lower() == "zonal":
+                frm = "zonal"
+            else:
+                frm = float(c["from"]) % 360.0
+            out.append((frm, w))
         tot = sum(w for _, w in out)
         if tot <= 0.0:
             raise ValueError("waves: the climate weights sum to zero.")
@@ -1793,6 +1810,10 @@ class ReadYaml(object):
         self.waveDecay = float(wd.get("decay", 1.0e5))
         self.waveShoalDepth = float(wd.get("shoal_depth", 20.0))
         self.waveShoalLength = float(wd.get("shoal_length", 2.0e3))
+        fe = wd.get("fetch", None)
+        self.waveFetch = None if fe is None else float(fe)
+        if self.waveFetch is not None and self.waveFetch <= 0.0:
+            raise ValueError("waves: fetch must be positive (m).")
         for key, v in (("decay", self.waveDecay), ("shoal_depth", self.waveShoalDepth),
                        ("shoal_length", self.waveShoalLength)):
             if v <= 0.0:

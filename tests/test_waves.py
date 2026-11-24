@@ -131,3 +131,75 @@ def test_waves_partition_invariant(tmp_path):
     assert np.array_equal(a[:, 0], b[:, 0])
     d = np.max(np.abs(a[:, 1] - b[:, 1]))
     assert d < 1.0e-8, f"np=1 vs np=3 wave energy differs by {d:.3e}"
+
+
+def _global_case(tmp_path, waves):
+    src = FIXTURES_DIR / "minimal_dual.yml"
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")
+    import re
+    text = re.sub(r"dir: '[^']*'", "dir: 'g_out'", src.read_text())
+    text = text.replace("output:", waves + "output:", 1)
+    (tmp_path / "g.yml").write_text(text)
+    return "g.yml"
+
+
+GWAVES = ("waves:\n    decay: 1.e7\n    fetch: 5.e5\n    shoal_depth: 20.\n"
+          "    shoal_length: 2.e3\n    climate:\n      - {from: zonal, weight: 1.}\n")
+
+
+def test_waves_global(tmp_path, monkeypatch):
+    """On a global mesh (no edges) the waves grow over the fetch: the energy
+    is in [0, 1], zero on land, close to g / (g + 1/decay) in the open ocean
+    far from land, and the zonal belts differ from a single bearing; a global
+    mesh without fetch, and zonal belts on a flat mesh, are refused."""
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    m = Model(_global_case(tmp_path, GWAVES), verbose=False, showlog=False)
+    try:
+        E = m.waveEnergy()
+        h = m.hLocal.getArray()
+        own = m.inIDs == 1
+        assert np.all((E >= 0.0) & (E <= 1.0)) and np.all(E[h >= m.sealevel] == 0.0)
+        einf = (1.0 / 5.0e5) / (1.0 / 5.0e5 + 1.0e-7)
+        deep = own & (h < m.sealevel - 4000.0)
+        assert deep.any() and np.percentile(E[deep], 90) > 0.8 * einf
+        Ez = E.copy()
+        m.waveClimate = [(90.0, 1.0)]
+        m._waveCoef = None
+        Eb = m.waveEnergy()
+        assert np.max(np.abs(Ez - Eb)) > 1.0e-3
+    finally:
+        m.destroy()
+    with pytest.raises(ValueError, match="fetch"):
+        Model(_global_case(tmp_path, GWAVES.replace("    fetch: 5.e5\n", "")),
+              verbose=False, showlog=False)
+    with pytest.raises(ValueError, match="zonal"):
+        Model(_flat_case(tmp_path, WAVES.replace("{from: 250., weight: 3.}",
+                                                 "{from: zonal, weight: 3.}")),
+              verbose=False, showlog=False)
+
+
+_GCHILD = _CHILD
+
+
+@pytest.mark.mpi
+@pytest.mark.slow
+def test_waves_global_partition_invariant(tmp_path):
+    """Zonal waves with a fetch on the global mesh: the same at np=1 and np=3."""
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    yml = _global_case(tmp_path, GWAVES)
+    child = tmp_path / "_g.py"
+    child.write_text(_GCHILD)
+    out = {}
+    for n in (1, 3):
+        f = tmp_path / f"g{n}.npy"
+        r = subprocess.run(["mpirun", "-n", str(n), sys.executable, str(child), yml, str(f)],
+                           cwd=tmp_path, capture_output=True, text=True,
+                           env=mpi_child_env(), timeout=MPI_TIMEOUT)
+        assert r.returncode == 0, r.stderr[-2000:]
+        out[n] = np.load(f)
+    a, b = out[1], out[3]
+    assert np.array_equal(a[:, 0], b[:, 0])
+    assert np.max(np.abs(a[:, 1] - b[:, 1])) < 1.0e-8

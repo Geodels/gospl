@@ -327,7 +327,8 @@ Wave energy and shadows
     waves:
         climate:                       # directions the waves come FROM
           - {from: 90., weight: 0.7}   # degrees: 0 = north, 90 = east
-          - {from: 180., weight: 0.3}
+          - {from: 180., weight: 0.3}  # or from: zonal, or from_map: [file, key]
+        fetch: 3.e5                    # growth to full energy over open water (m)
         decay: 1.e5                    # attenuation length in deep water (m)
         shoal_depth: 20.               # waves feel the bottom shallower than this (m)
         shoal_length: 2.e3             # attenuation length at the shoreline (m)
@@ -339,9 +340,24 @@ water (more and more as the depth drops below ``shoal_depth``) and stops on
 land, so islands, headlands and barriers cast a shadow behind them. The
 directions are combined with their weights (normalised to 1). It is the
 ``wave`` response control of the factories, and the energy of the coastal
-erosion planned in phase C4. Flat meshes only for now. Choose ``decay`` much
-longer than the domain if the open ocean should keep its energy, and
-``shoal_length`` of the width of the surf zone to the reef flat.
+erosion planned in phase C4.
+
+*Directions.* ``from`` is one bearing everywhere; ``from: zonal`` gives the
+global wind belts (trade winds from the east within 30° of the equator,
+westerlies to 60°, polar easterlies beyond; global meshes only);
+``from_map: [file, key]`` gives a bearing per mesh vertex (degrees), for any
+other pattern.
+
+*Fetch.* With ``fetch`` the waves grow to full energy over that length of open
+water, and grow again behind islands (fetch-limited waves). A global mesh has
+no domain edges to bring the waves in, so ``fetch`` is required there (a few
+hundred km); on a flat mesh the edges facing the waves bring the open-ocean
+energy, and ``fetch`` is optional.
+
+Choose ``decay`` much longer than the domain if the open ocean should keep its
+energy, and ``shoal_length`` of the width of the surf zone to the reef flat.
+The waves follow the wind directions: refraction (turning towards the shore in
+shallow water) is planned as an option.
 
 .. _carb_sst:
 
@@ -468,7 +484,8 @@ Setting it up for your resolution
        response (no reef outside the warm belt), or ``habitat`` maps; a
        ``pelagic`` block with a productivity map and
        a lysocline and CCD per event; ``clay_decay`` of tens to hundreds of
-       km; usually no ``exposure`` (cells are wider than lagoons); time steps
+       km; usually no ``exposure`` (cells are wider than lagoons); a ``waves`` block
+       with ``from: zonal`` and a ``fetch`` for exposed and sheltered coasts; time steps
        of 10-100 kyr are fine (the production does not depend on ``dt``).
    * - Regional, 0.5-5 km cells
      - Platforms with a margin, an interior and a slope, carbonate aprons,

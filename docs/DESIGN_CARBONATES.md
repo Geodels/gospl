@@ -237,6 +237,25 @@ mesh the directions would be a field (e.g. trade winds by latitude), later.
 Proposed order: C5 (small, independent), C7 (also prepares C4), C6 (after the
 units are agreed), then C4.
 
+**C7 on global meshes (added 2026-11-24).** Bearings become a tangent field
+(local east/north on the sphere), with `from: zonal` belts and `from_map`; a
+fetch growth term `(d.grad + 1/L_f + kappa) E = 1/L_f` replaces the inflow
+edges a sphere does not have (behind an island the waves grow again over the
+fetch).
+
+**C7b, refraction (approved, after C6; option 1).** `refraction: True` in the
+`waves:` block (off by default): in shallow water the local direction turns
+towards the shore by Snell's law, `sin(theta)/c(h)` constant with
+`c = sqrt(g h)` and theta measured from the normal to the depth contours of a
+smoothed depth gradient; deep water keeps the offshore direction. The upwind
+coefficients are then recomputed each step (one Fortran call per direction).
+Exact test: plane beach with straight contours, direction against Snell's
+angle at every depth. No caustics (smoothed by upwinding), no diffraction
+(a small lateral diffusion could be added). A spectral model (directional
+bins) and ray tracing were considered and rejected (cost, parallelism).
+
+Agreed order: C7 global, C6, C7b refraction, C4.
+
 ## 3. Outputs, tests, benchmarks
 
 - Outputs: production rate per factory, cumulative carbonate thickness, surface
