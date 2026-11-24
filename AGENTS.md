@@ -269,7 +269,7 @@ All sentinels and threshold values are defined in `gospl/tools/constants.py` and
 | `MISSING_DATA_SENTINEL` | `-1.0e8` | Pre-fill before `Allreduce(MAX)` + boundary marker before `fitedges`. |
 | `MISSING_LARGE_SENTINEL` | `-1.0e10` | Same as above but for fields whose magnitude can exceed 1e8 (cumED, flexure, soil thickness — used in `tectonics._advectPlates`). Two orders below `MISSING_DATA_SENTINEL` so they never collide. |
 | `DISCHARGE_FLOOR` | `1.0e-8` | Minimum FA/discharge/sedLoad value written to HDF5 outputs (avoids `-inf` in log10 viz). |
-| `DEPOSIT_FLOOR` | `1.0e-3` (1 mm) | Drop sub-mm marine sediment as numerical noise. |
+| `DEPOSIT_FLOOR` | `1.0e-9` (1 nm) | Round-off floor of the routed marine deposit before the diffusion. Was 1 mm until 2026-11-25: it discarded real sub-mm deposits without putting the volume back (4e-5 of the activity on the closed test sphere, ~5 % of thinly spread coastal-erosion material). |
 | `BEDROCK_EXPOSED` | `1.0e-1` (10 cm) | Soil-vs-bedrock threshold in soil-aware SPL. |
 | `BEDROCK_SENTINEL` | `1.0e6` | Infinite-bedrock layer-0 sentinel thickness; offset cancels in cumsum arithmetic. |
 | `BOUNDARY_FLOW_SENTINEL` | `-1.0e6` | Mfd no-data marker passed to `mfdreceivers`/`mfdrcvrs`; **distinct from `MISSING_DATA_SENTINEL`** — kept two orders apart so a mix-up is obvious in diagnostics. |
@@ -283,7 +283,7 @@ All sentinels and threshold values are defined in `gospl/tools/constants.py` and
 
 **Same value, different role — DO NOT replace these with the listed constants:**
 - `1.0e-8` at `sed/stratplex.py:219` (thickness numerical-noise floor).
-- `1.0e-3` at `flow/flowplex.py:363` (water-routing convergence), `sed/sedplex.py:139` (sediment-routing convergence), `flow/pitfilling.py:568,622` (minh epsilon nudges), `sed/seaplex.py:507,509` (clinoH 1mm offset).
+- `1.0e-3` at `flow/flowplex.py:363` (water-routing convergence), `sed/sedplex.py:139` (sediment-routing convergence), `flow/pitfilling.py:568,622` (minh epsilon nudges), `sed/seaplex.py:507,509` (clinoH 1mm offset): they matched the former 1 mm `DEPOSIT_FLOOR` and are distinct roles.
 - `1.0e-2` in `flow/iceplex.py` (`_glacialMeltwater`, `_routeTill`) is the ice-presence threshold (m): a distinct physical role, not a tolerance.
 
 Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but distinct role; do not replace` comment so future readers know the coincidence is intentional.

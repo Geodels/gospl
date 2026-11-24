@@ -262,6 +262,12 @@ def test_snes_converge_on_the_residual(tmp_path, monkeypatch, case):
         snes = getattr(m, attr)
         assert snes is not None
         reason = snes.getConvergedReason()
+        # When the primary fails (< 0) its fallback finishes the step (the
+        # quasi-Newton primary of the soil solve can diverge on a stiff step
+        # and ngmres take over): check the solver that finished it.
+        fb = getattr(m, attr + "_fb", None)
+        if reason < 0 and fb is not None:
+            attr, reason = attr + "_fb", fb.getConvergedReason()
         # 2 = CONVERGED_FNORM_ABS, 3 = CONVERGED_FNORM_RELATIVE (4 = SNORM)
         assert reason in (2, 3), f"{attr} stopped with reason {reason}"
     finally:

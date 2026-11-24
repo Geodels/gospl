@@ -1193,7 +1193,7 @@ def test_transport_limited_strata_conserve_volume(fixture, tmp_path):
 
     On the closed sphere (no outlet, so net volume must be ~0) with G = 1:
     +9.0e-4 of the activity before the fix (+9.4e-4 dual, +9.0e-4 prov),
-    -5e-5 after (the documented DEPOSIT_FLOOR / pit-residue floor).
+    -5e-5 after (then the 1 mm DEPOSIT_FLOOR; ~0 since it is a round-off floor).
     """
     import json
     import os

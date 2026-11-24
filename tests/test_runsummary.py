@@ -78,12 +78,12 @@ def test_summary_records_every_step(tmp_path):
             "soil_snes_fallback",
             "soil_substep", "nlspl_snes_fallback", "nlspl_snes_failed"}
 
-    # minimal.yml is a closed sphere: the per-step budget closes to the
-    # documented floor (DEPOSIT_FLOOR + pit residue, ~1e-4 of activity).
+    # minimal.yml is a closed sphere: the per-step budget closes (it closed
+    # to ~1e-4 only while DEPOSIT_FLOOR discarded sub-mm marine deposits).
     for r in steps:
         activity = -r["volume"]["eroded"] + r["volume"]["deposited"]
         if activity > 0:
-            assert abs(r["volume"]["net"]) / activity < 1e-3
+            assert abs(r["volume"]["net"]) / activity < 1e-5
 
 
 def test_summary_off_adds_nothing(tmp_path):
