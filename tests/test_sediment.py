@@ -132,20 +132,14 @@ def test_mass_conservation(minimal_model):
             f"NEEDS_HUMAN_REVIEW: lengthen the run or steepen the gradient."
         )
 
-    # ---- Tolerance pinned 2026-06 against tests/fixtures/minimal.yml ----
-    # 1e-4 relative against total_activity. The underlying KSP runs at
-    # rtol=1e-10 so true closure is tighter; the gap is dominated by
-    # legitimate floor effects:
-    #   - DEPOSIT_FLOOR=1e-3 (seaplex.py:465, sedplex.py:156) drops
-    #     sub-mm deposits as numerical noise; over many cells this
-    #     accumulates to a small but non-zero mass loss.
-    #   - Pit-routing residue (sedplex.py:184 threshold ~1e-3 m^3) leaves
-    #     a small unrouted excess inside the pit volumes.
-    # Before raising this bound: demonstrate that a 1% scaling error in
-    # SPL.py:352 (multiply `-Eb * self.dt` by 1.01) still trips the
-    # assertion. If it doesn't, 1e-4 is already too loose — tighten,
-    # don't loosen.
-    TOLERANCE = 1.0e-4
+    # ---- Tolerance pinned 2026-11-25 against tests/fixtures/minimal.yml ----
+    # 1e-6 relative against total_activity (the closure is ~4e-9). It was
+    # 1e-4 while DEPOSIT_FLOOR was 1 mm: the routed marine deposit discarded
+    # every sub-mm cell, 4.3e-5 of the activity here, and this bound trips
+    # on that. Before raising it: demonstrate that a 1% scaling error in
+    # SPL (multiply `-Eb * self.dt` by 1.01) still trips the assertion.
+    # Tighten, don't loosen.
+    TOLERANCE = 1.0e-6
 
     rel_cumED = abs(dV_cumED) / total_activity
     rel_surface = abs(dV_surface) / total_activity
@@ -267,10 +261,8 @@ def test_sediment_balance_with_evap(minimal_model_with_evap):
             f"steeper-gradient fixture."
         )
 
-    # Same tolerance as test_mass_conservation — see that test for the
-    # rationale (KSP rtol=1e-10 but DEPOSIT_FLOOR and pit-routing residue
-    # dominate the gap).
-    TOLERANCE = 1.0e-4
+    # Same tolerance as test_mass_conservation (see that test).
+    TOLERANCE = 1.0e-6
 
     rel_cumED = abs(dV_cumED) / total_activity
     rel_surface = abs(dV_surface) / total_activity
