@@ -139,6 +139,103 @@ class WaveMesh(object):
                          where=nrm > 0.0)
         return b[cosv < -grazing]
 
+    def _waveBasis(self):
+        """Local tangent basis ``(e1, e2)`` per node: ``x, y`` on a flat mesh,
+        east and north on a sphere."""
+        if self.flatModel:
+            e1 = np.zeros((self.lpoints, 3))
+            e2 = np.zeros((self.lpoints, 3))
+            e1[:, 0] = 1.0
+            e2[:, 1] = 1.0
+            return e1, e2
+        xyz = self.lcoords
+        lon = np.arctan2(xyz[:, 1], xyz[:, 0])
+        lat = np.arcsin(np.clip(xyz[:, 2] / np.maximum(np.linalg.norm(xyz, axis=1), 1.0),
+                                -1.0, 1.0))
+        e1 = np.column_stack([-np.sin(lon), np.cos(lon), np.zeros_like(lon)])
+        e2 = np.column_stack([-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon),
+                              np.cos(lat)])
+        return e1, e2
+
+    def _waveGradient(self, f):
+        """
+        Least-squares gradient of ``f`` in the local tangent plane, as a 3-D
+        vector per node: the plane fit of each node's neighbours (exact for a
+        linear field). Owned rows are complete; ghost rows are taken from
+        their owners (collective). Scratch: ``tmp``, ``tmpL``.
+        """
+        e1, e2 = self._waveBasis()
+        ngb = self.FVmesh_ngbID
+        ok = ngb >= 0
+        nb = np.where(ok, ngb, np.arange(self.lpoints)[:, None])
+        dx = self.lcoords[nb] - self.lcoords[:, None, :]
+        a = np.einsum("nkc,nc->nk", dx, e1) * ok
+        b = np.einsum("nkc,nc->nk", dx, e2) * ok
+        df = (f[nb] - f[:, None]) * ok
+        saa, sab, sbb = (a * a).sum(1), (a * b).sum(1), (b * b).sum(1)
+        saf, sbf = (a * df).sum(1), (b * df).sum(1)
+        det = saa * sbb - sab * sab
+        good = np.abs(det) > 1.0e-30
+        ga = np.divide(sbb * saf - sab * sbf, det, out=np.zeros(self.lpoints), where=good)
+        gb = np.divide(saa * sbf - sab * saf, det, out=np.zeros(self.lpoints), where=good)
+        for arr in (ga, gb):
+            self.tmpL.setArray(arr)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.dm.globalToLocal(self.tmp, self.tmpL)
+            arr[:] = self.tmpL.getArray()
+        return ga[:, None] * e1 + gb[:, None] * e2
+
+    def _waveRefract(self, vel0, depth):
+        """
+        Refracted wave directions (refraction, phase C7b): deeper than
+        ``shoal_depth`` the offshore direction ``vel0``; shallower, turned
+        towards the normal of the depth contours (pointing to shallower water)
+        so that ``sin(theta) = sqrt(w / w_s) sin(theta_0)``, Snell's law with
+        the shallow-water celerity ``sqrt(g w)`` (``theta`` measured from the
+        contour normal). Waves travelling away from the shore are not turned.
+        The depth may be smoothed over ``refraction_length`` first.
+        Collective (gradient sync, smoothing solve).
+        """
+        w = np.maximum(depth, 0.0)
+        if self.waveRefLength is not None:
+            w = self._waveSmooth(w)
+        g = self._waveGradient(w)
+        gn = np.linalg.norm(g, axis=1)
+        n = np.divide(-g, gn[:, None], out=np.zeros_like(g), where=gn[:, None] > 0.0)
+        cos0 = np.einsum("nc,nc->n", vel0, n)
+        t = vel0 - cos0[:, None] * n
+        tn = np.linalg.norm(t, axis=1)
+        t = np.divide(t, tn[:, None], out=np.zeros_like(t), where=tn[:, None] > 0.0)
+        sin0 = tn
+        ratio = np.sqrt(np.clip(w / self.waveShoalDepth, 0.0, 1.0))
+        sin1 = np.clip(ratio * sin0, 0.0, 1.0)
+        cos1 = np.sqrt(1.0 - sin1 * sin1)
+        vel = cos1[:, None] * n + sin1[:, None] * t
+        turn = (cos0 > 0.0) & (gn > 0.0) & (depth > 0.0) & (depth < self.waveShoalDepth)
+        return np.where(turn[:, None], vel, vel0)
+
+    def _waveSmooth(self, f):
+        """``f`` smoothed over ``refraction_length``, (I - L^2 lap) s = f
+        (the open-water index operator, built for this length). Collective."""
+        if getattr(self, "_waveSmMat", None) is None:
+            kd = np.full(self.lpoints, self.waveRefLength ** 2, dtype=np.float64)
+            self._waveSmMat = self._buildDiffMat(kd)
+            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+            ksp.setType("fgmres")
+            ksp.getPC().setType("bjacobi")
+            ksp.setTolerances(rtol=1.0e-10, max_it=2000)
+            ksp.setOptionsPrefix("wavesm_")
+            petsc4py.PETSc.Options()["wavesm_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setFromOptions()
+            ksp.setOperators(self._waveSmMat, self._waveSmMat)
+            self._ksp_wavesm = ksp
+        self.tmpL.setArray(f)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp1.set(0.0)
+        self._ksp_wavesm.solve(self.tmp, self.tmp1)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return self.tmpL.getArray().copy()
+
     def _waveCoefficients(self):
         """Upwind advection coefficients (unit speed, so the operator is
         ``d . grad`` in 1/m) and the inflow edges (flat meshes) of every
@@ -146,9 +243,16 @@ class WaveMesh(object):
         ``getfacevelocity`` sets module state of the Fortran kernels, so the
         coefficients are copied at once."""
         self._waveCoef = []
-        for frm, _ in self.waveClimate:
-            bearing = self._waveBearings(frm)
+        depth = self.sealevel - self.hLocal.getArray()
+        if getattr(self, "_waveBear", None) is None:
+            self._waveBear = [self._waveBearings(frm) for frm, _ in self.waveClimate]
+        self._waveVel = []
+        for k, (frm, _) in enumerate(self.waveClimate):
+            bearing = self._waveBear[k]
             vel = self._waveVelocity(bearing)
+            if self.waveRefraction:
+                vel = self._waveRefract(vel, depth)
+            self._waveVel.append(vel)
             getfacevelocity(self.lpoints, vel)
             lcoeff = advecupwind(self.lpoints, 1.0)
             inflow = self._waveInflow(vel) if self.flatModel else np.zeros(0, dtype=np.int64)
@@ -197,7 +301,7 @@ class WaveMesh(object):
         ``tmp``, ``tmpL``, ``tmp1``.
         """
         t0 = process_time()
-        if self._waveCoef is None:
+        if self._waveCoef is None or self.waveRefraction:
             self._waveCoefficients()
         h = self.hLocal.getArray()
         w = self.sealevel - h

@@ -243,7 +243,7 @@ fetch growth term `(d.grad + 1/L_f + kappa) E = 1/L_f` replaces the inflow
 edges a sphere does not have (behind an island the waves grow again over the
 fetch).
 
-**C7b, refraction (approved, after C6; option 1).** `refraction: True` in the
+**C7b, refraction (done; option 1).** `refraction: True` in the
 `waves:` block (off by default): in shallow water the local direction turns
 towards the shore by Snell's law, `sin(theta)/c(h)` constant with
 `c = sqrt(g h)` and theta measured from the normal to the depth contours of a

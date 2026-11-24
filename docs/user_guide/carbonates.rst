@@ -337,6 +337,8 @@ Wave energy and shadows
           - {from: 90., weight: 0.7}   # degrees: 0 = north, 90 = east
           - {from: 180., weight: 0.3}  # or from: zonal, or from_map: [file, key]
         fetch: 3.e5                    # growth to full energy over open water (m)
+        refraction: True               # turn the waves towards the shore (optional)
+        refraction_length: 2.e3        # optional smoothing of the bathymetry (m)
         decay: 1.e5                    # attenuation length in deep water (m)
         shoal_depth: 20.               # waves feel the bottom shallower than this (m)
         shoal_length: 2.e3             # attenuation length at the shoreline (m)
@@ -364,8 +366,13 @@ energy, and ``fetch`` is optional.
 
 Choose ``decay`` much longer than the domain if the open ocean should keep its
 energy, and ``shoal_length`` of the width of the surf zone to the reef flat.
-The waves follow the wind directions: refraction (turning towards the shore in
-shallow water) is planned as an option.
+*Refraction.* By default the waves keep the direction of the climate all the
+way to the coast. With ``refraction: True``, in water shallower than
+``shoal_depth`` they turn towards the shore (Snell's law with the shallow-water
+wave speed), so they wrap around headlands and reach the coast more nearly
+head-on. The depth contours come from the bathymetry, optionally smoothed over
+``refraction_length`` (a few cells) on rough seafloors. It costs one more
+coefficient computation per direction and step.
 
 .. _carb_sst:
 

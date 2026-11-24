@@ -186,3 +186,68 @@ def test_wave_fetch_growth(tmp_path, monkeypatch):
         assert e1 < 1.0e-10 and e2 < 1.0e-10
     finally:
         m.destroy()
+
+
+def _beach_case(path, dx, frm):
+    """Planar beach: depth 40 m at x = 0 decreasing eastwards (1e-3), so the
+    contours are straight lines along y; walls; waves from `frm` with
+    refraction."""
+    lx, ly = 30.0e3, 10.0e3
+    nx, ny = int(round(lx / dx)) + 1, int(round(ly / dx)) + 1
+    X, Y = np.meshgrid(np.arange(nx) * dx, np.arange(ny) * dx)
+    x, y = X.ravel(), Y.ravel()
+    cells = []
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            a = j * nx + i
+            cells += [[a, a + 1, a + nx + 1], [a, a + nx + 1, a + nx]]
+    z = -40.0 + 1.0e-3 * x
+    np.savez(path / "beach.npz", v=np.column_stack([x, y, np.zeros_like(x)]),
+             c=np.array(cells, dtype=np.int64), z=z)
+    (path / "beach.yml").write_text(
+        "name: refraction\n"
+        "domain:\n    npdata: ['beach','v','c','z']\n    flowdir: 1\n    bc: 'wwww'\n"
+        "    seadepo: True\n"
+        "time:\n    start: 0.\n    end: 10.\n    tout: 10.\n    dt: 10.\n"
+        "spl:\n    K: 1.0e-20\n    d: 0.\n    m: 0.5\n"
+        "diffusion:\n    hillslopeKa: 0.\n    hillslopeKm: 0.\n"
+        "sea:\n    position: 0.\n"
+        "climate:\n  - start: 0.\n    uniform: 1.\n"
+        "waves:\n    decay: 1.e7\n    shoal_depth: 20.\n    shoal_length: 1.e6\n"
+        "    refraction: True\n    climate:\n      - {from: %r, weight: 1.}\n"
+        "output:\n    dir: 'beach_out'\n" % frm)
+
+
+@pytest.mark.benchmark
+@pytest.mark.slow
+@pytest.mark.parametrize("frm", [225.0, 250.0])
+def test_wave_refraction_snell(tmp_path, monkeypatch, frm):
+    """Refraction on a planar beach with straight contours: deeper than
+    shoal_depth the waves keep their offshore direction; shallower, their
+    angle to the contour normal follows Snell's law with the shallow-water
+    celerity, sin(theta) = sqrt(w / w_s) sin(theta_0), exactly (the plane fit
+    of the depth gradient is exact for a planar beach)."""
+    from mpi4py import MPI
+
+    monkeypatch.chdir(tmp_path)
+    _beach_case(tmp_path, 250.0, frm)
+    m = Model("beach.yml", verbose=False, showlog=False)
+    try:
+        m.sealevel = 0.0
+        m.waveEnergy()
+        vel = m._waveVel[0]
+        w = -m.hLocal.getArray()
+        a = np.deg2rad(frm)
+        d0 = np.array([-np.sin(a), -np.cos(a)])           # offshore travel direction
+        theta0 = np.arccos(d0[0])                          # from the normal (+x)
+        own = (m.inIDs == 1) & (w > 0.5) & (w < 39.0)
+        sin_model = np.abs(vel[own, 1]) / np.hypot(vel[own, 0], vel[own, 1])
+        expect = np.where(w[own] < 20.0,
+                          np.sqrt(np.clip(w[own] / 20.0, 0.0, 1.0)) * np.sin(theta0),
+                          np.sin(theta0))
+        err = float(np.max(np.abs(sin_model - expect))) if own.any() else 0.0
+        err = MPI.COMM_WORLD.allreduce(err, op=MPI.MAX)
+        print("\n[waves refraction] from %g: max |sin(theta) - Snell| %.2e" % (frm, err))
+        assert err < 1.0e-10
+    finally:
+        m.destroy()

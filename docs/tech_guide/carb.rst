@@ -186,6 +186,25 @@ an island (away from the half cells of the walls and outflow edge), and
 :math:`(1 + \kappa\Delta x)^{-i}` without fetch.
 
 
+*Refraction* (``refraction``). In water shallower than :math:`w_s` the local
+direction turns towards the normal :math:`\hat{\mathbf{n}}` of the depth
+contours (pointing to shallower water), by Snell's law with the shallow-water
+celerity :math:`c = \sqrt{g w}`:
+
+.. math::
+
+    \sin\theta = \sqrt{\frac{w}{w_s}}\, \sin\theta_0,
+
+with :math:`\theta_0` the angle of the offshore direction to
+:math:`\hat{\mathbf{n}}`; waves travelling away from the shore are not turned.
+:math:`\hat{\mathbf{n}}` comes from a least-squares plane fit of the
+(optionally smoothed) depth in the local tangent plane, synchronised from the
+owners to the ghost nodes; the upwind coefficients are then recomputed every
+step. On a planar beach with straight contours the direction follows Snell's
+angle to round-off (benchmark). Caustics are smoothed by the upwind scheme and
+diffraction is not represented.
+
+
 Pelagic rain
 ------------
 
@@ -288,6 +307,9 @@ Benchmarks
    * - Clay decay
      - 1-D strip, :math:`\lambda^i` and :math:`e^{-x/L}`
      - :math:`10^{-10}`; second order in :math:`\Delta x/L`
+   * - Wave refraction
+     - planar beach, Snell's angle at every depth
+     - :math:`10^{-16}`
    * - Wave energy
      - strip :math:`(1 + \kappa\Delta x)^{-i}`; island shadow; two directions
      - :math:`10^{-14}`; nothing in the lee (``benchmarks/test_waves.py``)

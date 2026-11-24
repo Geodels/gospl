@@ -1400,7 +1400,7 @@ class UnstMesh(object):
             # carbonate open-water index (carbplex._carbBuildOp)
             "_carbMat", "_ksp_carb", "_clayMat", "_ksp_clay",
             # wave energy (waveplex)
-            "_waveMat", "_ksp_wave",
+            "_waveMat", "_ksp_wave", "_waveSmMat", "_ksp_wavesm",
             # geochemistry plume of the carbonate factories (carbplex)
             "_plumeMat", "_ksp_plume",
             "_soluteMat", "_ksp_solute",

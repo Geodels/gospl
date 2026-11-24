@@ -1765,13 +1765,16 @@ class ReadYaml(object):
                                                  # or from_map: [file, key] (degrees)
                 fetch: 3.e5          # growth to full energy over open water (m);
                                      # required on a global mesh
+                refraction: False    # turn the waves towards the shore (Snell)
+                refraction_length: 2.e3   # optional smoothing of the depth (m)
                 decay: 1.e5          # attenuation length in deep water (m)
                 shoal_depth: 20.     # depth below which the waves feel the bottom (m)
                 shoal_length: 2.e3   # attenuation length at the shoreline (m)
 
         The weights are normalised to sum to 1. Sets ``waveOn``,
         ``waveClimate`` (list of ``(from, weight)``), ``waveDecay``,
-        ``waveShoalDepth``, ``waveShoalLength`` and ``waveFetch`` (m or None).
+        ``waveShoalDepth``, ``waveShoalLength``, ``waveFetch`` (m or None),
+        ``waveRefraction`` and ``waveRefLength`` (m or None).
         A climate entry's direction is a bearing (degrees), ``"zonal"`` (trade
         winds, westerlies, polar easterlies by latitude; global meshes) or a
         ``(file, key)`` map of bearings per vertex.
@@ -1812,6 +1815,11 @@ class ReadYaml(object):
         self.waveDecay = float(wd.get("decay", 1.0e5))
         self.waveShoalDepth = float(wd.get("shoal_depth", 20.0))
         self.waveShoalLength = float(wd.get("shoal_length", 2.0e3))
+        self.waveRefraction = bool(wd.get("refraction", False))
+        rl = wd.get("refraction_length", None)
+        self.waveRefLength = None if rl is None else float(rl)
+        if self.waveRefLength is not None and self.waveRefLength <= 0.0:
+            raise ValueError("waves: refraction_length must be positive (m).")
         fe = wd.get("fetch", None)
         self.waveFetch = None if fe is None else float(fe)
         if self.waveFetch is not None and self.waveFetch <= 0.0:
