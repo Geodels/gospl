@@ -50,8 +50,9 @@ MISSING_LARGE_SENTINEL = -1.0e10
 # See AGENTS.md > Magic numbers.
 DISCHARGE_FLOOR = 1.0e-8
 
-# Round-off floor of the routed marine deposit (1 nm): thinner cells are set
-# to zero right before the marine diffusion (sed/seaplex.py::seaChange). It
+# Round-off floor of deposits (1 nm): the routed marine deposit is set to zero
+# below it right before the marine diffusion (sed/seaplex.py::seaChange), and
+# deposeStrat records every deposit above it (it skipped those under 0.1 mm). It
 # was 1 mm until 2026-11-25: real sub-millimetre deposits were discarded
 # without putting the volume back (4e-5 of the sediment moved on the closed
 # test sphere, ~5 % of thinly spread coastal-erosion material). See AGENTS.md
