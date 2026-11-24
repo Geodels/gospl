@@ -930,3 +930,32 @@ def test_groundwater_restart(tmp_path, monkeypatch):
         assert np.allclose(mr.duriKarmor, 1.0 - mr.duriArmorMax * mr.duriF)
     finally:
         mr.destroy()
+
+
+def test_river_solute_zero_without_source(tmp_path, monkeypatch):
+    """
+    Protects: ``_solve_KSP(guess=False)`` starts from zero. A species with no
+    source (silica on minimal_gw_river2: weatherability 0 for the only
+    bedrock class) has an exactly zero river load and marine reservoir.
+
+    Until 2026-11-24 the cached flow KSP kept the nonzero-initial-guess flag
+    of earlier calls, so the per-species routing started silica from the
+    carbonate solution (~1e14) and left ~1e-4 of noise at the relative
+    tolerance (reservoir 0.31 at np=1, 0.38 at np=3).
+    """
+    import shutil
+
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    for f in ("mesh.npz", "soiltemp.npz", "minimal_gw_river2.yml"):
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    m = Model("minimal_gw_river2.yml", verbose=False, showlog=False)
+    try:
+        m.runProcesses()
+        k = list(m.gwGeoName).index("silica")
+        assert np.max(np.abs(m.gwSoluteFluxSp[:, k])) == 0.0
+        assert np.max(np.abs(m.riverSoluteSp[:, k])) == 0.0
+        assert m.marineSolute[k] == 0.0
+    finally:
+        m.destroy()

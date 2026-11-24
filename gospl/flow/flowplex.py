@@ -643,6 +643,14 @@ class FAMesh(object):
             # it to the lower bound b for (I - W^T) routing solves, else to 0.
             # Collective (every rank calls _solve_KSP); one matvec per call.
             self._warmStartGuard(matrix, vector1, vector2, seed)
+        else:
+            # guess=False is a ZERO initial guess. The KSP is cached, so a
+            # flag set by an earlier warm-started call would otherwise stay on
+            # and start this solve from whatever the solution Vec holds: the
+            # per-species river routing started silica (no source) from the
+            # carbonate solution (~1e14) and left ~1e-4 of noise at the
+            # relative tolerance, different on every partition (2026-11-24).
+            ksp.setInitialGuessNonzero(False)
         # Cap the iteration budget per call: the fatal flow-accumulation solve
         # keeps the full primary budget (it must converge); the non-fatal IDA
         # cascade solves (seed=True) are capped so a near-singular cell can't
