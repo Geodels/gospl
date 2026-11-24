@@ -18,6 +18,7 @@ Class WaveMesh
    .. autosummary::
 
       ~WaveMesh.waveEnergy
+      ~WaveMesh.coastalErosion
 
    .. rubric:: Private Methods
 
@@ -39,6 +40,7 @@ Public functions
 ---------------------
 
 .. automethod:: sed.waveplex.WaveMesh.waveEnergy
+.. automethod:: sed.waveplex.WaveMesh.coastalErosion
 
 Private functions
 ---------------------

@@ -251,3 +251,100 @@ def test_wave_refraction_snell(tmp_path, monkeypatch, frm):
         assert err < 1.0e-10
     finally:
         m.destroy()
+
+
+def _coast_case(path, dx, island=False, cliff=False, strat=False):
+    """Seafloor at three depths in bands along x (5, 10, 20 m), waves from the
+    west with no attenuation (decay and shoal_length huge); optional island
+    and a low coastal strip (3 m) at the east edge; coastal erosion on."""
+    lx, ly = 30.0e3, 12.0e3
+    nx, ny = int(round(lx / dx)) + 1, int(round(ly / dx)) + 1
+    X, Y = np.meshgrid(np.arange(nx) * dx, np.arange(ny) * dx)
+    x, y = X.ravel(), Y.ravel()
+    cells = []
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            a = j * nx + i
+            cells += [[a, a + 1, a + nx + 1], [a, a + nx + 1, a + nx]]
+    z = np.where(y < 4.0e3, -5.0, np.where(y < 8.0e3, -10.0, -20.0))
+    if island:
+        z[(np.abs(x - 8.0e3) <= 1.0e3) & (np.abs(y - 6.0e3) <= 1.0e3)] = 20.0
+    if cliff:
+        z[x >= lx - 1.5 * dx] = 3.0
+    np.savez(path / "coast.npz", v=np.column_stack([x, y, np.zeros_like(x)]),
+             c=np.array(cells, dtype=np.int64), z=z)
+    (path / "coast.yml").write_text(
+        "name: coastal erosion\n"
+        "domain:\n    npdata: ['coast','v','c','z']\n    flowdir: 1\n    bc: 'wwww'\n"
+        "    seadepo: True\n"
+        "time:\n    start: 0.\n    end: 100.\n    tout: 100.\n    dt: 100.\n"
+        + ("    strat: 100.\n" if strat else "") +
+        "spl:\n    K: 1.0e-20\n    d: 0.\n    m: 0.5\n"
+        "diffusion:\n    hillslopeKa: 0.\n    hillslopeKm: 0.\n"
+        "sea:\n    position: 0.\n"
+        "climate:\n  - start: 0.\n    uniform: 1.\n"
+        "waves:\n    decay: 1.e15\n    shoal_depth: 1.\n    shoal_length: 1.e15\n"
+        "    climate:\n      - {from: 270., weight: 1.}\n"
+        "coastal_erosion:\n    rate: 1.e-3\n    depth_scale: 5.\n    cliff_height: 10.\n"
+        "    max_erosion: 50.\n"
+        "output:\n    dir: 'coast_out'\n")
+    return lx
+
+
+@pytest.mark.benchmark
+@pytest.mark.slow
+def test_coastal_abrasion_exact(tmp_path, monkeypatch):
+    """One step of seafloor abrasion in uniform wave energy:
+    rate * E * exp(-w / depth_scale) * dt exactly, at three depths."""
+    from mpi4py import MPI
+
+    monkeypatch.chdir(tmp_path)
+    _coast_case(tmp_path, 500.0)
+    m = Model("coast.yml", verbose=False, showlog=False)
+    try:
+        m.sealevel = 0.0
+        h0 = m.hLocal.getArray().copy()
+        m.coastalErosion()
+        E = m.waveE
+        dz = h0 - m.hLocal.getArray()
+        exp = 1.0e-3 * E * np.exp(-(-h0) / 5.0) * m.dt
+        own = m.inIDs == 1
+        err = float(np.max(np.abs(dz[own] - exp[own])))
+        err = MPI.COMM_WORLD.allreduce(err, op=MPI.MAX)
+        emin = MPI.COMM_WORLD.allreduce(float(E[own].min()), op=MPI.MIN)
+        print("\n[coast] abrasion error %.2e m (E min %.6f)" % (err, emin))
+        assert emin > 1.0 - 1e-9
+        assert err < 1.0e-12
+    finally:
+        m.destroy()
+
+
+@pytest.mark.benchmark
+@pytest.mark.slow
+def test_coastal_cliff_and_shadow(tmp_path, monkeypatch):
+    """A low coastal strip retreats by rate * E_sea * dt (never below sea
+    level); the seafloor in the lee of an island is not eroded."""
+    from mpi4py import MPI
+
+    monkeypatch.chdir(tmp_path)
+    lx = _coast_case(tmp_path, 500.0, island=True, cliff=True)
+    m = Model("coast.yml", verbose=False, showlog=False)
+    try:
+        m.sealevel = 0.0
+        h0 = m.hLocal.getArray().copy()
+        m.coastalErosion()
+        dz = h0 - m.hLocal.getArray()
+        x, y = m.lcoords[:, 0], m.lcoords[:, 1]
+        own = m.inIDs == 1
+        # first land column of the strip: its sea neighbours have E = 1
+        cl = own & (np.abs(x - (lx - 500.0)) < 1.0) & (np.abs(y - 6.0e3) > 2.0e3)
+        ok1 = bool(np.allclose(dz[cl], 1.0e-3 * m.dt)) if cl.any() else True
+        assert np.all(m.hLocal.getArray()[cl] >= -1.0e-6)
+        lee = own & (x > 9.5e3) & (x < 20.0e3) & (np.abs(y - 6.0e3) < 0.5e3)
+        lee_max = float(dz[lee].max()) if lee.any() else 0.0
+        ok1 = MPI.COMM_WORLD.allreduce(ok1, op=MPI.LAND)
+        lee_max = MPI.COMM_WORLD.allreduce(lee_max, op=MPI.MAX)
+        print("\n[coast] cliff retreat ok %s, max erosion in the lee %.2e m" % (ok1, lee_max))
+        assert ok1 and lee_max < 1.0e-12
+    finally:
+        m.destroy()

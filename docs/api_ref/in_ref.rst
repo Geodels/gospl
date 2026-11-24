@@ -58,6 +58,7 @@ Class ReadYaml
       ~ReadYaml._readOut
       ~ReadYaml._readLithologies
       ~ReadYaml._readWaves
+      ~ReadYaml._readCoastalErosion
       ~ReadYaml._readCarbSupply
       ~ReadYaml._readSST
       ~ReadYaml._readCarbonate
@@ -112,3 +113,4 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._readSST
 .. automethod:: tools.inputparser.ReadYaml._readWaves
 .. automethod:: tools.inputparser.ReadYaml._readCarbSupply
+.. automethod:: tools.inputparser.ReadYaml._readCoastalErosion

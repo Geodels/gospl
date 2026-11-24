@@ -1638,6 +1638,7 @@ class ReadYaml(object):
 
         self._readLithologies()
         self._readWaves()
+        self._readCoastalErosion()
         self._extraProvenance()
 
         return
@@ -1863,6 +1864,42 @@ class ReadYaml(object):
                              "block.")
         self.carbSupply = {"species": str(cs["species"]), "yield": y,
                            "pelagic": bool(cs.get("pelagic", True))}
+
+    def _readCoastalErosion(self):
+        """
+        Parse the optional ``coastal_erosion:`` block (wave erosion of the
+        coast and the shallow seafloor, docs/DESIGN_CARBONATES.md, phase C4;
+        needs ``waves:``)::
+
+            coastal_erosion:
+                rate: 1.e-3          # m/yr at full wave energy, sea level, K = 1
+                depth_scale: 5.      # seafloor erosion decays as exp(-depth/this)
+                cliff_height: 10.    # land up to this height next to the sea erodes
+                max_erosion: 5.      # cap per step (m)
+
+        Sets ``coastOn``, ``coastRate`` (m/yr), ``coastDepth``,
+        ``coastCliff`` and ``coastMax``.
+        """
+        self.coastOn = False
+        cd = self.input.get("coastal_erosion", None)
+        if cd is None:
+            return
+        if not isinstance(cd, dict):
+            raise ValueError("coastal_erosion: must be a mapping.")
+        if not getattr(self, "waveOn", False):
+            raise ValueError("coastal_erosion: needs a `waves:` block (the wave "
+                             "energy that erodes the coast).")
+        self.coastRate = float(cd.get("rate", 1.0e-3))
+        self.coastDepth = float(cd.get("depth_scale", 5.0))
+        self.coastCliff = float(cd.get("cliff_height", 10.0))
+        self.coastMax = float(cd.get("max_erosion", 5.0))
+        for key, v in (("rate", self.coastRate), ("depth_scale", self.coastDepth),
+                       ("max_erosion", self.coastMax)):
+            if v <= 0.0:
+                raise ValueError("coastal_erosion: %s must be positive." % key)
+        if self.coastCliff < 0.0:
+            raise ValueError("coastal_erosion: cliff_height must be >= 0 (m).")
+        self.coastOn = True
 
     def _readSST(self):
         """

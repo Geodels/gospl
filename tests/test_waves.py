@@ -205,3 +205,71 @@ def test_waves_global_partition_invariant(tmp_path):
     a, b = out[1], out[3]
     assert np.array_equal(a[:, 0], b[:, 0])
     assert np.max(np.abs(a[:, 1] - b[:, 1])) < 1.0e-8
+
+
+COAST = ("coastal_erosion:\n    rate: 1.e-3\n    depth_scale: 5.\n    cliff_height: 10.\n"
+         "    max_erosion: 5.\n")
+
+
+def test_coastal_erosion_parse_and_run(tmp_path, monkeypatch):
+    """coastal_erosion needs waves; in a run with stratigraphy the eroded
+    volume is taken from the coast and handed to the marine routing (the
+    routed deposit-equivalent volume is positive and the cumulative erosion
+    output exists)."""
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="waves"):
+        Model(_flat_case(tmp_path, "", COAST), verbose=False, showlog=False)
+    m = Model(_flat_case(tmp_path, WAVES, COAST), verbose=False, showlog=False)
+    try:
+        assert m.coastOn
+        m.runProcesses()
+        assert m._coastEroded > 0.0
+        assert m.coastBudget[1] > 0.0
+        assert np.all(m.coastEro >= 0.0) and np.all(m.coastEro <= 2 * 5.0 + 1e-9)
+    finally:
+        m.destroy()
+
+
+_CCHILD = '''\
+import sys
+import numpy as np
+from mpi4py import MPI
+from gospl.model import Model
+
+m = Model(sys.argv[1], verbose=False, showlog=False)
+try:
+    m.runProcesses()
+    own = m.inIDs == 1
+    rows = np.column_stack([m.locIDs[own].astype(float), m.hLocal.getArray()[own]])
+    allr = MPI.COMM_WORLD.gather(rows, root=0)
+    if MPI.COMM_WORLD.rank == 0:
+        a = np.vstack(allr)
+        np.save(sys.argv[2], a[np.argsort(a[:, 0])])
+finally:
+    m.destroy()
+'''
+
+
+@pytest.mark.mpi
+@pytest.mark.slow
+def test_coastal_erosion_partition_invariant(tmp_path):
+    """Coastal erosion (wave solve, cliffs, eroded material into the marine
+    routing) gives the same elevation at np=1 and np=3."""
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    yml = _flat_case(tmp_path, WAVES, COAST)
+    child = tmp_path / "_cc.py"
+    child.write_text(_CCHILD)
+    out = {}
+    for n in (1, 3):
+        f = tmp_path / f"cc{n}.npy"
+        r = subprocess.run(["mpirun", "-n", str(n), sys.executable, str(child), yml, str(f)],
+                           cwd=tmp_path, capture_output=True, text=True,
+                           env=mpi_child_env(), timeout=MPI_TIMEOUT)
+        assert r.returncode == 0, r.stderr[-2000:]
+        out[n] = np.load(f)
+    a, b = out[1], out[3]
+    assert np.array_equal(a[:, 0], b[:, 0])
+    assert np.max(np.abs(a[:, 1] - b[:, 1])) < 1.0e-6

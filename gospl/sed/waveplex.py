@@ -56,6 +56,10 @@ class WaveMesh(object):
         """Cached coefficients per direction and the solver (registered in
         ``destroy_DMPlex``)."""
         self.waveE = None
+        self._waveT = None
+        self.coastEro = None
+        self.coastBudget = None
+        self._coastDet = None
         self._waveCoef = None
         self._waveMat = None
         self._ksp_wave = None
@@ -72,6 +76,14 @@ class WaveMesh(object):
                 "waves: the `zonal` belts need latitudes, i.e. a global mesh; on a "
                 "flat mesh give a bearing or a from_map.")
         self.waveE = np.zeros(self.lpoints, dtype=np.float64)
+        if getattr(self, "coastOn", False):
+            if not getattr(self, "seaDepo", False) or getattr(self, "nodep", False):
+                raise ValueError(
+                    "coastal_erosion: needs marine deposition (seadepo: True, "
+                    "nodep: False): the eroded material is spread by the marine "
+                    "routing.")
+            self.coastEro = np.zeros(self.lpoints, dtype=np.float64)
+            self._coastEroded = 0.0
         return
 
     def _waveBearings(self, frm):
@@ -300,6 +312,8 @@ class WaveMesh(object):
         ``(d . grad + 1/L_f + kappa) E = 1/L_f`` (see the class). Collective. Scratch:
         ``tmp``, ``tmpL``, ``tmp1``.
         """
+        if self._waveT is not None and self._waveT == self.tNow and self.waveE is not None:
+            return self.waveE
         t0 = process_time()
         if self._waveCoef is None or self.waveRefraction:
             self._waveCoefficients()
@@ -324,7 +338,105 @@ class WaveMesh(object):
             Ek[land] = 0.0
             E += wgt * np.clip(Ek, 0.0, 1.0)
         self.waveE = E
+        self._waveT = self.tNow
         if MPIrank == 0 and self.verbose:
             print("[waves] wave energy (%0.02f seconds)" % (process_time() - t0),
                   flush=True)
         return E
+
+    def coastalErosion(self):
+        """
+        Wave erosion of the coast and the shallow seafloor (phase C4), after
+        Pastier et al. (2019): with the wave energy ``E`` (``waveEnergy``) and
+        the erodibility ``K`` of the exposed layer (stratigraphic ``stratK`` of
+        the top layer times the lithology and duricrust factor),
+
+        - a marine cell at depth ``w`` erodes ``rate * E * exp(-w /
+          depth_scale) * K * dt``;
+        - a land cell up to ``cliff_height`` above sea level with a sea
+          neighbour (a cliff) erodes ``rate * E_sea * K * dt`` (``E_sea`` the
+          largest energy of its sea neighbours), at most down to sea level: the
+          cliff retreats and leaves a platform, abraded in turn;
+
+        both capped at ``max_erosion`` per step. The eroded material is taken
+        from the stratigraphy (``erodeStrat``, its deposit-equivalent volume and
+        composition) and handed to this step's marine routing (``seaChange``),
+        like the loose carbonate. Elevation, cumulative erosion and the rate
+        field are updated. Collective (wave solve, halo sync, budget).
+        Scratch: ``tmp``, ``tmpL``.
+        """
+        E = self.waveEnergy()
+        h = self.hLocal.getArray().copy()
+        w = self.sealevel - h
+        kf = self._surfaceK() * self._surfaceLithoK() if self.stratNb > 0 \
+            else np.ones(self.lpoints)
+        kf = kf * np.ones(self.lpoints)
+        sea = w > 0.0
+        ero = np.where(sea, self.coastRate * E * np.exp(-np.maximum(w, 0.0) / self.coastDepth),
+                       0.0)
+        # cliffs: land cells next to the sea, low enough above it
+        ngb = self.FVmesh_ngbID
+        ok = ngb >= 0
+        nb = np.where(ok, ngb, np.arange(self.lpoints)[:, None])
+        nsea = ok & sea[nb]
+        esea = np.where(nsea, E[nb], 0.0).max(axis=1)
+        cliff = (~sea) & nsea.any(axis=1) & (h - self.sealevel <= self.coastCliff)
+        ero = np.where(cliff, self.coastRate * esea, ero)
+        ero = ero * kf * self.dt
+        # a cliff is cut down to sea level at most
+        ero = np.where(cliff, np.minimum(ero, np.maximum(h - self.sealevel, 0.0) + 1.0e-6),
+                       ero)
+        ero = np.clip(ero, 0.0, self.coastMax)
+        # halo: the owners' values on the ghosts
+        self.tmpL.setArray(ero)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        ero = self.tmpL.getArray().copy()
+
+        # remove it from the stratigraphy (keep the river step's arrays)
+        lit = getattr(self, "_litMulti", False)
+        vol = ero * self.larea
+        if self.stratNb > 0:
+            saved = {k: getattr(self, k).copy() for k in
+                     ("thCoarse", "thFine", "provEro", "thL")
+                     if getattr(self, k, None) is not None}
+            self.tmpL.setArray(-ero)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.erodeStrat()
+            det = self.thCoarse * self.dt * self.larea
+            fine = np.zeros(self.lpoints)
+            if self.stratLith:
+                fine = self.thFine * self.dt * self.larea
+                det = det + fine
+            litv = None
+            if lit:
+                litv = np.column_stack([self.thL[l] * self.dt * self.larea
+                                        for l in range(self.litNb)])
+            for k, v in saved.items():
+                setattr(self, k, v)
+        else:
+            det, fine, litv = vol.copy(), np.zeros(self.lpoints), None
+        self._coastDet = det
+        self._coastFine = fine
+        self._coastL = litv
+
+        # elevation, cumulative erosion, rate
+        self.tmpL.setArray(-ero)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        self.tmpL.setArray(-ero / self.dt)
+        self.EbLocal.axpy(1.0, self.tmpL)
+        self.coastEro += ero
+
+        own = self.inIDs == 1
+        b = MPI.COMM_WORLD.allreduce(np.array([vol[own].sum(), det[own].sum()]),
+                                     op=MPI.SUM)
+        self.coastBudget = b                     # (bulk eroded, routed deposit-equivalent)
+        self._coastEroded += b[0]
+        if MPIrank == 0 and self.verbose:
+            print("[coast] eroded %0.4g km3 (routed %0.4g km3)" % (b[0] * 1e-9, b[1] * 1e-9),
+                  flush=True)
+        return

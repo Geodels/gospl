@@ -498,6 +498,11 @@ class Model(
                     _probeZ(self, "after continental sed")
                     if self.seaDepo:
                         # Downstream sediment deposition in marine environments
+                        if getattr(self, "coastOn", False):
+                            # wave erosion of the coast and the shallow seafloor
+                            with self.profiler.phase("coast"), self._phase("coastal erosion"):
+                                _WaveMesh.coastalErosion(self)
+                            _probeZ(self, "after coastal erosion")
                         if getattr(self, "carbSupply", None) is not None:
                             # supply-limited burial: scale of this step's carbonate
                             _CarbMesh.carbSupplyLimit(self)

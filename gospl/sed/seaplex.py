@@ -1738,18 +1738,28 @@ class SEAMesh(object):
         # gravity currents do not carry it), with its mud in the fine group
         # and each part in its lithology.
         carbMud = None
+        carbL = None
         if getattr(self, "carbOn", False) and getattr(self, "_carbDet", None) is not None:
             carbDet = np.where(self.sinkIDs, self._carbDet, 0.0)
             carbMud = np.where(self.sinkIDs, self._carbMud, 0.0)
             carbL = np.where(self.sinkIDs[:, None], self._carbL, 0.0)
             sedFlux = sedFlux + carbDet
             self._carbDet = None
+        # Material eroded at the coast this step (waveplex.coastalErosion):
+        # into the cascade input too, its fine part and lithologies with it.
+        if getattr(self, "coastOn", False) and getattr(self, "_coastDet", None) is not None:
+            sedFlux = sedFlux + self._coastDet
+            cf = self._coastFine
+            carbMud = cf if carbMud is None else carbMud + cf
+            if self._coastL is not None:
+                carbL = self._coastL if carbL is None else carbL + self._coastL
+            self._coastDet = None
         provOn = getattr(self, "provOn", False)
         provFlux = (self.provFrac * sedFlux[:, None]) if provOn else None
         if lit:
             # the lithologies ride the same lockstep as extra columns
             casL = litM - gravL
-            if carbMud is not None:
+            if carbL is not None:
                 casL = casL + carbL
             provFlux = casL if provFlux is None else np.column_stack([provFlux, casL])
         tracers = provFlux is not None

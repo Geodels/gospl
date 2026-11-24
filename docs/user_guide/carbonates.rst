@@ -374,6 +374,35 @@ head-on. The depth contours come from the bathymetry, optionally smoothed over
 ``refraction_length`` (a few cells) on rough seafloors. It costs one more
 coefficient computation per direction and step.
 
+.. _carb_coast:
+
+Coastal erosion
+---------------
+
+.. code:: yaml
+
+    coastal_erosion:
+        rate: 1.e-3          # m/yr at full wave energy, at sea level, erodibility 1
+        depth_scale: 5.      # seafloor erosion decays as exp(-depth / depth_scale)
+        cliff_height: 10.    # land up to this height next to the sea is a cliff
+        max_erosion: 5.      # cap per step (m)
+
+With a ``waves`` block, the waves erode the coast and the shallow seafloor
+(after Pastier et al., 2019). A marine cell erodes at ``rate`` times the wave
+energy times ``exp(-depth / depth_scale)``; a land cell no higher than
+``cliff_height`` above sea level and next to the sea is a cliff, eroded with
+the wave energy of the sea beside it, down to sea level at most: the cliff
+retreats and leaves a wave-cut platform, which is abraded in turn. Both are
+multiplied by the erodibility of the exposed layer (``stratK`` and the
+lithology ``k_factor``: a ``reef`` layer with ``k_factor: 0.1`` erodes ten
+times slower than clastic sediment), and capped at ``max_erosion`` per step.
+The eroded material is removed from the stratigraphy and spread by the marine
+transport of the same step. Sheltered coasts (in the wave shadow, or with
+``refraction`` turning the waves away) erode less. The cumulative erosion is
+written as ``coastEro`` (m); with ``--summary`` each step has a
+``coastal_erosion`` record (eroded, routed). Reef terraces form from the
+interplay of this erosion with reef growth under changing sea level.
+
 .. _carb_sst:
 
 Sea-surface temperature
@@ -548,7 +577,7 @@ Setting it up for your resolution
        changes through time; framework 0.3-0.6 for the euphotic factory; ``dt`` of 1-10 kyr.
    * - Local, 50-200 m cells
      - Rimmed platforms, barriers and lagoons, patch reefs several cells
-       wide; reef terraces with coastal erosion (planned, phase C4).
+       wide; reef terraces with ``coastal_erosion`` and a ``waves`` climate.
      - ``exposure_length`` of a lagoon width (a few hundred metres to a few
        km); a ``depth`` window for the reef factory (for instance full
        production to 10 m, none below 30 m); framework up to 0.8 for reef
@@ -626,7 +655,8 @@ Outputs
 - ``pelDep`` (m/yr): settled (or resuspended) pelagic thickness rate.
 - ``sst`` (°C): sea-surface temperature of the step (with an ``sst`` block).
 - ``waveE`` (0 to 1): relative wave energy (with a ``waves`` block, when a
-  factory uses it).
+  factory or the coastal erosion uses it).
+- ``coastEro`` (m): cumulative coastal erosion (with ``coastal_erosion``).
 - Stratigraphy: one pile per lithology, ``stratH_<name>`` and ``phi_<name>``
   (``stratHf``/``phiF`` for the dual-lithology fine fraction), in the
   ``stratal`` files.

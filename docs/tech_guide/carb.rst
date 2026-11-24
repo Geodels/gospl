@@ -205,6 +205,29 @@ angle to round-off (benchmark). Caustics are smoothed by the upwind scheme and
 diffraction is not represented.
 
 
+Coastal erosion
+---------------
+
+With the wave energy :math:`E` and the erodibility :math:`K` of the exposed
+layer (stratigraphic multiplier times the lithology and duricrust factor), a
+marine cell at depth :math:`w` erodes over a step
+
+.. math::
+
+    \Delta z = r\, E\, e^{-w/z_0}\, K\, \Delta t ,
+
+and a cliff cell (land no higher than :math:`h_c` above sea level, next to the
+sea) erodes :math:`r\, E_{sea}\, K\, \Delta t`, with :math:`E_{sea}` the largest
+energy of its sea neighbours, at most down to sea level; both are capped per
+step (``max_erosion``). This is the depth-decaying wave erosion of Pastier et
+al. (2019) on a 2-D mesh, with the shoreward dissipation carried by the wave
+energy itself. The eroded material is removed with the stratigraphic erosion
+and added to the marine cascade of the step with its composition. Benchmarks:
+the abrasion of a seafloor at three depths in uniform wave energy is exact to
+:math:`10^{-15}` m; a low cliff retreats by :math:`r E \Delta t` and stops at
+sea level; nothing erodes in the lee of an island.
+
+
 Pelagic rain
 ------------
 
@@ -307,6 +330,9 @@ Benchmarks
    * - Clay decay
      - 1-D strip, :math:`\lambda^i` and :math:`e^{-x/L}`
      - :math:`10^{-10}`; second order in :math:`\Delta x/L`
+   * - Coastal erosion
+     - abrasion at three depths, cliff retreat, island lee
+     - :math:`10^{-15}` m; nothing in the lee
    * - Wave refraction
      - planar beach, Snell's angle at every depth
      - :math:`10^{-16}`
