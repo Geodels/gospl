@@ -1424,10 +1424,12 @@ class hillSLP(object):
         # on |bed + deposit| and lets the allowed error grow with water depth
         # (0.5 m per step for a deposit at 5000 m depth vs 5 mm near the
         # coast). Instead tol_i = 5e-3 m + 1e-4 * |deposit_i| as a vector atol
-        # with rtol = 0, so the error control is independent of bathymetry: the
-        # 5 mm floor matches the sub-mm deposits dropped as noise elsewhere, and
+        # with rtol = 0, so the error control is independent of bathymetry, and
         # the 0.01 % relative part (deposit-relative now) keeps the "peak"
-        # overshoot artefacts seen with 1e-3/1e-3 suppressed. Guard:
+        # overshoot artefacts seen with 1e-3/1e-3 suppressed. The 5 mm floor
+        # was tested down to 0.1 mm (2026-11-25): no change of the results nor
+        # of the np=1 vs np=3 differences on the test sphere and on a 47,700-
+        # node margin, ~16 % more time. Guard:
         # benchmarks/test_marine_diffusion.py (depth invariance).
         self.tmpL.setArray(5.0e-3 + 1.0e-4 * np.abs(dh))
         self.dm.localToGlobal(self.tmpL, self._ts_marine_atol)
