@@ -23,6 +23,12 @@ pytest.importorskip(
 pytestmark = [pytest.mark.sediment]
 
 CARB = "carbonate:\n    insolation: 400.\n\n"
+# production favoured on margins and rims (open-water index, phase C3)
+CARB_EXP = ("carbonate:\n    exposure_length: 3.e4\n    factories:\n"
+            "      - {name: margin, growth: 500., extinction: 0.8, saturation: 60., "
+            "framework: 0.5, sand: 0.7, response: [{control: exposure, "
+            "x: [-50., 50.], f: [0.2, 1.]}]}\n"
+            "      - {name: deep, growth: 100., extinction: 0.005, sand: 0.3}\n\n")
 
 
 def _case(tmp_path, name, block=CARB, dual=True):
@@ -63,6 +69,9 @@ def test_carbonate_parse(tmp_path, monkeypatch):
          "between 0 and 1"),
         (dict(block="carbonate:\n    lithologies: {limestone: {phi0: 0.3}}\n\n"),
          "no 'limestone'"),
+        (dict(block="carbonate:\n    factories:\n      - {name: a, growth: 1., "
+                    "response: [{control: exposure, x: [0, 1], f: [1, 0]}]}\n\n"),
+         "exposure_length"),
     ]
     for kw, msg in bad:
         yml = _case(tmp_path, "bad", **kw)
@@ -155,12 +164,12 @@ finally:
 @pytest.mark.mpi
 @pytest.mark.slow
 def test_carbonate_partition_invariant(tmp_path):
-    """Carbonate production, framework, the routed loose sediment and the
-    pelagic rain give the same elevation and lithology piles at np=1 and
-    np=3."""
+    """Carbonate production (with the open-water index, a parallel solve),
+    framework, the routed loose sediment and the pelagic rain give the same
+    elevation and lithology piles at np=1 and np=3."""
     if shutil.which("mpirun") is None:
         pytest.skip("mpirun not on PATH")
-    yml = _case(tmp_path, "part", block=CARB + PEL)
+    yml = _case(tmp_path, "part", block=CARB_EXP + PEL)
     child = tmp_path / "_c.py"
     child.write_text(_CHILD)
     out = {}
@@ -282,3 +291,23 @@ def test_pelagic_budget(tmp_path, monkeypatch):
         m.destroy()
     with h5py.File(tmp_path / "pg_out" / "h5" / "gospl.1.p0.h5", "r") as f:
         assert "pelDep" in f
+
+
+def test_carbonate_exposure_response(tmp_path, monkeypatch):
+    """The open-water index is positive on highs and negative in lows of
+    the seafloor, and its response table scales the factory accordingly."""
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    m = Model(_case(tmp_path, "e", block=CARB_EXP), verbose=False, showlog=False)
+    try:
+        h = m.hLocal.getArray().copy()
+        st = m._carbStatic(h)
+        E = m.carbExpo
+        own = m.inIDs == 1
+        # the highest and lowest local nodes sit above / below their smoothing
+        assert E[own][np.argmax(h[own])] > 0.0 and E[own][np.argmin(h[own])] < 0.0
+        exp = np.interp(E, [-50.0, 50.0], [0.2, 1.0])
+        assert np.allclose(st[0], exp) and np.all(st[1] == 1.0)
+    finally:
+        m.destroy()

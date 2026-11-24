@@ -174,7 +174,7 @@ place (resuspension); first version deposits in place.
 
 ## 2.9 Revised phases
 
-**Status (2026-11-24): C0, C1 and C2 done** (C2: `pelagic:` block, `CarbMesh.pelagicRain`, deposited in place; resuspension into the marine diffusion and a distance-from-coast clay law are not in) (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
+**Status (2026-11-24): C0, C1, C2 and C3 done** (C3: `exposure` response control, screened-Poisson open-water index over a length in metres, not the marine smoother whose strength is in cells) (C2: `pelagic:` block, `CarbMesh.pelagicRain`, deposited in place; resuspension into the marine diffusion and a distance-from-coast clay law are not in) (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
 deposition, compaction, blends, advection, outputs; stage B: the routed composition
 at every deposit). Checks: dual lithology bitwise identical on 13 variants; a fine or
 coarse fraction split into two identical lithologies reproduces the dual run to
@@ -190,6 +190,7 @@ round-off (a base-model fix for `dev`).
 | C1 | Carbonate lithologies, benthic production (factories x response tables, per-node ODE with sea-level cap), framework vs detritus into the marine routing, outputs | keep-up depth, drowning, `dt` independence, conservation, np=1 vs np=3 |
 | C2 | Pelagic carbonate and hemipelagic rain, lysocline / CCD | budget per step, global example |
 | C3 | Open-water index (marine smoother) | regional platform example |
+| C2b | Hemipelagic clay decreasing away from the coast (`decay` length L: `exp(-d/L)` from a screened-Poisson solve `(L^2 lap - 1) c = 0`, c = 1 at the coast, one cached KSP per step, parallel; reuses the clinoform coast distance if it is already computed); optional hand-over of the settled rain to the marine diffusion (resuspension), each part riding the lithology lockstep of `_diffuseOcean` | 1-D strip against exp(-x/L); volume and per-lithology conservation through the diffusion; np=1 vs np=3 |
 | C4 | Coastal wave erosion (own opt-in block) | Pastier-type terrace example |
 | later | Karst of exposed carbonate through the geochemistry | |
 

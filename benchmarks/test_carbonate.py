@@ -140,3 +140,62 @@ def test_carbonate_step_independent(tmp_path, monkeypatch, dt):
         assert np.allclose(w[-1], ref, rtol=1e-4)
     finally:
         m.destroy()
+
+
+def _ridge_case(path, dx, L, b):
+    """Square lattice, parabolic ridge along y, walls on every side."""
+    lx, ly = 40.0 * L, 8.0 * L
+    nx, ny = int(round(lx / dx)) + 1, int(round(ly / dx)) + 1
+    X, Y = np.meshgrid(np.arange(nx) * dx, np.arange(ny) * dx)
+    x, y = X.ravel(), Y.ravel()
+    cells = []
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            a = j * nx + i
+            cells += [[a, a + 1, a + nx + 1], [a, a + nx + 1, a + nx]]
+    z = -500.0 - b * (x - 0.5 * lx) ** 2
+    np.savez(path / "ridge.npz", v=np.column_stack([x, y, np.zeros_like(x)]),
+             c=np.array(cells, dtype=np.int64), z=z)
+    (path / "ridge.yml").write_text(
+        "name: open-water index\n"
+        "domain:\n    npdata: ['ridge','v','c','z']\n    flowdir: 1\n    bc: 'wwww'\n"
+        "    seadepo: True\n"
+        "time:\n    start: 0.\n    end: 10.\n    tout: 10.\n    dt: 10.\n    strat: 10.\n"
+        "spl:\n    K: 1.0e-20\n    d: 0.\n    m: 0.5\n"
+        "diffusion:\n    hillslopeKa: 0.\n    hillslopeKm: 0.\n"
+        "sea:\n    position: 0.\n"
+        "climate:\n  - start: 0.\n    uniform: 1.\n"
+        "strata:\n    dual: True\n"
+        "carbonate:\n    exposure_length: %r\n    factories:\n"
+        "      - {name: a, growth: 100., response: [{control: exposure, x: [-1., 1.], "
+        "f: [0., 1.]}]}\n"
+        "output:\n    dir: 'ridge_out'\n" % L)
+    return lx, z
+
+
+@pytest.mark.benchmark
+@pytest.mark.slow
+@pytest.mark.parametrize("dx,L", [(200.0, 1000.0), (100.0, 1000.0), (200.0, 2000.0)])
+def test_carbonate_exposure_ridge(tmp_path, monkeypatch, dx, L):
+    """Open-water index on a parabolic ridge h = -b (x - x0)^2: exactly
+    2 b L^2 away from the walls (the 5-point stencil of the square lattice is
+    exact for quadratics), whatever the spacing."""
+    from mpi4py import MPI
+
+    b = 1.0e-6
+    monkeypatch.chdir(tmp_path)
+    lx, _ = _ridge_case(tmp_path, dx, L, b)
+    m = Model("ridge.yml", verbose=False, showlog=False)
+    try:
+        E = m._carbExposure(m.hLocal.getArray().copy())
+        x = m.lcoords[:, 0]
+        # at least 16 L from the walls, whose zero-flux condition perturbs
+        # E by ~ 20 * 2bL^2 * exp(-d/L) at a distance d
+        mid = (np.abs(x - 0.5 * lx) < 4.0 * L) & (m.inIDs == 1)
+        err = np.max(np.abs(E[mid] / (2.0 * b * L * L) - 1.0)) if mid.any() else 0.0
+        err = MPI.COMM_WORLD.allreduce(err, op=MPI.MAX)
+        print("\n[carbonate exposure] dx=%g L=%g: 2bL^2 = %.4f m, max rel error %.2e"
+              % (dx, L, 2 * b * L * L, err))
+        assert err < 1.0e-5
+    finally:
+        m.destroy()

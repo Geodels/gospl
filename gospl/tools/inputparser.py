@@ -1746,7 +1746,7 @@ class ReadYaml(object):
         "reef": {"size": "coarse", "phi0": 0.2, "z0": 5000.0, "k_factor": 0.1,
                  "diff_factor": 0.1},
     }
-    CARB_CONTROLS = ("depth", "slope", "sedrate")
+    CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure")
 
     def _readCarbonate(self, add):
         """
@@ -1763,7 +1763,8 @@ class ReadYaml(object):
         (fine-like), handed to the marine routing. Rates are read in m/Myr
         and kept in m/yr.
 
-        Sets ``carbOn``, ``carbI0``, ``carbMinDepth`` and ``carbFact`` (list
+        Sets ``carbOn``, ``carbI0``, ``carbMinDepth``, ``carbExpLength`` and
+        ``carbFact`` (list
         of dicts with ``g`` (m/yr), ``k``, ``Ik``, ``phi`` (framework),
         ``sand``, ``habitat`` ([file, key] or None) and ``resp`` (list of
         (control, x, f))).
@@ -1778,6 +1779,13 @@ class ReadYaml(object):
         self.carbOn = True
         self.carbI0 = float(cdict.get("insolation", 400.0))
         self.carbMinDepth = float(cdict.get("min_depth", 0.0))
+        # Length (m) of the open-water index `exposure` (elevation minus its
+        # smoothing over that length; positive on margins and rims, negative
+        # in lagoons). Needed only when a response uses it.
+        el = cdict.get("exposure_length", None)
+        self.carbExpLength = None if el is None else float(el)
+        if self.carbExpLength is not None and self.carbExpLength <= 0.0:
+            raise ValueError("carbonate: exposure_length must be positive (m).")
         if self.carbI0 <= 0.0:
             raise ValueError("carbonate: insolation must be positive.")
         facts = cdict.get("factories", None)
@@ -1833,6 +1841,12 @@ class ReadYaml(object):
                                   "phi": phi, "sand": sand, "habitat": hab,
                                   "resp": resp})
 
+        if self.carbExpLength is None and any(
+                ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):
+            raise ValueError(
+                "carbonate: a response uses `exposure`; set carbonate: "
+                "exposure_length (m), the length over which the open-water "
+                "index compares the seafloor with its surroundings.")
         over = cdict.get("lithologies", None) or {}
         if not isinstance(over, dict):
             raise ValueError("carbonate: lithologies must be a mapping by name.")

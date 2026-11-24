@@ -29,6 +29,9 @@ Class CarbMesh
       ~CarbMesh._carbStatic
       ~CarbMesh._carbRates
       ~CarbMesh._carbSubsteps
+      ~CarbMesh._carbBuildOp
+      ~CarbMesh._carbScreened
+      ~CarbMesh._carbExposure
       ~CarbMesh._initPelagic
       ~CarbMesh._pelEvent
       ~CarbMesh._pelPreservedFraction
@@ -51,3 +54,6 @@ Private functions
 .. automethod:: sed.carbplex.CarbMesh._initPelagic
 .. automethod:: sed.carbplex.CarbMesh._pelEvent
 .. automethod:: sed.carbplex.CarbMesh._pelPreservedFraction
+.. automethod:: sed.carbplex.CarbMesh._carbBuildOp
+.. automethod:: sed.carbplex.CarbMesh._carbScreened
+.. automethod:: sed.carbplex.CarbMesh._carbExposure

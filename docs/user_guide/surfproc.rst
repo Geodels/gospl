@@ -949,6 +949,7 @@ Carbonate production
             carbonate:
                 insolation: 400.      # surface light I0 (W/m2)
                 min_depth: 0.         # production stops this far below sea level (m)
+                exposure_length: 2000.  # open-water index length (m), if used
                 factories:            # default: euphotic, oligophotic, aphotic
                   - name: euphotic
                     growth: 500.      # maximum rate (m/Myr)
@@ -979,9 +980,15 @@ compaction curves (``lithologies`` above, defaults: sand 0.45 / 2500 m, mud
 0.65 / 1500 m, reef 0.2 / 5000 m).
 
 ``response`` tables (piecewise linear, ``x`` increasing, factors ``f`` >= 0)
-scale a factory's production with ``depth`` (m), the seafloor ``slope``, or
+scale a factory's production with ``depth`` (m), the seafloor ``slope``,
 ``sedrate``, the clastic marine deposition rate of the previous step (m/yr;
-turbidity and burial). The ``habitat`` map (``[file, key]``, one value per mesh
+turbidity and burial), or ``exposure``, an open-water index (m): the elevation
+minus its smoothing over ``exposure_length``, positive on platform margins and
+rims, negative in lagoons and behind barriers. A table such as
+``{control: exposure, x: [-5., 5.], f: [0.2, 1.]}`` concentrates a reef factory
+on the margin, as the distance-to-open-water penalty of Pastier et al. (2019).
+Choose ``exposure_length`` several cells long (the width of a lagoon or a
+platform top). The ``habitat`` map (``[file, key]``, one value per mesh
 vertex) restricts where a factory lives.
 
 The production rate is written as ``carbProd`` (m/yr); with ``--summary`` each

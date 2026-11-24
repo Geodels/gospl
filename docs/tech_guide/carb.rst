@@ -49,6 +49,23 @@ routing of the same step, so carbonate and river sediment share the marine
 cascade, diffusion and stratigraphy. Each carbonate lithology keeps its own
 compaction curve and erodibility.
 
+**Open-water index** (response control ``exposure``). Reefs grow best at the
+platform margin, facing open water, and less in lagoons and behind barriers
+(the distance-to-open-water penalty of Pastier et al., 2019, or the wave-energy
+control of pyBadlands). goSPL measures this with the elevation minus its
+smoothing over a length :math:`L` (``exposure_length``),
+
+.. math::
+
+    E = h - s, \qquad (I - L^2 \nabla^2)\, s = h,
+
+positive on margins, rims and highs, negative in lagoons. It is solved for
+:math:`E` directly, :math:`(I - L^2 \nabla^2) E = -L^2 \nabla^2 h`, so the solver
+tolerance applies to the relief. For a parabolic ridge :math:`h = -b x^2` the
+index is exactly :math:`2 b L^2`; the benchmark recovers it to
+:math:`2 \times 10^{-6}` at two spacings and two lengths. Unlike a smoothing set
+in cells, the index does not change with the mesh resolution.
+
 **Pelagic carbonate and hemipelagic clay** (``pelagic:`` block). A carbonate
 rain :math:`R_c` (export production, uniform or a map) and a clay rain
 :math:`R_k` settle on the marine cells each step. The fraction of the carbonate

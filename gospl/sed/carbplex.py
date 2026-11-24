@@ -43,6 +43,10 @@ class CarbMesh(object):
         self.carbProd = None
         self.carbBudget = None
         self._carbDet = None
+        # cached screened-Poisson operator and solver of the open-water index
+        # (registered in destroy_DMPlex)
+        self._carbMat = None
+        self._ksp_carb = None
         self.pelDep = None
         self.pelBudget = None
         if getattr(self, "pelOn", False):
@@ -222,11 +226,74 @@ class CarbMesh(object):
         g = np.divide(np.abs(h[nb] - h[:, None]), d, out=np.zeros_like(d), where=d > 0.0)
         return g.max(axis=1)
 
+    def _carbBuildOp(self):
+        """Build and cache the screened-Poisson operator ``I - L^2 lap`` and
+        its solver on first use (collective)."""
+        if self._carbMat is not None:
+            return
+        kd = np.full(self.lpoints, self.carbExpLength ** 2, dtype=np.float64)
+        self._carbMat = self._buildDiffMat(kd)
+        ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+        ksp.setType("fgmres")
+        ksp.getPC().setType("bjacobi")
+        ksp.setTolerances(rtol=1.0e-10, atol=1.0e-12, max_it=2000)
+        ksp.setOptionsPrefix("carbsmooth_")
+        petsc4py.PETSc.Options()["carbsmooth_sub_pc_factor_shift_type"] = "nonzero"
+        ksp.setFromOptions()
+        ksp.setOperators(self._carbMat, self._carbMat)
+        self._ksp_carb = ksp
+
+    def _carbScreened(self, rhs):
+        """
+        Solve ``(I - L^2 lap) x = rhs`` with ``L = carbExpLength`` (the
+        finite-volume Laplacian of ``sethillslopecoeff`` with ``Kd = L^2``;
+        open edges of a flat mesh are identity rows). Operator and solver are
+        built once and cached (``_carbMat``, ``_ksp_carb``, prefix
+        ``carbsmooth_``: fgmres + block Jacobi, which converges when L spans
+        many cells). Collective.
+
+        :arg rhs: local right-hand side
+        :return: local solution
+        """
+        self._carbBuildOp()
+        self.tmpL.setArray(rhs)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp1.set(0.0)
+        self._ksp_carb.solve(self.tmp, self.tmp1)
+        if self._ksp_carb.getConvergedReason() < 0 and MPIrank == 0:
+            print("[carbonate] open-water index solve did not converge (%d)"
+                  % self._ksp_carb.getConvergedReason(), flush=True)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return self.tmpL.getArray().copy()
+
+    def _carbExposure(self, h):
+        """
+        Open-water index ``E = h - s`` (m), ``s`` the elevation smoothed over
+        ``carbExpLength`` (``(I - L^2 lap) s = h``): positive on platform
+        margins, rims and highs, negative in lagoons and behind barriers. It
+        is solved for ``E`` itself, ``(I - L^2 lap) E = A h - h``, so the
+        solver tolerance applies to the relief, not to the elevation. For a
+        parabolic ridge ``h = -b x^2`` it is exactly ``2 b L^2``. Collective.
+        Scratch: ``tmp``, ``tmpL``, ``tmp1``.
+        """
+        self._carbBuildOp()
+        self.tmpL.setArray(h)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self._carbMat.mult(self.tmp, self.tmp1)
+        self.tmp1.axpy(-1.0, self.tmp)                        # A h - h
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return self._carbScreened(self.tmpL.getArray().copy())
+
     def _carbStatic(self, h):
         """Per-factory factor that does not change within the step: habitat
-        map times the ``slope`` and ``sedrate`` responses."""
+        map times the ``slope``, ``sedrate`` and ``exposure`` responses
+        (the open-water index is solved once per step, only when used)."""
         out = []
         slope = None
+        expo = None
+        if any(ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):
+            expo = self._carbExposure(h)
+        self.carbExpo = expo
         for k, f in enumerate(self.carbFact):
             m = np.ones(self.lpoints, dtype=np.float64)
             if self._carbHab[k] is not None:
@@ -238,6 +305,8 @@ class CarbMesh(object):
                     m = m * np.interp(slope, x, fv)
                 elif ctl == "sedrate":
                     m = m * np.interp(self._carbSedRate, x, fv)
+                elif ctl == "exposure":
+                    m = m * np.interp(expo, x, fv)
             out.append(m)
         return out
 
