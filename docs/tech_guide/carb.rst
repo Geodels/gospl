@@ -86,16 +86,27 @@ where :math:`w` is the water depth, :math:`g_f` the maximum growth rate,
 slope, the clastic deposition rate of the previous step, the turbid plume of
 the river fine load, the open-water index and the sea-surface temperature.
 
-*Turbid plume* (``turbidity`` response). With :math:`q` the fine sediment the
-rivers deliver to the sea during the step, per unit area (m/yr, at the marine
-cells the river routing reaches), the plume is
+*Turbid plume* (``turbidity`` response). The plume is
 :math:`(I - L^2 \nabla^2)\, c = q` with land as identity rows (:math:`c = 0`
-there), the operator of the clay decay and of the solute plume. The
-finite-volume operator is conservative: away from land
+there), the operator of the clay decay and of the solute plume, and the
+response factor is read at :math:`c`. Its source :math:`q` (m/yr) is either
+
+- ``source: transport`` (default): the river mud carried through each marine
+  cell by the clinoform routing of the previous step, per unit area and
+  year. The routing moves the marine load downslope in passes
+  (:math:`q^{k+1} = W\, q^k` minus what each cell keeps); the river mud
+  column (lithology 0 of the lockstep) arriving at a cell is summed over the
+  passes, the river input counting at the cell it enters, so a cell's
+  throughflow is at least the mud it receives and at least the mud deposited
+  there. The production runs before the marine routing of its step, hence
+  the one-step lag (as for ``sedrate``), and the first step has no source;
+- ``source: mouths``: the mud the rivers deliver to the sea during the step
+  (at the marine cells the river routing reaches), per unit area.
+
+The finite-volume operator is conservative: away from land
 :math:`\sum c\, a = \sum q\, a` (checked to :math:`10^{-5}`, the tail that
-reaches land being absorbed), and :math:`c` decays as :math:`e^{-d/L}` from a
-river mouth. The plume is computed after the river routing of the same step,
-before the production, so it sees the current supply.
+reaches land being absorbed), and :math:`c` decays as :math:`e^{-d/L}` from
+its source.
 
 **Integration over a step.** Each cell grows with the depth it creates,
 

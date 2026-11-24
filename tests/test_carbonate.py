@@ -150,10 +150,11 @@ def test_carbonate_turbidity(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     L = 4.0e5
     block = ("carbonate:\n    factories:\n      - {name: a, growth: 500., response: "
-             "[{control: turbidity, length: %g, x: [0., 1.e-4], f: [1., 0.]}]}\n\n" % L)
+             "[{control: turbidity, length: %g, source: mouths, x: [0., 1.e-4], "
+             "f: [1., 0.]}]}\n\n" % L)
     m = Model(_case(tmp_path, "t", block), verbose=False, showlog=False)
     try:
-        assert m.carbFact[0]["turbidity"] == L
+        assert m.carbFact[0]["turbidity"] == (L, "mouths")
         h = m.hLocal.getArray()
         xyz = m.lcoords
         land = h >= m.sealevel
@@ -166,7 +167,7 @@ def test_carbonate_turbidity(tmp_path, monkeypatch):
         v = np.zeros(m.lpoints)
         v[i] = 1.0e9                                     # m3/yr of fine load
         m.vSedFLocal.setArray(v)
-        c = m._carbTurbidity(L)
+        c = m._carbTurbidity(L, "mouths")
         assert np.all(c >= 0.0) and np.all(c[land] == 0.0)
         # conservative: only the tail reaching land (> 6 L away, ~exp(-6)
         # times the coastal cells' share) is absorbed by its identity rows
@@ -180,13 +181,65 @@ def test_carbonate_turbidity(tmp_path, monkeypatch):
 
         m.tEnd = m.tNow + 0.5 * m.dt
         m.runProcesses()                                 # river load routed
-        c = m._carbTurbidity(L)
+        c = m._carbTurbidity(L, "mouths")
         assert np.all(c[m.hLocal.getArray() >= m.sealevel] == 0.0) and c.max() > 0.0
     finally:
         m.destroy()
     bad = block.replace("length: %g, " % L, "")
     with pytest.raises(ValueError, match="turbidity response needs"):
         Model(_case(tmp_path, "t2", bad), verbose=False, showlog=False)
+    with pytest.raises(ValueError, match="turbidity source"):
+        Model(_case(tmp_path, "t3", block.replace("source: mouths", "source: rivers")),
+              verbose=False, showlog=False)
+
+
+def test_carbonate_turbidity_transport(tmp_path, monkeypatch):
+    """`source: transport` (default): the marine routing records the river
+    mud carried through each cell; every deposited part of it passed through
+    its node (throughflow >= mud deposit, both from the same routing), the
+    river input counts at the nodes it enters, and the next step's plume uses
+    it (zero on land). Without a transport turbidity response the
+    routing records nothing."""
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    block = ("carbonate:\n    factories:\n      - {name: a, growth: 500., response: "
+             "[{control: turbidity, length: 4.e5, x: [0., 1.e-3], f: [1., 0.]}]}\n\n")
+    m = Model(_case(tmp_path, "tt", block), verbose=False, showlog=False)
+    try:
+        assert m.carbFact[0]["turbidity"] == (4.0e5, "transport") and m._turbTransport
+        c0 = m._carbTurbidity(4.0e5)
+        assert np.all(c0 == 0.0)                          # nothing routed yet
+        dep = {}
+        orig = type(m)._distOcean
+
+        def spy(self, sedflux, provFlux=None):
+            out = orig(self, sedflux, provFlux=provFlux)
+            if getattr(self, "_turbCol", None) is not None:
+                dep["mud"] = self._marDepProv[:, self._turbCol].copy()
+                dep["in"] = np.maximum(provFlux[:, self._turbCol], 0.0)
+            return out
+
+        monkeypatch.setattr(type(m), "_distOcean", spy)
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+        thr = m._turbThrough
+        assert thr.sum() > 0.0 and "mud" in dep
+        assert np.all(thr >= dep["mud"] - 1.0e-6 * max(dep["mud"].max(), 1.0))
+        assert np.all(thr >= dep["in"])
+        np.testing.assert_allclose(m._turbRate, thr / (m.larea * m.dt))
+        c = m._carbTurbidity(4.0e5)
+        assert c.max() > 0.0
+        assert np.all(c[m.hLocal.getArray() >= m.sealevel] == 0.0)    # land rows
+    finally:
+        m.destroy()
+    m = Model(_case(tmp_path, "tn", CARB), verbose=False, showlog=False)
+    try:
+        m.tEnd = m.tNow + 0.5 * m.dt
+        m.runProcesses()
+        assert getattr(m, "_turbThrough", None) is None
+    finally:
+        m.destroy()
 
 
 _CHILD = '''\

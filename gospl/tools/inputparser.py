@@ -2078,7 +2078,13 @@ class ReadYaml(object):
                         raise ValueError(
                             "carbonate: factory '%s' turbidity response needs a "
                             "positive `length` (m), the plume decay length." % name)
-                    turb = float(r["length"])
+                    src = str(r.get("source", "transport"))
+                    if src not in ("transport", "mouths"):
+                        raise ValueError(
+                            "carbonate: factory '%s' turbidity source must be "
+                            "`transport` (mud carried through the sea) or `mouths` "
+                            "(river input only)." % name)
+                    turb = (float(r["length"]), src)
                 resp.append((ctl, x, fv))
             hab = f.get("habitat", None)
             if hab is not None and (not isinstance(hab, (list, tuple)) or len(hab) != 2):
@@ -2088,6 +2094,10 @@ class ReadYaml(object):
                                   "phi": phi, "sand": sand, "habitat": hab,
                                   "resp": resp, "solute": solute, "turbidity": turb})
 
+        # the marine routing records the mud throughflow only when needed
+        self._turbTransport = any(f["turbidity"] is not None
+                                  and f["turbidity"][1] == "transport"
+                                  for f in self.carbFact)
         if self.carbExpLength is None and any(
                 ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):
             raise ValueError(

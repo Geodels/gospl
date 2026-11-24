@@ -138,22 +138,31 @@ class CarbMesh(object):
         q = np.where(exits, self.riverSoluteSp[:, k], 0.0) / self.larea
         return self._carbPlumeSolve(q, L)
 
-    def _carbTurbidity(self, L):
+    def _carbTurbidity(self, L, source="transport"):
         """
-        Turbid plume of the river fine load (``turbidity`` response): the fine
-        (suspended) sediment the rivers deliver to the sea this step
-        (``vSedFLocal`` at the marine cells the river routing reaches, per
-        unit area, m/yr) spread along and off the coast by ``(I - L^2 lap) c
-        = q``, land as identity rows. ``c`` is in m/yr of fine sediment per
-        unit area: near a river mouth it approaches the local supply, and it
-        decays as ``exp(-d / L)`` away from it. Read after this step's river
-        routing (the production runs before the marine deposition), so it
-        sees the current supply even where the load bypasses the shallow
-        water without settling (unlike ``sedrate``). Collective. Scratch:
-        ``tmp``, ``tmpL``, ``tmp1``.
+        Turbid plume of the river mud (``turbidity`` response), spread along
+        and off the coast by ``(I - L^2 lap) c = q``, land as identity rows.
+        ``c`` is in m/yr of mud per unit area and decays as ``exp(-d / L)``
+        away from its source ``q``:
+
+        - ``source="transport"`` (default): the river mud the marine routing
+          carried THROUGH each cell during the previous step (``_turbRate``,
+          summed over the cascade passes by ``seaplex._distOcean``, per unit
+          area and year): turbid water wherever mud is in transit, including
+          over delta platforms the load crosses without settling. Zero
+          before the first marine step.
+        - ``source="mouths"``: the fine load the rivers deliver to the sea
+          this step (``vSedFLocal`` at the marine cells the river routing
+          reaches), so the plume spreads from the river mouths only.
+
+        Collective. Scratch: ``tmp``, ``tmpL``, ``tmp1``.
         """
         sea = self.lFill <= self.sealevel
-        q = np.where(sea, np.maximum(self.vSedFLocal.getArray(), 0.0), 0.0) / self.larea
+        if source == "mouths":
+            q = np.where(sea, np.maximum(self.vSedFLocal.getArray(), 0.0), 0.0) / self.larea
+        else:
+            r = getattr(self, "_turbRate", None)
+            q = np.zeros(self.lpoints) if r is None else np.where(sea, r, 0.0)
         return self._carbPlumeSolve(q, L)
 
     def _carbPlumeSolve(self, q, L):
@@ -597,9 +606,9 @@ class CarbMesh(object):
                         plume[key] = self._carbPlume(*key)
                     m = m * np.interp(plume[key], x, fv)
                 elif ctl == "turbidity":
-                    key = ("turbidity", f["turbidity"])
+                    key = ("turbidity",) + tuple(f["turbidity"])
                     if key not in plume:
-                        plume[key] = self._carbTurbidity(f["turbidity"])
+                        plume[key] = self._carbTurbidity(*f["turbidity"])
                     m = m * np.interp(plume[key], x, fv)
             out.append(m)
         return out

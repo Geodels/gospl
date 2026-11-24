@@ -272,14 +272,19 @@ Parameters
        (nutrients, terrigenous input).
    * - ``turbidity``
      - m/yr
-     - Turbid plume of the river fine (suspended) load delivered to the sea
-       this step, spread along and off the coast over ``length`` (m): about
-       the local fine supply per unit area near a river mouth, decaying as
-       ``exp(-d / length)`` away from it. Unlike ``sedrate`` it does not need
-       the mud to settle where the factory is, so it also acts where the river
-       load crosses the shallow water and is deposited further out.
-       ``{control: turbidity, length: 1.e4, x: [0., 1.e-4], f: [1., 0.]}``
-       stops production where the plume carries 0.1 mm/yr of mud.
+     - Turbid plume of the river mud, spread along and off the coast over
+       ``length`` (m), decaying as ``exp(-d / length)`` from its source.
+       With ``source: transport`` (default) the source is the river mud the
+       marine routing carried THROUGH each cell during the previous step, per
+       unit area and year: turbid water wherever mud is in transit,
+       including over delta platforms the load crosses without settling.
+       With ``source: mouths`` it is the mud the rivers deliver to the sea
+       this step, so the plume spreads from the river mouths only (factories
+       next to the mouths, e.g. inshore reefs). Unlike ``sedrate`` neither
+       needs the mud to settle where the factory is. ``{control: turbidity,
+       length: 1.e4, x: [0., 1.e-4], f: [1., 0.]}`` stops production where the
+       plume carries 0.1 mm/yr of mud; the values depend on the source
+       (the throughflow counts the mud at every cell it crosses).
    * - ``temperature``
      - °C
      - Sea-surface temperature from the ``sst`` block (below). For reef

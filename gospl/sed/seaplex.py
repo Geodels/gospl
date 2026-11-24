@@ -1122,6 +1122,14 @@ class SEAMesh(object):
                 self.tmpL.setArray(sinkVolP[:, c])
                 self.dm.localToGlobal(self.tmpL, pvCur[c])
 
+        # Turbidity source (carbonate `turbidity` response, `source:
+        # transport`): the river mud (lithology-0 column) that reaches each
+        # node, summed over the passes; the river input itself counts at the
+        # nodes it enters. Set by seaChange for the first routing pass only.
+        tcol = getattr(self, "_turbCol", None) if prov else None
+        if tcol is not None:
+            self._turbThrough += np.maximum(provFlux[:, tcol], 0.0)
+
         # Convergence threshold: relative to initial input volume (1e-6 of
         # total) with a fixed floor of 1 m^3. Scales with input magnitude so
         # continental-scale runs converge in far fewer iterations than the
@@ -1161,6 +1169,8 @@ class SEAMesh(object):
                     self.dMat1.mult(pvCur[c], pvNxt)
                     self.dm.globalToLocal(pvNxt, self.tmpL)
                     sinkVolP[:, c] = self.tmpL.getArray()
+                if tcol is not None:
+                    self._turbThrough += np.maximum(sinkVolP[:, tcol], 0.0)
 
             excess = sinkVol >= marVol
             sinkVol[excess] -= marVol[excess]
@@ -1781,7 +1791,15 @@ class SEAMesh(object):
                 casL = casL + carbL
             provFlux = casL if provFlux is None else np.column_stack([provFlux, casL])
         tracers = provFlux is not None
+        # the mud throughflow for the next step's turbidity response
+        self._turbCol = None
+        if lit and getattr(self, "_turbTransport", False):
+            self._turbCol = (self.provNb if provOn else 0)    # lithology 0: river mud
+            self._turbThrough = np.zeros(self.lpoints, dtype=np.float64)
         marDep = self._distOcean(sedFlux, provFlux=provFlux)
+        if self._turbCol is not None:
+            self._turbRate = self._turbThrough / (self.larea * self.dt)
+            self._turbCol = None
         reportVolume(self, "marine routed deposit", marDep / self.larea)
         if not self.flatModel and self.Gmar > 0.:
             vdep = self._depMarineSystem(marDep)
