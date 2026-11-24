@@ -8,8 +8,9 @@ maximum over ranks.
 Use a short window (two or three steps) of the run you want to explain. It
 times the marine routing pieces (`_matOcean` and inside it the smoother,
 the serial `epsfill`, the whole-mesh gather), the marine cascade and coupled
-deposition, the marine diffusion, the sediment-load and flow routing solves,
-and the SPL eroder. The `--profile` phase profiler gives the coarse split
+deposition, the gravity-current routing, the marine diffusion, the
+sediment-load and flow routing solves, the SPL eroder, and the opt-in
+coastal erosion, wave solve, carbonate production and pelagic rain. The `--profile` phase profiler gives the coarse split
 (flow / erosion / sed / sea); this script goes one level down, which is what
 a stage that costs ~1000 s at scale but seconds on a smaller mesh needs.
 
@@ -33,12 +34,21 @@ _TARGETS = [
     ("gospl.mesher.unstructuredmesh", "UnstMesh", "_gatherGlobalOnRoot", "    whole-mesh gather to rank 0"),
     ("gospl.sed.seaplex", "SEAMesh", "_distOcean", "  _distOcean (marine cascade)"),
     ("gospl.sed.seaplex", "SEAMesh", "_depMarineSystem", "  _depMarineSystem (Gmar)"),
+    ("gospl.sed.seaplex", "SEAMesh", "_gravRoute", "  _gravRoute (gravity currents)"),
     ("gospl.sed.hillslope", "hillSLP", "_diffuseOcean", "  _diffuseOcean"),
     ("gospl.sed.sedplex", "SEDMesh", "sedChange", "sedChange (continental)"),
     ("gospl.sed.sedplex", "SEDMesh", "_getSedFlux", "  _getSedFlux (sediment load)"),
     ("gospl.flow.flowplex", "FAMesh", "flowAccumulation", "flowAccumulation"),
     ("gospl.eroder.SPL", "SPL", "erodepSPL", "erodepSPL"),
     ("gospl.sed.hillslope", "hillSLP", "getHillslope", "getHillslope"),
+    # opt-in marine processes (timed only when their block is on)
+    ("gospl.sed.waveplex", "WaveMesh", "coastalErosion", "coastalErosion"),
+    ("gospl.sed.waveplex", "WaveMesh", "waveEnergy", "  waveEnergy (wave solve)"),
+    ("gospl.sed.carbplex", "CarbMesh", "carbSupplyLimit", "carbSupplyLimit"),
+    ("gospl.sed.carbplex", "CarbMesh", "carbProduction", "carbProduction"),
+    ("gospl.sed.carbplex", "CarbMesh", "_carbExposure", "  _carbExposure (open-water index)"),
+    ("gospl.sed.carbplex", "CarbMesh", "_carbPlumeSolve", "  _carbPlumeSolve (solute/turbidity)"),
+    ("gospl.sed.carbplex", "CarbMesh", "pelagicRain", "pelagicRain"),
 ]
 
 

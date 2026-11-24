@@ -194,6 +194,15 @@ def field_stats(out, step):
     return res
 
 
+def makes_sediment(out):
+    """True when the run creates sediment in place (carbonate production,
+    pelagic rain): its output budget then gains volume by design."""
+    if not out.steps:
+        return False
+    names = set(out.fields(out.steps[-1]))
+    return bool(names & {"carbProd", "pelDep"})
+
+
 def budget(out):
     """Per-output-step eroded / deposited / net volume from erodep (m^3)."""
     rows, prev = [], None
@@ -249,6 +258,21 @@ def compare(a, b, step):
     return res
 
 
+def in_model_sources(rec):
+    """Volume of sediment created in place during a step (m^3), from a
+    `--summary` record: the carbonate produced (framework and loose) and the
+    settled pelagic carbonate and clay (when resuspended, the same volume
+    reaches the seafloor through the marine diffusion)."""
+    src = 0.0
+    carb = rec.get("carbonate")
+    if carb:
+        src += float(carb.get("produced", 0.0))
+    pel = rec.get("pelagic")
+    if pel:
+        src += float(pel.get("carbonate", 0.0)) + float(pel.get("clay", 0.0))
+    return src
+
+
 def inspect_summary(path, jump=0.25):
     """Anomalies in a `gospl --summary` JSON-Lines file."""
     recs = [json.loads(l) for l in open(path) if l.strip()]
@@ -292,12 +316,16 @@ def inspect_summary(path, jump=0.25):
                                "detail": {"before": prev["elev"], "after": r["elev"]}})
         vol = r.get("volume", {})
         act = vol.get("deposited", 0.0) - vol.get("eroded", 0.0)
+        # Sediment made in place this step (carbonate production, settled
+        # pelagic carbonate and clay) is a real source: take it out of the net
+        # before judging the balance.
+        src = in_model_sources(r)
         # Only a CLOSED domain must balance; on an open one a negative net is
-        # sediment leaving through the boundary. A gain is never physical.
-        net_rel = vol.get("net", 0.0) / act if act > 0 else 0.0
+        # sediment leaving through the boundary. Any other gain is not physical.
+        net_rel = (vol.get("net", 0.0) - src) / act if act > 0 else 0.0
         if act > 0 and (net_rel > 0.05 or (head.get("closed") and abs(net_rel) > 0.05)):
             issues.append({"t": t, "issue": "volume_imbalance",
-                           "detail": {**vol, "net_rel": net_rel}})
+                           "detail": {**vol, "sources": src, "net_rel": net_rel}})
         grav = r.get("gravity")
         gin = (grav or {}).get("supplied", 0.0) + (grav or {}).get("eroded", 0.0)
         if grav and gin > 0.0:
@@ -373,6 +401,7 @@ def main(argv=None):
            "steps": out.steps, "times": [out.time(s) for s in out.steps],
            "step": step}
     rep["budget"] = budget(out)
+    rep["makes_sediment"] = makes_sediment(out)
     if not args.budget:
         rep["fields"] = field_stats(out, step)
         rep["spikes"] = spikes(out)
@@ -400,6 +429,10 @@ def main(argv=None):
         for r in rep["budget"]:
             print("  %6d %12s %12.4e %12.4e %12.4e %9.2e" % (
                 r["step"], _fmt(r["t"]), r["eroded"], r["deposited"], r["net"], r["net_rel"]))
+        if rep.get("makes_sediment"):
+            print("  (this run makes sediment in place, carbonate production or pelagic "
+                  "rain: a net gain is expected here; for the budget with these "
+                  "sources, run with --summary and inspect that file)")
     if rep.get("spikes"):
         worst = max(rep["spikes"], key=lambda r: r["max_abs_dz"])
         print("\nlargest elevation change between outputs: %.4g m at step %d, node %d "

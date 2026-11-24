@@ -22,7 +22,10 @@ SCOPE — this is a **deliberately partial** debugging facility, not a complete
 audit. What is instrumented:
 
 * the per-stage elevation maximum around SPL, the continental cascade, the
-  marine path, hillslope creep and flexure (``model.runProcesses``);
+  marine path, hillslope creep and flexure (``model.runProcesses``), and
+  around the coastal erosion, the carbonate production and the pelagic rain
+  when they are on;
+* the gravity-current deposit (``seaplex``, ``gravity:`` runs);
 * every deposition site that is **deliberately unbounded**, i.e. the ones that
   can lift a cell arbitrarily far because they exist to conserve mass when the
   routing has nowhere else to put the sediment: the closed-sink deposit

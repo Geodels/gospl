@@ -73,7 +73,7 @@ def _synthetic(tmp_path, nx=12, ny=10, dx=1000.0, L=5, sea=None, time=None):
         xd.mkdir()
         txt = '<Grid>\n'
         if time is not None:
-            txt += '  <Time Value="%r"/>\n' % float(time)
+            txt += '  <Time Type="Single" Value="%r"/>\n' % float(time)   # goSPL's format
         if sea is not None:
             txt += ('  <Attribute Name="sea">\n'
                     '    <DataItem ItemType="Function" Function="$0 * 1.0 + %r">\n'
@@ -392,3 +392,12 @@ def test_stratasection_lithologies(tmp_path):
     ax = ss.cross_section(data, kind="x", at=4500.0, color_by="lithologies")
     texts = [t.get_text() for t in ax.get_legend().get_texts()]
     assert "reef" in texts
+    # the well and the Wheeler diagram use the same named classes (no
+    # interpolated codes, a legend instead of a colour bar)
+    import matplotlib.pyplot as plt
+    for draw in (lambda: ss.synthetic_well(data, 4500.0, 4500.0, color_by="lithologies"),
+                 lambda: ss.wheeler(data, kind="x", at=4500.0, color_by="lithologies")):
+        ax = draw()
+        texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert "reef" in texts and len(ax.figure.axes) == 1
+        plt.close(ax.figure)

@@ -19,6 +19,15 @@ Three field modes (``--field``):
   plain stratigraphy run needs neither dual lithology nor provenance).
 * ``lithology`` — coarse / fine thickness, fine fraction and the per-fraction
   porosities (needs the dual-lithology ``stratHf``/``phiF`` fields).
+* ``lithologies`` — every lithology the run recorded: river sand
+  (``coarse``, the remainder of each layer), river mud (``fine``) and the
+  named piles ``stratH_<name>`` (the carbonate lithologies ``carb_mud``,
+  ``carb_sand``, ``reef``, or a ``strata: lithologies:`` list), as a volume
+  fraction per lithology (``frac_<name>``), the ``dominantLith`` code (in the
+  order coarse, fine, then the names sorted, as in
+  ``stratasection color_by="lithologies"``; -1 for an empty layer), the
+  ``carbonateFrac`` when the run has carbonate lithologies and the
+  ``porosity``. The codes are printed when the volume is written.
 * ``provenance`` — per-source-class volume fraction, the dominant source and
   the per-layer ``porosity`` (plus ``phiFine`` if the run is also dual
   lithology); needs the provenance ``stratP`` field.
@@ -45,12 +54,15 @@ Options
 ``--out PREFIX``
     output file prefix (default ``strata``); writes ``<outdir>/<out>.xdmf`` plus
     ``<outdir>/<out>.<step>.p<p>.h5``.
-``--field {basic,lithology,provenance}``
+``--field {basic,lithology,lithologies,provenance}``
     cell-field set (default ``basic``). ``basic`` = thickness/elevation/layer/
     porosity only (works for any run); ``lithology`` = coarse/fine thickness,
     fine fraction and per-fraction porosity (needs the dual-lithology
     ``stratHf``/``phiF`` fields); ``provenance`` = per-source-class volume
-    fraction + dominant source + per-layer ``porosity`` (needs ``stratP``).
+    fraction + dominant source + per-layer ``porosity`` (needs ``stratP``);
+    ``lithologies`` = one fraction per recorded lithology, the dominant one
+    and the carbonate fraction (runs with several lithologies, e.g. the
+    carbonate module; ``lithology`` counts every non-fine pile as coarse).
 ``--steps S0,S1,...``
     comma-separated output steps to convert (default: all found). Steps with
     fewer than 2 recorded layers are skipped.
@@ -172,8 +184,9 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
         nlay = stratZ.shape[1]
         avail = set(f.keys())
         litho = field == "lithology"
+        lits = field == "lithologies"
         prov = field == "provenance"
-        basic = not (litho or prov)          # thickness/elevation/porosity only
+        basic = not (litho or lits or prov)  # thickness/elevation/porosity only
         # Per-layer porosity (phiS) is recorded for ANY stratigraphy run, so it is
         # read here and attached for every field mode (including "basic", which
         # needs neither dual lithology nor provenance).
@@ -206,6 +219,18 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
                 )
             stratHf = np.asarray(f["stratHf"], dtype=np.float64)
             phiF = np.asarray(f["phiF"], dtype=np.float64)
+        if lits:
+            if "stratHf" not in avail:
+                raise ValueError(
+                    "field 'lithologies' needs the dual-lithology 'stratHf' field, "
+                    "absent from %s (use --field basic for a single-lithology run)"
+                    % stratal_path
+                )
+            litnames = ["fine"] + sorted(
+                k[len("stratH_"):] for k in avail if k.startswith("stratH_"))
+            litH = {"fine": np.asarray(f["stratHf"], dtype=np.float64)}
+            for name in litnames[1:]:
+                litH[name] = np.asarray(f["stratH_" + name], dtype=np.float64)
         if prov:
             if "stratP" not in avail:
                 raise ValueError(
@@ -313,6 +338,31 @@ def build_partition(stratal_path, topology_path, lo, field, mesh_path=None):
         out["cells"]["phiCoarse"] = _cell(phiS[:, lay])
         out["cells"]["phiFine"] = _cell(phiF[:, lay])
 
+    if lits:
+        Hl = stratH[:, lay]
+        piles = {name: np.clip(litH[name][:, lay], 0.0, None) for name in litnames}
+        named = sum(piles.values())
+        piles = {"coarse": np.clip(Hl - named, 0.0, None), **piles}
+        names = ["coarse"] + litnames
+        # average the thicknesses over the wedge's vertices, then divide: a
+        # vertex where the layer is eroded must not dilute the fractions
+        thick = {nm: _cell(piles[nm]).astype(np.float64) for nm in names}
+        tot = sum(thick.values())
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cells = {nm: np.where(tot > 0.0, thick[nm] / tot, 0.0).astype(np.float32)
+                     for nm in names}
+        stack = np.column_stack([cells[nm] for nm in names])
+        dom = np.where(stack.sum(axis=1) > 0.0, stack.argmax(axis=1), -1)
+        for nm in names:
+            out["cells"]["frac_" + nm] = cells[nm]
+        out["cells"]["dominantLith"] = dom.astype(np.int32)
+        carb = [nm for nm in names if nm.startswith("carb_") or nm == "reef"]
+        if carb:
+            out["cells"]["carbonateFrac"] = sum(cells[nm] for nm in carb)
+        if phiS is not None:
+            out["cells"]["porosity"] = _cell(phiS[:, lay])
+        out["lith_names"] = names
+
     if prov:
         C = stratP.shape[2]
         P = stratP[:, lay, :]                                   # (n, nint, C)
@@ -419,7 +469,7 @@ def write_xdmf(out_prefix, meta, field, times=None):
                 "      </Geometry>\n" % (nv, h5)
             )
             for name in blk["cells"]:
-                dt = "Int" if name in ("dominant", "layer") else "Float"
+                dt = "Int" if name in ("dominant", "dominantLith", "layer") else "Float"
                 L.append("   " + _attr_cell(name, h5, name, nw, dtype=dt))
             if field == "provenance":
                 for c in range(blk["ncl"]):
@@ -442,10 +492,12 @@ def main(argv=None):
     p.add_argument("--out", default="strata",
                    help="output file prefix (default: strata)")
     p.add_argument("--field", default="basic",
-                   choices=["basic", "lithology", "provenance"],
+                   choices=["basic", "lithology", "lithologies", "provenance"],
                    help="cell field set to attach: 'basic' (thickness, "
                         "elevation, layer, porosity — works for any run), "
                         "'lithology' (dual-lithology coarse/fine + porosities), "
+                        "'lithologies' (one fraction per recorded lithology, "
+                        "dominant lithology, carbonate fraction), "
                         "or 'provenance' (per-source fractions). Default: basic")
     p.add_argument("--steps", default=None,
                    help="comma-separated steps (default: all found)")
@@ -516,6 +568,7 @@ def main(argv=None):
                 "nw": len(data["wedges"]),
                 "cells": list(data["cells"].keys()),
                 "ncl": data["n_classes"],
+                "lith": data.get("lith_names"),
             })
         if blocks:
             local_meta[step] = blocks
@@ -543,6 +596,11 @@ def main(argv=None):
         write_xdmf(out_prefix, meta, args.field, times=times)
         print("wrote %s.xdmf (%d step(s), %d partition(s)) — open in ParaView"
               % (out_prefix, len(meta), nparts))
+        lith = next((b["lith"] for bl in meta.values() for b in bl if b.get("lith")),
+                    None)
+        if lith:
+            print("  dominantLith codes: " + ", ".join(
+                "%d = %s" % (k, nm) for k, nm in enumerate(lith)) + " (-1: empty)")
         skipped = [s for s in steps if s not in meta]
         if skipped:
             print("  (skipped step(s) %s — fewer than 2 recorded layers, so no "

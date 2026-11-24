@@ -1998,6 +1998,7 @@ class SEAMesh(object):
             self.dm.localToGlobal(self.tmpL, self.tmp)
             # net gravity change: deposit (+) or slope erosion (-)
             self.gravDep += gC + gF - eTh
+            reportVolume(self, "gravity-current deposit", gC + gF)
             owned = self.inIDs == 1
             sums = MPI.COMM_WORLD.allreduce(
                 np.array([gravSed[owned].sum(),

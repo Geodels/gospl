@@ -141,7 +141,8 @@ def _read_time(h5dir, file_base, step):
             txt = f.read()
     except OSError:
         return None
-    m = re.search(r'<Time\s+Value="(-?[0-9.eE+]+)"', txt)
+    # goSPL writes <Time Type="Single" Value="..."/>: allow other attributes
+    m = re.search(r'<Time\b[^>]*?\bValue="(-?[0-9.eE+]+)"', txt)
     return float(m.group(1)) if m else None
 
 

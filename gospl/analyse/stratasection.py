@@ -649,13 +649,20 @@ def synthetic_well(data, x, y, color_by="lithology", cmap=None, ax=None,
     iface = _interp_layers(data, data["interfaces"],
                            np.array([x]), np.array([y]))[0]        # (L+1,)
     cfld, dcmap, label = color_field(data, color_by, tstart, dt)
-    cval = _interp_layers(data, cfld, np.array([x]), np.array([y]))[0]  # (L,)
-
-    finite = cval[np.isfinite(cval)]
-    lo = vmin if vmin is not None else (finite.min() if finite.size else 0.0)
-    hi = vmax if vmax is not None else (finite.max() if finite.size else 1.0)
-    norm = colors.Normalize(lo, hi)
-    cmp = plt.get_cmap(cmap or dcmap)
+    litho = color_by == "lithologies"
+    if litho:
+        # categories: the nearest node's class, never an interpolated code
+        cval = _nearest_layers(data, cfld, np.array([x]), np.array([y]))[0]
+        names, lcols, llabels = _litho_classes(data)
+        cmp = colors.ListedColormap(lcols)
+        norm = colors.BoundaryNorm(np.arange(len(lcols) + 1) - 0.5, len(lcols))
+    else:
+        cval = _interp_layers(data, cfld, np.array([x]), np.array([y]))[0]  # (L,)
+        finite = cval[np.isfinite(cval)]
+        lo = vmin if vmin is not None else (finite.min() if finite.size else 0.0)
+        hi = vmax if vmax is not None else (finite.max() if finite.size else 1.0)
+        norm = colors.Normalize(lo, hi)
+        cmp = plt.get_cmap(cmap or dcmap)
 
     if ax is None:
         _, ax = plt.subplots(figsize=figsize or (2.6, 6))
@@ -675,7 +682,13 @@ def synthetic_well(data, x, y, color_by="lithology", cmap=None, ax=None,
         ax.set_ylim(np.nanmin(iface), np.nanmax(iface))
     ax.set_xticks([])
     ax.set_ylabel("elevation (m)")
-    if colorbar:
+    if colorbar and litho:
+        from matplotlib.patches import Patch
+        present = sorted(set(int(v) for v in cval[np.isfinite(cval)]))
+        ax.legend(handles=[Patch(color=lcols[i], label=llabels[i]) for i in present],
+                  loc="upper center", bbox_to_anchor=(0.5, -0.02), fontsize=7,
+                  frameon=False, ncol=1)
+    elif colorbar:
         sm = cm.ScalarMappable(norm=norm, cmap=cmp)
         if cbar_orientation == "horizontal":
             # A well is usually drawn tall & very narrow (e.g. figsize=(1, 8));
@@ -802,7 +815,11 @@ def wheeler(data, kind="x", at=None, path=None, color_by="thickness",
         label = _LABEL["facies"]
     else:
         cfld, dcmap, label = color_field(data, color_by, tstart, dt)
-    cvals = _interp_layers(data, cfld, xs, ys)                    # (npts, L)
+    litho = color_by == "lithologies"
+    if litho:
+        cvals = _nearest_layers(data, cfld, xs, ys)               # categories
+    else:
+        cvals = _interp_layers(data, cfld, xs, ys)                # (npts, L)
     C = np.where(np.nan_to_num(thick) > 1.0e-6, cvals, np.nan)    # gap = hiatus
 
     times = tstart + (data["lo"] + np.arange(data["nlayers"] + 1)) * dt
@@ -815,6 +832,17 @@ def wheeler(data, kind="x", at=None, path=None, color_by="thickness",
         fcmap, norm, fcolors, nfac = _facies_cmap_norm(facies_depths, facies_colors)
         Cf = np.ma.masked_invalid(np.round(C.T[:, :-1]))
         mesh = ax.pcolormesh(X, Y, Cf, cmap=fcmap, norm=norm, shading="flat")
+    elif litho:
+        from matplotlib.colors import BoundaryNorm, ListedColormap
+        from matplotlib.patches import Patch
+
+        names, lcols, llabels = _litho_classes(data)
+        Cl = np.ma.masked_invalid(C.T[:, :-1])
+        ax.pcolormesh(X, Y, Cl, cmap=ListedColormap(lcols),
+                      norm=BoundaryNorm(np.arange(len(lcols) + 1) - 0.5, len(lcols)),
+                      shading="flat")
+        present = sorted(set(int(v) for v in np.unique(Cl.compressed())))
+        lith_handles = [Patch(color=lcols[i], label=llabels[i]) for i in present]
     else:
         mesh = ax.pcolormesh(X, Y, np.ma.masked_invalid(C.T[:, :-1]),
                              cmap=cmap or dcmap, shading="flat")
@@ -858,6 +886,9 @@ def wheeler(data, kind="x", at=None, path=None, color_by="thickness",
     if facies:
         _facies_legend(ax, fcolors, facies_labels, nfac, loc=legend_loc,
                        extra=[shoreline] if shoreline is not None else None)
+    elif litho:
+        ax.legend(handles=lith_handles + ([shoreline] if shoreline is not None else []),
+                  loc=legend_loc, fontsize=8, frameon=False)
     elif shoreline is not None:
         ax.legend(handles=[shoreline], loc=legend_loc, fontsize=8)
 
@@ -992,8 +1023,10 @@ def main(argv=None):
                      legend_loc=loc or "upper right", title_fontsize=tf,
                      xlim=xlim, ylim=ylim)
     # Keep the requested --figsize by default; --tight crops to content.
+    # a well's lithology legend sits below the column: keep it in the file
+    tight = args.tight or (args.kind == "well" and args.color_by == "lithologies")
     ax.figure.savefig(args.out, dpi=200,
-                      bbox_inches="tight" if args.tight else None)
+                      bbox_inches="tight" if tight else None)
     # Release the figure — the CLI owns it (saved to file), so close it so
     # repeated invocations don't accumulate open figures (matplotlib's
     # "More than 20 figures have been opened" warning).

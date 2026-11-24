@@ -104,3 +104,23 @@ def test_inspect_summary_flags_issues(run_dir, tmp_path):
     assert not rep["finished"]
     assert {"nonfinite", "flow_ksp_fallback_failed"} <= kinds
     assert ri.main(["--summary", str(p)]) == 1                 # non-finite -> rc 1
+
+
+def test_inspect_summary_in_model_sources(tmp_path):
+    """Sediment made in place (carbonate production, settled pelagic
+    carbonate and clay) is a source, not an imbalance: a step whose net gain
+    equals its production is clean, the same gain without the production is
+    flagged."""
+    from gospl.analyse import runinspect as ri
+
+    step = {"step": 1, "t": 10.0, "wall_s": 1.0, "elev": {"min": -1.0, "max": 1.0, "mean": 0.0},
+            "volume": {"eroded": -1.0e9, "deposited": 1.5e9, "net": 0.5e9}}
+    p = tmp_path / "s.jsonl"
+    with_src = dict(step, carbonate={"produced": 0.3e9, "framework": 0.1e9, "loose": 0.2e9},
+                    pelagic={"carbonate_rain": 0.3e9, "carbonate": 0.15e9, "dissolved": 0.15e9,
+                             "clay": 0.05e9, "bypassed": 0.0})
+    assert ri.in_model_sources(with_src) == 0.5e9
+    p.write_text(json.dumps(with_src) + "\n")
+    assert not any(i["issue"] == "volume_imbalance" for i in ri.inspect_summary(str(p))["issues"])
+    p.write_text(json.dumps(step) + "\n")
+    assert any(i["issue"] == "volume_imbalance" for i in ri.inspect_summary(str(p))["issues"])

@@ -316,3 +316,38 @@ def test_stratamesh_cli_end_to_end(tmp_path):
             assert f["vertices"].shape == (n * (L - 1), 3)   # lo=1 -> 2 surfaces
             assert f["wedges"].shape == (m * (L - 2), 6)
             assert f["frac"].shape[1] == C
+
+
+def test_stratamesh_lithologies_field(tmp_path):
+    """``--field lithologies``: one fraction per recorded lithology (river
+    sand as the remainder, river mud, the named piles), summing to 1, the
+    dominant lithology code and the carbonate fraction; a vertex with an
+    eroded layer does not dilute the fractions of its wedges."""
+    h5py = pytest.importorskip("h5py")
+    from gospl.analyse.stratamesh import build_partition
+
+    h5dir, n, m, L, C, _ = _write_dataset(tmp_path, nparts=1)
+    sp = os.path.join(h5dir, "stratal.0.p0.h5")
+    with h5py.File(sp, "a") as f:
+        H = f["stratH"][:]
+        reef = np.zeros_like(H)
+        reef[:, 2] = 15.0                            # layer 2: 30 m, 9 fine, 15 reef
+        mud = np.zeros_like(H)
+        mud[:, 1] = 5.0                              # layer 1: 50 m, 20 fine, 5 carb_mud
+        H[3, 2] = 0.0                                # vertex 3: layer 2 eroded
+        reef[3, 2] = 0.0
+        f["stratH"][...] = H
+        f["stratHf"][3, 2] = 0.0
+        f["stratH_reef"] = reef
+        f["stratH_carb_mud"] = mud
+    data = build_partition(sp, os.path.join(h5dir, "topology.p0.h5"), 1, "lithologies")
+    c = data["cells"]
+    assert data["lith_names"] == ["coarse", "fine", "carb_mud", "reef"]
+    fr = np.column_stack([c["frac_" + k] for k in data["lith_names"]])
+    np.testing.assert_allclose(fr.sum(axis=1), 1.0, rtol=1e-6)
+    # the only interval is layer 2 (lo = 1): coarse 6, fine 9, reef 15 of 30
+    np.testing.assert_allclose(c["frac_reef"], 0.5, rtol=1e-6)
+    np.testing.assert_allclose(c["frac_fine"], 0.3, rtol=1e-6)
+    np.testing.assert_allclose(c["frac_coarse"], 0.2, rtol=1e-6)
+    assert np.all(c["dominantLith"] == 3)
+    np.testing.assert_allclose(c["carbonateFrac"], 0.5, rtol=1e-6)

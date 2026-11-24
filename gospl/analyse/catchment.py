@@ -25,15 +25,18 @@ The defaults match the names :func:`gospl.analyse.gridexport.to_netcdf` writes,
 so this tool reads a ``surface*.nc`` produced by ``gospl-grid`` **directly** — no
 renaming step:
 
-================  ====================  ===========================
+================  ====================  =================================
 quantity          gridexport name       legacy fallback (mapOutputs)
-================  ====================  ===========================
+================  ====================  =================================
 water discharge   ``FA``                ``flowDischarge``
 sediment load     ``sedLoad``           ``sedimentLoad``
 basin id          ``basin``             ``basinID``
-longitude         ``lon``               ``longitude``
-latitude          ``lat``               ``latitude``
-================  ====================  ===========================
+longitude         ``lon``               ``longitude``, ``x`` (flat run)
+latitude          ``lat``               ``latitude``, ``y`` (flat run)
+================  ====================  =================================
+
+On a flat (non-geographic) run the grid axes are ``x``/``y`` in metres; the
+``lon``/``lat`` columns of the CSVs then hold those coordinates.
 
 Each variable falls back to the legacy name automatically if the gridexport one
 is absent, so old ``fsdata*.nc`` files still work; explicit ``*_var`` arguments
@@ -89,8 +92,10 @@ import numpy as np
 _FLOW_ALIASES = ("FA", "fillFA", "flowDischarge")
 _SED_ALIASES = ("sedLoad", "sedimentLoad")
 _BASIN_ALIASES = ("basin", "basinID")
-_LON_ALIASES = ("lon", "longitude")
-_LAT_ALIASES = ("lat", "latitude")
+# A flat (non-geographic) run's grid has x/y axes (m): accepted as the
+# fallback, and the "lon"/"lat" columns of the CSVs then hold x/y.
+_LON_ALIASES = ("lon", "longitude", "x")
+_LAT_ALIASES = ("lat", "latitude", "y")
 # Dissolved-solute flux (Level-B geochemistry). The routed river dissolved load
 # `riverSolute` is the basin's solute delivery; `soluteflux` (the raw groundwater
 # seepage export, not routed downstream) is the fallback. Per-species fields are

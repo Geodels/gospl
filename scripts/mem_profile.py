@@ -62,6 +62,8 @@ _PHASES = [
     "_meshfrom_cell_list", "_meshStructure", "readStratLayers",
     "applyForces", "getTectonics", "flowAccumulation", "erodepSPL",
     "sedChange", "seaChange", "getHillslope", "applyFlexure", "outputMesh",
+    # opt-in marine processes (present only when their block is on)
+    "coastalErosion", "carbSupplyLimit", "carbProduction", "pelagicRain",
 ]
 
 
