@@ -48,3 +48,20 @@ carbonate sand (coarse-like) and mud (fine-like) and added to the marine
 routing of the same step, so carbonate and river sediment share the marine
 cascade, diffusion and stratigraphy. Each carbonate lithology keeps its own
 compaction curve and erodibility.
+
+**Pelagic carbonate and hemipelagic clay** (``pelagic:`` block). A carbonate
+rain :math:`R_c` (export production, uniform or a map) and a clay rain
+:math:`R_k` settle on the marine cells each step. The fraction of the carbonate
+preserved at water depth :math:`w` is
+
+.. math::
+
+    f(w) = \begin{cases} 1 & w \le z_{lys} \\
+                         \dfrac{z_{ccd} - w}{z_{ccd} - z_{lys}} & z_{lys} < w < z_{ccd} \\
+                         0 & w \ge z_{ccd} \end{cases}
+
+with :math:`z_{lys}` the lysocline and :math:`z_{ccd}` the carbonate
+compensation depth. The settled thickness over a step is
+:math:`(R_c f(w) + R_k)\,\Delta t`, capped at the water depth; the dissolved
+volume :math:`R_c (1 - f)\,\Delta t` is kept in the budget. A deposit thinner
+than the stratigraphic floor (0.1 mm) is carried over to the next steps.

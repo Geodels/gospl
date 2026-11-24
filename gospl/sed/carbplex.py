@@ -43,6 +43,10 @@ class CarbMesh(object):
         self.carbProd = None
         self.carbBudget = None
         self._carbDet = None
+        self.pelDep = None
+        self.pelBudget = None
+        if getattr(self, "pelOn", False):
+            self._initPelagic()
         if not getattr(self, "carbOn", False):
             return
         if not getattr(self, "seaDepo", False) or getattr(self, "nodep", False):
@@ -68,6 +72,145 @@ class CarbMesh(object):
         self._carbProduced = 0.0
         self._carbFramework = 0.0
         self._carbLoose = 0.0
+        return
+
+    def _initPelagic(self):
+        """Allocate the pelagic rain state: deposit rate output, the per-node
+        carry-over of sub-floor deposits, budgets and the event maps (local
+        slices, m/yr)."""
+        self.pelDep = np.zeros(self.lpoints, dtype=np.float64)
+        self._pelCarry = np.zeros((self.lpoints, 2), dtype=np.float64)
+        self._pelRain = 0.0
+        self._pelPreserved = 0.0
+        self._pelDissolved = 0.0
+        self._pelClay = 0.0
+        self._pelMaps = []
+        for e in self.pelEvents:
+            m = {}
+            for key in ("carb", "clay"):
+                v = e[key]
+                if isinstance(v, tuple):
+                    d = np.load(v[0] + ".npz")
+                    arr = np.asarray(d[v[1]], dtype=np.float64)
+                    if arr.shape[0] != self.mpoints:
+                        raise ValueError(
+                            "pelagic: map %s has %d values, the mesh %d."
+                            % (list(v), arr.shape[0], self.mpoints))
+                    m[key] = np.clip(arr[self.locIDs], 0.0, None) * 1.0e-6
+                else:
+                    m[key] = float(v)
+            self._pelMaps.append(m)
+
+    def _pelEvent(self):
+        """Index of the pelagic event in force at ``tNow`` (the last one that
+        has started; the first one before it starts)."""
+        k = 0
+        for i, e in enumerate(self.pelEvents):
+            if e["start"] <= self.tNow + 1.0e-6:
+                k = i
+        return k
+
+    def _pelPreservedFraction(self, depth, lys, ccd):
+        """Fraction of the pelagic carbonate rain preserved at water depth
+        ``depth``: 1 above the lysocline, 0 below the CCD, linear between."""
+        if ccd <= lys:
+            return np.where(depth <= lys, 1.0, 0.0)
+        return np.clip((ccd - depth) / (ccd - lys), 0.0, 1.0)
+
+    def pelagicRain(self):
+        """
+        Settle the pelagic carbonate and the hemipelagic clay of the step on
+        the marine nodes (``lFill`` at or below sea level).
+
+        The carbonate rain (event rate, uniform or map) is preserved by the
+        fraction set by the water depth (``_pelPreservedFraction``), the rest
+        dissolves (budget only); the clay settles entirely. The deposit never
+        builds above sea level. Both are laid into the stratigraphy (``carb_mud``
+        and ``fine``, so ``depoFineFrac = 1``) and raise the elevation. A
+        node's deposit thinner than the stratigraphic floor of ``deposeStrat``
+        (0.1 mm) is carried over to the next steps (``_pelCarry``) instead of
+        being lost.
+
+        Scratch Vecs: ``self.tmp`` / ``self.tmpL`` (the deposit on exit).
+        Collective (halo sync, budget).
+        """
+        ev = self._pelMaps[self._pelEvent()]
+        e = self.pelEvents[self._pelEvent()]
+        hl = self.hLocal.getArray().copy()
+        depth = self.sealevel - hl
+        marine = (self.lFill <= self.sealevel) & (depth > 0.0)
+        rain = np.where(marine, ev["carb"] * self.dt, 0.0) * np.ones(self.lpoints)
+        keep = self._pelPreservedFraction(depth, e["lys"], e["ccd"])
+        carb0 = rain * keep
+        dissolved = rain - carb0
+        clay0 = np.where(marine, ev["clay"] * self.dt, 0.0) * np.ones(self.lpoints)
+        # never above sea level: what does not fit is bypassed (budget)
+        tot = carb0 + clay0
+        scale = np.divide(np.minimum(tot, np.maximum(depth, 0.0)), tot,
+                          out=np.zeros_like(tot), where=tot > 0.0)
+        carb = carb0 * scale
+        clay = clay0 * scale
+        bypass = tot - carb - clay
+
+        # carry-over of sub-floor deposits
+        self._pelCarry[:, 0] += carb
+        self._pelCarry[:, 1] += clay
+        tot = self._pelCarry.sum(axis=1)
+        lay = tot >= 1.0e-4
+        c = np.where(lay, self._pelCarry[:, 0], 0.0)
+        k = np.where(lay, self._pelCarry[:, 1], 0.0)
+        self._pelCarry[lay] = 0.0
+        depo = c + k
+        self.pelDep = depo / self.dt
+
+        self.tmpL.setArray(depo)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        self.tmpL.setArray(depo / self.dt)
+        self.EbLocal.axpy(1.0, self.tmpL)
+        if self.stratNb > 0:
+            ff = self.depoFineFrac.copy()
+            sh = None if self.litShare is None else self.litShare.copy()
+            self.depoFineFrac[:] = 1.0
+            if self.litShare is not None:
+                self.litShare[:] = 0.0
+                cm = self.carbLit.get("carb_mud") if hasattr(self, "carbLit") else None
+                if cm is not None:
+                    self.litShare[cm] = np.divide(c, depo, out=np.zeros_like(depo),
+                                                  where=depo > 0.0)
+                self.litShare[0] = np.divide(k, depo, out=np.zeros_like(depo),
+                                             where=depo > 0.0)
+            self.tmpL.setArray(depo)
+            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.deposeStrat()
+            self.depoFineFrac = ff
+            if sh is not None:
+                self.litShare = sh
+
+        own = self.inIDs == 1
+        a = self.larea
+        b = MPI.COMM_WORLD.allreduce(
+            np.array([(rain * a)[own].sum(), (carb * a)[own].sum(),
+                      (dissolved * a)[own].sum(), (clay * a)[own].sum(),
+                      (bypass * a)[own].sum()]), op=MPI.SUM)
+        # (carbonate rain, carbonate settled, dissolved, clay settled,
+        #  bypassed above sea level), m3 over the step
+        self.pelBudget = b
+        self._pelRain += b[0]
+        self._pelPreserved += b[1]
+        self._pelDissolved += b[2]
+        self._pelClay += b[3]
+        self._pelBypass = getattr(self, "_pelBypass", 0.0) + b[4]
+        if MPIrank == 0 and self.verbose:
+            print(
+                "[pelagic] carbonate rain %0.4g km3 (preserved %0.4g, dissolved "
+                "%0.4g), clay %0.4g km3" % (b[0] * 1e-9, b[1] * 1e-9, b[2] * 1e-9,
+                                            b[3] * 1e-9),
+                flush=True,
+            )
         return
 
     def _carbSlope(self, h):

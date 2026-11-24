@@ -58,6 +58,7 @@ Class ReadYaml
       ~ReadYaml._readOut
       ~ReadYaml._readLithologies
       ~ReadYaml._readCarbonate
+      ~ReadYaml._readPelagic
 
 
 Private functions
@@ -104,3 +105,4 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._readOut
 .. automethod:: tools.inputparser.ReadYaml._readLithologies
 .. automethod:: tools.inputparser.ReadYaml._readCarbonate
+.. automethod:: tools.inputparser.ReadYaml._readPelagic

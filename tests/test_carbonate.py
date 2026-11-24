@@ -155,11 +155,12 @@ finally:
 @pytest.mark.mpi
 @pytest.mark.slow
 def test_carbonate_partition_invariant(tmp_path):
-    """Carbonate production, framework and the routed loose sediment give the
-    same elevation and lithology piles at np=1 and np=3."""
+    """Carbonate production, framework, the routed loose sediment and the
+    pelagic rain give the same elevation and lithology piles at np=1 and
+    np=3."""
     if shutil.which("mpirun") is None:
         pytest.skip("mpirun not on PATH")
-    yml = _case(tmp_path, "part")
+    yml = _case(tmp_path, "part", block=CARB + PEL)
     child = tmp_path / "_c.py"
     child.write_text(_CHILD)
     out = {}
@@ -174,3 +175,110 @@ def test_carbonate_partition_invariant(tmp_path):
     assert np.array_equal(a[:, 0], b[:, 0])
     d = np.max(np.abs(a[:, 1:] - b[:, 1:]))
     assert d < 1.0e-5, f"np=1 vs np=3 differ by {d:.3e} m"
+
+
+PEL = ("pelagic:\n  - start: 0.\n    carbonate: 50.\n    lysocline: 3500.\n"
+       "    ccd: 4500.\n    clay: 20.\n\n")
+
+
+def test_pelagic_parse(tmp_path, monkeypatch):
+    """pelagic: events are sorted and converted to m/yr, carb_mud is added
+    to the lithology table, inconsistent events are refused."""
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    block = ("pelagic:\n  - start: 50.\n    clay: 2.\n"
+             "  - start: 0.\n    carbonate: 5.\n    lysocline: 3000.\n    ccd: 4000.\n\n")
+    m = Model(_case(tmp_path, "pp", block=block), verbose=False, showlog=False)
+    try:
+        assert m.pelOn and not m.carbOn
+        assert [e["start"] for e in m.pelEvents] == [0.0, 50.0]
+        assert abs(m.pelEvents[0]["carb"] - 5.0e-6) < 1e-18
+        assert m.pelEvents[1]["carb"] == 0.0 and abs(m.pelEvents[1]["clay"] - 2e-6) < 1e-18
+        assert m.litName == ["fine", "carb_mud"] and m.carbLit["carb_mud"] == 1
+        m.tNow = 49.0
+        assert m._pelEvent() == 0
+        m.tNow = 50.0
+        assert m._pelEvent() == 1
+    finally:
+        m.destroy()
+    for block, msg in (
+        ("pelagic:\n  - start: 0.\n    carbonate: 5.\n\n", "lysocline"),
+        ("pelagic:\n  - start: 0.\n    carbonate: 5.\n    lysocline: 4000.\n"
+         "    ccd: 3000.\n\n", "ccd >= lysocline"),
+    ):
+        with pytest.raises(ValueError, match=msg):
+            Model(_case(tmp_path, "pb", block=block), verbose=False, showlog=False)
+    with pytest.raises(ValueError, match="dual lithology"):
+        Model(_case(tmp_path, "pd", block=PEL, dual=False), verbose=False, showlog=False)
+
+
+def test_pelagic_settling_exact(tmp_path, monkeypatch):
+    """
+    Protects: the settled thickness. On a seafloor at three water depths
+    (above the lysocline, half-way to the CCD, below the CCD) one step
+    deposits ``rate * dt * (1, 0.5, 0)`` of carb_mud plus ``clay * dt`` of
+    fine everywhere (20 m/Myr), exactly; a rate too small for the stratigraphic floor
+    is carried over, not lost.
+    """
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    m = Model(_case(tmp_path, "px", block=PEL), verbose=False, showlog=False)
+    try:
+        n = m.lpoints
+        depth = np.array([1000.0, 4000.0, 5000.0])[np.arange(n) % 3]
+        m.sealevel = 0.0
+        h = -depth
+        m.hLocal.setArray(h)
+        m.dm.localToGlobal(m.hLocal, m.hGlobal)
+        m.lFill = h.copy()
+        m.tNow = 0.0
+        top = m.stratStep
+        c0 = m.stratHL[1][:, top].copy()
+        f0 = m.stratHL[0][:, top].copy()
+        m.pelagicRain()
+        carb = m.stratHL[1][:, top] - c0
+        clay = m.stratHL[0][:, top] - f0
+        exp = 50.0e-6 * m.dt * np.array([1.0, 0.5, 0.0])[np.arange(n) % 3]
+        assert np.allclose(carb, exp, rtol=1e-12, atol=1e-15)
+        assert np.allclose(clay, 20.0e-6 * m.dt, rtol=1e-12)
+        assert np.allclose(m.hLocal.getArray() - h, exp + 20.0e-6 * m.dt, rtol=1e-12)
+        # a tiny rate: carried over until it reaches the 0.1 mm floor
+        m.pelEvents[0]["carb"] = m._pelMaps[0]["carb"] = 1.0e-7
+        m.pelEvents[0]["clay"] = m._pelMaps[0]["clay"] = 0.0
+        before = m.stratHL[1][:, top].copy()
+        nstep = 0
+        while nstep < 200 and np.all(m.stratHL[1][::3, top] == before[::3]):
+            m.pelagicRain()
+            nstep += 1
+        need = int(np.ceil(1.0e-4 / (1.0e-7 * m.dt)))
+        assert nstep == need, (nstep, need)
+        got = m.stratHL[1][::3, top] - before[::3]
+        assert np.allclose(got, need * 1.0e-7 * m.dt, rtol=1e-9)
+    finally:
+        m.destroy()
+
+
+@pytest.mark.slow
+def test_pelagic_budget(tmp_path, monkeypatch):
+    """Over a run: carbonate rain = settled + dissolved, the settled
+    carbonate is the carb_mud of the stratigraphy (exactly, no carbonate
+    block), and the output field exists."""
+    from gospl.model import Model
+    import h5py
+
+    monkeypatch.chdir(tmp_path)
+    m = Model(_case(tmp_path, "pg", block=PEL), verbose=False, showlog=False)
+    try:
+        m.runProcesses()
+        own = m.inIDs == 1
+        carry = (m._pelCarry[:, 0] * m.larea)[own].sum()
+        assert m._pelRain > 0.0 and m._pelDissolved > 0.0 and m._pelClay > 0.0
+        assert abs(m._pelRain - m._pelPreserved - m._pelDissolved) < 1e-9 * m._pelRain
+        dep = dict(zip(m.litName, m._litDeposited))
+        assert abs(dep["carb_mud"] + carry - m._pelPreserved) < 1e-9 * m._pelPreserved
+    finally:
+        m.destroy()
+    with h5py.File(tmp_path / "pg_out" / "h5" / "gospl.1.p0.h5", "r") as f:
+        assert "pelDep" in f

@@ -501,6 +501,12 @@ class Model(
                                 _CarbMesh.carbClasticRate(self)
                         _probeZ(self, "after marine sed")
 
+                # Pelagic carbonate and hemipelagic clay settling (opt-in)
+                if getattr(self, "pelOn", False):
+                    with self.profiler.phase("pelagic"), self._phase("pelagic"):
+                        _CarbMesh.pelagicRain(self)
+                    _probeZ(self, "after pelagic")
+
                 # Hillslope diffusion (linear and non-linear)
                 if not hillFirst:
                     with self.profiler.phase("hillslope"), self._phase("hillslope"):

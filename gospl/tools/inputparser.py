@@ -1666,7 +1666,14 @@ class ReadYaml(object):
         self.litName, self.litFine = [], []
         self.litPhi0, self.litZ0, self.litK, self.litD, self.litBed = [], [], [], [], []
         self.carbOn = False
+        self.pelOn = False
         if not self.stratLith:
+            if "pelagic" in self.input:
+                raise ValueError(
+                    "pelagic: needs dual lithology (strata: dual: True) and "
+                    "stratigraphy (a positive `strat` interval): the rain is "
+                    "recorded as the carb_mud and fine lithologies."
+                )
             if "carbonate" in self.input:
                 raise ValueError(
                     "carbonate: needs dual lithology (strata: dual: True) and "
@@ -1707,6 +1714,7 @@ class ReadYaml(object):
                 float(ent.get("z0", self.z0f)), float(ent.get("k_factor", 1.0)),
                 float(ent.get("diff_factor", 1.0)), float(ent.get("bedrock_frac", 0.0)))
         self._readCarbonate(add)
+        self._readPelagic(add)
         if sum(self.litBed) > 1.0 + 1.0e-12:
             raise ValueError(
                 "strata: the bedrock shares of the lithologies (fine: "
@@ -1846,6 +1854,74 @@ class ReadYaml(object):
             prop.update(over.get(name, {}) or {})
             self.carbLit[name] = len(self.litName)
             add(name, prop["size"] == "fine", float(prop["phi0"]), float(prop["z0"]),
+                float(prop["k_factor"]), float(prop["diff_factor"]), 0.0)
+
+    def _readPelagic(self, add):
+        """
+        Parse the optional ``pelagic:`` block (settled pelagic carbonate and
+        hemipelagic clay, docs/DESIGN_CARBONATES.md 2.8, phase C2): a list of
+        events sorted by ``start`` (yr), each holding until the next one::
+
+            pelagic:
+              - start: 0.
+                carbonate: 5.        # pelagic carbonate rain (m/Myr) or [file, key]
+                lysocline: 3500.     # depth (m) where dissolution starts
+                ccd: 4500.           # carbonate compensation depth (m)
+                clay: 1.             # hemipelagic clay (m/Myr) or [file, key]
+
+        The carbonate rain settles as ``carb_mud`` with the fraction
+        preserved going linearly from 1 at the lysocline to 0 at the CCD; the
+        clay settles as ``fine``. Adds ``carb_mud`` to the lithology table if
+        the carbonate block did not. Sets ``pelOn`` and ``pelEvents`` (list of
+        dicts: ``start``, ``carb``/``clay`` (m/yr scalar or [file, key] with
+        the m/Myr scale), ``lys``, ``ccd``).
+        """
+        ev = self.input.get("pelagic", None)
+        if ev is None:
+            return
+        if not isinstance(ev, (list, tuple)) or len(ev) == 0:
+            raise ValueError("pelagic: must be a list of events with a start time.")
+        for k, e in enumerate(ev):
+            if not isinstance(e, dict) or "start" not in e:
+                raise ValueError("pelagic: event %d needs a start time." % k)
+        self.pelEvents = []
+        anyCarb = False
+
+        def rate(val, key, k):
+            if val is None:
+                return 0.0
+            if isinstance(val, (list, tuple)):
+                if len(val) != 2:
+                    raise ValueError(
+                        "pelagic: event %d %s map must be [file, key]." % (k, key))
+                return (str(val[0]), str(val[1]))
+            v = float(val)
+            if v < 0.0:
+                raise ValueError("pelagic: event %d %s must be >= 0." % (k, key))
+            return v * 1.0e-6
+
+        for k, e in enumerate(sorted(ev, key=lambda x: float(x["start"]))):
+            carb = rate(e.get("carbonate"), "carbonate", k)
+            clay = rate(e.get("clay"), "clay", k)
+            lys = float(e.get("lysocline", 1.0e12))
+            ccd = float(e.get("ccd", lys))
+            hasCarb = isinstance(carb, tuple) or carb > 0.0
+            if hasCarb and "lysocline" not in e:
+                raise ValueError(
+                    "pelagic: event %d has carbonate rain but no lysocline." % k)
+            if ccd < lys:
+                raise ValueError(
+                    "pelagic: event %d needs ccd >= lysocline (depths in m)." % k)
+            anyCarb = anyCarb or hasCarb
+            self.pelEvents.append({"start": float(e["start"]), "carb": carb,
+                                   "clay": clay, "lys": lys, "ccd": ccd})
+        self.pelOn = True
+        if anyCarb and "carb_mud" not in self.litName:
+            prop = self.CARB_LITHOLOGIES["carb_mud"]
+            if not hasattr(self, "carbLit"):
+                self.carbLit = {}
+            self.carbLit["carb_mud"] = len(self.litName)
+            add("carb_mud", True, float(prop["phi0"]), float(prop["z0"]),
                 float(prop["k_factor"]), float(prop["diff_factor"]), 0.0)
 
     def _extraProvenance(self):

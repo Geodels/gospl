@@ -990,6 +990,37 @@ Theory: :ref:`the carbonate page of the technical guide <carb>`; design:
 ``docs/DESIGN_CARBONATES.md``.
 
 
+Pelagic carbonate and hemipelagic clay
+-----------------------------------------------------
+
+.. code:: yaml
+
+    pelagic:
+      - start: 0.
+        carbonate: 5.         # pelagic carbonate rain (m/Myr) or [file, key]
+        lysocline: 3500.      # depth (m) where dissolution starts
+        ccd: 4500.            # carbonate compensation depth (m)
+        clay: 1.              # hemipelagic clay (m/Myr) or [file, key]
+      - start: 2.e6           # a later event replaces the earlier one
+        carbonate: ['prod2Ma', 'p']
+        lysocline: 3800.
+        ccd: 4800.
+        clay: 1.
+
+Sediment settling from the water column onto the marine cells, every step,
+without routing. The carbonate rain (a uniform rate or a map with one value
+per mesh vertex, for instance an export-production field) is preserved
+entirely above the lysocline, not at all below the carbonate compensation
+depth (CCD), and linearly in between; the rest dissolves. It is recorded as
+the lithology ``carb_mud``. The clay settles everywhere on the seafloor and is
+recorded as ``fine``. Each event holds until the next one starts, so the
+lysocline and the CCD can move through time. Needs ``strata: dual: True`` and a
+``strat`` interval; it can be used with or without the ``carbonate`` block. The
+settled thickness rate is written as ``pelDep`` (m/yr); with ``--summary`` each
+step has a ``pelagic`` budget (carbonate rain, settled carbonate, dissolved,
+clay, and what did not fit below sea level).
+
+
 Groundwater & duricrust
 -----------------------
 

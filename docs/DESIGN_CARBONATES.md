@@ -174,7 +174,7 @@ place (resuspension); first version deposits in place.
 
 ## 2.9 Revised phases
 
-**Status (2026-11-24): C0 and C1 done** (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
+**Status (2026-11-24): C0, C1 and C2 done** (C2: `pelagic:` block, `CarbMesh.pelagicRain`, deposited in place; resuspension into the marine diffusion and a distance-from-coast clay law are not in) (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
 deposition, compaction, blends, advection, outputs; stage B: the routed composition
 at every deposit). Checks: dual lithology bitwise identical on 13 variants; a fine or
 coarse fraction split into two identical lithologies reproduces the dual run to

@@ -215,6 +215,11 @@ class RunSummary(object):
         if getattr(model, "carbOn", False) and cb is not None:
             rec["carbonate"] = {"produced": float(cb[0]), "framework": float(cb[1]),
                                 "loose": float(cb[2])}
+        pb = getattr(model, "pelBudget", None)
+        if getattr(model, "pelOn", False) and pb is not None:
+            rec["pelagic"] = {"carbonate_rain": float(pb[0]), "carbonate": float(pb[1]),
+                              "dissolved": float(pb[2]), "clay": float(pb[3]),
+                              "bypassed": float(pb[4])}
         with open(self.path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         self.step += 1
