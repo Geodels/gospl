@@ -248,7 +248,8 @@ class soilSPL(object):
             prefix = "soilspl_"
             solver = self.soil_solver
             snes.setTolerances(rtol=self.soil_rtol, atol=self.soil_atol,
-                               max_it=self.soil_maxit)
+                               max_it=self.soil_maxit,
+                               stol=0.0)
         else:
             prefix = "soilsplfb_"
             # The fallback only runs when the primary has already stalled, so
@@ -259,7 +260,8 @@ class soilSPL(object):
             solver = "ngmres" if self.soil_solver == "qn" else "qn"
             snes.setTolerances(rtol=max(self.soil_rtol * 100.0, 1.0e-4),
                                atol=self.soil_atol,
-                               max_it=max(2 * self.soil_maxit, 200))
+                               max_it=max(2 * self.soil_maxit, 200),
+                               stol=0.0)
         snes.setOptionsPrefix(prefix)
 
         if solver == "ngmres":
