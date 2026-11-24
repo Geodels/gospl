@@ -5,7 +5,7 @@ import numpy as np
 from time import process_time
 from mpi4py import MPI
 
-from gospl.tools.constants import ICE_COVER_MIN
+from gospl.tools.constants import ICE_COVER_MIN, FILL_LEVEL_TOL
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import jacobiancoeff
@@ -290,10 +290,7 @@ class GWMesh(object):
         #    meltwater recharge is added back below (opt-in).
         sub = np.zeros(self.lpoints, dtype=bool)
         sub[self.seaID] = True
-        pitIDs = getattr(self, "pitIDs", None)
-        lFill = getattr(self, "lFill", None)
-        if pitIDs is not None and lFill is not None:
-            sub |= (pitIDs > -1) & (lFill > self.hLocal.getArray())
+        sub |= self._underLake(self.hLocal.getArray())
         if getattr(self, "iceOn", False):
             iceHL = getattr(self, "iceHL", None)
             if iceHL is not None:
@@ -401,10 +398,7 @@ class GWMesh(object):
         # Base seepage (Dirichlet h = z): standing water + open outlets.
         seep = np.zeros(self.lpoints, dtype=bool)
         seep[self.seaID] = True
-        pitIDs = getattr(self, "pitIDs", None)
-        lFill = getattr(self, "lFill", None)
-        if pitIDs is not None and lFill is not None:
-            seep |= (pitIDs > -1) & (lFill > z)
+        seep |= self._underLake(z)
         outletIDs = getattr(self, "outletIDs", None)
         if outletIDs is not None and len(outletIDs) > 0:
             seep[outletIDs] = True
@@ -582,11 +576,28 @@ class GWMesh(object):
         z = self.hLocal.getArray()
         sub = np.zeros(self.lpoints, dtype=bool)
         sub[self.seaID] = True
+        sub |= self._underLake(z)
+        return ~sub
+
+    def _underLake(self, z):
+        r"""
+        Per-node mask of cells under a ponded continental lake: in a
+        depression (``pitIDs > -1``) and more than ``FILL_LEVEL_TOL`` below
+        its filled surface ``lFill``. A cell within that distance of the
+        surface is AT it, not under water: the fill leaves 1-ulp noise
+        between ``lFill`` and the elevation, and the strict ``lFill > z``
+        flipped recharge, seepage and the subaerial mask at such cells with
+        the rank count (recharge at 12 nodes, head 44 m on
+        minimal_gw_combo at np=3; 2026-11-24). Same tolerance and sense as
+        ``flowplex._distributeDownstream``. Rank-local.
+
+        :arg z: local elevation
+        """
         pitIDs = getattr(self, "pitIDs", None)
         lFill = getattr(self, "lFill", None)
-        if pitIDs is not None and lFill is not None:
-            sub |= (pitIDs > -1) & (lFill > z)
-        return ~sub
+        if pitIDs is None or lFill is None:
+            return np.zeros(self.lpoints, dtype=bool)
+        return (pitIDs > -1) & (lFill > z + FILL_LEVEL_TOL)
 
     def _baseflowClosure(self, hold, hnew, seep):
         r"""

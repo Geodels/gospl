@@ -1701,3 +1701,52 @@ def test_base_model_partition_exact(tmp_path):
     for k in ("FA", "sedLoad"):
         rel = np.nanmax(np.abs(a[k] - b[k])) / np.nanmax(np.abs(a[k]))
         assert rel < 1.0e-6, f"np=1 vs np=3 {k} differs by {rel:.2e} of its max"
+
+
+@pytest.mark.slow
+def test_groundwater_partition_exact(tmp_path):
+    """
+    Protects: the groundwater model (recharge, head, duricrust) is
+    partition-exact on minimal_gw_combo (groundwater + duricrust + dual
+    lithology + provenance): a full run at np=3 matches np=1.
+
+    Until 2026-11-24 the recharge, seepage and subaerial masks tested
+    ``lFill > z`` strictly, so a lake cell at its own surface (1-ulp fill
+    noise) flipped with the rank count: recharge differed at 12 nodes by the
+    whole 0.02 m/yr, the head by 44 m and the elevation by 5 mm (through the
+    duricrust). `gwplex._underLake` applies `FILL_LEVEL_TOL`.
+    Asserted: recharge identical, head within 1e-3 m, elevation within 1e-5 m.
+    """
+    import re
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import numpy as np
+
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not on PATH")
+    src = FIXTURES_DIR / "minimal_gw_combo.yml"
+    if not src.exists() or not (FIXTURES_DIR / "mesh.npz").exists():
+        pytest.skip("minimal_gw_combo.yml / mesh.npz not present")
+    for f in FIXTURES_DIR.glob("*.npz"):
+        shutil.copy(f, tmp_path / f.name)
+    (tmp_path / "g.yml").write_text(re.sub(r"dir: '[^']*'", "dir: 'out'", src.read_text()))
+    tool = Path(__file__).resolve().parents[1] / "scripts" / "ab_partition.py"
+    keep = tmp_path / "ab"
+    res = subprocess.run(
+        [sys.executable, str(tool), "g.yml", "-n", "3", "--steps", "0",
+         "--field", "rechargeL", "--field", "headL",
+         "--keep", str(keep), "--timeout", str(MPI_TIMEOUT)],
+        cwd=tmp_path, capture_output=True, text=True, env=mpi_child_env(),
+        timeout=3 * MPI_TIMEOUT)
+    a, b = keep / "ab_np1.npz", keep / "ab_np3.npz"
+    assert a.exists() and b.exists(), res.stdout[-2000:] + res.stderr[-2000:]
+    a, b = np.load(a), np.load(b)
+    dr = np.nanmax(np.abs(a["rechargeL"] - b["rechargeL"]))
+    assert dr == 0.0, f"np=1 vs np=3 recharge differs by {dr:.3e} m/yr"
+    dh = np.nanmax(np.abs(a["headL"] - b["headL"]))
+    assert dh < 1.0e-3, f"np=1 vs np=3 head differs by {dh:.3e} m"
+    de = np.nanmax(np.abs(a["elev"] - b["elev"]))
+    assert de < 1.0e-5, f"np=1 vs np=3 elevation differs by {de:.3e} m"
