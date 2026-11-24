@@ -881,9 +881,9 @@ class SEAMesh(object):
                 warnings.filterwarnings("ignore")
                 self._distanceCoasts(hl)
             # From the distance to coastline define the upper limit of the shelf to ensure a maximum slope angle
-            self.clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (clinoH 1mm offset below sealevel); do not replace
+            self.clinoH = self.sealevel - 1.0e-3 - self.coastDist * self.clinSlp  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (clinoH 1mm offset below sealevel); do not replace
         else:
-            self.clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (clinoH 1mm offset); do not replace
+            self.clinoH = np.full(self.lpoints, self.sealevel - 1.0e-3, dtype=np.float64)  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (clinoH 1mm offset); do not replace
         self.clinoH[hl >= self.sealevel] = hl[hl >= self.sealevel]
         self.clinoH[self.clinoH < hl] = hl[self.clinoH < hl]
         self.maxDepQs = (self.clinoH - hl) * self.larea

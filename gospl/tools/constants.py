@@ -50,12 +50,13 @@ MISSING_LARGE_SENTINEL = -1.0e10
 # See AGENTS.md > Magic numbers.
 DISCHARGE_FLOOR = 1.0e-8
 
-# Drop sub-millimetre marine sediment deposits as numerical noise.
-# Used by sed/seaplex.py::seaChange right before the diffusion step.
-# Prevents the round-off accumulation of vanishingly thin deposits
-# across many timesteps from drifting the mass balance. See
-# AGENTS.md > Magic numbers.
-DEPOSIT_FLOOR = 1.0e-3
+# Round-off floor of the routed marine deposit (1 nm): thinner cells are set
+# to zero right before the marine diffusion (sed/seaplex.py::seaChange). It
+# was 1 mm until 2026-11-25: real sub-millimetre deposits were discarded
+# without putting the volume back (4e-5 of the sediment moved on the closed
+# test sphere, ~5 % of thinly spread coastal-erosion material). See AGENTS.md
+# > Magic numbers.
+DEPOSIT_FLOOR = 1.0e-9
 
 # Soil thickness below which the cell is treated as bedrock-exposed in
 # the soil-aware SPL kernels. Used by eroder/soilSPL.py both before

@@ -914,7 +914,7 @@ class PITFill(object):
         hl = self.hLocal.getArray().copy()
         minh = self.hGlobal.min()[1]
         if not self.flatModel:
-            minh += 1.0e-3  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (minh epsilon nudge for fillElevation); do not replace
+            minh += 1.0e-3  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (minh epsilon nudge for fillElevation); do not replace
         level = max(minh, self.sealevel + self.oFill)
 
         self._performFilling(hl - level, level, sed)
@@ -968,7 +968,7 @@ class PITFill(object):
         tfill = process_time()
         minh = self.hGlobal.min()[1]
         if not self.flatModel:
-            minh += 1.0e-3  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (minh epsilon nudge for fillIceElevation); do not replace
+            minh += 1.0e-3  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (minh epsilon nudge for fillIceElevation); do not replace
         level = max(minh, self.sealevel + self.oFill)
 
         self._performFilling(hl - level, level, False)

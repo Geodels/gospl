@@ -366,7 +366,7 @@ class SEDMesh(object):
         self._routedFine = np.zeros(self.lpoints, dtype=np.float64)
         self._routedProv = np.zeros((self.lpoints, self.provNb), dtype=np.float64)
         # In case there is still remaining sediment flux to distribute downstream
-        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value matches DEPOSIT_FLOOR but distinct role (sediment-routing convergence threshold); do not replace  # mpi-lint: ok eV = inV - pitVol is global (inV Allreduced, pitVol from pitParams)
+        if (eV > 1.0e-3).any():  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (sediment-routing convergence threshold); do not replace  # mpi-lint: ok eV = inV - pitVol is global (inV Allreduced, pitVol from pitParams)
             # Only rebuild the flow direction matrix when the topography has
             # actually changed (a pit saturated this iteration), or on the
             # very first iteration when no matrix exists yet, or on the
