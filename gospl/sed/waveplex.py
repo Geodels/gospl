@@ -133,7 +133,7 @@ class WaveMesh(object):
 
     def _waveInflow(self, vel, grazing=0.05):
         """Domain-edge nodes (flat mesh) where the waves enter: the local
-        travel direction points into the domain, ``v . n < -grazing`` with
+        travel direction points into the domain, ``dot(v, n) < -grazing`` with
         ``n`` the outward edge normal estimated from the neighbours (the test
         of ``_oroInflowBorders``, with a direction per node). Rank-local."""
         b = np.asarray(self.advectBorders, dtype=np.int64)
@@ -250,7 +250,7 @@ class WaveMesh(object):
 
     def _waveCoefficients(self):
         """Upwind advection coefficients (unit speed, so the operator is
-        ``d . grad`` in 1/m) and the inflow edges (flat meshes) of every
+        ``dot(d, grad)`` in 1/m) and the inflow edges (flat meshes) of every
         direction of the climate. Computed once (the mesh does not change);
         ``getfacevelocity`` sets module state of the Fortran kernels, so the
         coefficients are copied at once."""
@@ -309,7 +309,7 @@ class WaveMesh(object):
         """
         Relative wave energy ``waveE`` (0 to 1) of the current surface: the
         weighted sum over the wave climate of the solutions of
-        ``(d . grad + 1/L_f + kappa) E = 1/L_f`` (see the class). Collective. Scratch:
+        ``(dot(d, grad) + 1/L_f + kappa) E = 1/L_f`` (see the class). Collective. Scratch:
         ``tmp``, ``tmpL``, ``tmp1``.
         """
         if self._waveT is not None and self._waveT == self.tNow and self.waveE is not None:
