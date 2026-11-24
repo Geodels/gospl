@@ -1,3 +1,4 @@
+import re
 import os
 import gc
 import sys
@@ -11,6 +12,17 @@ from mpi4py import MPI
 from time import process_time
 
 from gospl.tools.constants import DISCHARGE_FLOOR
+
+
+# Fields written in double precision: the ones a restart reads back
+# (readData). In single precision the restored surface lost the 1-ulp tilts of
+# the depression fill and broke near-ties on flat ground, so the flow, and the
+# whole run, diverged after a restart (2026-11-24). The other outputs are for
+# viewing and stay single precision.
+_RESTART_F64 = ("elev", "erodep", "EDrate", "sedLoad", "sedLoadF", "FA", "fillFA",
+                "iceH", "flexIso", "soilH", "wtable", "duricrust")
+_F64_XMF = re.compile(r'Precision="4" (Dimensions="[^"]*">[^<]*:/(?:%s)</DataItem>)'
+                      % "|".join(_RESTART_F64))
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
@@ -65,15 +77,22 @@ class WriteMesh(object):
         # values according to the restarting step
         if self.rStep > 0:
             self.step = self.rStep + 1
+            # The state of the continuous run when it wrote output rStep (at
+            # the top of a step, before that step opens its layer): rStep * n
+            # layers above the basement, and the next layer due now. readData
+            # then takes the layer count from the file. (It was rStep * n + 1
+            # with the next layer one interval later: a restarted run skipped
+            # one layer and its compaction, and diverged from the continuous
+            # run; 2026-11-24.)
             if self.strat > 0:
                 n = int(self.tout / self.strat)
-                self.stratStep = self.rStep * n + 1
+                self.stratStep = self.rStep * n
             self.tNow = self.tStart + self.rStep * self.tout
             self.rStart = self.tStart + self.rStep * self.tout
             self.saveTime = self.tNow + self.tout
             self.saveStrat = self.tEnd + self.tout
             if self.strat > 0:
-                self.saveStrat = self.tNow + self.strat
+                self.saveStrat = self.tNow
         else:
             self.rStart = self.tStart
 
@@ -222,7 +241,7 @@ class WriteMesh(object):
             f.create_dataset(
                 "stratZ",
                 shape=(self.lpoints, self.stratStep + 1),
-                dtype="float32",
+                dtype="float64",
                 **self._h5opts,
             )
             f["stratZ"][:, : self.stratStep + 1] = self.stratZ[:, : self.stratStep + 1]
@@ -397,21 +416,21 @@ class WriteMesh(object):
             f.create_dataset(
                 "elev",
                 shape=(self.lpoints, 1),
-                dtype="float32",
+                dtype="float64",
                 **self._h5opts,
             )
             f["elev"][:, 0] = self.hLocal.getArray()
             f.create_dataset(
                 "erodep",
                 shape=(self.lpoints, 1),
-                dtype="float32",
+                dtype="float64",
                 **self._h5opts,
             )
             f["erodep"][:, 0] = self.cumEDLocal.getArray()
             f.create_dataset(
                 "EDrate",
                 shape=(self.lpoints, 1),
-                dtype="float32",
+                dtype="float64",
                 **self._h5opts,
             )
             data = self.EbLocal.getArray().copy()
@@ -427,7 +446,7 @@ class WriteMesh(object):
             f.create_dataset(
                 "fillFA",
                 shape=(self.lpoints, 1),
-                dtype="float32",
+                dtype="float64",
                 **self._h5opts,
             )
             data = self.fillFAL.getArray().copy()
@@ -438,7 +457,7 @@ class WriteMesh(object):
             f.create_dataset(
                 "FA",
                 shape=(self.lpoints, 1),
-                dtype="float32",
+                dtype="float64",
                 **self._h5opts,
             )
             data = self.FAL.getArray().copy()
@@ -451,7 +470,7 @@ class WriteMesh(object):
                 f.create_dataset(
                     "iceH",
                     shape=(self.lpoints, 1),
-                    dtype="float32",
+                    dtype="float64",
                     **self._h5opts,
                 )
                 data = self.iceHL.getArray().copy()
@@ -503,7 +522,7 @@ class WriteMesh(object):
                 f.create_dataset(
                     "flexIso",
                     shape=(self.lpoints, 1),
-                    dtype="float32",
+                    dtype="float64",
                     **self._h5opts,
                 )
                 f["flexIso"][:, 0] = self.localFlex
@@ -519,7 +538,7 @@ class WriteMesh(object):
                 f.create_dataset(
                     "soilH",
                     shape=(self.lpoints, 1),
-                    dtype="float32",
+                    dtype="float64",
                     **self._h5opts,
                 )
                 f["soilH"][:, 0] = self.Lsoil.getArray().copy()
@@ -540,7 +559,7 @@ class WriteMesh(object):
                 f.create_dataset(
                     "wtable",
                     shape=(self.lpoints, 1),
-                    dtype="float32",
+                    dtype="float64",
                     **self._h5opts,
                 )
                 f["wtable"][:, 0] = self.headL.getArray().copy()
@@ -573,7 +592,7 @@ class WriteMesh(object):
                     f.create_dataset(
                         "duricrust",
                         shape=(self.lpoints, 1),
-                        dtype="float32",
+                        dtype="float64",
                         **self._h5opts,
                     )
                     f["duricrust"][:, 0] = self.duriHL.getArray().copy()
@@ -676,7 +695,7 @@ class WriteMesh(object):
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
-                dtype="float32",
+                dtype="float64",
                 **self._h5opts,
             )
             data = self.vSedLocal.getArray().copy()
@@ -689,7 +708,7 @@ class WriteMesh(object):
                 f.create_dataset(
                     "sedLoadF",
                     shape=(self.lpoints, 1),
-                    dtype="float32",
+                    dtype="float64",
                     **self._h5opts,
                 )
                 dataF = self.vSedFLocal.getArray().copy()
@@ -868,46 +887,49 @@ class WriteMesh(object):
             if not os.path.exists(h5file):
                 raise ValueError("Restart file is missing...")
             with h5py.File(h5file, "r") as hf:
+                # as many layers as the output holds (basement included)
+                nL = hf["/stratH"].shape[1]
+                self.stratStep = nL - 1
                 self.stratZ.fill(0.0)
-                self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
+                self.stratZ[:, :nL] = np.array(hf["/stratZ"])
                 self.stratH.fill(0.0)
-                self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
+                self.stratH[:, :nL] = np.array(hf["/stratH"])
                 self.phiS.fill(0.0)
-                self.phiS[:, : self.stratStep] = np.array(hf["/phiS"])
+                self.phiS[:, :nL] = np.array(hf["/phiS"])
                 if "/stratK" in hf and self.stratK is not None:
                     # Restart-safe restore of per-layer K multipliers.
                     # Older outputs without this dataset fall back to the
                     # initialised 1.0 array (no scaling), preserving
                     # behaviour for any pre-existing restart files.
                     self.stratK.fill(1.0)
-                    self.stratK[:, : self.stratStep] = np.array(hf["/stratK"])
+                    self.stratK[:, :nL] = np.array(hf["/stratK"])
                 # Dual-lithology fine-fraction fields. Restarting a dual run
                 # from a single-fraction output (no /stratHf dataset) falls
                 # back to all-coarse zeros, so the restore stays robust.
                 if self.stratHf is not None:
                     self.stratHf.fill(0.0)
                     if "/stratHf" in hf:
-                        self.stratHf[:, : self.stratStep] = np.array(hf["/stratHf"])
+                        self.stratHf[:, :nL] = np.array(hf["/stratHf"])
                     self.phiF.fill(0.0)
                     if "/phiF" in hf:
-                        self.phiF[:, : self.stratStep] = np.array(hf["/phiF"])
+                        self.phiF[:, :nL] = np.array(hf["/phiF"])
                 # Diagenetic induration archive. Restarting a groundwater run
                 # from an output without /stratDuri falls back to uncemented
                 # zeros (the readStratLayers init), so the restore stays robust.
                 if self.stratDuri is not None and "/stratDuri" in hf:
                     self.stratDuri.fill(0.0)
-                    self.stratDuri[:, : self.stratStep] = np.array(hf["/stratDuri"])
+                    self.stratDuri[:, :nL] = np.array(hf["/stratDuri"])
                 # Level-B crust chemistry archive. Falls back to the empty
                 # (-1 = no crust) init from readStratLayers when the output
                 # predates the field, so the restore stays robust.
                 if self.stratCrustType is not None and "/stratCrustType" in hf:
                     self.stratCrustType.fill(-1.0)
-                    self.stratCrustType[:, : self.stratStep] = np.array(
+                    self.stratCrustType[:, :nL] = np.array(
                         hf["/stratCrustType"]
                     )
                 if self.stratCrustSource is not None and "/stratCrustSource" in hf:
                     self.stratCrustSource.fill(-1.0)
-                    self.stratCrustSource[:, : self.stratStep] = np.array(
+                    self.stratCrustSource[:, :nL] = np.array(
                         hf["/stratCrustSource"]
                     )
                 # In-model provenance: restore per-layer per-class thickness.
@@ -916,7 +938,7 @@ class WriteMesh(object):
                 # readStratLayers), so the restore stays robust.
                 if getattr(self, "provOn", False) and "/stratP" in hf:
                     self.stratP.fill(0.0)
-                    self.stratP[:, : self.stratStep, :] = np.array(hf["/stratP"])
+                    self.stratP[:, :nL, :] = np.array(hf["/stratP"])
 
         return
 
@@ -1223,6 +1245,14 @@ class WriteMesh(object):
         f.write(" </Domain>\n")
         f.write("</Xdmf>\n")
         f.close()
+
+        # The fields a restart reads back are stored in double precision
+        # (_RESTART_F64): declare them so, the others stay single precision.
+        with open(xmf_file) as fx:
+            txt = fx.read()
+        txt = _F64_XMF.sub(r'Precision="8" \1', txt)
+        with open(xmf_file, "w") as fx:
+            fx.write(txt)
 
         return
 
