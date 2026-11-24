@@ -665,9 +665,11 @@ Outputs
   bypassed) and, with ``carbonate_supply``, a ``carbonate_supply`` record
   (available, demand, scale, reservoir).
 
-The section and well tools (``gospl.analyse.stratasection``) currently draw
-the coarse/fine composition; to plot the carbonate lithologies, read the
-``stratH_<name>`` datasets.
+The section tool (``gospl.analyse.stratasection.cross_section``) draws the
+lithologies with ``color_by="lithologies"`` (each layer cell coloured by its
+dominant lithology: clastic sand yellow, clastic mud grey, carbonate sand light
+blue, carbonate mud dark blue, reef pink, with a legend) and the carbonate share
+with ``color_by="carbonate"``.
 
 
 With the other options

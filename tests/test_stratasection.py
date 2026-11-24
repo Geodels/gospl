@@ -362,3 +362,33 @@ def test_stratasection_global_mesh(tmp_path):
         assert np.allclose(iface, expect[None, :], atol=1e-6)
         ss.cross_section(data, path=path, color_by="lithology")
     ss.horizontal_slice(data, -115.0, color_by="lithology")
+
+
+def test_stratasection_lithologies(tmp_path):
+    """Lithology piles (stratH_<name>, the carbonate lithologies) are read;
+    ``color_by="lithologies"`` gives each layer cell its dominant lithology
+    (reef where it dominates), ``carbonate`` the carbonate share, and the
+    section draws them with a legend."""
+    h5py = pytest.importorskip("h5py")
+    import gospl.analyse.stratasection as ss
+
+    h5dir, mesh, _ = _synthetic(tmp_path)
+    with h5py.File(str(tmp_path / "h5" / "stratal.0.p0.h5"), "a") as f:
+        H = np.asarray(f["stratH"])
+        reef = np.zeros_like(H)
+        reef[:, 2] = 0.9 * H[:, 2]                    # layer 2: reef-dominated
+        f["stratHf"][:, 2] = 0.05 * H[:, 2]
+        f["stratH_reef"] = reef
+        f["stratH_carb_mud"] = np.zeros_like(H)
+    data = ss.load_strata(h5dir, mesh, step=0)
+    assert set(data["lithologies"]) == {"fine", "carb_mud", "reef"}
+    arr, _, _ = ss.color_field(data, "lithologies")
+    names, cols, labels = ss._litho_classes(data)
+    k = names.index("reef")
+    assert np.all(arr[:, 1] == k)                     # layer 2 (sentinel dropped)
+    assert cols[k] == ss._LITHO_COLORS["reef"] and labels[k] == "reef"
+    carb, _, _ = ss.color_field(data, "carbonate")
+    assert np.allclose(carb[:, 1], 0.9) and np.allclose(carb[:, 0], 0.0)
+    ax = ss.cross_section(data, kind="x", at=4500.0, color_by="lithologies")
+    texts = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert "reef" in texts

@@ -36,18 +36,37 @@ import numpy as np
 
 # Per-layer colour fields. Each maps to an (n_nodes, n_layers) array.
 _COLOR_FIELDS = ("deposition", "thickness", "lithology", "coarse",
-                 "porosity", "age", "provenance", "facies")
+                 "porosity", "age", "provenance", "facies", "lithologies",
+                 "carbonate")
 _CMAP = {
     "deposition": "terrain", "thickness": "viridis", "lithology": "YlGnBu",
     "coarse": "YlOrBr", "porosity": "cividis", "age": "Spectral",
-    "provenance": "tab20",
+    "provenance": "tab20", "carbonate": "PuBu",
 }
 _LABEL = {
     "deposition": "deposition elevation (m)", "thickness": "layer thickness (m)",
     "lithology": "fine fraction", "coarse": "coarse fraction",
     "porosity": "bulk porosity", "age": "layer (oldest=0)",
     "provenance": "dominant source class", "facies": "depositional facies",
+    "lithologies": "dominant lithology", "carbonate": "carbonate fraction",
 }
+
+# Colours of the lithologies (``color_by="lithologies"``): coarse clastic sand,
+# clastic mud (the dual-lithology fine fraction), the carbonate lithologies
+# (DESIGN_CARBONATES.md) and a cycle for any other named lithology.
+_LITHO_COLORS = {
+    "coarse": "#e9c46a",      # clastic sand
+    "fine": "#8d99ae",        # clastic mud
+    "carb_sand": "#a8dadc",   # carbonate sand
+    "carb_mud": "#457b9d",    # carbonate mud (incl. pelagic)
+    "reef": "#f15bb5",        # reef framework
+}
+_LITHO_LABELS = {
+    "coarse": "clastic sand", "fine": "clastic mud", "carb_sand": "carbonate sand",
+    "carb_mud": "carbonate mud", "reef": "reef",
+}
+_LITHO_CYCLE = ("#2a9d8f", "#e76f51", "#6a4c93", "#80b918", "#ffb703")
+_CARB_NAMES = ("carb_sand", "carb_mud", "reef")
 _SENTINEL = 1.0e5
 
 # Depositional-facies defaults (tunable). The facies of a layer is set by the
@@ -190,6 +209,7 @@ def load_strata(h5dir, mesh, step=None, vkey="v", ckey="c", file_base="gospl",
     with h5py.File(sparts[0], "r") as f:
         L = f["stratH"].shape[1]
         has_litho = "stratHf" in f and "phiF" in f
+        litnames = sorted(k[len("stratH_"):] for k in f.keys() if k.startswith("stratH_"))
         has_prov = "stratP" in f
         nprov = f["stratP"].shape[2] if has_prov else 0
 
@@ -198,6 +218,8 @@ def load_strata(h5dir, mesh, step=None, vkey="v", ckey="c", file_base="gospl",
     if has_litho:
         fields["stratHf"] = np.full((npts, L), np.nan)
         fields["phiF"] = np.full((npts, L), np.nan)
+    for name in litnames:
+        fields["stratH_" + name] = np.full((npts, L), np.nan)
     prov = np.full((npts, L, nprov), np.nan) if has_prov else None
     elev = np.full(npts, np.nan)
 
@@ -233,6 +255,12 @@ def load_strata(h5dir, mesh, step=None, vkey="v", ckey="c", file_base="gospl",
         "phiF": fields["phiF"][:, sl] if has_litho else None,
         "stratP": prov[:, sl, :] if has_prov else None,
         "nlayers": L - lo, "lo": lo, "step": step,
+        # every lithology pile (bulk thickness per layer): the dual fine
+        # fraction as "fine", then the others by name (carbonates, ...)
+        "lithologies": dict(
+            ([("fine", np.nan_to_num(fields["stratHf"][:, sl]))] if has_litho else [])
+            + [(n, np.nan_to_num(fields["stratH_" + n][:, sl])) for n in litnames]
+        ),
     }
     # Sea level for this step, read from the simulation (the step's .xmf `sea`
     # constant); None if the file is absent. Used as the default sea level for
@@ -285,6 +313,22 @@ def color_field(data, color_by, tstart=0.0, dt=1.0):
             tstart + (data["lo"] + np.arange(data["nlayers"])) * dt,
             H.shape,
         ).astype(float)
+    elif color_by in ("lithologies", "carbonate"):
+        lit = data.get("lithologies") or {}
+        if not lit:
+            raise ValueError("color_by=%r needs dual-lithology output" % color_by)
+        H = data["stratH"]
+        if color_by == "carbonate":
+            carb = sum((v for k, v in lit.items() if k in _CARB_NAMES), np.zeros_like(H))
+            with np.errstate(invalid="ignore", divide="ignore"):
+                arr = np.where(H > 0, np.clip(carb / H, 0.0, 1.0), np.nan)
+        else:
+            names, cols, _ = _litho_classes(data)
+            piles = [np.maximum(H - sum(lit.values()), 0.0)] + [lit[n] for n in names[1:]]
+            arr = np.argmax(np.stack(piles, axis=-1), axis=-1).astype(float)
+            arr[~(H > 0)] = np.nan
+            from matplotlib.colors import ListedColormap
+            return arr, ListedColormap(cols), _LABEL[color_by]
     elif color_by == "provenance":
         if data["stratP"] is None:
             raise ValueError("color_by='provenance' needs provenance output")
@@ -294,6 +338,32 @@ def color_field(data, color_by, tstart=0.0, dt=1.0):
         raise ValueError("unknown color_by %r (choose from %s)"
                          % (color_by, ", ".join(_COLOR_FIELDS)))
     return arr, _CMAP.get(color_by, "viridis"), _LABEL.get(color_by, color_by)
+
+
+def _litho_classes(data):
+    """Lithology classes of ``color_by="lithologies"``: names (coarse clastic
+    first, then ``fine`` and the named piles), colours and labels."""
+    names = ["coarse"] + list((data.get("lithologies") or {}).keys())
+    cols, labels = [], []
+    k = 0
+    for n in names:
+        if n in _LITHO_COLORS:
+            cols.append(_LITHO_COLORS[n])
+        else:
+            cols.append(_LITHO_CYCLE[k % len(_LITHO_CYCLE)])
+            k += 1
+        labels.append(_LITHO_LABELS.get(n, n))
+    return names, cols, labels
+
+
+def _nearest_layers(data, arr, xs, ys):
+    """Per-(node, layer) values at the transect points from the nearest node
+    (for categorical fields, which must not be interpolated)."""
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(np.column_stack([data["x"], data["y"]]))
+    _, idx = tree.query(np.column_stack([xs, ys]))
+    return arr[idx]
 
 
 def _transect(data, kind="x", at=None, path=None, npts=None):
@@ -416,6 +486,7 @@ def cross_section(data, kind="x", at=None, path=None, color_by="lithology",
         sea_level = data.get("sea_level")
     dt = _effective_dt(data, tstart, dt)
     facies = color_by == "facies"
+    litho = color_by == "lithologies"
 
     xs, ys, dist = _transect(data, kind, at, path, npts)
     iface = _interp_layers(data, data["interfaces"], xs, ys)        # (npts, L+1)
@@ -424,7 +495,10 @@ def cross_section(data, kind="x", at=None, path=None, color_by="lithology",
         label = _LABEL["facies"]
     else:
         cfld, dcmap, label = color_field(data, color_by, tstart, dt)
-    cvals = _interp_layers(data, cfld, xs, ys)                      # (npts, L)
+    if litho:
+        cvals = _nearest_layers(data, cfld, xs, ys)                # categories
+    else:
+        cvals = _interp_layers(data, cfld, xs, ys)                  # (npts, L)
 
     Y = iface.T                                                    # true elevation
     X = np.broadcast_to(dist, Y.shape)
@@ -460,6 +534,17 @@ def cross_section(data, kind="x", at=None, path=None, color_by="lithology",
         mesh = ax.pcolormesh(X, Y, C, cmap=fcmap, norm=norm, shading="flat",
                              zorder=2)
         _facies_legend(ax, fcolors, facies_labels, nfac, loc=legend_loc)
+    elif litho:
+        from matplotlib.colors import BoundaryNorm, ListedColormap
+        from matplotlib.patches import Patch
+
+        names, cols, labels = _litho_classes(data)
+        norm = BoundaryNorm(np.arange(len(cols) + 1) - 0.5, len(cols))
+        ax.pcolormesh(X, Y, C, cmap=ListedColormap(cols), norm=norm,
+                      shading="flat", zorder=2)
+        present = sorted(set(int(v) for v in np.unique(C.compressed())))
+        ax.legend(handles=[Patch(color=cols[i], label=labels[i]) for i in present],
+                  loc=legend_loc, fontsize=8, frameon=False)
     else:
         mesh = ax.pcolormesh(X, Y, C, cmap=cmap or dcmap, shading="flat",
                              zorder=2)
