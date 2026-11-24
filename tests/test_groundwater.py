@@ -102,8 +102,9 @@ def test_groundwater_recharge():
             """marine + ponded-lake mask on the current state (no ice)."""
             s = np.zeros(m.lpoints, dtype=bool)
             s[m.seaID] = True
-            if getattr(m, "pitIDs", None) is not None and getattr(m, "lFill", None) is not None:
-                s |= (m.pitIDs > -1) & (m.lFill > hl)
+            # the model's lake mask (gwplex._underLake: lFill above the
+            # surface by more than FILL_LEVEL_TOL)
+            s |= m._underLake(hl)
             return s
 
         # (humid, scalar f) R = f·max(0, rain−evap) with the under-water zeroing.
@@ -315,7 +316,7 @@ def test_watertable_steady():
 
         deltas = []
         prev = None
-        for _ in range(55):
+        for _ in range(120):
             m.updateGroundwater()             # outer relaxation onto steady state
             h = m.headL.getArray().copy()
             if prev is not None:
@@ -326,8 +327,10 @@ def test_watertable_steady():
         assert np.isfinite(deltas).all() and (deltas >= 0).all()
         # Contracting fixed-point iteration: the head-change per solve collapses
         # toward zero. Geometric decay (ratio ~0.96/iter on this coarse pitted
-        # mesh — full mm-level convergence takes ~60 iters), so we assert a clear
-        # multi-fold contraction over the relaxation, not full convergence.
+        # mesh) with a slow monotone tail where a dry cell fills: 0.30 of the
+        # first change after 54 sweeps, 0.11 after 119 (since 2026-11-24, when
+        # cells at a lake surface stopped being pinned to it on round-off). So
+        # we assert a clear multi-fold contraction, not full convergence.
         assert deltas[-1] < 0.3 * deltas[0], (
             f"head not converging to steady state: first Δ={deltas[0]:.3g}, "
             f"last Δ={deltas[-1]:.3g}"
@@ -914,11 +917,14 @@ def test_groundwater_restart(tmp_path, monkeypatch):
     try:
         assert np.allclose(mr.headL.getArray(), h1, atol=1.0e-4), "head not restored"
         assert np.allclose(mr.duriHL.getArray(), d1, atol=1.0e-6), "duriH not restored"
-        # depth below the surface, floored at 0 like the model
-        # (gwplex: clip(z - h, 0, z - zbed)): where the water table stands
-        # above the ground (a lake) the depth is 0, not negative
+        # depth below the surface, clipped like the model
+        # (gwplex: clip(z - h, 0, z - zbed)): 0 where the water table stands
+        # above the ground (a lake), the aquifer thickness where the head is
+        # below the aquifer base
+        z = mr.hLocal.getArray()
         assert np.allclose(
-            mr.wtDepth, np.maximum(mr.hLocal.getArray() - mr.headL.getArray(), 0.0),
+            mr.wtDepth, np.clip(z - mr.headL.getArray(), 0.0,
+                                np.maximum(z - mr._gwZbed(z), 0.0)),
             atol=1.0e-6,
         )
         assert np.allclose(mr.duriKarmor, 1.0 - mr.duriArmorMax * mr.duriF)
