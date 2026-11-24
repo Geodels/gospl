@@ -802,7 +802,8 @@ class hillSLP(object):
         if self._snes_hill is None:
             snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
             snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                               max_it=self.snes_maxit)
+                               max_it=self.snes_maxit,
+                               stol=0.0)
             if self.verbose:
                 snes.setMonitor(self._diff_nl_monitor)
             self._snes_hill_f = self.hGlobal.duplicate()

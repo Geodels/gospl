@@ -192,13 +192,15 @@ class nlSPL(object):
             prefix = "nlspled_"
             solver = self.nlspl_solver
             snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                               max_it=self.snes_maxit)
+                               max_it=self.snes_maxit,
+                               stol=0.0)
         else:
             prefix = "nlspledfb_"
             solver = "ngmres" if self.nlspl_solver == "qn" else "qn"
             snes.setTolerances(rtol=max(self.snes_rtol * 100.0, 1.0e-4),
                                atol=self.snes_atol,
-                               max_it=max(2 * self.snes_maxit, 200))
+                               max_it=max(2 * self.snes_maxit, 200),
+                               stol=0.0)
         snes.setOptionsPrefix(prefix)
 
         if solver == "ngmres":
@@ -361,7 +363,8 @@ class nlSPL(object):
         if self._snes_nl is None:
             snes = petsc4py.PETSc.SNES().create(comm=petsc4py.PETSc.COMM_WORLD)
             snes.setTolerances(rtol=self.snes_rtol, atol=self.snes_atol,
-                               max_it=self.snes_maxit)
+                               max_it=self.snes_maxit,
+                               stol=0.0)
             if self.verbose:
                 snes.setMonitor(self._monitor)
             self._snes_nl_f = self.hGlobal.duplicate()
