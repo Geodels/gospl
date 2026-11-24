@@ -299,10 +299,12 @@ def test_carbonate_partition_invariant(tmp_path, pel):
     a, b = out[1], out[3]
     assert np.array_equal(a[:, 0], b[:, 0])
     d = np.max(np.abs(a[:, 1:] - b[:, 1:]))
-    # With the rain resuspended, more (and thinner) sediment goes through the
-    # marine diffusion, whose stage solve stops at ~5e-3 m per node: since
-    # thin deposits are no longer discarded (DEPOSIT_FLOOR 1 nm) its
-    # partition noise shows (8.6e-5 m; it passed at 1e-5 with the 1 mm floor).
+    # KNOWN BUG (AGENTS.md > Known bugs): with the rain resuspended, the
+    # lithology split of sub-millimetre marine deposits depends on the
+    # partition (carb_sand 0.18 vs 0.27 mm in one layer, 8.6e-5 m; elevation
+    # and layer totals agree to 1e-7). Hidden while thin deposits were
+    # discarded. Not the marine diffusion tolerance (unchanged down to 1e-5 m).
+    # Pinned at the current behaviour; tighten to 1e-5 once fixed.
     tol = 2.0e-4 if pel == "resuspend" else 1.0e-5
     assert d < tol, f"np=1 vs np=3 differ by {d:.3e} m"
 

@@ -318,7 +318,7 @@ Each of these is marked with a permanent `# TODO-REFACTOR: value matches X but d
 
 ## Known bugs (fix before refactoring)
 All issues found by the 2026-10 analytical benchmarks and partition checks are fixed (see `docs/dev/FIXED_BUGS.md`). When you find one, record it here with how to reproduce it, and pin it with a benchmark or test at the current behaviour.
-- _(none currently open)_
+- **Lithology split of thin marine deposits depends on the partition (resuspended pelagic rain).** `pytest tests/test_carbonate.py -k "partition_invariant and resuspend"`: after 10 steps np=1 and np=3 agree on elevation and layer thickness to 1e-7 m, but the `carb_sand` pile of a 0.2 mm deposit differs (0.18 vs 0.27 mm, 8.6e-5 m). It was hidden while sub-mm deposits were discarded (the former 1 mm `DEPOSIT_FLOOR` and the 0.1 mm `deposeStrat` floor); it does not depend on the marine diffusion tolerance (tested down to 1e-5 m). Suspects: the tracer split of tiny arrivals in `_distOcean` (`arr > 1e-12`), `_marineLitShare` (priors below 1e-12 zeroed) or the composition handed with the resuspended rain. Pinned at 2e-4 m in that test (branch `feat/carbonates`).
 
 ## Known limitations (documented, not bugs)
 Stated in the GMD model-description paper (revision of Nov 2026) and in the user and technical guides. Do not "fix" them silently: a change of behaviour must update the docs and be discussed with the maintainer.
