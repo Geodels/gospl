@@ -221,3 +221,48 @@ def test_soil_hillslope_conservation(minimal_ice_soil_model):
     assert np.max(np.abs(dL - dh)) < 1.0e-6, "soil change != elevation change"
     # (3) bedrock unchanged by creep.
     assert np.max(np.abs(dbed)) < 1.0e-6, "soil creep moved the bedrock (lHbed changed)"
+
+
+@pytest.mark.parametrize("case", ["soil", "nlspl_ed"])
+def test_snes_converge_on_the_residual(tmp_path, monkeypatch, case):
+    """
+    Protects: the soil-aware SPL and the non-linear SPL with deposition
+    converge on their residual, not on PETSc's default step-size test.
+
+    Until 2026-11-24 their SNES kept PETSc's ``stol = 1e-8``: the quasi-Newton
+    solves stopped with ``CONVERGED_SNORM_RELATIVE`` when the line-search step
+    became small, with the residual still ~1e-2 (relative ~2e-3), far from
+    ``rtol``/``atol`` = 1e-6. The answer was only as accurate as where the step
+    collapsed, which depends on the partition (a carbonate run with the soil
+    model differed by 7e-4 m between np=1 and np=3). ``stol = 0`` makes them
+    stop on the residual (or the iteration limit, then the fallbacks).
+    """
+    import re
+    import shutil
+
+    from gospl.model import Model
+
+    monkeypatch.chdir(tmp_path)
+    for f in ("mesh.npz", "soiltemp.npz"):
+        shutil.copy(FIXTURES_DIR / f, tmp_path / f)
+    if case == "soil":
+        yml = "minimal_soil_strata.yml"
+        shutil.copy(FIXTURES_DIR / yml, tmp_path / yml)
+        attr = "_snes_soil"
+    else:
+        text = (FIXTURES_DIR / "minimal.yml").read_text()
+        text = text.replace("    m: 0.5", "    n: 1.5\n    m: 0.5", 1)
+        text = re.sub(r"    G: [0-9.e+-]+", "    G: 1.", text)
+        yml = "nled.yml"
+        (tmp_path / yml).write_text(text)
+        attr = "_snes_ed"
+    m = Model(yml, verbose=False, showlog=False)
+    try:
+        m.runProcesses()
+        snes = getattr(m, attr)
+        assert snes is not None
+        reason = snes.getConvergedReason()
+        # 2 = CONVERGED_FNORM_ABS, 3 = CONVERGED_FNORM_RELATIVE (4 = SNORM)
+        assert reason in (2, 3), f"{attr} stopped with reason {reason}"
+    finally:
+        m.destroy()
