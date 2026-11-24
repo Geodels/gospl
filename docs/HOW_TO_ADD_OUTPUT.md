@@ -173,7 +173,7 @@ f["myField"][:, 0] = <source>      # write the column-0 slice
 |---|---|---|
 | Shape | `(self.lpoints, 1)` for per-node scalars | matches existing reads in `readData` and the XMF Dimensions |
 | Dtype | `float32` for output-only fields | matches existing reads; halves on-disk size |
-| Dtype | `float64` if used in restart (compaction stratigraphy uses this) | full precision survives restart |
+| Dtype | `float64` if used in restart: add the name to `_RESTART_F64` in `outmesh.py` (the XDMF then declares `Precision="8"` for it) | single precision lost the 1-ulp tilts of the depression fill and made restarts diverge (2026-11-24) |
 | Compression | `"gzip"` | adaptive, ~5-10× smaller for smooth fields |
 | Chunking | (not specified) | h5py uses auto-chunking; do not override |
 | Column slice | `[:, 0]` | shape is `(lpoints, 1)` because XMF Dimensions are `<N> 1` |
@@ -277,7 +277,7 @@ Add the matching XMF block in `_save_DMPlex_XMF` in the SAME relative position s
 `readData` (outmesh.py:401-493) restores the state Vecs from a previous run's HDF5 outputs. Only fields that participate in restarting the simulation appear there — `elev`, `erodep`, `EDrate`, `FA`, `fillFA`, `sedLoad`, optionally `sedLoadF` (dual lithology), `iceH`, `flexIso`, `soilH`.
 
 - **If your field is purely a visualisation output**, do NOT add a read block in `readData`. Restart works fine without it.
-- **If your field is state** (initialised at the start of a fresh run, expected to survive restarts), add a read block mirroring outmesh.py:434-441:
+- **If your field is state** (initialised at the start of a fresh run, expected to survive restarts), write it in double precision (`_RESTART_F64`) and add a read block mirroring the `flexIso` one. Check with `tests/test_restart.py` (continuous vs restarted run):
 
 ```python
 # In readData, inside the `with h5py.File(h5file, "r") as hf:` block
