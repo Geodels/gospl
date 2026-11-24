@@ -1718,6 +1718,7 @@ class ReadYaml(object):
         self._readSST()
         self._readCarbonate(add)
         self._readPelagic(add)
+        self._readCarbSupply()
         if sum(self.litBed) > 1.0 + 1.0e-12:
             raise ValueError(
                 "strata: the bedrock shares of the lithologies (fine: "
@@ -1749,7 +1750,8 @@ class ReadYaml(object):
         "reef": {"size": "coarse", "phi0": 0.2, "z0": 5000.0, "k_factor": 0.1,
                  "diff_factor": 0.1},
     }
-    CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure", "temperature", "wave")
+    CARB_CONTROLS = ("depth", "slope", "sedrate", "exposure", "temperature", "wave",
+                     "solute")
 
     def _readWaves(self):
         """
@@ -1819,6 +1821,40 @@ class ReadYaml(object):
             if v <= 0.0:
                 raise ValueError("waves: %s must be positive (m)." % key)
         self.waveOn = True
+
+    def _readCarbSupply(self):
+        """
+        Parse the optional ``carbonate_supply:`` block (supply-limited
+        carbonate burial, docs/DESIGN_CARBONATES.md 2.10, phase C6)::
+
+            carbonate_supply:
+                species: carbonate   # geochemistry species feeding the burial
+                yield: 1.0           # m3 of carbonate per unit of solute
+                pelagic: True        # the pelagic rain shares the supply
+
+        The marine reservoir of the species (groundwater geochemistry with
+        ``river_load`` and ``marine_coupling``) caps the carbonate buried each
+        step. ``yield`` follows the convention of the duricrust
+        ``solid_volume``: volume of rock per unit of solute, in the
+        concentration units of the geochemistry. Sets ``carbSupply`` (dict or
+        None).
+        """
+        self.carbSupply = None
+        cs = self.input.get("carbonate_supply", None)
+        if cs is None:
+            return
+        if not isinstance(cs, dict) or "species" not in cs:
+            raise ValueError("carbonate_supply: needs a `species` (geochemistry "
+                             "tracer name) and a `yield`.")
+        y = float(cs.get("yield", 0.0))
+        if y <= 0.0:
+            raise ValueError("carbonate_supply: yield must be positive (m3 of "
+                             "carbonate per unit of solute).")
+        if not (self.carbOn or self.pelOn):
+            raise ValueError("carbonate_supply: needs a `carbonate` or a `pelagic` "
+                             "block.")
+        self.carbSupply = {"species": str(cs["species"]), "yield": y,
+                           "pelagic": bool(cs.get("pelagic", True))}
 
     def _readSST(self):
         """
@@ -1942,6 +1978,7 @@ class ReadYaml(object):
                     "carbonate: factory '%s' framework and sand must be between "
                     "0 and 1." % name)
             resp = []
+            solute = None
             for r in f.get("response", None) or []:
                 ctl = str(r.get("control", ""))
                 if ctl not in self.CARB_CONTROLS:
@@ -1958,6 +1995,17 @@ class ReadYaml(object):
                     raise ValueError(
                         "carbonate: factory '%s' response '%s' factors must be "
                         ">= 0." % (name, ctl))
+                if ctl == "solute":
+                    # coastal plume of a geochemistry species (phase C6)
+                    if solute is not None:
+                        raise ValueError(
+                            "carbonate: factory '%s' has more than one solute "
+                            "response." % name)
+                    if "species" not in r or float(r.get("length", 0.0)) <= 0.0:
+                        raise ValueError(
+                            "carbonate: factory '%s' solute response needs a "
+                            "`species` and a positive `length` (m)." % name)
+                    solute = (str(r["species"]), float(r["length"]))
                 resp.append((ctl, x, fv))
             hab = f.get("habitat", None)
             if hab is not None and (not isinstance(hab, (list, tuple)) or len(hab) != 2):
@@ -1965,7 +2013,7 @@ class ReadYaml(object):
                     "carbonate: factory '%s' habitat must be [file, key]." % name)
             self.carbFact.append({"name": name, "g": g * 1.0e-6, "k": kx, "Ik": ik,
                                   "phi": phi, "sand": sand, "habitat": hab,
-                                  "resp": resp})
+                                  "resp": resp, "solute": solute})
 
         if self.carbExpLength is None and any(
                 ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):

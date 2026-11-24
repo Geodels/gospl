@@ -215,6 +215,10 @@ class RunSummary(object):
         if getattr(model, "carbOn", False) and cb is not None:
             rec["carbonate"] = {"produced": float(cb[0]), "framework": float(cb[1]),
                                 "loose": float(cb[2])}
+        sb = getattr(model, "carbSupplyBudget", None)
+        if getattr(model, "carbSupply", None) is not None and sb is not None:
+            rec["carbonate_supply"] = {"available": float(sb[0]), "demand": float(sb[1]),
+                                       "scale": float(sb[2]), "reservoir": float(sb[3])}
         pb = getattr(model, "pelBudget", None)
         if getattr(model, "pelOn", False) and pb is not None:
             rec["pelagic"] = {"carbonate_rain": float(pb[0]), "carbonate": float(pb[1]),

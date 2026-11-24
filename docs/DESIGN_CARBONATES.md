@@ -174,7 +174,7 @@ place (resuspension); first version deposits in place.
 
 ## 2.9 Revised phases
 
-**Status (2026-11-24): C0, C1, C2, C2b, C3, C5 and C7 done** (C3: `exposure` response control, screened-Poisson open-water index over a length in metres, not the marine smoother whose strength is in cells) (C2: `pelagic:` block, `CarbMesh.pelagicRain`; C2b: `clay_decay` and `resuspend`) (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
+**Status (2026-11-24): C0, C1, C2, C2b, C3, C5, C6 and C7 done** (C3: `exposure` response control, screened-Poisson open-water index over a length in metres, not the marine smoother whose strength is in cells) (C2: `pelagic:` block, `CarbMesh.pelagicRain`; C2b: `clay_decay` and `resuspend`) (C1: `carbonate:` block, `gospl/sed/carbplex.py`, benchmarks in `benchmarks/test_carbonate.py`; the keep-up depth `w*` turned out to be the give-up threshold, an unstable equilibrium, not an attractor). C0 on `feat/carbonates` (stage A: table, piles, erosion,
 deposition, compaction, blends, advection, outputs; stage B: the routed composition
 at every deposit). Checks: dual lithology bitwise identical on 13 variants; a fine or
 coarse fraction split into two identical lithologies reproduces the dual run to
@@ -205,7 +205,7 @@ A new response control `temperature` per factory, e.g. reef builders
 `x: [16, 18, 28, 32], f: [0, 1, 1, 0]`. It is also available to the pelagic
 rain (`carbonate_temperature` table on the rain rate). Pointwise, cheap.
 
-**C6, link to the geochemistry** (needs `groundwater:` with Level-B
+**C6, link to the geochemistry (done: `solute` response, `carbonate_supply:`; yield in the `solid_volume` convention)** (needs `groundwater:` with Level-B
 geochemistry and `marine_coupling`). Two couplings, both optional:
 - regional, coastal plume: the river dissolved load delivered at the coast
   (`marineSoluteInput`, per species) spread offshore with the screened-Poisson

@@ -262,6 +262,14 @@ Parameters
      - Relative wave energy from the ``waves`` block (below): 1 in the open
        ocean, 0 on land and in the lee of islands and headlands.
        ``x: [0., 0.5], f: [0.1, 1.]`` keeps reef builders on exposed margins.
+   * - ``solute``
+     - solute/m²/yr
+     - Coastal plume of a geochemistry species (needs the groundwater
+       geochemistry with ``river_load``): the river dissolved load of
+       ``species`` delivered at the coast, spread offshore over ``length``
+       (m). ``{control: solute, species: carbonate, length: 5.e4, x: [...],
+       f: [...]}`` raises production near river mouths (alkalinity) or cuts it
+       (nutrients, terrigenous input).
    * - ``temperature``
      - °C
      - Sea-surface temperature from the ``sst`` block (below). For reef
@@ -463,6 +471,40 @@ carried over until they are thick enough to be recorded. The ``pelagic`` block
 can be used with or without the ``carbonate`` block.
 
 
+.. _carb_supply:
+
+Link to the geochemistry
+------------------------
+
+With the groundwater geochemistry (``groundwater: geochem:`` with
+``river_load: True``), the solutes weathered on land reach the sea through the
+rivers. Two couplings use them:
+
+*Regional, coastal plume.* The ``solute`` response control (table above) gives
+a factory the dissolved load of a species delivered at the coast and spread
+offshore.
+
+*Global, supply-limited burial* (needs ``marine_coupling: True``, which keeps a
+marine reservoir per species fed by the rivers):
+
+.. code:: yaml
+
+    carbonate_supply:
+        species: carbonate    # geochemistry species feeding the burial
+        yield: 1.e-3          # m3 of carbonate per unit of solute
+        pelagic: True         # the pelagic rain shares the supply
+
+Each step, before the production, goSPL compares the carbonate the factories
+and the pelagic rain would bury with what the reservoir can make
+(``reservoir x yield``). When they would bury more, both are reduced by the
+same factor; what is buried is removed from the reservoir. This closes the
+loop from weathering to carbonate burial: over long times the burial follows
+the supply from the continents. ``yield`` follows the convention of the
+duricrust ``solid_volume`` (volume of rock per unit of solute), in the
+concentration units of your geochemistry: check the ``carbonate_supply``
+record of ``--summary`` (available, demand, scale, reservoir) to calibrate it.
+The reservoir is saved in the outputs and restored on restart.
+
 .. _carb_resolution:
 
 Setting it up for your resolution
@@ -484,7 +526,8 @@ Setting it up for your resolution
        response (no reef outside the warm belt), or ``habitat`` maps; a
        ``pelagic`` block with a productivity map and
        a lysocline and CCD per event; ``clay_decay`` of tens to hundreds of
-       km; usually no ``exposure`` (cells are wider than lagoons); a ``waves`` block
+       km; ``carbonate_supply`` with the geochemistry to tie the burial to
+       the weathering; usually no ``exposure`` (cells are wider than lagoons); a ``waves`` block
        with ``from: zonal`` and a ``fetch`` for exposed and sheltered coasts; time steps
        of 10-100 kyr are fine (the production does not depend on ``dt``).
    * - Regional, 0.5-5 km cells
@@ -581,8 +624,9 @@ Outputs
   (``stratHf``/``phiF`` for the dual-lithology fine fraction), in the
   ``stratal`` files.
 - ``--summary``: a ``carbonate`` budget per step (produced, framework, loose,
-  m³) and a ``pelagic`` budget (carbonate rain, settled, dissolved, clay,
-  bypassed).
+  m³), a ``pelagic`` budget (carbonate rain, settled, dissolved, clay,
+  bypassed) and, with ``carbonate_supply``, a ``carbonate_supply`` record
+  (available, demand, scale, reservoir).
 
 The section and well tools (``gospl.analyse.stratasection``) currently draw
 the coarse/fine composition; to plot the carbonate lithologies, read the

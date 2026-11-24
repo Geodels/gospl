@@ -20,6 +20,7 @@ Class CarbMesh
       ~CarbMesh.carbProduction
       ~CarbMesh.carbClasticRate
       ~CarbMesh.pelagicRain
+      ~CarbMesh.carbSupplyLimit
 
    .. rubric:: Private Methods
 
@@ -29,6 +30,11 @@ Class CarbMesh
       ~CarbMesh._carbStatic
       ~CarbMesh._carbRates
       ~CarbMesh._carbSubsteps
+      ~CarbMesh._carbIntegrate
+      ~CarbMesh._carbFinish
+      ~CarbMesh._initGeoLink
+      ~CarbMesh._carbPlume
+      ~CarbMesh._carbDrawdown
       ~CarbMesh._initSST
       ~CarbMesh._sst
       ~CarbMesh._carbBuildOp
@@ -48,6 +54,7 @@ Public functions
 .. automethod:: sed.carbplex.CarbMesh.carbProduction
 .. automethod:: sed.carbplex.CarbMesh.carbClasticRate
 .. automethod:: sed.carbplex.CarbMesh.pelagicRain
+.. automethod:: sed.carbplex.CarbMesh.carbSupplyLimit
 
 Private functions
 ---------------------
@@ -67,3 +74,8 @@ Private functions
 .. automethod:: sed.carbplex.CarbMesh._pelSettle
 .. automethod:: sed.carbplex.CarbMesh._initSST
 .. automethod:: sed.carbplex.CarbMesh._sst
+.. automethod:: sed.carbplex.CarbMesh._carbIntegrate
+.. automethod:: sed.carbplex.CarbMesh._carbFinish
+.. automethod:: sed.carbplex.CarbMesh._initGeoLink
+.. automethod:: sed.carbplex.CarbMesh._carbPlume
+.. automethod:: sed.carbplex.CarbMesh._carbDrawdown

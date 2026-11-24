@@ -226,6 +226,28 @@ marine composition, so both are conserved with the rest of the marine
 deposit.
 
 
+Link to the geochemistry
+------------------------
+
+*Coastal plume* (``solute`` response). With :math:`q_k` the river dissolved
+load of species :math:`k` delivered at the coastal exits per unit area, the
+plume is :math:`(I - L^2 \nabla^2)\, c_k = q_k` with land as identity rows
+(the operator of the clay decay); the response factor is read at :math:`c_k`.
+
+*Supply-limited burial* (``carbonate_supply``). With :math:`R_k` the marine
+reservoir of the species (accumulated from the rivers by the geochemistry) and
+:math:`y` the yield, the potential burial of a step :math:`B` (benthic
+production plus settled pelagic carbonate) is scaled by
+
+.. math::
+
+    s = \min\left(1, \frac{y R_k}{B}\right),
+
+and the reservoir loses what is buried, :math:`R_k \leftarrow R_k - s B / y`.
+Over many steps the burial is bounded by the supply from weathering; when the
+supply exceeds the potential production, the reservoir accumulates.
+
+
 Numerics and parallel consistency
 ---------------------------------
 

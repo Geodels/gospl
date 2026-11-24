@@ -54,8 +54,16 @@ class CarbMesh(object):
         self._clayMat = None
         self._ksp_clay = None
         self._sstMaps = None
+        self._carbSupplyScale = 1.0
+        self._carbProdCache = None
+        self.carbSupplyBudget = None
+        self._plumeMat = None
+        self._ksp_plume = None
         if getattr(self, "sstOn", False):
             self._initSST()
+        if getattr(self, "carbSupply", None) is not None or any(
+                f.get("solute") for f in getattr(self, "carbFact", [])):
+            self._initGeoLink()
         if getattr(self, "pelOn", False):
             self._initPelagic()
         if not getattr(self, "carbOn", False):
@@ -84,6 +92,123 @@ class CarbMesh(object):
         self._carbFramework = 0.0
         self._carbLoose = 0.0
         return
+
+    def _initGeoLink(self):
+        """Check the geochemistry coupling (phase C6): the species named by
+        ``carbonate_supply`` and by the ``solute`` responses must be tracers of
+        the groundwater geochemistry, with river routing and (for the supply)
+        the marine reservoir."""
+        names = list(getattr(self, "gwGeoName", []) or [])
+        if not getattr(self, "gwRiverLoad", False) or not names:
+            raise ValueError(
+                "carbonate: the solute response and carbonate_supply need the "
+                "groundwater geochemistry with `river_load: True`.")
+        want = [f["solute"][0] for f in getattr(self, "carbFact", []) if f.get("solute")]
+        if getattr(self, "carbSupply", None) is not None:
+            if not getattr(self, "gwMarineCoupling", False):
+                raise ValueError(
+                    "carbonate_supply: needs `marine_coupling: True` in the "
+                    "groundwater geochemistry (the marine reservoir).")
+            want.append(self.carbSupply["species"])
+        for sp in want:
+            if sp not in names:
+                raise ValueError(
+                    "carbonate: geochemistry species '%s' not found (species: %s)."
+                    % (sp, ", ".join(names)))
+        if getattr(self, "carbSupply", None) is not None:
+            self._carbSupplyK = names.index(self.carbSupply["species"])
+
+    def _carbPlume(self, species, L):
+        """
+        Coastal plume of a geochemistry species (``solute`` response, phase
+        C6): the river dissolved load of the species delivered at the coast
+        this step (``riverSoluteSp`` at the coastal exits, per unit area)
+        spread offshore by ``(I - L^2 lap) c = q``, land as identity rows
+        (holding their own input). Units: solute per m2 per yr. The operator is
+        rebuilt each call (the coast moves); cached solver ``_ksp_plume``.
+        Collective. Scratch: ``tmp``, ``tmpL``, ``tmp1``.
+        """
+        k = list(self.gwGeoName).index(species)
+        exits = np.zeros(self.lpoints, dtype=bool)
+        mi = getattr(self, "marineSoluteInput", None)
+        if mi is not None:
+            exits = mi > 0.0
+        else:
+            exits = self.lFill <= self.sealevel
+        q = np.where(exits, self.riverSoluteSp[:, k], 0.0) / self.larea
+        land = self.hLocal.getArray() >= self.sealevel
+        kd = np.full(self.lpoints, L * L, dtype=np.float64)
+        if self._plumeMat is not None:
+            self._plumeMat.destroy()
+        self._plumeMat = self._buildDiffMat(kd, fixed=land)
+        if self._ksp_plume is None:
+            ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
+            ksp.setType("fgmres")
+            ksp.getPC().setType("bjacobi")
+            ksp.setTolerances(rtol=1.0e-10, atol=1.0e-30, max_it=2000)
+            ksp.setOptionsPrefix("plume_")
+            petsc4py.PETSc.Options()["plume_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setFromOptions()
+            self._ksp_plume = ksp
+        self._ksp_plume.setOperators(self._plumeMat, self._plumeMat)
+        self.tmpL.setArray(q)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.tmp1.set(0.0)
+        self._ksp_plume.solve(self.tmp, self.tmp1)
+        self.dm.globalToLocal(self.tmp1, self.tmpL)
+        return np.maximum(self.tmpL.getArray().copy(), 0.0)
+
+    def carbSupplyLimit(self):
+        """
+        Supply-limited burial (``carbonate_supply``, phase C6). Before the
+        production and the pelagic rain of the step: their potential burial
+        (benthic production, plus the settled pelagic carbonate when the rain
+        shares the supply) against what the marine reservoir of the species
+        can make (``marineSolute * yield``). When the potential exceeds it,
+        both are scaled down by the same factor (``_carbSupplyScale``); the
+        burial actually made is removed from the reservoir as it is laid
+        (``_carbDrawdown``). The benthic integration is kept and reused by
+        ``carbProduction``. Collective (reductions).
+        """
+        k = self._carbSupplyK
+        own = self.inIDs == 1
+        demand = 0.0
+        if getattr(self, "carbOn", False):
+            prod = self._carbIntegrate()
+            self._carbProdCache = prod
+            tot = prod[0].copy()
+            for p in prod[1:]:
+                tot += p
+            demand += float(np.sum((tot * self.larea)[own]))
+        if getattr(self, "pelOn", False) and self.carbSupply["pelagic"]:
+            e = self.pelEvents[self._pelEvent()]
+            ev = self._pelMaps[self._pelEvent()]
+            depth = self.sealevel - self.hLocal.getArray()
+            marine = (self.lFill <= self.sealevel) & (depth > 0.0)
+            rain = np.where(marine, ev["carb"] * self.dt, 0.0) * np.ones(self.lpoints)
+            if e.get("temp") is not None:
+                rain = rain * np.interp(self._sst(), e["temp"][0], e["temp"][1])
+            carb = np.minimum(rain * self._pelPreservedFraction(depth, e["lys"], e["ccd"]),
+                              np.maximum(depth, 0.0))
+            demand += float(np.sum((carb * self.larea)[own]))
+        demand = MPI.COMM_WORLD.allreduce(demand, op=MPI.SUM)
+        avail = max(float(self.marineSolute[k]), 0.0) * self.carbSupply["yield"]
+        s = 1.0 if demand <= avail or demand <= 0.0 else avail / demand
+        self._carbSupplyScale = s
+        self.carbSupplyBudget = np.array([avail, demand, s, float(self.marineSolute[k])])
+        if MPIrank == 0 and self.verbose:
+            print("[carbonate] supply: available %0.4g km3, demand %0.4g km3, scale %0.3f"
+                  % (avail * 1e-9, demand * 1e-9, s), flush=True)
+
+    def _carbDrawdown(self, vol):
+        """Remove the carbonate volume ``vol`` (m3, already reduced over the
+        ranks) buried this step from the marine reservoir of the supply
+        species (no-op without ``carbonate_supply``)."""
+        if getattr(self, "carbSupply", None) is None or vol <= 0.0:
+            return
+        k = self._carbSupplyK
+        self.marineSolute[k] = max(float(self.marineSolute[k]) - vol / self.carbSupply["yield"],
+                                   0.0)
 
     def _initSST(self):
         """Load the sea-surface temperature event maps (local slices)."""
@@ -247,6 +372,8 @@ class CarbMesh(object):
         if e.get("temp") is not None:
             # pelagic production scaled by the sea-surface temperature
             rain = rain * np.interp(self._sst(), e["temp"][0], e["temp"][1])
+        if getattr(self, "carbSupply", None) is not None and self.carbSupply["pelagic"]:
+            rain = rain * self._carbSupplyScale
         keep = self._pelPreservedFraction(depth, e["lys"], e["ccd"])
         carb0 = rain * keep
         dissolved = rain - carb0
@@ -279,6 +406,8 @@ class CarbMesh(object):
         # (carbonate rain, carbonate settled or resuspended, dissolved, clay,
         #  bypassed above sea level), m3 over the step
         self.pelBudget = b
+        if getattr(self, "carbSupply", None) is not None and self.carbSupply["pelagic"]:
+            self._carbDrawdown(b[1])
         self._pelRain += b[0]
         self._pelPreserved += b[1]
         self._pelDissolved += b[2]
@@ -411,6 +540,7 @@ class CarbMesh(object):
         expo = None
         sst = None
         wave = None
+        plume = {}
         if any(ctl == "exposure" for f in self.carbFact for ctl, _, _ in f["resp"]):
             expo = self._carbExposure(h)
         self.carbExpo = expo
@@ -435,6 +565,11 @@ class CarbMesh(object):
                     if wave is None:
                         wave = self.waveEnergy()
                     m = m * np.interp(wave, x, fv)
+                elif ctl == "solute":
+                    key = f["solute"]
+                    if key not in plume:
+                        plume[key] = self._carbPlume(*key)
+                    m = m * np.interp(plume[key], x, fv)
             out.append(m)
         return out
 
@@ -473,6 +608,21 @@ class CarbMesh(object):
         exit, as ``deposeStrat`` needs it). Collective (halo sync, budget).
         """
         t0 = process_time()
+        if self._carbProdCache is not None:
+            prod = self._carbProdCache
+            self._carbProdCache = None
+        else:
+            prod = self._carbIntegrate()
+        s = self._carbSupplyScale
+        if s < 1.0:
+            prod = [p * s for p in prod]
+        self._carbFinish(prod, t0)
+        return
+
+    def _carbIntegrate(self):
+        """Integrate the production of every factory over the step (Heun
+        sub-steps, sea-level cap); returns the thickness produced per factory.
+        Collective only through the response fields it may solve."""
         hl = self.hLocal.getArray().copy()
         marine = self.lFill <= self.sealevel
         static = self._carbStatic(hl)
@@ -501,7 +651,12 @@ class CarbMesh(object):
             for k, r in enumerate(rates):
                 prod[k] += r * dts * scale
             h += dz * scale
+        return prod
 
+    def _carbFinish(self, prod, t0):
+        """Split the production ``prod`` into framework and loose sediment,
+        build the framework, keep the loose part for the marine step, update
+        the budgets (and draw the supply reservoir down)."""
         total = np.zeros(self.lpoints)
         frame = np.zeros(self.lpoints)
         sand = np.zeros(self.lpoints)
@@ -550,6 +705,7 @@ class CarbMesh(object):
             np.array([(total * self.larea)[own].sum(), (frame * self.larea)[own].sum(),
                       (loose * self.larea)[own].sum()]), op=MPI.SUM)
         self.carbBudget = b
+        self._carbDrawdown(b[0])
         self._carbProduced += b[0]
         self._carbFramework += b[1]
         self._carbLoose += b[2]

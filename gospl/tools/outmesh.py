@@ -674,6 +674,13 @@ class WriteMesh(object):
                                 **self._h5opts,
                             )
                             f["marineSoluteInput"][:, 0] = self.marineSoluteInput.copy()
+                            # Marine reservoir per species (global, the same on
+                            # every rank): model memory, drawn down by the
+                            # carbonate burial (carbonate_supply), so restored
+                            # on restart.
+                            f.create_dataset("marineSolute",
+                                             data=np.asarray(self.marineSolute,
+                                                             dtype=np.float64))
                     if self.gwNspecies > 1:
                         # Per-species fields, named by tracer: concentration,
                         # crust contribution, groundwater seepage export, and —
@@ -866,6 +873,8 @@ class WriteMesh(object):
             # restarted from an output without these datasets falls back to the
             # dry-start / uncemented init, so the restore stays robust.
             if getattr(self, "gwOn", False):
+                if getattr(self, "gwMarineCoupling", False) and "/marineSolute" in hf:
+                    self.marineSolute[:] = np.array(hf["/marineSolute"], dtype=np.float64)
                 if "/wtable" in hf:
                     self.headL.setArray(np.array(hf["/wtable"])[:, 0])
                     self.dm.localToGlobal(self.headL, self.headG)

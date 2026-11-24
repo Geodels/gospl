@@ -498,6 +498,9 @@ class Model(
                     _probeZ(self, "after continental sed")
                     if self.seaDepo:
                         # Downstream sediment deposition in marine environments
+                        if getattr(self, "carbSupply", None) is not None:
+                            # supply-limited burial: scale of this step's carbonate
+                            _CarbMesh.carbSupplyLimit(self)
                         if getattr(self, "pelOn", False) and _CarbMesh._pelResuspend(self):
                             # Pelagic rain handed to this marine step's diffusion
                             with self.profiler.phase("pelagic"), self._phase("pelagic"):
