@@ -170,8 +170,10 @@ finally:
 @pytest.mark.mpi
 @pytest.mark.slow
 def test_carbonate_supply_partition_invariant(tmp_path):
-    """Supply-limited burial (a decision on global sums) gives the same
-    elevation and reservoir at np=1 and np=3."""
+    """Supply-limited burial (a decision on global sums), with the soil model
+    of the fixture, gives the same elevation and reservoirs at np=1 and np=3
+    (it differed by 7e-4 m until the soil SNES stopped on their residual,
+    2026-11-24)."""
     import subprocess
     import sys
 
@@ -181,11 +183,6 @@ def test_carbonate_supply_partition_invariant(tmp_path):
         pytest.skip("mpirun not on PATH")
     block = CARB + "carbonate_supply:\n    species: carbonate\n    yield: 1.0e-6\n\n"
     yml = _case(tmp_path, "pp", block)
-    # without the soil model: with it, carbonate runs on this fixture differ
-    # by ~7e-4 m between np=1 and np=3 (open item, see gospl/sed/AGENTS.md),
-    # which is not what this test is about
-    text = re.sub(r"\nsoil:\n(    .*\n)*", "\n", (tmp_path / yml).read_text())
-    (tmp_path / yml).write_text(text)
     child = tmp_path / "_c.py"
     child.write_text(_CHILD)
     out, res = {}, {}
@@ -199,6 +196,8 @@ def test_carbonate_supply_partition_invariant(tmp_path):
         res[n] = np.load(str(f) + ".res.npy")
     assert np.array_equal(out[1][:, 0], out[3][:, 0])
     assert np.max(np.abs(out[1][:, 1] - out[3][:, 1])) < 1.0e-5
-    # the reservoir of the supply species (index 0, `carbonate`); the other
-    # species (silica, with an in-transit decay) is not touched by C6
-    assert np.allclose(res[1][0], res[3][0], rtol=1e-6, atol=1e-6 * max(abs(res[1][0]), 1.0))
+    # every species' reservoir (silica has no source on this fixture: 0 on
+    # both, since _solve_KSP(guess=False) starts from zero, 2026-11-24)
+    # (a drawn-down reservoir is the difference of two ~1e15 numbers: atol 1
+    # is a few ulps of that inventory)
+    assert np.allclose(res[1], res[3], rtol=1e-6, atol=1.0)
