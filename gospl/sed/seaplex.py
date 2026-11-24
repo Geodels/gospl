@@ -1733,11 +1733,24 @@ class SEAMesh(object):
         # is `provFrac · sedFlux` (Σ_c == sedFlux, nonzero only at the river-fed
         # marine nodes), routed in lockstep with the total through _distOcean so
         # each offshore deposit carries the source that drained to it.
+        # Loose carbonate sediment produced this step (carbplex.carbProduction):
+        # added to the cascade input after the gravity split (the river
+        # gravity currents do not carry it), with its mud in the fine group
+        # and each part in its lithology.
+        carbMud = None
+        if getattr(self, "carbOn", False) and getattr(self, "_carbDet", None) is not None:
+            carbDet = np.where(self.sinkIDs, self._carbDet, 0.0)
+            carbMud = np.where(self.sinkIDs, self._carbMud, 0.0)
+            carbL = np.where(self.sinkIDs[:, None], self._carbL, 0.0)
+            sedFlux = sedFlux + carbDet
+            self._carbDet = None
         provOn = getattr(self, "provOn", False)
         provFlux = (self.provFrac * sedFlux[:, None]) if provOn else None
         if lit:
             # the lithologies ride the same lockstep as extra columns
             casL = litM - gravL
+            if carbMud is not None:
+                casL = casL + carbL
             provFlux = casL if provFlux is None else np.column_stack([provFlux, casL])
         tracers = provFlux is not None
         marDep = self._distOcean(sedFlux, provFlux=provFlux)
@@ -1988,6 +2001,8 @@ class SEAMesh(object):
                 fineFlux = self.vSedFLocal.getArray().copy() * self.dt
                 fineFlux[np.invert(self.sinkIDs)] = 0.0
                 fineFlux[fineFlux < 0] = 0.0
+                if carbMud is not None:
+                    fineFlux = fineFlux + carbMud
                 litArgs = (casL, sedFlux, fineFlux - (gravFine if gravOn else 0.0)) if lit else None
                 if gravOn:
                     self._gravFineFraction(hl, sedFlux, fineFlux - gravFine,

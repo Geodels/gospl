@@ -165,3 +165,10 @@ GRAVITY_EROSION_MAX_CELL = 200.0
 # on a 1-ulp coin flip that differed with the rank count (2026-11-24).
 FILL_LEVEL_TOL = 1.0e-9
 
+
+# Growth (m) per sub-step of the carbonate production integration
+# (carbplex._carbSubsteps): the step is cut into ceil(sum(g_f) * dt / this)
+# second-order sub-steps, from the inputs only, so every rank uses the same
+# number. 0.25 m matches the exact Bosscher & Schlager ODE to 1e-4 relative
+# at 1 and 10 kyr steps (benchmarks/test_carbonate.py).
+CARB_SUBSTEP_GROWTH = 0.25

@@ -1665,7 +1665,14 @@ class ReadYaml(object):
         self.litNb = 0
         self.litName, self.litFine = [], []
         self.litPhi0, self.litZ0, self.litK, self.litD, self.litBed = [], [], [], [], []
+        self.carbOn = False
         if not self.stratLith:
+            if "carbonate" in self.input:
+                raise ValueError(
+                    "carbonate: needs dual lithology (strata: dual: True) and "
+                    "stratigraphy (a positive `strat` interval): the carbonate "
+                    "sediment is recorded as its own lithologies."
+                )
             return
 
         def add(name, fine, phi0, z0, k, d, bed):
@@ -1699,6 +1706,7 @@ class ReadYaml(object):
             add(name, size == "fine", float(ent.get("phi0", self.phi0f)),
                 float(ent.get("z0", self.z0f)), float(ent.get("k_factor", 1.0)),
                 float(ent.get("diff_factor", 1.0)), float(ent.get("bedrock_frac", 0.0)))
+        self._readCarbonate(add)
         if sum(self.litBed) > 1.0 + 1.0e-12:
             raise ValueError(
                 "strata: the bedrock shares of the lithologies (fine: "
@@ -1707,6 +1715,138 @@ class ReadYaml(object):
         self.litNb = len(self.litName)
 
         return
+
+    # Default carbonate factories (docs/DESIGN_CARBONATES.md 2.1): the three
+    # Bosscher & Schlager factories of CarboKitten (Hidding et al. 2026,
+    # Table 1). The framework and sand fractions are illustrative defaults.
+    CARB_FACTORIES = (
+        {"name": "euphotic", "growth": 500.0, "extinction": 0.8, "saturation": 60.0,
+         "framework": 0.5, "sand": 0.7},
+        {"name": "oligophotic", "growth": 400.0, "extinction": 0.1, "saturation": 60.0,
+         "framework": 0.1, "sand": 0.5},
+        {"name": "aphotic", "growth": 100.0, "extinction": 0.005, "saturation": 60.0,
+         "framework": 0.0, "sand": 0.3},
+    )
+    # Default carbonate lithologies: surface porosity and e-folding depth of
+    # the porosity-depth curve (grainstone, lime mud, boundstone; orders of
+    # magnitude from published carbonate compaction trends, to calibrate).
+    CARB_LITHOLOGIES = {
+        "carb_sand": {"size": "coarse", "phi0": 0.45, "z0": 2500.0, "k_factor": 1.0,
+                      "diff_factor": 1.0},
+        "carb_mud": {"size": "fine", "phi0": 0.65, "z0": 1500.0, "k_factor": 1.0,
+                     "diff_factor": 1.0},
+        "reef": {"size": "coarse", "phi0": 0.2, "z0": 5000.0, "k_factor": 0.1,
+                 "diff_factor": 0.1},
+    }
+    CARB_CONTROLS = ("depth", "slope", "sedrate")
+
+    def _readCarbonate(self, add):
+        """
+        Parse the optional ``carbonate:`` block (benthic carbonate production,
+        docs/DESIGN_CARBONATES.md, phase C1) and add its lithologies to the
+        table through ``add`` (called from ``_readLithologies``).
+
+        Each factory ``f`` produces, below sea level, at the Bosscher &
+        Schlager (1992) rate ``growth * tanh(I0 exp(-extinction w) /
+        saturation)`` (``w`` the water depth), times an optional habitat map
+        and response tables. Its ``framework`` fraction is built in place
+        (lithology ``reef``), the rest is loose sediment split into
+        ``carb_sand`` (``sand`` fraction, coarse-like) and ``carb_mud``
+        (fine-like), handed to the marine routing. Rates are read in m/Myr
+        and kept in m/yr.
+
+        Sets ``carbOn``, ``carbI0``, ``carbMinDepth`` and ``carbFact`` (list
+        of dicts with ``g`` (m/yr), ``k``, ``Ik``, ``phi`` (framework),
+        ``sand``, ``habitat`` ([file, key] or None) and ``resp`` (list of
+        (control, x, f))).
+        """
+        cdict = self.input.get("carbonate", None)
+        if cdict is None:
+            return
+        if cdict is True or cdict == {}:
+            cdict = {}
+        if not isinstance(cdict, dict):
+            raise ValueError("carbonate: must be a mapping.")
+        self.carbOn = True
+        self.carbI0 = float(cdict.get("insolation", 400.0))
+        self.carbMinDepth = float(cdict.get("min_depth", 0.0))
+        if self.carbI0 <= 0.0:
+            raise ValueError("carbonate: insolation must be positive.")
+        facts = cdict.get("factories", None)
+        if facts is None:
+            facts = [dict(f) for f in self.CARB_FACTORIES]
+        if not isinstance(facts, (list, tuple)) or len(facts) == 0:
+            raise ValueError("carbonate: factories must be a non-empty list.")
+        self.carbFact = []
+        names = set()
+        for k, f in enumerate(facts):
+            if not isinstance(f, dict):
+                raise ValueError("carbonate: factory %d must be a mapping." % k)
+            name = str(f.get("name", "factory%d" % k))
+            if name in names:
+                raise ValueError("carbonate: factory name '%s' is used twice." % name)
+            names.add(name)
+            g = float(f.get("growth", 0.0))
+            kx = float(f.get("extinction", 0.1))
+            ik = float(f.get("saturation", 60.0))
+            phi = float(f.get("framework", 0.0))
+            sand = float(f.get("sand", 0.5))
+            if g < 0.0 or kx < 0.0 or ik <= 0.0:
+                raise ValueError(
+                    "carbonate: factory '%s' needs growth >= 0, extinction >= 0 "
+                    "and saturation > 0." % name)
+            if not (0.0 <= phi <= 1.0 and 0.0 <= sand <= 1.0):
+                raise ValueError(
+                    "carbonate: factory '%s' framework and sand must be between "
+                    "0 and 1." % name)
+            resp = []
+            for r in f.get("response", None) or []:
+                ctl = str(r.get("control", ""))
+                if ctl not in self.CARB_CONTROLS:
+                    raise ValueError(
+                        "carbonate: factory '%s' response control '%s' is not one "
+                        "of %s." % (name, ctl, ", ".join(self.CARB_CONTROLS)))
+                x = np.asarray(r.get("x", []), dtype=float)
+                fv = np.asarray(r.get("f", []), dtype=float)
+                if x.size < 2 or x.size != fv.size or np.any(np.diff(x) <= 0.0):
+                    raise ValueError(
+                        "carbonate: factory '%s' response '%s' needs x and f of "
+                        "the same length (>= 2), x increasing." % (name, ctl))
+                if np.any(fv < 0.0):
+                    raise ValueError(
+                        "carbonate: factory '%s' response '%s' factors must be "
+                        ">= 0." % (name, ctl))
+                resp.append((ctl, x, fv))
+            hab = f.get("habitat", None)
+            if hab is not None and (not isinstance(hab, (list, tuple)) or len(hab) != 2):
+                raise ValueError(
+                    "carbonate: factory '%s' habitat must be [file, key]." % name)
+            self.carbFact.append({"name": name, "g": g * 1.0e-6, "k": kx, "Ik": ik,
+                                  "phi": phi, "sand": sand, "habitat": hab,
+                                  "resp": resp})
+
+        over = cdict.get("lithologies", None) or {}
+        if not isinstance(over, dict):
+            raise ValueError("carbonate: lithologies must be a mapping by name.")
+        needed = ["carb_sand", "carb_mud"]
+        if any(f["phi"] > 0.0 for f in self.carbFact):
+            needed.append("reef")
+        for key in over:
+            if key not in self.CARB_LITHOLOGIES:
+                raise ValueError(
+                    "carbonate: lithologies has no '%s' (carb_sand, carb_mud, reef)."
+                    % key)
+        self.carbLit = {}
+        for name in needed:
+            if name in self.litName:
+                raise ValueError(
+                    "carbonate: lithology name '%s' is reserved for the carbonate "
+                    "sediment; rename the strata: lithologies entry." % name)
+            prop = dict(self.CARB_LITHOLOGIES[name])
+            prop.update(over.get(name, {}) or {})
+            self.carbLit[name] = len(self.litName)
+            add(name, prop["size"] == "fine", float(prop["phi0"]), float(prop["z0"]),
+                float(prop["k_factor"]), float(prop["diff_factor"]), 0.0)
 
     def _extraProvenance(self):
         """

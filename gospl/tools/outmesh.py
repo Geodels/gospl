@@ -501,6 +501,14 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["flexIso"][:, 0] = self.localFlex
+            if getattr(self, "carbOn", False):
+                f.create_dataset(
+                    "carbProd",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    **self._h5opts,
+                )
+                f["carbProd"][:, 0] = self.carbProd
             if getattr(self, "gravOn", False):
                 f.create_dataset(
                     "gravDep",
@@ -1064,6 +1072,16 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/flexIso</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+            if getattr(self, "carbOn", False):
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="carbProd">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/carbProd</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

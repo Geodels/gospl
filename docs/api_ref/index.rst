@@ -336,6 +336,7 @@ API reference
     soilspl_ref
     sed_ref
     sea_ref
+    carb_ref
     hill_ref
     plate_ref
     ice_ref

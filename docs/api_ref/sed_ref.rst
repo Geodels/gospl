@@ -34,6 +34,9 @@ Class SEDMesh
       ~SEDMesh._pitFineFraction
       ~SEDMesh._pitProvFraction
       ~SEDMesh._updateSinks
+      ~SEDMesh._routeLithologies
+      ~SEDMesh._setLitShare
+      ~SEDMesh._setPitLitShare
 
 Public functions
 ---------------------
@@ -55,3 +58,6 @@ Private functions
 .. automethod:: sed.sedplex.SEDMesh._pitFineFraction
 .. automethod:: sed.sedplex.SEDMesh._pitProvFraction
 .. automethod:: sed.sedplex.SEDMesh._updateSinks
+.. automethod:: sed.sedplex.SEDMesh._routeLithologies
+.. automethod:: sed.sedplex.SEDMesh._setLitShare
+.. automethod:: sed.sedplex.SEDMesh._setPitLitShare

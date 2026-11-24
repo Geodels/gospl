@@ -202,3 +202,4 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     ice
     provenance
     groundwater
+    carb

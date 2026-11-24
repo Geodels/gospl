@@ -37,6 +37,18 @@ Class StraMesh
       ~STRAMesh._surfaceLithoD
       ~STRAMesh._depthPorosity
       ~STRAMesh._depthPorosityDual
+      ~STRAMesh._defaultLithTable
+      ~STRAMesh._lsum
+      ~STRAMesh._fineGroup
+      ~STRAMesh._litSoleFine
+      ~STRAMesh._groupShares
+      ~STRAMesh._litDepoFrac
+      ~STRAMesh._allocLithologies
+      ~STRAMesh._litFileKeys
+      ~STRAMesh._litOutKeys
+      ~STRAMesh._capLithologies
+      ~STRAMesh._surfaceLithFractions
+      ~STRAMesh._surfaceLithoBlend
 
 Public functions
 ---------------------
@@ -62,3 +74,15 @@ Private functions
 .. automethod:: sed.stratplex.STRAMesh._surfaceLithoD
 .. automethod:: sed.stratplex.STRAMesh._depthPorosity
 .. automethod:: sed.stratplex.STRAMesh._depthPorosityDual
+.. automethod:: sed.stratplex.STRAMesh._defaultLithTable
+.. automethod:: sed.stratplex.STRAMesh._lsum
+.. automethod:: sed.stratplex.STRAMesh._fineGroup
+.. automethod:: sed.stratplex.STRAMesh._litSoleFine
+.. automethod:: sed.stratplex.STRAMesh._groupShares
+.. automethod:: sed.stratplex.STRAMesh._litDepoFrac
+.. automethod:: sed.stratplex.STRAMesh._allocLithologies
+.. automethod:: sed.stratplex.STRAMesh._litFileKeys
+.. automethod:: sed.stratplex.STRAMesh._litOutKeys
+.. automethod:: sed.stratplex.STRAMesh._capLithologies
+.. automethod:: sed.stratplex.STRAMesh._surfaceLithFractions
+.. automethod:: sed.stratplex.STRAMesh._surfaceLithoBlend

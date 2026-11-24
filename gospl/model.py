@@ -15,6 +15,7 @@ if "READTHEDOCS" not in os.environ:
     from .sed import SEDMesh as _SEDMesh
     from .sed import hillSLP as _hillSLP
     from .sed import SEAMesh as _SEAMesh
+    from .sed import CarbMesh as _CarbMesh
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
@@ -92,6 +93,10 @@ else:
             pass
 
     class _SEAMesh(object):
+        def __init__(self):
+            pass
+
+    class _CarbMesh(object):
         def __init__(self):
             pass
 
@@ -207,6 +212,7 @@ class Model(
     _SEDMesh,
     _hillSLP,
     _SEAMesh,
+    _CarbMesh,
     _STRAMesh,
 ):
     """
@@ -304,6 +310,10 @@ class Model(
 
         # Marine sediment transport and deposition initialisation
         _SEAMesh.__init__(self, *args, **kwargs)
+
+        # Benthic carbonate production (opt-in `carbonate:`; needs the
+        # lithology table, the stratigraphy and the marine step above)
+        _CarbMesh.__init__(self)
 
         # Define additional grid processes (flexure, orographic rain)
         _GridProcess.__init__(self)
@@ -479,8 +489,16 @@ class Model(
                     _probeZ(self, "after continental sed")
                     if self.seaDepo:
                         # Downstream sediment deposition in marine environments
+                        if getattr(self, "carbOn", False):
+                            # Carbonate production: framework in place, loose
+                            # sediment into this marine step
+                            with self.profiler.phase("carbonate"), self._phase("carbonate"):
+                                _CarbMesh.carbProduction(self)
+                            _probeZ(self, "after carbonate")
                         with self.profiler.phase("sea"), self._phase("marine"):
                             _SEAMesh.seaChange(self)
+                            if getattr(self, "carbOn", False):
+                                _CarbMesh.carbClasticRate(self)
                         _probeZ(self, "after marine sed")
 
                 # Hillslope diffusion (linear and non-linear)

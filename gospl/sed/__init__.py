@@ -8,3 +8,4 @@ from .sedplex import SEDMesh
 from .hillslope import hillSLP
 from .seaplex import SEAMesh
 from .stratplex import STRAMesh
+from .carbplex import CarbMesh

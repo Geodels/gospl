@@ -933,6 +933,63 @@ block and 0.96 s without, about 30 % more: the routing solves take most of it
 and tests: ``docs/DESIGN_GRAVITY_CURRENTS.md``.
 
 
+Carbonate production
+-----------------------------------------------------
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+
+        **Declaration example** (needs ``strata: dual: True``, a ``strat``
+        interval and marine deposition):
+
+        .. code:: yaml
+
+            carbonate:
+                insolation: 400.      # surface light I0 (W/m2)
+                min_depth: 0.         # production stops this far below sea level (m)
+                factories:            # default: euphotic, oligophotic, aphotic
+                  - name: euphotic
+                    growth: 500.      # maximum rate (m/Myr)
+                    extinction: 0.8   # light extinction (1/m)
+                    saturation: 60.   # saturating light (W/m2)
+                    framework: 0.5    # fraction built in place (reef)
+                    sand: 0.7         # sand fraction of the loose part
+                    habitat: ['hab', 'h']   # optional map (0-1)
+                    response:         # optional, multiplied
+                      - {control: sedrate, x: [0., 1.e-3], f: [1., 0.]}
+                lithologies:          # optional property changes
+                    reef: {phi0: 0.2, z0: 5000., k_factor: 0.1}
+
+Each factory produces carbonate below sea level at the Bosscher & Schlager
+(1992) rate, ``growth * tanh(insolation * exp(-extinction * depth) /
+saturation)``, which saturates in shallow water and falls off with depth. The
+growth is integrated over each time step with the depth it creates, so a cell
+never builds above sea level (minus ``min_depth``): a platform shallower than
+the depth where production equals the rate of relative sea-level rise keeps up
+with the sea, a deeper one drowns.
+
+The ``framework`` part of a factory is built in place and recorded as the
+lithology ``reef`` (low erodibility by default). The rest is loose sediment,
+``carb_sand`` (coarse-like) and ``carb_mud`` (fine-like), spread by the marine
+routing and diffusion of the same step together with the river sediment. The
+three carbonate lithologies are added to the stratigraphy with their own
+compaction curves (``lithologies`` above, defaults: sand 0.45 / 2500 m, mud
+0.65 / 1500 m, reef 0.2 / 5000 m).
+
+``response`` tables (piecewise linear, ``x`` increasing, factors ``f`` >= 0)
+scale a factory's production with ``depth`` (m), the seafloor ``slope``, or
+``sedrate``, the clastic marine deposition rate of the previous step (m/yr;
+turbidity and burial). The ``habitat`` map (``[file, key]``, one value per mesh
+vertex) restricts where a factory lives.
+
+The production rate is written as ``carbProd`` (m/yr); with ``--summary`` each
+step's record has a ``carbonate`` budget (produced, framework, loose, m3).
+Theory: :ref:`the carbonate page of the technical guide <carb>`; design:
+``docs/DESIGN_CARBONATES.md``.
+
+
 Groundwater & duricrust
 -----------------------
 

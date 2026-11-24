@@ -211,6 +211,10 @@ class RunSummary(object):
                               "exported": float(gb[2]),
                               "eroded": float(gb[3]) if len(gb) > 3 else 0.0,
                               "failed": float(gb[4]) if len(gb) > 4 else 0.0}
+        cb = getattr(model, "carbBudget", None)
+        if getattr(model, "carbOn", False) and cb is not None:
+            rec["carbonate"] = {"produced": float(cb[0]), "framework": float(cb[1]),
+                                "loose": float(cb[2])}
         with open(self.path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         self.step += 1

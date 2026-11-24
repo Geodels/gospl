@@ -45,6 +45,8 @@ Class hillSLP
       ~hillSLP._diffuseOcean
       ~hillSLP._diffuseImplicit
       ~hillSLP._diffuseImplicitPicard
+      ~hillSLP._litNodeShares
+      ~hillSLP._litMix
 
 Public functions
 ---------------------
@@ -77,3 +79,5 @@ Private functions
 .. automethod:: sed.hillslope.hillSLP._diffuseOcean
 .. automethod:: sed.hillslope.hillSLP._diffuseImplicit
 .. automethod:: sed.hillslope.hillSLP._diffuseImplicitPicard
+.. automethod:: sed.hillslope.hillSLP._litNodeShares
+.. automethod:: sed.hillslope.hillSLP._litMix
