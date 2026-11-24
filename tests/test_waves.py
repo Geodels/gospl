@@ -167,6 +167,8 @@ def test_waves_global(tmp_path, monkeypatch):
         Ez = E.copy()
         m.waveClimate = [(90.0, 1.0)]
         m._waveCoef = None
+        m._waveBear = None          # cached bearings (refraction)
+        m._waveT = None             # per-step cache of the field (coastal erosion)
         Eb = m.waveEnergy()
         assert np.max(np.abs(Ez - Eb)) > 1.0e-3
     finally:
