@@ -189,8 +189,10 @@ html_sidebars = {
 
 # html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 html_theme_options = {
-    # footer: copyright, Sphinx version, then the QuESt-lab logo
-    "footer_start": ["copyright", "sphinx-version", "quest-logo"],
+    # footer: copyright and Sphinx version on the left; the QuESt-lab logo on
+    # the right, above the theme version
+    "footer_start": ["copyright", "sphinx-version"],
+    "footer_end": ["quest-logo", "theme-version"],
     "search_bar_text": "Search goSPL docs ...",
     "header_links_before_dropdown": 7,
     # the round GitHub icon, as SciPy (github_url gives the square one)

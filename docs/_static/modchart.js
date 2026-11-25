@@ -154,6 +154,10 @@
     root.appendChild(extras);
     var resources = makeResources();
     root.appendChild(resources.node);
+    var skeleton = el("div", {"class": "modchart-panel modchart-skel"});
+    root.appendChild(skeleton);
+    var lastSt = null;
+    resources.onChange(function () { if (lastSt) writeSkeleton(lastSt); });
 
     function toggle(id, on) {
       if (id === coreId) return;
@@ -196,6 +200,8 @@
       writeExamples(st);
       writeParams(st);
       resources.update(st);
+      lastSt = st;
+      writeSkeleton(st);
     }
 
     // ---- report under the graph
@@ -518,18 +524,205 @@
       extras.appendChild(box);
     }
 
+    // ---- skeleton input file of the selection, and where to read more
+    var BLOCK_ORDER = ["", "domain", "time", "output", "spl", "diffusion", "sea", "climate",
+      "orography", "sedfactor", "soil", "compaction", "strata", "provenance", "gravity",
+      "carbonate", "sst", "waves", "coastal_erosion", "pelagic", "carbonate_supply", "karst",
+      "groundwater", "ice", "tectonics", "flexure", "temap"];
+    function num(x) {
+      var s = String(+x.toPrecision(6));
+      if (/e/.test(s)) return s.replace(/e\+?/, ".e").replace(".e-", ".e-").replace("..", ".");
+      return s.indexOf(".") < 0 ? s + "." : s;
+    }
+    function buildYaml(st) {
+      var r = resources.values(), end = r.dur, dt = r.dt || 1;
+      var tout = Math.max(dt, Math.round(end / 10 / dt) * dt);
+      var fill = function (v) {
+        return v.replace(/\{end\}/g, num(end)).replace(/\{dt\}/g, num(dt))
+          .replace(/\{tout\}/g, num(tout)).replace(/\{strat\}/g, num(r.strat || dt));
+      };
+      var ids = Object.keys(st.sel);
+      ids.sort(function (a, b) { return a === coreId ? -1 : b === coreId ? 1 : 0; });
+      // tree: block path -> ordered keys
+      var tree = {}, order = [];
+      function node(path) {
+        if (!tree[path]) { tree[path] = {keys: [], vals: {}}; order.push(path); }
+        return tree[path];
+      }
+      ids.forEach(function (id) {
+        (mods[id].yaml || []).forEach(function (e) {
+          if (e.key === "bc" && domain === "global") return;
+          // a top-level list (climate, tectonics, pelagic, ...) is a block of its own
+          var path = e.block === "" && e.key !== "name" ? "#" + e.key : e.block;
+          var n = node(path), v = fill(e.value);
+          if (path === "#climate" && st.sel.evaporation)
+            v += "\n    evap_uniform: 0.2   # evaporation (m/yr)";
+          if (!(e.key in n.vals)) n.keys.push(e.key);
+          n.vals[e.key] = {v: v, c: e.comment, id: id};
+        });
+      });
+      // on a sphere the waves need a fetch (no domain edge brings them in)
+      if (tree.waves && domain === "global" && !("fetch" in tree.waves.vals)) {
+        tree.waves.keys.unshift("fetch");
+        tree.waves.vals.fetch = {v: "5.e5", c: "m; growth length to full energy over open water (required on a global mesh)"};
+      }
+      // goSPL needs both creep coefficients whenever the diffusion block is
+      // there (marine keys or channelQ alone made it stop at start-up)
+      if (tree.diffusion) {
+        [["hillslopeKm", "Linear diffusivity of the seafloor creep"],
+         ["hillslopeKa", "Linear hillslope diffusivity on land"]].forEach(function (k) {
+          if (!(k[0] in tree.diffusion.vals)) {
+            tree.diffusion.keys.unshift(k[0]);
+            tree.diffusion.vals[k[0]] = {v: "0.", c: "m2/yr; " + k[1] +
+              " (required in this block; 0 = none)"};
+          }
+        });
+      }
+      // the block of a sub-block exists even when the parent has no key
+      order.slice().forEach(function (p) {
+        var parts = p.split(".");
+        for (var k = 1; k < parts.length; k++) node(parts.slice(0, k).join("."));
+      });
+      var tops = order.filter(function (p) { return p.indexOf(".") < 0; });
+      tops.sort(function (a, b) {
+        var ia = BLOCK_ORDER.indexOf(a.replace("#", "")), ib = BLOCK_ORDER.indexOf(b.replace("#", ""));
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      });
+      var L = [];
+      L.push("# goSPL input file: skeleton for a " + (domain === "global" ? "global (spherical)" : "regional (flat)") + " model");
+      L.push("# made by 'Which modules do I need?' in the goSPL documentation, with the minimal keys of:");
+      L.push("#   " + ids.map(function (id) { return mods[id].label; }).join(", "));
+      L.push("# Values are starting points: check each one (units and ranges: the input reference page).");
+      L.push("# The mesh (domain: npdata) and any map ([file, key]) are npz files you build first.");
+      if (domain === "global") L.push("# Global model: the mesh is a sphere; there are no edge conditions (domain: bc).");
+      L.push("");
+      function emit(path, indent) {
+        var n = tree[path], pad = new Array(indent + 1).join(" ");
+        n.keys.forEach(function (k) {
+          var e = n.vals[k];
+          if (e.v.charAt(0) === "\n") {
+            L.push(pad + k + ":" + (e.c ? "   # " + e.c : ""));
+            e.v.slice(1).split("\n").forEach(function (line) { L.push(pad + line); });
+          } else {
+            L.push(pad + k + ": " + e.v + (e.c ? "   # " + e.c : ""));
+          }
+        });
+        order.filter(function (p) {
+          return p.indexOf(path + ".") === 0 && p.split(".").length === path.split(".").length + 1;
+        }).forEach(function (sub) {
+          L.push(pad + sub.split(".").pop() + ":");
+          emit(sub, indent + 4);
+        });
+      }
+      tops.forEach(function (t) {
+        if (t === "" || t.charAt(0) === "#") { emit(t, 0); L.push(""); return; }
+        L.push(t + ":");
+        emit(t, 4);
+        L.push("");
+      });
+      return L.join("\n");
+    }
+    // where to get the mesh (domain: npdata) for the chosen kind of model
+    function meshHelp() {
+      var ml = data.meshes || {}, r = window.GOSPL_DOCROOT || "../";
+      var box = el("div", {"class": "modchart-mesh"});
+      box.appendChild(el("strong", {text: "The mesh (domain: npdata). "}));
+      function a(href, txt) { var x = el("a", {href: href}); x.textContent = txt; return x; }
+      function t(x) { return document.createTextNode(x); }
+      if (domain === "global") {
+        [t("Download a uniform global mesh (5, 10 or 20 km cells) from "),
+         a(ml.global_download, "the goSPL meshes folder"),
+         t(", or build your own (any resolution, refined where you need it) with "),
+         a(r + ml.global_build + ".html", "the continental_flux build_inputs notebook"),
+         t(". To put your NetCDF data (elevation, rain, uplift, ...) on the mesh, see "),
+         a(r + ml.global_data + ".html", "Global data on a goSPL mesh"),
+         t(" (longitudes -180 to 180 or 0 to 360, latitudes -90 to 90, both ends included).")]
+          .forEach(function (n) { box.appendChild(n); });
+      } else {
+        [t("Build a regional mesh (from a DEM, refined or uniform) with "),
+         a(r + ml.regional_build + ".html", "the Building 2D meshes example"),
+         t(".")].forEach(function (n) { box.appendChild(n); });
+      }
+      return box;
+    }
+
+    function writeSkeleton(st) {
+      skeleton.innerHTML = "";
+      if (!Object.keys(picked).length) return;
+      skeleton.appendChild(el("h4", {text: "Your input file (skeleton)"}));
+      var yaml = buildYaml(st);
+      var bar = el("div", {"class": "modchart-skelbar"});
+      var dl = el("button", {type: "button", "class": "modchart-add", text: "Download input.yml"});
+      dl.addEventListener("click", function () {
+        var blob = new Blob([yaml + "\n"], {type: "text/yaml"});
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "input.yml";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+      });
+      var cp = el("button", {type: "button", "class": "modchart-add", text: "Copy"});
+      cp.addEventListener("click", function () {
+        if (navigator.clipboard) navigator.clipboard.writeText(yaml + "\n").then(function () {
+          cp.textContent = "Copied"; setTimeout(function () { cp.textContent = "Copy"; }, 1500);
+        });
+      });
+      bar.appendChild(dl);
+      bar.appendChild(cp);
+      bar.appendChild(el("span", {"class": "modchart-hint",
+        text: "  End time, step, output and layer intervals come from the size form above."}));
+      skeleton.appendChild(bar);
+      skeleton.appendChild(meshHelp());
+      skeleton.appendChild(el("pre", {"class": "modchart-yaml", text: yaml}));
+      if (Object.keys(st.missing).length)
+        skeleton.appendChild(el("p", {"class": "modchart-hint modchart-bad",
+          text: "Some modules still need others (in red above): the file is not complete until they are added."}));
+
+      // where to read more about each selected module
+      var root_ = window.GOSPL_DOCROOT || "../";
+      skeleton.appendChild(el("h4", {text: "Read more about your modules"}));
+      var t = el("table", {"class": "modchart-links"});
+      t.appendChild(el("tr", {}, [el("th", {text: "module"}), el("th", {text: "theory"}),
+        el("th", {text: "how to set it"}), el("th", {text: "its keys"})]));
+      Object.keys(st.sel).forEach(function (id) {
+        var m = mods[id], anchors = [];
+        (m.yaml || []).forEach(function (e) { if (e.anchor && anchors.indexOf(e.anchor) < 0) anchors.push(e.anchor); });
+        var cell = function (href, txt) {
+          if (!href) return el("td", {text: "-"});
+          var a = el("a", {href: href});
+          a.textContent = txt;
+          return el("td", {}, [a]);
+        };
+        var keys = el("td");
+        anchors.forEach(function (an, i) {
+          var a = el("a", {href: root_ + "user_guide/reference/inputs.html#" + an});
+          a.textContent = an.replace(/^in-/, "").replace(/-/g, ".");
+          if (i) keys.appendChild(document.createTextNode(", "));
+          keys.appendChild(a);
+        });
+        if (!anchors.length) keys.textContent = "-";
+        var row = el("tr", {}, [el("td", {text: m.label}),
+          cell(m.tech ? root_ + m.tech + ".html" : "", m.tech ? m.tech.split("/").pop().replace("ero", "erosion").replace("dep", "depressions").replace("hill", "hillslope").replace("strat", "stratigraphy").replace("tecto", "tectonics").replace("carb", "carbonates") : ""),
+          cell(m.page ? root_ + m.page + ".html" : "", "user guide"), keys]);
+        t.appendChild(row);
+      });
+      skeleton.appendChild(t);
+    }
+
     // ---- resources: nodes, steps, time and memory from the measured costs
     function makeResources() {
       // base step: 1.67 s at 1 rank for 47,672 nodes (cost page), of which
       // the marine deposition is ~64 %
       var NODE_S = 1.6664 / 47672, MARINE = 0.64, LIB_GB = 0.56, KB_NODE = 6.5, ROOT_KB = 1.8;
+      var onChange = null;
       var node = el("div", {"class": "modchart-panel modchart-res"});
       node.appendChild(el("h4", {text: "Your run: size and resources"}));
       var form = el("div", {"class": "modchart-form"}), out = el("div", {"class": "modchart-out"});
       var fields = {};
       function field(key, label, val, unit, cls) {
         var inp = el("input", {type: "number", min: "0", step: "any", value: val});
-        inp.addEventListener("input", function () { update(); });
+        inp.addEventListener("input", function () { update(); if (onChange) onChange(); });
         fields[key] = inp;
         var w = el("label", {"class": "modchart-field " + (cls || "")}, [el("span", {text: label}), inp,
           el("em", {text: unit})]);
@@ -552,6 +745,7 @@
         if (d === "global") { fields.dur.value = 10; fields.dt.value = 50; fields.strat.value = 100; }
         else { fields.dur.value = 1; fields.dt.value = 5; fields.strat.value = 5; }
         update();
+        if (onChange) onChange();
       }
       function fromExample(r) {
         if (r.group === "global") fields.dxg.value = +(r.spacing_m / 1000).toPrecision(3);
@@ -563,6 +757,7 @@
         fields.dt.value = +(r.dt_yr / 1e3).toPrecision(4);
         if (r.strat_yr) fields.strat.value = +(r.strat_yr / 1e3).toPrecision(4);
         update();
+        if (onChange) onChange();
         node.scrollIntoView({behavior: "smooth", block: "start"});
       }
       function update(st) {
@@ -630,7 +825,12 @@
         notes.push("Order of magnitude only: scaled from the costs measured on a 47,672-node margin; the real cost depends on the landscape and the solvers.");
         notes.forEach(function (n) { out.appendChild(el("p", {"class": "modchart-hint", text: n})); });
       }
-      return {node: node, update: update, setDomain: setDomain, fromExample: fromExample};
+      function values() {
+        var v = function (k) { return Math.max(0, parseFloat(fields[k].value) || 0); };
+        return {dur: v("dur") * 1e6, dt: v("dt") * 1e3, strat: v("strat") * 1e3};
+      }
+      return {node: node, update: update, setDomain: setDomain, fromExample: fromExample,
+              values: values, onChange: function (f) { onChange = f; }};
     }
 
     render();
