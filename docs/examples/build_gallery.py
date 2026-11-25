@@ -182,7 +182,15 @@ def _local_links(text, names, url):
             if len(rest) == 2 and rest[1] in NOTEBOOKS:
                 return "](../%s/%s)" % (rest[0], rest[1])
         return "](%s/%s)" % (url, target)
-    return re.sub(r"\]\(([^)\s]+)\)", rel, text)
+    text = re.sub(r"\]\(([^)\s]+)\)", rel, text)
+
+    # an absolute link with "&" in its address (a Dropbox share link) is
+    # written as HTML with the "&" encoded once: the Markdown parser of some
+    # versions escaped it twice ("&amp;amp;"), so the browser opened a URL
+    # containing "&amp;" (2026-11-26)
+    def amp(m):
+        return '<a href="%s">%s</a>' % (m.group(2).replace("&", "&amp;"), m.group(1))
+    return re.sub(r"\[([^\]]+)\]\((https?://[^)\s]*&[^)\s]*)\)", amp, text)
 
 
 def build():
