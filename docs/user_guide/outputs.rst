@@ -62,8 +62,8 @@ Water & drainage
      - Flow accumulation on the **depression-filled** surface — drainage routed through lakes/pits.
      - always
    * - ``waterFill``
-     - Filled water-surface elevation (lake / depression water level).
-     - when depressions are filled
+     - Lake water depth: depth of water in filled depressions (m), 0 outside lakes.
+     - always, except with ``domain: fast``
    * - ``sedLoad``
      - River **sediment load** carried downstream (m³/yr).
      - always

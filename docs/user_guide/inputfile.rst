@@ -42,7 +42,7 @@ Initial mesh definition and simulation declaration
         The following parameters are **required**:
 
         a. the initial spherical or 2D surface mesh ``npdata`` (**.npz** file). This file contains the following keys: ``v`` the mesh vertices coordinates, ``z`` the vertice elevations, ``c`` the mesh cells. **No vertex may have more than 12 neighbours**: goSPL's finite-volume neighbour tables are fixed at 12 slots per vertex, and a mesh that exceeds it is rejected at start-up with an explicit error rather than being silently truncated. Near-uniform Delaunay meshes (icosahedral refinement, `jigsaw`, `stripy`) stay well under that limit; a strongly refined or hand-edited triangulation may not.
-        b. the flow direction method to be used ``flowdir`` that takes an integer value between 1 (for SFD) and 6 (for MFD)
+        b. the flow direction method to be used ``flowdir``: the number of downstream receivers of each node, an integer from 1 (single flow direction, SFD) up to the number of neighbours (multiple flow direction, MFD; default 8)
 
         The planet geometry defaults to **Earth** but can be overridden to model another body (both optional): ``radius`` is the planet radius in metres (default ``6378137.0``) used for the spherical-mesh geometry, and ``gravity`` is the surface gravity in m/s\ :sup:`2` (default ``9.81``) used by the flexural-isostasy solver. For example a Mars run would set ``radius: 3389500.0`` and ``gravity: 3.71``.
 

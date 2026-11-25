@@ -89,6 +89,30 @@ Parameters related to surface processes
             Learn more.
 
 
+Groundwater, duricrust and geochemistry
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Water table, duricrust and solute geochemistry**
+        ^^^
+
+        An implicit water table, a crust that hardens the surface, and the
+        dissolution, transport and export of solutes down the rivers to the
+        ocean.
+
+        +++
+
+        .. button-ref:: gw_user
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
 Optional parameters related to climate
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -181,6 +205,63 @@ Model outputs
 
             Learn more.
 
+Reference
+^^^^^^^^^
+
+.. grid:: 1 1 3 3
+    :gutter: 2
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Which modules do I need?**
+        ^^^
+
+        Pick the processes you want: an interactive chart adds what they
+        require and flags what does not go together.
+
+        +++
+
+        .. button-ref:: module_chooser
+            :color: secondary
+            :click-parent:
+
+            Open the chooser.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Input parameters**
+        ^^^
+
+        Every input key with its unit, default, typical range and how it
+        depends on the resolution.
+
+        +++
+
+        .. button-ref:: input_reference
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Output fields**
+        ^^^
+
+        Every output field with its unit, meaning, typical range and how it
+        depends on the resolution.
+
+        +++
+
+        .. button-ref:: output_reference
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
 
 Performance on HPC
 ^^^^^^^^^^^^^^^^^^^
@@ -210,8 +291,12 @@ Performance on HPC
 
     inputfile
     surfproc
+    groundwater
     optfile1
     optfile2
     running
     outputs
+    reference/modules
+    reference/inputs
+    reference/outputs_ref
     hpc_scaling

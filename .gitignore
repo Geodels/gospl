@@ -63,3 +63,6 @@ gw_river2_out
 docs/examples/generated/
 docs/_examples_src/
 *.swp
+docs/user_guide/reference/inputs.rst
+docs/user_guide/reference/outputs_ref.rst
+docs/user_guide/reference/modules.rst

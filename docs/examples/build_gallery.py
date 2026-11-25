@@ -158,8 +158,14 @@ def _local_links(text, names, url):
         path = m.group(2) or "index.html"
         if path.endswith("/"):
             path += "index.html"
+        moved = {"user_guide/surfproc.html#groundwater-duricrust": "user_guide/groundwater.html"}
+        full = path + (m.group(3) or "")
+        if full in moved:
+            path, anchor = moved[full], ""
+        else:
+            anchor = m.group(3) or ""
         label = re.sub(r"`([^`]+)`", r"<code>\\1</code>", m.group(1))
-        return '<a href="../../../%s%s">%s</a>' % (path, m.group(3) or "", label)
+        return '<a href="../../../%s%s">%s</a>' % (path, anchor, label)
     text = re.sub(r"\[([^\]]+)\]\(" + SITE.pattern + r"\)", site, text)
 
     def rel(m):

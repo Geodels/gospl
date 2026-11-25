@@ -1,0 +1,509 @@
+[
+ {
+  "group": "Core (always written)",
+  "condition": "always",
+  "fields": [
+   {
+    "name": "elev",
+    "unit": "m",
+    "meaning": "Surface (bed) elevation at the output time, relative to the model datum (sea level 0 unless the sea-level curve moves). float64. Shown as Z in the XDMF/ParaView file.",
+    "range": "Set by the input topography: about -11000 to +9000 m on Earth global meshes (examples: -6500 to +7300 m); a few hundred m to a few km on regional meshes.",
+    "resolution": "Point value; finer meshes resolve narrower valleys and higher peaks. Independent of dt except through the processes.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "erodep",
+    "unit": "m",
+    "meaning": "Cumulative erosion (negative) and deposition (positive) thickness since the start of the run, all processes included (rivers, hillslopes, marine, ice). Not changed by uplift or flexure. float64, restart field. Shown as ED in ParaView.",
+    "range": "Grows with run time: tens to a few hundred m over 1 Myr regional runs (examples -220 to +300 m); -8000 to +17000 m extremes on global 10-100 Myr runs, with the median near 0.",
+    "resolution": "Cumulative thickness, so nearly independent of dt; extremes are sharper and larger on finer meshes (one-cell channels and depocentres).",
+    "sign": "positive = deposition, negative = erosion",
+    "file": "surface"
+   },
+   {
+    "name": "EDrate",
+    "unit": "m/yr",
+    "meaning": "Net erosion/deposition thickness rate of the LAST time step before the output (river step plus the marine and hillslope contributions). Not averaged over the output interval. float64, restart field.",
+    "range": "Typically 1e-6 to 1e-3 m/yr; incision up to ~1e-2 m/yr and marine/fan deposition up to a few 1e-2 m/yr at single cells (examples -0.025 to +0.059 m/yr).",
+    "resolution": "Rate over one dt (dt-averaged): a longer dt smooths short pulses and an implicit large-dt deposit spreads its rate over the step; peaks grow on finer meshes.",
+    "sign": "positive = deposition, negative = incision",
+    "file": "surface"
+   },
+   {
+    "name": "FA",
+    "unit": "m3/yr",
+    "meaning": "Water discharge (flow accumulation of the net runoff, rain minus evaporation plus meltwater/baseflow) on the actual surface, routed with the multiple-flow-direction scheme. Floored at DISCHARGE_FLOOR (1e-8); marine nodes are set to 1.0 unless domain fast is on. float64, restart field.",
+    "range": "From rain x cell area at divides (1e3 to 1e7 m3/yr depending on cell size and rain) to 1e9-1e10 m3/yr for regional trunks and ~1e12-1e13 m3/yr for continental rivers on global meshes; 1 everywhere in the sea.",
+    "resolution": "The value at a given point of a channel is resolution independent (it is an area x rain), but the minimum (one cell) scales with dx^2 and hillslope cells carry less on finer meshes (flow spread by MFD). Rate: no dt dependence beyond the forcing.",
+    "sign": "always >= 0",
+    "file": "surface"
+   },
+   {
+    "name": "fillFA",
+    "unit": "m3/yr",
+    "meaning": "Water discharge routed on the depression-filled surface (water crossing lakes and closed pits to their spill points). Same floor and marine value (1.0) as FA. float64, restart field.",
+    "range": "As FA, but continuous through lakes: up to ~1e12-1e13 m3/yr on global meshes; 1 in the sea.",
+    "resolution": "Same as FA.",
+    "sign": "always >= 0",
+    "file": "surface"
+   },
+   {
+    "name": "sedLoad",
+    "unit": "m3/yr",
+    "meaning": "River sediment load (total, coarse plus fine) carried downstream through each node, from the sediment routing of the last step. Floored at DISCHARGE_FLOOR (1e-8). float64, restart field. Shown as SL in ParaView.",
+    "range": "1e-8 (floor) on hillslopes without transport and in the sea; tens to 1e5 m3/yr in regional rivers (examples up to 8e5 m3/yr); 1e8 to a few 1e9 m3/yr for continental rivers on global meshes.",
+    "resolution": "Volumetric flux, so resolution independent along a channel in principle, but the eroded volume (hence the load) depends on resolution through the SPL drainage area on hillslopes and the resolved slopes; it reflects the last dt only.",
+    "sign": "always >= 0",
+    "file": "surface"
+   },
+   {
+    "name": "sea",
+    "unit": "m",
+    "meaning": "XDMF-only attribute (no HDF5 dataset): the sea level of the output time repeated on every node, for thresholding the ocean in ParaView.",
+    "range": "The sea-level curve value (0 m by default).",
+    "resolution": "Uniform; independent of mesh and dt.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "coords",
+    "unit": "m",
+    "meaning": "Node coordinates (x, y, z) of each partition, written once in h5/topology.p<rank>.h5 (float32). Flat meshes: planar x, y with z = 0; global meshes: Cartesian x, y, z on the sphere of radius domain:radius.",
+    "range": "Domain size; about +-6.378e6 m on an Earth sphere.",
+    "resolution": "Mesh geometry only.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "cells",
+    "unit": "1",
+    "meaning": "Triangle connectivity (three node indices, 1-based, int32) of each partition, in h5/topology.p<rank>.h5, written once.",
+    "range": "Integer indices from 1 to the number of local nodes.",
+    "resolution": "Mesh geometry only.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Depression filling",
+  "condition": "unless domain: fast: True (written whenever depressions are filled)",
+  "fields": [
+   {
+    "name": "waterFill",
+    "unit": "m",
+    "meaning": "Water depth of lakes in closed depressions: the filled water level minus the bed elevation (0 outside lakes and in the sea). The code subtracts the bed (waterFilled -= hl), so it is a depth, not a water-surface elevation as the outputs page says. float32, not used on restart.",
+    "range": "0 almost everywhere; centimetres to tens of metres in lakes, up to 1e3-4e3 m in deep closed basins of global runs (examples: median 5-20 m among lake cells, maximum 3900 m).",
+    "resolution": "Depends on the depression volumes and the inflow of the last step; a larger dt fills pits faster. Finer meshes resolve more small pits.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Climate and tectonic forcing",
+  "condition": "with the climate block (rain, evap) or a tectonics map with vertical displacement (uplift)",
+  "fields": [
+   {
+    "name": "rain",
+    "unit": "m/yr",
+    "meaning": "Precipitation rate applied at the output time (the climate map or uniform value, or the orographic rain when the orography block is on). float32. Shown as Rain.",
+    "range": "Input forcing: 0 to a few m/yr (examples 0.0007 to 5.8 m/yr).",
+    "resolution": "Forcing, interpolated to the mesh; independent of dt. The orographic rain is solved on the mesh, so its smoothing scales with the mesh spacing.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "evap",
+    "unit": "m/yr",
+    "meaning": "Evaporation rate of the current climate event (written only when an event defines evap_uniform or evap_map). float32. Shown as Evap.",
+    "range": "Input forcing: 0 to a few m/yr; calibration dependent.",
+    "resolution": "Forcing; independent of mesh and dt.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "uplift",
+    "unit": "m/yr",
+    "meaning": "Vertical tectonic displacement rate in force (the tectonics event map, applied at the start of each step). float32. Shown as vTec.",
+    "range": "Input forcing: typically -1e-2 to +1e-2 m/yr (examples -0.01 to +0.0076 m/yr, uniform -0.0005 m/yr subsidence in the atoll example).",
+    "resolution": "Forcing; independent of dt (applied as uplift x dt each step).",
+    "sign": "positive = uplift, negative = subsidence",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Dual lithology",
+  "condition": "with strata: dual (stratLith, requires stratigraphy)",
+  "fields": [
+   {
+    "name": "sedLoadF",
+    "unit": "m3/yr",
+    "meaning": "Fine (mud) part of the river sediment load; the coarse load is sedLoad - sedLoadF. Floored at 1e-8. float64, restart field. Shown as SLf.",
+    "range": "Between 1e-8 and sedLoad; examples up to 6.5e8 m3/yr on global meshes, about half the total load where the bedrock fine fraction is 0.5.",
+    "resolution": "As sedLoad.",
+    "sign": "always >= 0",
+    "file": "surface"
+   },
+   {
+    "name": "surfFineFrac",
+    "unit": "0-1",
+    "meaning": "Fine fraction (by bulk thickness) of the topmost non-empty stratigraphic layer: the composition exposed at the surface. float32.",
+    "range": "0 (all coarse) to 1 (all mud); the bedrock value (1 - bedrock_coarse_frac) where no sediment covers it (examples median 0.4-0.7).",
+    "resolution": "Depends on the layer interval (strat) and dt: thin top layers make it vary faster; little mesh dependence.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Flexural isostasy",
+  "condition": "with the flexure block (flexOn)",
+  "fields": [
+   {
+    "name": "flexIso",
+    "unit": "m",
+    "meaning": "Cumulative flexural isostatic deflection since the start of the run (sum of each flexure solve's increment). float64, restart field.",
+    "range": "Tens of m on regional runs (examples -53 to +900 m: escarpment rebound reaches several hundred m), up to +-several km at extreme global load changes (examples -8900 to +3700 m).",
+    "resolution": "Cumulative, set by the load history; with flex_interval > 1 it is updated only every N steps. The flexural wavelength is resolved only when the mesh spacing is well below it.",
+    "sign": "positive = upward deflection (rebound), negative = downward",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Soil",
+  "condition": "with the soil block (cptSoil)",
+  "fields": [
+   {
+    "name": "soilH",
+    "unit": "m",
+    "meaning": "Soil/regolith thickness (mobile layer above bedrock). float64, restart field.",
+    "range": "0 on bare bedrock to a few m; examples median 0.2-0.9 m among soil cells, maximum about 18 m in hollows/deposits.",
+    "resolution": "State variable; production and creep depend on slopes, so steeper resolved slopes on fine meshes give thinner soils. Little dt dependence once at equilibrium.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Ice (diagnostic glacial model)",
+  "condition": "with the ice block (iceOn)",
+  "fields": [
+   {
+    "name": "iceH",
+    "unit": "m",
+    "meaning": "Ice thickness from the Bahr scaling H = eheight x fwidth x Q^0.3 of the routed ice discharge. Floored at 1e-8 and set to 1.0 on marine nodes unless domain fast is on (a quirk of the writer). float64, restart field.",
+    "range": "0 (1e-8) outside glaciers; tens to a few hundred m in valley glaciers (example max 114 m, median 29 m among ice cells).",
+    "resolution": "Diagnostic of the last step's ice discharge, not time integrated; follows FA-like resolution behaviour through Q^0.3 (weak).",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "iceFA",
+    "unit": "m3/yr",
+    "meaning": "Ice discharge: the ELA accumulation routed downhill (glacial analogue of FA). float32.",
+    "range": "0 outside glaciers; 1e4 to 1e7 m3/yr in valley glaciers (example max 1.9e7).",
+    "resolution": "As FA (area x accumulation rate).",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "iceUb",
+    "unit": "m/yr",
+    "meaning": "Basal sliding speed from the Glen sliding law on the ice thickness and surface slope; drives abrasion. float32.",
+    "range": "0 off the ice; ~1 to tens of m/yr (example median 1.7, max 61 m/yr); calibration dependent (slide).",
+    "resolution": "Depends on the resolved slope, so faster on finer meshes over steep beds.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "iceAbr",
+    "unit": "m/yr",
+    "meaning": "Vertical glacial abrasion rate E_g = Kg |u_b|^l (lateral wall erosion Kl not included). Zero when Kg = 0. float32.",
+    "range": "0 to ~1e-3 m/yr (example median 5e-5, max 1.8e-3 m/yr); calibration dependent.",
+    "resolution": "Rate of the last step; inherits the slope dependence of iceUb.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "iceMelt",
+    "unit": "m3/yr",
+    "meaning": "Glacial meltwater delivered to the rivers where the ice melts out (ablation zone, terminus). float32.",
+    "range": "0 except at the ablation zone; up to ~1e7 m3/yr per cell in the example.",
+    "resolution": "Volumetric flux; concentrated on few cells, so peak values per cell grow on coarser meshes.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Groundwater (water table)",
+  "condition": "with the groundwater block (gwOn)",
+  "fields": [
+   {
+    "name": "recharge",
+    "unit": "m/yr",
+    "meaning": "Net groundwater recharge f_infil x max(0, rain - evap) (optionally reduced on slopes and fine sediment), zero under the sea, lakes and ice. float32.",
+    "range": "0 to a fraction of the runoff: examples 0.003 to 0.3 m/yr.",
+    "resolution": "Forcing-like; independent of dt. Slope reduction (infil_slope_ref) makes it mesh dependent.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "wtable",
+    "unit": "m",
+    "meaning": "Water-table head (elevation of the saturated surface); pinned to the surface under the sea. float64, restart field.",
+    "range": "Follows the topography (examples 20 to 2200 m on land); equals elev in the sea. A few outliers far below the seafloor were seen on a global example (-21800 m), calibration dependent.",
+    "resolution": "Steady Dupuit solve each step, so independent of dt; finer meshes resolve valley-scale head gradients.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "wtdepth",
+    "unit": "m",
+    "meaning": "Depth of the water table below the surface z - h, clipped to [0, aquifer thickness]. 0 in the sea and at seepage faces. float32.",
+    "range": "0 at seepage/valleys to the aquifer thickness (examples cap at 30, 50 or 100 m).",
+    "resolution": "As wtable.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "baseflow",
+    "unit": "m3/yr",
+    "meaning": "Seepage-return discharge re-injected into the rivers (land only, zero on marine nodes). Written with conserve_baseflow (default True). float32.",
+    "range": "0 away from seepage nodes; 1e5 to 6e6 m3/yr per seepage cell in the examples.",
+    "resolution": "Volumetric flux concentrated on seepage cells; per-cell values scale with the upslope area draining to them.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Duricrust",
+  "condition": "with the groundwater block and its nested duricrust block (duriOn)",
+  "fields": [
+   {
+    "name": "duricrust",
+    "unit": "m",
+    "meaning": "Duricrust thickness duriH, capped at max_thickness. float64, restart field.",
+    "range": "0 to max_thickness (examples 5 and 20 m).",
+    "resolution": "Grows with time at the capillary fringe; with geochemistry the precipitation rate k_p is per year, so a large dt saturates it in fewer steps.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "induration",
+    "unit": "0-1",
+    "meaning": "Induration degree duriF = duriH / max_thickness, or the archived induration of an exhumed crust layer where larger. float32.",
+    "range": "0 to 1.",
+    "resolution": "As duricrust.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "Karmor",
+    "unit": "1",
+    "meaning": "Erodibility armoring multiplier 1 - armor_max x duriF applied to K.",
+    "range": "1 - armor_max (e.g. 0.1 or 0.02) to 1.",
+    "resolution": "As duricrust.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Groundwater geochemistry",
+  "condition": "with the groundwater geochem block (gwGeochemOn); riverSolute with river_load; marineSoluteInput with marine_coupling; crust_type and per-species fields with more than one species; crust_source with the provenance block",
+  "fields": [
+   {
+    "name": "solute",
+    "unit": "solute units per m3 of water",
+    "meaning": "Groundwater dissolved concentration summed over the species (steady transport solve of the step). float32.",
+    "range": "Calibration dependent (weatherability, source pool): examples 1e-7 to 1e-2, one ferricrete example up to 10.",
+    "resolution": "Steady per step, so independent of dt; depends on the resolved head gradients.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "soluteflux",
+    "unit": "solute units/yr",
+    "meaning": "Dissolved export leaving the aquifer at seepage nodes (baseflow-carried), summed over species. The outputs page labels it m3/yr, which holds only when the solute is counted as a volume (for example solute_per_m3 = 1). float32.",
+    "range": "0 away from seepage nodes; 10 to 1e7 per seepage cell in the examples; calibration dependent.",
+    "resolution": "Per-cell flux concentrated on seepage cells.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "crust_type",
+    "unit": "code",
+    "meaning": "Dominant crust-forming species per node (index in the species list, -1 = no crust). Integer stored as float32. Only with more than one species.",
+    "range": "-1 to number of species - 1.",
+    "resolution": "Categorical.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "crust_source",
+    "unit": "code",
+    "meaning": "Dominant source-rock (provenance) class of the solute that formed the crust (-1 = no crust). Integer stored as float32. With provenance.",
+    "range": "-1 to number of provenance classes - 1.",
+    "resolution": "Categorical.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "riverSolute",
+    "unit": "solute units/yr",
+    "meaning": "River dissolved load: the seepage export routed down the drainage network per species and summed; accumulates downstream to the coast. With river_load. float32.",
+    "range": "0 on dry hillslopes; up to 1e7-1e8 at river mouths in the examples; calibration dependent.",
+    "resolution": "Accumulated like FA, so resolution independent along trunks.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "marineSoluteInput",
+    "unit": "solute units/yr",
+    "meaning": "River dissolved load entering the ocean at coastal and outlet exit nodes in the step (0 elsewhere). With river_load and marine_coupling. float32.",
+    "range": "0 except at river mouths; up to 1e7-6e7 in global examples.",
+    "resolution": "Concentrated on mouth cells.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "solute_<name>",
+    "unit": "solute units per m3 of water",
+    "meaning": "Groundwater concentration of one species (one dataset per species, name from the species list). Only with more than one species. float32.",
+    "range": "Calibration dependent; examples 1e-7 to 1e-2.",
+    "resolution": "As solute.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "crust_<name>",
+    "unit": "m",
+    "meaning": "Cumulative crust thickness contributed by one species (precipitated mass x solid_volume per unit area), summed over the run; never reduced by erosion. Only with more than one species. float32.",
+    "range": "0 to tens of m, up to ~240 m at single nodes in global examples; calibration dependent.",
+    "resolution": "Cumulative; the precipitation rate is per year so it grows with dt x steps.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "soluteflux_<name>",
+    "unit": "solute units/yr",
+    "meaning": "Seepage export of one species. Only with more than one species. float32.",
+    "range": "Calibration dependent; examples up to 5e5.",
+    "resolution": "As soluteflux.",
+    "sign": "",
+    "file": "surface"
+   },
+   {
+    "name": "riverSolute_<name>",
+    "unit": "solute units/yr",
+    "meaning": "River dissolved load of one species. Only with more than one species and river_load. float32.",
+    "range": "Calibration dependent; examples up to 1e8.",
+    "resolution": "As riverSolute.",
+    "sign": "",
+    "file": "surface"
+   }
+  ]
+ },
+ {
+  "group": "Stratigraphy (per layer)",
+  "condition": "with stratigraphic recording (output: strat interval set); written in h5/stratal.<step>.p<rank>.h5 at each output, one column per recorded layer (column 0 is the initial or bedrock layer)",
+  "fields": [
+   {
+    "name": "stratZ",
+    "unit": "m",
+    "meaning": "Surface elevation when the layer was recorded (paleo-elevation at deposition; the top layer follows the current surface until the next layer starts). Not updated by later uplift or flexure, only moved by plate advection.",
+    "range": "Same range as elev.",
+    "resolution": "One value per layer; layers last the strat interval.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "stratH",
+    "unit": "m",
+    "meaning": "Layer thickness after erosion and compaction (total, coarse and fine). Column 0 holds the BEDROCK_SENTINEL 1e6 m infinite-bedrock layer when no strata file sets it.",
+    "range": "0 to tens of m per layer (examples max 31-69 m); 1e6 in the sentinel column.",
+    "resolution": "Thickness per layer scales with the strat interval; peaks larger on finer meshes.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "phiS",
+    "unit": "0-1",
+    "meaning": "Porosity of the coarse sediment of the layer from the depth-porosity (compaction) curve.",
+    "range": "Below phi0s/phi0c (example 0.43-0.49).",
+    "resolution": "Depends on burial depth only.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "stratK",
+    "unit": "1",
+    "meaning": "Erodibility multiplier of the layer (1 for goSPL deposits; may differ for strata-file layers or soil mode).",
+    "range": "Usually 1.",
+    "resolution": "None.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "stratHf",
+    "unit": "m",
+    "meaning": "Fine (mud) thickness of the layer (lithology 0); fine fraction = stratHf / stratH. With dual lithology.",
+    "range": "0 to stratH.",
+    "resolution": "As stratH.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "phiF",
+    "unit": "0-1",
+    "meaning": "Porosity of the fine sediment of the layer. With dual lithology.",
+    "range": "Below phi0f (example 0.60-0.63).",
+    "resolution": "Depends on burial depth.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "stratDuri",
+    "unit": "0-1",
+    "meaning": "Diagenetic induration degree archived in the layer. With the groundwater duricrust.",
+    "range": "0 to 1.",
+    "resolution": "Per layer.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "stratCrustType",
+    "unit": "code",
+    "meaning": "Dominant solute species of the layer's crust (-1 = none). Integer as float64. With geochemistry.",
+    "range": "-1 to nspecies - 1.",
+    "resolution": "Categorical.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "stratCrustSource",
+    "unit": "code",
+    "meaning": "Dominant source region (provenance class) of the layer's crust chemistry (-1 = none). With geochemistry and provenance.",
+    "range": "-1 to provenance classes - 1.",
+    "resolution": "Categorical.",
+    "sign": "",
+    "file": "strata"
+   },
+   {
+    "name": "stratP",
+    "unit": "m",
+    "meaning": "Per-layer per-provenance-class thickness (3-D array lpoints x layers x classes); sums to stratH. With the provenance block.",
+    "range": "0 to stratH; 1e6 in the bedrock sentinel column.",
+    "resolution": "As stratH.",
+    "sign": "",
+    "file": "strata"
+   }
+  ]
+ }
+]
