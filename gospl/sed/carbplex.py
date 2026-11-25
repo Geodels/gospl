@@ -343,12 +343,21 @@ class CarbMesh(object):
             self._clayMat.destroy()
         self._clayMat = self._buildDiffMat(kd, fixed=land)
         if self._ksp_clay is None:
+            # A decay length of tens of cells makes the operator stiff:
+            # block-Jacobi needed hundreds of iterations (0.4 s a step, 15 % of
+            # the step on a 47k-node margin). Algebraic multigrid (hypre, as
+            # the groundwater head) where PETSc has it, at 1e-8 (the benchmark
+            # checks the exact discrete solution to that, 2026-11-25).
             ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
             ksp.setType("fgmres")
-            ksp.getPC().setType("bjacobi")
-            ksp.setTolerances(rtol=1.0e-10, atol=1.0e-14, max_it=2000)
+            if petsc4py.PETSc.Sys.hasExternalPackage("hypre"):
+                ksp.getPC().setType("hypre")
+                ksp.getPC().setHYPREType("boomeramg")
+            else:
+                ksp.getPC().setType("bjacobi")
+                petsc4py.PETSc.Options()["claydecay_sub_pc_factor_shift_type"] = "nonzero"
+            ksp.setTolerances(rtol=1.0e-8, atol=1.0e-14, max_it=2000)
             ksp.setOptionsPrefix("claydecay_")
-            petsc4py.PETSc.Options()["claydecay_sub_pc_factor_shift_type"] = "nonzero"
             ksp.setFromOptions()
             self._ksp_clay = ksp
         self._ksp_clay.setOperators(self._clayMat, self._clayMat)

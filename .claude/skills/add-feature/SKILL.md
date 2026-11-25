@@ -57,7 +57,16 @@ outcome worth surfacing.
 - `pytest tests/ -n 4` and `pytest benchmarks/ -m benchmark` green.
 
 ## 7. Docs
-User keys in `docs/user_guide/surfproc.rst` (or the relevant page), theory in
-`docs/tech_guide/`, every new method in BOTH the `autosummary` and `automethod` lists
-of its `docs/api_ref/*_ref.rst`. Update the subsystem `AGENTS.md`, add a
-`docs/dev/CHANGELOG_DEV.md` row.
+- **Inputs** (user guide, `docs/user_guide/surfproc.rst`, `marine.rst`,
+  `carbonates.rst` or the relevant page): every key with its meaning, unit and
+  default, what it does to the result, and a commented example block.
+- **Governing equations** (`docs/tech_guide/`): the law, its parameters and units,
+  the discretisation and solver, the benchmark or test that checks it.
+- **Outputs** (`docs/user_guide/outputs.rst`): every new field (name, meaning,
+  units, when written), restart-only datasets included.
+- **Cost** (`docs/user_guide/cost.rst`): add the option to `VARIANTS` in
+  `scripts/option_cost.py`, rerun it at 1 and 4 ranks and `scripts/option_scaling.py`
+  for the scaling figures; refresh the tables, figures and text.
+- Every new method in BOTH the `autosummary` and `automethod` lists of its
+  `docs/api_ref/*_ref.rst`. Update the subsystem `AGENTS.md`, add a
+  `docs/dev/CHANGELOG_DEV.md` row.
