@@ -62,3 +62,4 @@ gw_river2_out
 .claude/worktrees/
 docs/examples/generated/
 docs/_examples_src/
+*.swp
