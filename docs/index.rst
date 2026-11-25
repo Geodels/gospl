@@ -9,7 +9,7 @@
 goSPL documentation
 ********************
 
-**Date**: |today| **Version**: |version|
+**Date**: |today| **Version**: |docversion|
 
 
 **Useful links**:
