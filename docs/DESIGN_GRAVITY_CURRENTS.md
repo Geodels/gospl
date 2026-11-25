@@ -1,7 +1,7 @@
 # Design: marine gravity currents (opt-in `gravity:` block)
 
 Status (2026-11-23): phases G1, G2, G3b and G3 (slope failure) coded on
-`feat/gravity-currents`, with bypass, accommodation cap, channel-belt options, an
+`feat/gravity-currents` (since 2026-11-25 part of `feat/gravity-carbonates-karst`), with bypass, accommodation cap, channel-belt options, an
 analytical benchmark and regional and global examples. Not merged into `dev`.
 
 ## 1. Purpose and scope

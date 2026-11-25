@@ -611,3 +611,45 @@ def test_geochem_perspecies_outputs(tmp_path, monkeypatch):
     for nm in names:
         assert "oceanflux_" + nm in hdr, "missing oceanflux_%s in budget CSV" % nm
         assert "riverToOcean_" + nm in hdr and "marine_" + nm in hdr
+
+
+def test_geochem_flat_seafloor(tmp_path, monkeypatch):
+    """
+    Protects: a flat seafloor does not break the solute transport. Under the
+    sea the head is the surface, so cells of a flat patch have no lateral
+    flux, no seepage and no recharge: their rows of the transport operator
+    were empty, the direct LU failed on the zero pivots and every solute,
+    crust and armoring field became NaN on the whole mesh (a bathymetry
+    clipped at a constant depth, 2026-11-25). Such cells now discharge what
+    they hold to the surface: the fields stay finite and the budget closes.
+    """
+    import os
+    import shutil
+    from gospl.model import Model
+
+    fx = str(FIXTURES_DIR)
+    if not os.path.exists(os.path.join(fx, "minimal_gw_geochem.yml")):
+        pytest.skip("minimal_gw_geochem.yml fixture not present")
+    d = dict(np.load(os.path.join(fx, "mesh.npz")))
+    flat = -300.0
+    assert (d["z"] < flat).sum() > 20
+    d["z"] = np.maximum(d["z"], flat)
+    np.savez(tmp_path / "mesh.npz", **d)
+    for f in os.listdir(fx):
+        if f.endswith(".npz") and f != "mesh.npz":
+            shutil.copy(os.path.join(fx, f), tmp_path / f)
+    shutil.copy(os.path.join(fx, "minimal_gw_geochem.yml"), tmp_path / "g.yml")
+    monkeypatch.chdir(tmp_path)
+    m = Model("g.yml", verbose=False, showlog=False)
+    try:
+        m.tEnd = m.tNow + 2 * m.dt
+        while m.tNow < m.tEnd:
+            m.runProcesses()
+        assert np.all(np.isfinite(m.gwSolute))
+        assert np.all(np.isfinite(m.duriHL.getArray()))
+        for k in range(m.gwNspecies):
+            diss, prec, exp = m.gwDissolved[k], m.gwPrecip[k], m.gwOceanFlux[k]
+            assert diss > 0.0
+            assert abs(diss - (prec + exp)) < 1.0e-6 * diss
+    finally:
+        m.destroy()

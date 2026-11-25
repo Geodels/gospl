@@ -1,9 +1,9 @@
-# Karst dissolution (design note, branch `feat/karst`)
+# Karst dissolution (design note, branch `feat/gravity-carbonates-karst`)
 
 Opt-in chemical denudation of exposed carbonate: runoff dissolves the
 carbonate lithologies of the stratigraphy, more where the flow concentrates,
 and the dissolved carbonate can join the river dissolved load of the
-groundwater geochemistry. Built on `feat/carbonates` (lithology piles,
+groundwater geochemistry. Built on the carbonates (lithology piles,
 `sst:`, the carbonate/geochemistry link).
 
 ## 1. Physics

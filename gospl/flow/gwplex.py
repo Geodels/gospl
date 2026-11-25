@@ -5,7 +5,7 @@ import numpy as np
 from time import process_time
 from mpi4py import MPI
 
-from gospl.tools.constants import ICE_COVER_MIN, FILL_LEVEL_TOL
+from gospl.tools.constants import ICE_COVER_MIN, FILL_LEVEL_TOL, SOLUTE_DISCHARGE_FLOOR
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import jacobiancoeff
@@ -1224,6 +1224,17 @@ class GWMesh(object):
         extra = np.maximum(np.maximum(R - divq, 0.0) - seep_sink, 0.0)  # only ADD discharge
         adv[:, 0] += extra                          # keep the operator diagonal in sync
         seep_sink = seep_sink + extra
+        # Floor the discharge (diagonal) at SOLUTE_DISCHARGE_FLOOR (m/yr). Under
+        # the sea or a lake on a flat bed the head is the surface and the
+        # neighbours share it: no lateral flux, no seepage, no recharge, so the
+        # row was empty or held round-off (1e-19), the direct LU failed on the
+        # pivot and every solute, crust and armoring field became NaN on the
+        # whole mesh (a bathymetry clipped at a constant depth, 2026-11-25). The
+        # floor is added to the export as well, so the budget still closes; it
+        # is far below any recharge, so well-posed rows do not change.
+        lift = np.maximum(SOLUTE_DISCHARGE_FLOOR - adv[:, 0], 0.0)
+        adv[:, 0] += lift
+        seep_sink = seep_sink + lift
         self.gwSoluteFlux[:] = 0.0                 # per-node baseflow export (G3)
         self.gwSoluteFluxSp[:] = 0.0               # per-species export (output + routing)
         prov = getattr(self, "provOn", False) and getattr(self, "source_class", None) is not None

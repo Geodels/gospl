@@ -184,3 +184,12 @@ CARB_SUBSTEP_GROWTH = 0.25
 # carb_sand share (0.01 vs 0.15 at np=1 vs np=3, 2026-11-25). 1e-2 left 4e-7 m
 # of difference (elevation: 1.2e-7), 1e-3 left 1.5e-6 m.
 LITH_PRIOR_REL_FLOOR = 1.0e-2
+
+# Minimum discharge rate (m/yr) on the diagonal of the groundwater solute
+# transport operator (gwplex._updateSolute), added to the export too so the
+# budget closes. Under the sea or a lake on a flat bed the head is the surface
+# and neighbours share it: the row was empty or round-off (1e-19), the direct
+# LU failed and every solute field became NaN (a bathymetry clipped at a
+# constant depth, 2026-11-25). Far below any recharge: well-posed rows are
+# unchanged.
+SOLUTE_DISCHARGE_FLOOR = 1.0e-6

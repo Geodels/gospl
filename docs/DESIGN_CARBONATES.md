@@ -1,6 +1,6 @@
 # Design note: carbonate platforms and reefs in goSPL (draft for discussion)
 
-Branch `feat/carbonates` (from `feat/gravity-currents`). Status: design, no code.
+Branch `feat/gravity-carbonates-karst` (developed on `feat/carbonates`, from `feat/gravity-currents`; the three were combined on 2026-11-25). Status: see below.
 
 **Decisions (maintainer, 2026-11-24):** target both regional platforms / reef terraces
 and global carbonate burial; carbonate is a true lithology (third, with its own
