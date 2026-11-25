@@ -6,6 +6,8 @@ a base run, as a percentage of the base.
     python scripts/option_cost.py base.yml [-n 4] [--steps 8] [--only a,b]
                                   [--json out.json] [--workdir DIR]
     python scripts/option_cost.py --report DIR     # table from a finished run
+    python scripts/option_cost.py --plot DIR1 [DIR2] --out fig.png   # bar chart
+    python scripts/option_cost.py --table DIR1 DIR4 --out table.rst   # docs table
 
 The base input should be a regional run with land, rivers and a sea (the
 numbers in docs/user_guide/cost.rst come from the mixed_carbonate_clastic
@@ -230,6 +232,120 @@ def report(work, out=None):
     return res
 
 
+SHORT = {"base": "base", "nlspl": "non-linear SPL", "spl_G": "transport-limited SPL",
+         "hill_nl": "non-linear hillslope", "soil": "soil", "flexure": "flexure",
+         "orography": "orography", "ice": "ice", "strata": "stratigraphy",
+         "dual": "dual lithology", "prov": "provenance (3 classes)", "gw": "groundwater",
+         "gw_duri": "+ duricrust", "gw_geochem": "+ geochemistry",
+         "gravity": "gravity currents", "carbonate": "carbonates",
+         "carb_exposure": "+ exposure", "carb_turbidity": "+ turbidity",
+         "pelagic": "pelagic rain", "waves": "+ waves", "coastal": "+ coastal erosion",
+         "karst": "+ karst"}
+
+
+# What each option is added to, and a note for the documentation table.
+ADDED = {"dual": "stratigraphy", "prov": "dual", "gw_duri": "groundwater",
+         "gw_geochem": "duricrust", "gravity": "dual", "pelagic": "dual",
+         "carbonate": "dual", "carb_exposure": "carbonates",
+         "carb_turbidity": "carbonates", "waves": "carbonates",
+         "coastal": "carbonates", "karst": "carbonates"}
+NOTES = {"nlspl": "changes the relief: the marine step does less work here",
+         "soil": "soil-aware SPL and soil diffusion (SNES, TS)",
+         "flexure": "operator factorised once",
+         "orography": "lowers the rain here: less flow and marine work",
+         "strata": "memory grows with the layers (below)",
+         "dual": "a second (mud) routing in the cascades",
+         "prov": "one routed column per class",
+         "gw": "AMG head solve",
+         "gw_geochem": "one direct (MUMPS) solve per species",
+         "gravity": "its own network and solve, inside the marine step",
+         "pelagic": "clay decay solve, and carb_mud added to the marine routing",
+         "carbonate": "three more lithologies in the marine routing",
+         "carb_exposure": "one screened-Poisson solve",
+         "waves": "one upwind solve per wave direction"}
+GROUPS = [("Erosion and hillslope laws", ["nlspl", "spl_G", "hill_nl", "soil"]),
+          ("Climate, ice and the lithosphere", ["flexure", "orography", "ice"]),
+          ("Stratigraphy", ["strata", "dual", "prov"]),
+          ("Groundwater and geochemistry", ["gw", "gw_duri", "gw_geochem"]),
+          ("Marine processes", ["gravity", "pelagic", "carbonate", "carb_exposure",
+                                "carb_turbidity", "waves", "coastal", "karst"])]
+
+
+def table(dirs, out):
+    """The documentation table (RST list-table) of two finished runs, one
+    rank and several ranks: % of the base step and the option's own phases
+    (on the second run)."""
+    import io
+    import contextlib
+
+    runs = []
+    for d in dirs:
+        with contextlib.redirect_stdout(io.StringIO()):
+            runs.append({x["name"]: x for x in report(d)})
+    r1, rn = runs[0], runs[-1]
+    pct = lambda r, n, k="step_s": "%.0f" % (100 * r[n][k] / r["base"]["step_s"]) \
+        if n in r else ""
+    L = [".. list-table::", "   :header-rows: 1", "   :widths: 28 13 9 9 9 32", "",
+         "   * - Option", "     - added to", "     - %d rank" % r1["base"]["ranks"],
+         "     - %d ranks" % rn["base"]["ranks"], "     - own phases", "     - notes",
+         "   * - base", "     -", "     - 100 (%.2f s)" % r1["base"]["step_s"],
+         "     - 100 (%.2f s)" % rn["base"]["step_s"], "     -",
+         "     - mostly the marine deposition and the flow accumulation"]
+    for title, names in GROUPS:
+        L += ["   * - **%s**" % title] + ["     -"] * 5
+        for n in names:
+            if n not in rn:
+                continue
+            L += ["   * - %s" % SHORT[n], "     - %s" % ADDED.get(n, "base"),
+                  "     - %s" % pct(r1, n), "     - %s" % pct(rn, n),
+                  "     - %s" % pct(rn, n, "own_s"), "     - %s" % NOTES.get(n, "")]
+    open(out, "w").write("\n".join(L) + "\n")
+
+
+def plot(dirs, out):
+    """Bar chart of the step time of every option (% of the base), whole
+    step and the option's own phases, one bar per finished run directory."""
+    import io
+    import contextlib
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    runs = []
+    for d in dirs:
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = report(d)
+        runs.append(({x["name"]: x for x in r}, "%d rank%s" % (r[0]["ranks"],
+                                                             "s" if r[0]["ranks"] > 1 else "")))
+    names = [n for n, _, _ in VARIANTS if n in runs[0][0]]
+    fig, ax = plt.subplots(figsize=(10, 0.32 * len(names) + 1.6), constrained_layout=True)
+    y = np.arange(len(names))[::-1]
+    h = 0.8 / len(runs)
+    cols = ["#457b9d", "#e76f51", "#2a9d8f", "#8d99ae"]
+    vmax = 0.0
+    for k, (d, lab) in enumerate(runs):
+        b = d["base"]["step_s"]
+        tot = [100 * d[n]["step_s"] / b if n in d else 0 for n in names]
+        own = [100 * d[n].get("own_s", 0.0) / b if n in d else 0 for n in names]
+        off = (0.5 * (len(runs) - 1) - k) * h
+        ax.barh(y + off, tot, h, color=cols[k], alpha=0.4, label="whole step, %s" % lab)
+        ax.barh(y + off, own, h, color=cols[k], label="option's own phases, %s" % lab)
+        vmax = max(vmax, max(tot))
+    ax.axvline(100, color="k", lw=0.8)
+    ax.set_yticks(y)
+    ax.set_yticklabels([SHORT.get(n, n) for n in names])
+    ax.set_xlabel("%% of the base step (%d nodes)" % runs[0][0]["base"]["mpoints"])
+    ax.set_title("Time per step: each option added to the base, (+) to the option above",
+                 fontsize=10)
+    ax.set_xlim(0, 1.05 * vmax)
+    ax.grid(axis="x", alpha=0.25, lw=0.5)
+    ax.legend(fontsize=8, frameon=False, loc="lower right")
+    fig.savefig(out, dpi=150)
+
+
 def base_config(path, steps):
     cfg = yaml.safe_load(open(path))
     # keep only the core blocks: every option is switched on by a variant
@@ -249,6 +365,11 @@ def main(argv=None):
     ap.add_argument("input", nargs="?", help="base goSPL input YAML")
     ap.add_argument("--report", default=None, metavar="DIR",
                     help="print the table of a finished run (its --workdir)")
+    ap.add_argument("--plot", nargs="+", default=None, metavar="DIR",
+                    help="bar chart of finished runs (one bar per DIR)")
+    ap.add_argument("--table", nargs="+", default=None, metavar="DIR",
+                    help="RST table of finished runs (one rank, then several)")
+    ap.add_argument("--out", default="option_cost.png", help="output of --plot/--table")
     ap.add_argument("-n", type=int, default=4, help="MPI ranks (default 4)")
     ap.add_argument("--steps", type=int, default=8, help="steps per run (default 8)")
     ap.add_argument("--only", default=None, help="comma-separated variant names")
@@ -257,6 +378,12 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.report:
         report(a.report, a.json)
+        return 0
+    if a.plot:
+        plot(a.plot, a.out)
+        return 0
+    if a.table:
+        table(a.table, a.out)
         return 0
 
     base = os.path.abspath(a.input)
