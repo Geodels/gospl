@@ -183,24 +183,160 @@ def _strip_refs(obj):
     return obj
 
 
+# input-reference entries shown with each module of the chooser:
+# (input path, keys or None for the whole block)
+MOD_INPUTS = {
+    "core": [("domain", ["npdata", "flowdir", "bc"]), ("time", ["start", "end", "dt", "tout"]),
+             ("spl", ["K", "m", "d"])],
+    "sea": [("sea", None)],
+    "climate": [("climate[]", ["start", "uniform", "map"])],
+    "evaporation": [("climate[]", ["evap_uniform", "evap_map"])],
+    "orography": [("orography", None)],
+    "sedfactor": [("sedfactor[]", None)],
+    "spl_transport": [("spl", ["G"])],
+    "nlspl": [("spl", ["n"])],
+    "soil": [("soil", None)],
+    "deposition": [("domain", ["nodep"])],
+    "hillslope": [("diffusion", ["hillslopeKa", "hillslopeKm", "hillslopeSc", "hillslopeNb",
+                                 "hillslopenl"])],
+    "channelQ": [("diffusion", ["channelQ"])],
+    "marine_deposition": [("domain", ["seadepo"]),
+                          ("diffusion", ["nonlinKm", "clinSlp", "marineSolver", "picardSub"])],
+    "gravity": [("gravity", None), ("gravity.flood", None)],
+    "waves": [("waves", None), ("waves.climate[]", None)],
+    "coastal_erosion": [("coastal_erosion", None)],
+    "strata": [("time", ["strat"]), ("compaction", None)],
+    "dual": [("strata", None), ("strata.coarse", None), ("strata.fine", None)],
+    "lithologies": [("strata.lithologies[]", None)],
+    "provenance": [("provenance", None)],
+    "sst": [("sst", None), ("sst.events[]", None)],
+    "carbonate": [("carbonate", None), ("carbonate.factories[]", None),
+                  ("carbonate.factories[].response[]", None)],
+    "pelagic": [("pelagic[]", None)],
+    "carbonate_supply": [("carbonate_supply", None)],
+    "karst": [("karst", None)],
+    "groundwater": [("groundwater", None)],
+    "duricrust": [("groundwater.duricrust", None)],
+    "geochem": [("groundwater.geochem", None), ("groundwater.geochem.species[]", None)],
+    "river_load": [("groundwater.geochem", ["river_load"])],
+    "marine_coupling": [("groundwater.geochem", ["marine_coupling"])],
+    "ice": [("ice", None), ("ice.abrasion", None), ("ice.till", None)],
+    "flexure_flat": [("flexure", None)],
+    "flexure_global": [("flexure", None)],
+    "temap": [("temap[]", None)],
+    "tectonics_vertical": [("tectonics[]", None)],
+    "advection": [("domain", ["advect"]), ("tectonics[]", None)],
+    "plate_interp": [("domain", ["advect"]), ("tectonics[]", None)],
+    "interp_remap": [("domain", ["interp_remap"])],
+    "cyclic": [("domain", ["bc"])],
+}
+
+# measured extra time of each option, % of the base step (rows of the cost
+# table, docs/user_guide/scaling/option_cost_table.rst, "added time")
+COST_ROWS = {
+    "transport-limited SPL": "spl_transport", "soil": "soil", "flexure": "flexure",
+    "orography": "orography", "ice": "ice", "stratigraphy": "strata",
+    "dual lithology": "dual", "provenance (3 classes)": "provenance",
+    "groundwater": "groundwater", "+ duricrust": "duricrust", "+ geochemistry": "geochem",
+    "gravity currents": "gravity", "pelagic rain": "pelagic", "carbonates": "carbonate",
+    "+ waves": "waves", "+ coastal erosion": "coastal_erosion", "+ karst": "karst",
+}
+
+# where each module works: flat (regional) mesh, sphere (global) or both
+MOD_DOMAIN = {"orography": "flat", "flexure_flat": "flat", "cyclic": "flat",
+              "flexure_global": "sphere"}
+
+
+def _costs():
+    """Added time (% of the base step at 1 rank) per module, from the table."""
+    p = os.path.join(os.path.dirname(HERE), "scaling", "option_cost_table.rst")
+    out = {}
+    if not os.path.exists(p):
+        return out
+    rows = re.findall(r"   \* - (.*)\n     - (.*)\n     - (.*)\n     - (.*)\n     - (.*)\n", open(p).read())
+    for label, _, one, _, added in rows:
+        label = label.strip()
+        if label in COST_ROWS:
+            try:
+                out[COST_ROWS[label]] = float(added.strip() or 0)
+            except ValueError:
+                pass
+    if "flexure" in out:
+        out["flexure_flat"] = out["flexure_global"] = out.pop("flexure")
+    return out
+
+
+def _params(inputs):
+    """Per module: the input keys it sets, with unit, default and range."""
+    by_path = {b["path"]: b for b in inputs}
+    out = {}
+    for mid, spec in MOD_INPUTS.items():
+        rows = []
+        for path, keys in spec:
+            b = by_path.get(path)
+            if not b:
+                continue
+            for k in b["keys"]:
+                name = k["key"].split()[0]
+                if keys is None or name in keys:
+                    rows.append({"key": (path + ": " if path not in ("domain", "time", "spl", "diffusion")
+                                         or keys is None else path + ": ") + name,
+                                 "unit": k.get("unit", ""), "default": str(k.get("default", "")),
+                                 "range": k.get("range", "")})
+        if rows:
+            out[mid] = rows
+    return out
+
+
+def _examples():
+    """Catalogue of the goSPL-examples inputs, limited to the examples that
+    have a page in this build's gallery."""
+    p = os.path.join(HERE, "examples.json")
+    if not os.path.exists(p):
+        return []
+    gen = os.path.join(os.path.dirname(os.path.dirname(HERE)), "examples", "generated")
+    recs = json.load(open(p))
+    if os.path.isdir(gen):
+        recs = [r for r in recs if os.path.isdir(os.path.join(gen, r["example"]))]
+    return recs
+
+
 def _modules(data):
     data = _strip_refs(data)
+    costs = _costs()
+    ip = os.path.join(HERE, "inputs.json")
+    params = _params(json.load(open(ip))) if os.path.exists(ip) else {}
+    ids = {m["id"] for m in data["modules"]}
+    for m in data["modules"]:
+        m["domain"] = MOD_DOMAIN.get(m["id"], "both")
+        m["cost"] = costs.get(m["id"], 0.0)
+        if m["id"] in params:
+            m["params"] = params[m["id"]]
+    ex = _examples()
+    for r in ex:
+        r["modules"] = [i for i in r["modules"] if i in ids]
+    data["examples"] = ex
     js = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     return "".join([
         ".. _module_chooser:\n\n", "=" * 26 + "\n", "Which modules do I need?\n", "=" * 26 + "\n\n",
-        "Tick the processes you want to simulate. The chart adds the modules they\n"
-        "need (transitively), shows why, and lists the combinations that do not go\n"
-        "together, the mesh each one works on and the modules often used with them.\n"
-        "Each name links to its page; the units and ranges of every key are on\n"
-        ":ref:`input_reference`.\n\n",
+        "Choose a regional (flat mesh) or global (sphere) model and tick the\n"
+        "processes you want to simulate. The graph shows what each one needs (red\n"
+        "until it is selected, green when complete), the page lists the examples\n"
+        "that come closest to your set-up with their mesh, resolution and time span,\n"
+        "the main parameters of each module with their usual values, and an estimate\n"
+        "of the time and memory your run will need. The units and ranges of every\n"
+        "key are on :ref:`input_reference`; the measured cost of each option on\n"
+        ":ref:`option_cost`.\n\n",
         ".. raw:: html\n\n",
         "   <div class=\"gospl-modchart\"></div>\n",
         "   <script>window.GOSPL_MODULES = %s; window.GOSPL_DOCROOT = \"../../\";</script>\n" % js,
         "   <script src=\"../../_static/modchart.js\"></script>\n\n",
         ".. note::\n\n",
-        "   The chart is built from the checks goSPL makes when it reads the input\n",
-        "   file: a *required* module is one without which goSPL stops with an error,\n",
-        "   ignores the option, or would compute nothing useful. When in doubt, the\n",
+        "   The graph is built from the checks goSPL makes when it reads the input\n",
+        "   file: a module is *required* when goSPL stops without it, ignores the\n",
+        "   option, or would compute nothing useful. The resource estimate scales the\n",
+        "   costs measured on a 47,672-node margin (:ref:`option_cost`) with the number\n",
+        "   of nodes and steps: read it as an order of magnitude. When in doubt, the\n",
         "   message goSPL prints at start-up is the reference.\n",
     ])
 

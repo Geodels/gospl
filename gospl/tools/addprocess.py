@@ -41,6 +41,7 @@ class GridProcess(object):
         self.flex = None
 
         if self.flexOn:
+            self._flexMethodForMesh()
             self.rho_water = 1030.0
             self.localFlex = np.zeros(self.lpoints)
             self.flexTe_dh = None
@@ -64,6 +65,14 @@ class GridProcess(object):
             # start; interval=1 reproduces every-step behaviour exactly.
             self.flexCount = -1
         if self.oroOn:
+            if not self.flatModel:
+                # The wind is one vector in the plane of a flat mesh; on a
+                # sphere it has no meaning and the run went on with
+                # meaningless rain.
+                raise ValueError(
+                    "orography: the orographic rain model works on flat meshes "
+                    "only; use climate rain maps on a sphere."
+                )
             # Orographic precipitation is solved on the mesh (no regular grid).
             # The advection-relaxation operators depend only on the uniform,
             # constant wind and the fixed mesh, so they are assembled once and
@@ -85,6 +94,26 @@ class GridProcess(object):
 
         return
 
+    def _flexMethodForMesh(self):
+        """
+        Matches the flexure method to the mesh. Without ``flexure: method`` the
+        method follows the mesh: ``fem`` on a flat mesh, ``global`` on a
+        sphere. A method set explicitly for the other kind of mesh stops with a
+        message: ``fem`` on a sphere failed on the first step with an
+        AttributeError (the flat edge sets do not exist on a sphere), and
+        ``global`` on a flat mesh projected the plane onto a sphere.
+        """
+        want = "fem" if self.flatModel else "global"
+        if not getattr(self, "flexMethodSet", True):
+            self.flex_method = want
+        elif self.flex_method != want:
+            raise ValueError(
+                "flexure: method '%s' needs a %s mesh, this one is %s; use "
+                "method: '%s' (or leave `method` out: it follows the mesh)."
+                % (self.flex_method, "flat" if self.flex_method == "fem" else "spherical",
+                   "flat" if self.flatModel else "a sphere", want)
+            )
+
     def _updateTe(self):
         """
         Finds current elastic thickness map for the considered time interval.
@@ -99,18 +128,29 @@ class GridProcess(object):
             if nb == -1:
                 nb = 0
             self.teNb = nb
+            # A map is read only when the event gives one; otherwise the
+            # uniform value is used, 0 included (Airy, no rigidity). The test
+            # used to be `tUni == 0`, so a uniform 0 (and the row prepended
+            # before a late first event) was loaded as a map: np.load(None).
+            tMap = self.tedata.at[nb, "tMap"]
+            hasMap = tMap is not None and not pd.isnull(tMap)
             if self.flex_method == 'global':
-                loadData = np.load(self.tedata.at[nb, "tMap"])
-                self.flexTe = loadData[self.tedata.at[nb, "tKey"]]
-                del loadData
-                if MPIrank == 0:
-                    self.flexTe_dh = self._unstr2dh(self.flexTe)
+                if hasMap:
+                    loadData = np.load(tMap)
+                    self.flexTe = loadData[self.tedata.at[nb, "tKey"]]
+                    del loadData
+                    if MPIrank == 0:
+                        self.flexTe_dh = self._unstr2dh(self.flexTe)
+                elif MPIrank == 0:
+                    # uniform: the DH grid directly (no whole-mesh array per rank)
+                    self.flexTe_dh = np.full((self.dh_N, 2 * self.dh_N),
+                                             float(self.tedata.at[nb, "tUni"]))
             else:
                 # Parallel FV biharmonic (flat, 'fem'): Te is needed per LOCAL
                 # mesh node (no regular grid). Uniform value or per-vertex map
                 # indexed by this rank's owned+ghost nodes.
-                if self.tedata["tUni"][nb] == 0.:
-                    loadData = np.load(self.tedata.at[nb, "tMap"])
+                if hasMap:
+                    loadData = np.load(tMap)
                     teVal = loadData[self.tedata.at[nb, "tKey"]]
                     del loadData
                     self.flexTe_local = teVal[self.locIDs]

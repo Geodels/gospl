@@ -272,3 +272,21 @@ def test_snes_converge_on_the_residual(tmp_path, monkeypatch, case):
         assert reason in (2, 3), f"{attr} stopped with reason {reason}"
     finally:
         m.destroy()
+
+
+def test_soil_depth_prod_required():
+    """
+    Protects: `soil: depthProd` (the production decay depth `Hs`).
+
+    Silent failure prevented: it defaulted to 0, so the production law
+    `exp(-h/Hs)` produced no soil and the maximum soil thickness
+    `-ln(bedrockConv) * Hs` was 0, with no message. It is now required and
+    positive.
+    """
+    from gospl.tools.inputparser import ReadYaml
+
+    for soil in ({"soilK": 1.0e-5}, {"soilK": 1.0e-5, "depthProd": 0.0}):
+        parser = ReadYaml.__new__(ReadYaml)       # skip the file/IO bootstrap
+        parser.input = {"soil": soil}
+        with pytest.raises(ValueError, match="depthProd"):
+            parser._readSoilInfo()

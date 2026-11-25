@@ -136,7 +136,7 @@ goSPL provides two solvers, selected by ``method``:
 
         where:
 
-        a. ``method``: ``'fem'`` for flat/2D models (default) or ``'global'`` for global (spherical) models.
+        a. ``method``: ``'fem'`` for flat/2D models or ``'global'`` for global (spherical) models. Optional: without it the method follows the mesh (``'fem'`` on a flat mesh, ``'global'`` on a sphere); a method set for the other kind of mesh stops at start-up with a message.
         b. ``thick`` effective elastic plate thickness :math:`T_e` in m (uniform; spatially/temporally variable :math:`T_e` is set with the ``temap`` key below).
         c. ``rhoc`` sediment/crust (load) density in kg/m³,
         d. ``rhoa`` asthenospheric (mantle) density in kg/m³,
@@ -175,7 +175,7 @@ goSPL provides two solvers, selected by ``method``:
           The ``'fem'`` solver caches its operator and factorisation and reuses them every step (serial direct LU / parallel MUMPS), so it is fast even on small meshes; only the surface load changes between steps. Its result is influenced by the boundary condition (see ``bcN``/``bcE``/``bcS``/``bcW`` below) only where the flexural wavelength approaches the domain size (the deflection reaches the edges); away from the edges the interior solution is insensitive to the choice.
 
 
-In addition, it is possible to define a spatially-variable (and time-varying) lithospheric elastic thickness with the ``temap`` key below, where specific maps can be added through time during the run. This works with both ``'fem'`` and ``'global'`` methods (for ``'fem'`` the varying :math:`T_e` is still a single linear solve).
+In addition, it is possible to define a spatially-variable (and time-varying) lithospheric elastic thickness with the ``temap`` key below, where specific maps can be added through time during the run. This works with both ``'fem'`` and ``'global'`` methods (for ``'fem'`` the varying :math:`T_e` is still a single linear solve). Each event gives either a ``map`` or a ``uniform`` value (0 is allowed: local, Airy isostasy); before the first event the plate keeps the ``thick`` of the ``flexure`` block.
 
 .. grid:: 1
     :padding: 3

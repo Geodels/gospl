@@ -158,7 +158,7 @@ Orographic precipitation definition
 
 .. warning::
 
-    The orographic precipitation is only available for 2D grids and will not be working for global models.
+    The orographic precipitation is only available for flat (2D) meshes: on a global (spherical) mesh goSPL stops at start-up with a message.
 
 goSPL implements the Linear Theory of Orographic Precipitation following `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_.
 

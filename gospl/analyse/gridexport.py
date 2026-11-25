@@ -99,8 +99,11 @@ def _list_fields(h5dir, file_base, step):
             "no %s.%d.p*.h5 in %s" % (file_base, step, h5dir)
         )
     skip = {"coords", "cells"}
+    # per-node fields only, stored (npoints, 1); a 1-D dataset is a run-level
+    # record (the per-species marine reservoir `marineSolute`, written for the
+    # restart) and broke the reassembly
     with h5py.File(f0[0], "r") as f:
-        return [k for k in f.keys() if k not in skip and f[k].ndim <= 2]
+        return [k for k in f.keys() if k not in skip and f[k].ndim == 2]
 
 
 def _read_sealevel(h5dir, file_base, step):

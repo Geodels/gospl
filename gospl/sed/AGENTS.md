@@ -30,7 +30,7 @@ Opt-in, active **only** when stratigraphy is on (`stratNb > 0`). Enabled by `str
 - `self.phiS` = coarse porosity per layer, `self.phiF` = fine porosity per layer.
 - `self.fineFrac` (per node) = `vSedF/vSed` of the routed flux (composition arriving at each node). `self.depoFineFrac` = the fraction `deposeStrat` actually uses; seeded to `fineFrac`, then refined inside pits (`_pitFineFraction`) and the marine domain (`_marineFineFraction`).
 - `self.vSedF`/`self.vSedFLocal` = fine sediment flux (registered in `destroy_DMPlex`).
-- Parsed params (`_extraStrata`): `phi0c/z0c` (coarse curve, defaults to `phi0s/z0s`), `phi0f/z0f` (fine), `fine_k_factor` (fine erodibility multiplier), `fine_diff_factor` (fine diffusivity multiplier), `bedrock_coarse_frac`, `pit_inlet_bias_*`, `fine_efficiency`.
+- Parsed params (`_extraStrata`): `phi0c/z0c` (coarse curve, defaults to `phi0s/z0s`), `phi0f/z0f` (fine), `fine_k_factor` (fine erodibility multiplier), `fine_diff_factor` (fine diffusivity multiplier), `bedrock_coarse_frac`, `pit_inlet_bias_*` (`fine_efficiency` was planned but never implemented: the parser warns that it is ignored).
 
 **One shared hook does the lithology coupling:** `_surfaceComposition()` returns the per-node coarse fraction `fc` of the exposed top layer (all-coarse = 1.0 when off). Built on it: `_surfaceLithoK()` (= `fc + ff·fine_k_factor`, folded into `surfK` in all three SPL flavours) and `_surfaceLithoD()` (= `fc + ff·fine_diff_factor`, applied to `Cd` in `_hillSlope`/`_hillSlopeNL`/`soilSPL.diffuseSoil`). Both are 1.0 (no-op) when single-fraction or no contrast.
 

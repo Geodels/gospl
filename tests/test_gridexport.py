@@ -363,3 +363,23 @@ def test_d8_method_backends_give_identical_grids(tmp_path):
 
     with pytest.raises(ValueError):
         gx.grid_export(h5dir, mesh, spacing=dx, method="bogus")
+
+
+def test_list_fields_skips_run_level_records(tmp_path):
+    """
+    Protects: `gridexport._list_fields` lists per-node fields only.
+
+    Failure prevented: a 1-D dataset in the step file (the per-species marine
+    solute reservoir `marineSolute`, saved for the restart) was listed as a
+    field and `gospl-grid` stopped with "too many indices for array" on every
+    geochemistry run with `marine_coupling`.
+    """
+    import h5py
+
+    from gospl.analyse.gridexport import _list_fields
+
+    with h5py.File(tmp_path / "gospl.3.p0.h5", "w") as f:
+        f.create_dataset("elev", data=np.zeros((5, 1)))
+        f.create_dataset("marineSolute", data=np.zeros(3))
+        f.create_dataset("coords", data=np.zeros((5, 3)))
+    assert _list_fields(str(tmp_path), "gospl", 3) == ["elev"]

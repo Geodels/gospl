@@ -277,3 +277,25 @@ def test_rain_events_prepend_without_futurewarning(tmp_path):
     # zscale row (unstructuredmesh._updateRain branches on pd.isnull(rzA))
     assert rd.at[3, "rzA"] == 2.0 and rd.at[3, "rzB"] == 3.0
     assert pd.isnull(rd.at[3, "rMap"])
+
+
+def test_no_rainfall_is_a_clear_error():
+    """
+    Protects: an input with neither a `climate` nor an `orography` block.
+
+    Silent failure prevented: `_updateRain` called `len(self.raindata)` on
+    None and the run stopped with a TypeError on the first step. The parser
+    now stops with a message naming the missing block; a climate block or
+    orography alone is accepted.
+    """
+    parser = _bare_parser()
+    parser._readRain()
+    parser.oroOn = False
+    with pytest.raises(ValueError, match="climate"):
+        parser._checkRain()
+    parser.oroOn = True
+    parser._checkRain()
+    parser.input = {"climate": [{"start": 0.0, "uniform": 0.0}]}
+    parser.oroOn = False
+    parser._readRain()
+    parser._checkRain()

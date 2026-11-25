@@ -181,3 +181,68 @@ def test_dh_flexure_grid_placed_at_mesh_radius():
         "eigenvalues are physical and MUST scale as 1/radius**4 — only the "
         "interpolation geometry should follow the mesh."
     )
+
+
+def test_flexure_method_follows_the_mesh(tmp_path, monkeypatch):
+    """
+    Protects: `GridProcess._flexMethodForMesh`.
+
+    Silent failure prevented: `flexure` without `method` defaulted to the flat
+    'fem' solver on every mesh, and on a sphere the run stopped on the first
+    step with `AttributeError: eastPts` (the flat edge sets do not exist on a
+    sphere). Without `method` the solver now follows the mesh ('global' on a
+    sphere) and the run completes; a method set for the other kind of mesh
+    stops at start-up with a message.
+    """
+    import shutil
+
+    from gospl.model import Model
+    from _helpers import FIXTURES_DIR
+
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")    # a sphere
+    base = (FIXTURES_DIR / "minimal.yml").read_text()
+    monkeypatch.chdir(tmp_path)
+
+    (tmp_path / "auto.yml").write_text(base + "\nflexure:\n    thick: 30.e3\n")
+    m = Model("auto.yml", verbose=False, showlog=False)
+    try:
+        assert m.flex_method == "global"
+        m.runProcesses()
+    finally:
+        m.destroy()
+
+    (tmp_path / "fem.yml").write_text(base + "\nflexure:\n    method: fem\n    thick: 30.e3\n")
+    with pytest.raises(ValueError, match="needs a flat mesh"):
+        Model("fem.yml", verbose=False, showlog=False)
+
+
+def test_temap_uniform_zero_and_late_first_event():
+    """
+    Protects: `GridProcess._updateTe` and the row `_readTeMap` prepends.
+
+    Silent failure prevented: `_updateTe` read a map whenever `tUni == 0`, so
+    a uniform Te of 0 (Airy isostasy) and the row the parser prepends before a
+    first event that starts after `time: start` (Te 0, no map) both stopped
+    with np.load(None). A map is now read only when an event gives one, and
+    the prepended row keeps the flexure block's `thick`.
+    """
+    from gospl.tools.addprocess import GridProcess
+    from gospl.tools.inputparser import ReadYaml
+
+    parser = ReadYaml.__new__(ReadYaml)
+    parser.input = {"temap": [{"start": 500.0, "uniform": 0.0}]}
+    parser.tStart, parser.meshFile, parser.flex_eet = 0.0, "/dev/null", 25.0e3
+    parser._readTeMap()
+    td = parser.tedata
+    assert td["start"].tolist() == [0.0, 500.0]
+    assert td.at[0, "tUni"] == 25.0e3 and td.at[1, "tUni"] == 0.0
+
+    g = GridProcess.__new__(GridProcess)
+    g.tedata, g.teNb, g.flex_method = td, -1, "fem"
+    g.lpoints, g.locIDs = 4, np.arange(4)
+    g.tNow = 0.0
+    g._updateTe()
+    assert np.all(g.flexTe_local == 25.0e3)
+    g.tNow = 600.0
+    g._updateTe()
+    assert np.all(g.flexTe_local == 0.0)

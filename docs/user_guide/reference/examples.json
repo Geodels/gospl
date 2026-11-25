@@ -1,0 +1,1763 @@
+[
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-east.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-erosion.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-karst.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "karst",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-nowaves.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-refraction.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-ring.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-sealevel.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_atoll",
+  "group": "regional",
+  "input": "input-season.yml",
+  "page": "examples/generated/carbonate_atoll/index",
+  "duration_yr": 600000.0,
+  "dt_yr": 1000.0,
+  "steps": 600,
+  "strat_yr": 10000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 23064,
+  "spacing_m": 99.74217061746381,
+  "flat": true,
+  "extent_km": [
+   14.0,
+   14.0
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-erosion10.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 2308,
+  "spacing_m": 101.14975165459653,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-res050.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 8935,
+  "spacing_m": 50.61842103768843,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-res100.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 2308,
+  "spacing_m": 101.14975165459653,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-res200.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 676,
+  "spacing_m": 191.74410312361348,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-stationary.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 2308,
+  "spacing_m": 101.14975165459653,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-sub_erosion10.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 2308,
+  "spacing_m": 101.14975165459653,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-sub_reefonly.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical"
+  ],
+  "nodes": 2308,
+  "spacing_m": 101.14975165459653,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-sub_waves.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 2308,
+  "spacing_m": 101.14975165459653,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "carbonate_terraces",
+  "group": "regional",
+  "input": "input-subsidence.yml",
+  "page": "examples/generated/carbonate_terraces/index",
+  "duration_yr": 400000.0,
+  "dt_yr": 500.0,
+  "steps": 800,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "tectonics_vertical",
+   "waves"
+  ],
+  "nodes": 2308,
+  "spacing_m": 101.14975165459653,
+  "flat": true,
+  "extent_km": [
+   12.0,
+   1.6
+  ]
+ },
+ {
+  "example": "dual_lithology",
+  "group": "regional",
+  "input": "input-dual.yml",
+  "page": "examples/generated/dual_lithology/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 52805,
+  "spacing_m": 638.3551889936698,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "dual_lithology",
+  "group": "regional",
+  "input": "input-provenance.yml",
+  "page": "examples/generated/dual_lithology/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "provenance",
+   "sea",
+   "strata"
+  ],
+  "nodes": 52805,
+  "spacing_m": 638.3551889936698,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "escarpment_retreat",
+  "group": "regional",
+  "input": "input-escarpment-oro.yml",
+  "page": "examples/generated/escarpment_retreat/index",
+  "duration_yr": 50000000.0,
+  "dt_yr": 100000.0,
+  "steps": 500,
+  "strat_yr": null,
+  "modules": [
+   "core",
+   "deposition",
+   "flexure_flat",
+   "hillslope",
+   "orography",
+   "sea"
+  ],
+  "nodes": 104449,
+  "spacing_m": 1000.5250359190088,
+  "flat": true,
+  "extent_km": [
+   300.0,
+   300.0
+  ]
+ },
+ {
+  "example": "escarpment_retreat",
+  "group": "regional",
+  "input": "input-escarpment.yml",
+  "page": "examples/generated/escarpment_retreat/index",
+  "duration_yr": 50000000.0,
+  "dt_yr": 100000.0,
+  "steps": 500,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "flexure_flat",
+   "hillslope",
+   "sea"
+  ],
+  "nodes": 104449,
+  "spacing_m": 1000.5250359190088,
+  "flat": true,
+  "extent_km": [
+   300.0,
+   300.0
+  ]
+ },
+ {
+  "example": "ferricrete_inversion",
+  "group": "regional",
+  "input": "input.yml",
+  "page": "examples/generated/ferricrete_inversion/index",
+  "duration_yr": 15000000.0,
+  "dt_yr": 20000.0,
+  "steps": 750,
+  "strat_yr": 250000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "duricrust",
+   "geochem",
+   "groundwater",
+   "hillslope",
+   "marine_deposition",
+   "river_load",
+   "sea",
+   "strata",
+   "tectonics_vertical"
+  ],
+  "nodes": 32761,
+  "spacing_m": 316.13088540491617,
+  "flat": true,
+  "extent_km": [
+   50.0,
+   50.0
+  ]
+ },
+ {
+  "example": "flow_direction",
+  "group": "regional",
+  "input": "input-2ngb.yml",
+  "page": "examples/generated/flow_direction/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 1000.0,
+  "steps": 100,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "hillslope",
+   "sea"
+  ],
+  "nodes": 288467,
+  "spacing_m": 200.0406366333133,
+  "flat": true,
+  "extent_km": [
+   99.8,
+   99.8
+  ]
+ },
+ {
+  "example": "flow_direction",
+  "group": "regional",
+  "input": "input-mfd.yml",
+  "page": "examples/generated/flow_direction/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 1000.0,
+  "steps": 100,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "hillslope",
+   "sea"
+  ],
+  "nodes": 288467,
+  "spacing_m": 200.0406366333133,
+  "flat": true,
+  "extent_km": [
+   99.8,
+   99.8
+  ]
+ },
+ {
+  "example": "flow_direction",
+  "group": "regional",
+  "input": "input-sfd.yml",
+  "page": "examples/generated/flow_direction/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 1000.0,
+  "steps": 100,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "hillslope",
+   "sea"
+  ],
+  "nodes": 288467,
+  "spacing_m": 200.0406366333133,
+  "flat": true,
+  "extent_km": [
+   99.8,
+   99.8
+  ]
+ },
+ {
+  "example": "glacial_erosion",
+  "group": "regional",
+  "input": "input-glacier.yml",
+  "page": "examples/generated/glacial_erosion/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 5000.0,
+  "steps": 20,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "hillslope",
+   "ice",
+   "marine_deposition",
+   "sea"
+  ],
+  "nodes": 228573,
+  "spacing_m": 500.2160217094686,
+  "flat": true,
+  "extent_km": [
+   198.5,
+   248.5
+  ]
+ },
+ {
+  "example": "gravity_currents",
+  "group": "regional",
+  "input": "input-failure.yml",
+  "page": "examples/generated/gravity_currents/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "gravity",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 52805,
+  "spacing_m": 638.3551889936698,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "gravity_currents",
+  "group": "regional",
+  "input": "input-gravity.yml",
+  "page": "examples/generated/gravity_currents/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "gravity",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 52805,
+  "spacing_m": 638.3551889936698,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "gravity_currents",
+  "group": "regional",
+  "input": "input-nogravity.yml",
+  "page": "examples/generated/gravity_currents/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 52805,
+  "spacing_m": 638.3551889936698,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "groundwater_geochem",
+  "group": "regional",
+  "input": "input.yml",
+  "page": "examples/generated/groundwater_geochem/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 5000.0,
+  "steps": 20,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "duricrust",
+   "geochem",
+   "groundwater",
+   "hillslope",
+   "marine_coupling",
+   "marine_deposition",
+   "river_load",
+   "sea",
+   "soil",
+   "strata"
+  ],
+  "nodes": 228573,
+  "spacing_m": 500.2160217094686,
+  "flat": true,
+  "extent_km": [
+   198.5,
+   248.5
+  ]
+ },
+ {
+  "example": "hillslope_channels",
+  "group": "regional",
+  "input": "input-100.yml",
+  "page": "examples/generated/hillslope_channels/index",
+  "duration_yr": 3000000.0,
+  "dt_yr": 5000.0,
+  "steps": 600,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 40401,
+  "spacing_m": 111.86894471595188,
+  "flat": true,
+  "extent_km": [
+   20.0,
+   20.0
+  ]
+ },
+ {
+  "example": "hillslope_channels",
+  "group": "regional",
+  "input": "input-100_chan.yml",
+  "page": "examples/generated/hillslope_channels/index",
+  "duration_yr": 3000000.0,
+  "dt_yr": 5000.0,
+  "steps": 600,
+  "strat_yr": null,
+  "modules": [
+   "channelQ",
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 40401,
+  "spacing_m": 111.86894471595188,
+  "flat": true,
+  "extent_km": [
+   20.0,
+   20.0
+  ]
+ },
+ {
+  "example": "hillslope_channels",
+  "group": "regional",
+  "input": "input-200.yml",
+  "page": "examples/generated/hillslope_channels/index",
+  "duration_yr": 3000000.0,
+  "dt_yr": 5000.0,
+  "steps": 600,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 10201,
+  "spacing_m": 223.8676571645273,
+  "flat": true,
+  "extent_km": [
+   20.0,
+   20.0
+  ]
+ },
+ {
+  "example": "hillslope_channels",
+  "group": "regional",
+  "input": "input-200_chan.yml",
+  "page": "examples/generated/hillslope_channels/index",
+  "duration_yr": 3000000.0,
+  "dt_yr": 5000.0,
+  "steps": 600,
+  "strat_yr": null,
+  "modules": [
+   "channelQ",
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 10201,
+  "spacing_m": 223.8676571645273,
+  "flat": true,
+  "extent_km": [
+   20.0,
+   20.0
+  ]
+ },
+ {
+  "example": "hillslope_channels",
+  "group": "regional",
+  "input": "input-50.yml",
+  "page": "examples/generated/hillslope_channels/index",
+  "duration_yr": 3000000.0,
+  "dt_yr": 5000.0,
+  "steps": 600,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 160801,
+  "spacing_m": 55.94616639522319,
+  "flat": true,
+  "extent_km": [
+   20.0,
+   20.0
+  ]
+ },
+ {
+  "example": "hillslope_channels",
+  "group": "regional",
+  "input": "input-50_chan.yml",
+  "page": "examples/generated/hillslope_channels/index",
+  "duration_yr": 3000000.0,
+  "dt_yr": 5000.0,
+  "steps": 600,
+  "strat_yr": null,
+  "modules": [
+   "channelQ",
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 160801,
+  "spacing_m": 55.94616639522319,
+  "flat": true,
+  "extent_km": [
+   20.0,
+   20.0
+  ]
+ },
+ {
+  "example": "implicit_timestepping",
+  "group": "regional",
+  "input": "input-1.25k.yml",
+  "page": "examples/generated/implicit_timestepping/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 1250.0,
+  "steps": 80,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 290007,
+  "spacing_m": 199.9037974389001,
+  "flat": true,
+  "extent_km": [
+   100.0,
+   100.0
+  ]
+ },
+ {
+  "example": "implicit_timestepping",
+  "group": "regional",
+  "input": "input-2.5k.yml",
+  "page": "examples/generated/implicit_timestepping/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 2500.0,
+  "steps": 40,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 290007,
+  "spacing_m": 199.9037974389001,
+  "flat": true,
+  "extent_km": [
+   100.0,
+   100.0
+  ]
+ },
+ {
+  "example": "implicit_timestepping",
+  "group": "regional",
+  "input": "input-500.yml",
+  "page": "examples/generated/implicit_timestepping/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 500.0,
+  "steps": 200,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 290007,
+  "spacing_m": 199.9037974389001,
+  "flat": true,
+  "extent_km": [
+   100.0,
+   100.0
+  ]
+ },
+ {
+  "example": "implicit_timestepping",
+  "group": "regional",
+  "input": "input-5k.yml",
+  "page": "examples/generated/implicit_timestepping/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 5000.0,
+  "steps": 20,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "hillslope",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 290007,
+  "spacing_m": 199.9037974389001,
+  "flat": true,
+  "extent_km": [
+   100.0,
+   100.0
+  ]
+ },
+ {
+  "example": "mixed_carbonate_clastic",
+  "group": "regional",
+  "input": "input-clastic.yml",
+  "page": "examples/generated/mixed_carbonate_clastic/index",
+  "duration_yr": 500000.0,
+  "dt_yr": 5000.0,
+  "steps": 100,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "mixed_carbonate_clastic",
+  "group": "regional",
+  "input": "input-gravity.yml",
+  "page": "examples/generated/mixed_carbonate_clastic/index",
+  "duration_yr": 500000.0,
+  "dt_yr": 5000.0,
+  "steps": 100,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "gravity",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "mixed_carbonate_clastic",
+  "group": "regional",
+  "input": "input-mixed.yml",
+  "page": "examples/generated/mixed_carbonate_clastic/index",
+  "duration_yr": 500000.0,
+  "dt_yr": 5000.0,
+  "steps": 100,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "mixed_carbonate_clastic",
+  "group": "regional",
+  "input": "input-nocontrol.yml",
+  "page": "examples/generated/mixed_carbonate_clastic/index",
+  "duration_yr": 500000.0,
+  "dt_yr": 5000.0,
+  "steps": 100,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "mixed_carbonate_clastic",
+  "group": "regional",
+  "input": "input-sedrate.yml",
+  "page": "examples/generated/mixed_carbonate_clastic/index",
+  "duration_yr": 500000.0,
+  "dt_yr": 5000.0,
+  "steps": 100,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "mixed_carbonate_clastic",
+  "group": "regional",
+  "input": "input-wavecontrol.yml",
+  "page": "examples/generated/mixed_carbonate_clastic/index",
+  "duration_yr": 500000.0,
+  "dt_yr": 5000.0,
+  "steps": 100,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "waves"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "mixed_carbonate_clastic",
+  "group": "regional",
+  "input": "input-waves.yml",
+  "page": "examples/generated/mixed_carbonate_clastic/index",
+  "duration_yr": 500000.0,
+  "dt_yr": 5000.0,
+  "steps": 100,
+  "strat_yr": 5000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata",
+   "waves"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "soil_generation",
+  "group": "regional",
+  "input": "input-river-soil.yml",
+  "page": "examples/generated/soil_generation/index",
+  "duration_yr": 100000.0,
+  "dt_yr": 5000.0,
+  "steps": 20,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "soil"
+  ],
+  "nodes": 228573,
+  "spacing_m": 500.2160217094686,
+  "flat": true,
+  "extent_km": [
+   198.5,
+   248.5
+  ]
+ },
+ {
+  "example": "stratigraphic_record",
+  "group": "regional",
+  "input": "input-advect.yml",
+  "page": "examples/generated/stratigraphic_record/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": null,
+  "modules": [
+   "advection",
+   "climate",
+   "core",
+   "deposition",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "stratigraphic_record",
+  "group": "regional",
+  "input": "input-strati.yml",
+  "page": "examples/generated/stratigraphic_record/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "flexure_flat",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "strata"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "stratigraphic_record",
+  "group": "regional",
+  "input": "input-stratiG.yml",
+  "page": "examples/generated/stratigraphic_record/index",
+  "duration_yr": 250000.0,
+  "dt_yr": 5000.0,
+  "steps": 50,
+  "strat_yr": 5000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "spl_transport",
+   "strata"
+  ],
+  "nodes": 47672,
+  "spacing_m": 688.61368392163,
+  "flat": true,
+  "extent_km": [
+   200.0,
+   100.0
+  ]
+ },
+ {
+  "example": "valley_ferricrete",
+  "group": "regional",
+  "input": "input.yml",
+  "page": "examples/generated/valley_ferricrete/index",
+  "duration_yr": 15000000.0,
+  "dt_yr": 20000.0,
+  "steps": 750,
+  "strat_yr": 250000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "duricrust",
+   "geochem",
+   "groundwater",
+   "hillslope",
+   "marine_deposition",
+   "river_load",
+   "sea",
+   "strata",
+   "tectonics_vertical"
+  ],
+  "nodes": 32761,
+  "spacing_m": 316.13088540491617,
+  "flat": true,
+  "extent_km": [
+   50.0,
+   50.0
+  ]
+ },
+ {
+  "example": "carbonate_global",
+  "group": "global",
+  "input": "input-carb.yml",
+  "page": "examples/generated/carbonate_global/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 100000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "pelagic",
+   "sea",
+   "sst",
+   "strata"
+  ],
+  "nodes": 473582,
+  "spacing_m": 32845.765670947614,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "carbonate_global",
+  "group": "global",
+  "input": "input-ccd_shallow.yml",
+  "page": "examples/generated/carbonate_global/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 100000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "pelagic",
+   "sea",
+   "sst",
+   "strata"
+  ],
+  "nodes": 473582,
+  "spacing_m": 32845.765670947614,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "carbonate_global",
+  "group": "global",
+  "input": "input-geochem.yml",
+  "page": "examples/generated/carbonate_global/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 100000.0,
+  "modules": [
+   "carbonate",
+   "carbonate_supply",
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "duricrust",
+   "geochem",
+   "groundwater",
+   "hillslope",
+   "marine_coupling",
+   "marine_deposition",
+   "pelagic",
+   "provenance",
+   "river_load",
+   "sea",
+   "soil",
+   "sst",
+   "strata"
+  ],
+  "nodes": 473582,
+  "spacing_m": 32845.765670947614,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "carbonate_global",
+  "group": "global",
+  "input": "input-waves.yml",
+  "page": "examples/generated/carbonate_global/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 100000.0,
+  "modules": [
+   "carbonate",
+   "climate",
+   "coastal_erosion",
+   "core",
+   "deposition",
+   "dual",
+   "hillslope",
+   "marine_deposition",
+   "pelagic",
+   "sea",
+   "sst",
+   "strata",
+   "waves"
+  ],
+  "nodes": 473582,
+  "spacing_m": 32845.765670947614,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "continental_flux",
+  "group": "global",
+  "input": "input-cont.yml",
+  "page": "examples/generated/continental_flux/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "hillslope",
+   "marine_deposition",
+   "sea"
+  ],
+  "nodes": 473582,
+  "spacing_m": 32845.765670947614,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "continental_geochem",
+  "group": "global",
+  "input": "input.yml",
+  "page": "examples/generated/continental_geochem/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 100000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "duricrust",
+   "geochem",
+   "groundwater",
+   "hillslope",
+   "marine_coupling",
+   "marine_deposition",
+   "provenance",
+   "river_load",
+   "sea",
+   "soil",
+   "strata"
+  ],
+  "nodes": 473582,
+  "spacing_m": 32845.765670947614,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "erodep_1My",
+  "group": "global",
+  "input": "input-mardep.yml",
+  "page": "examples/generated/erodep_1My/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "flexure_global",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "spl_transport",
+   "temap"
+  ],
+  "nodes": 370830,
+  "spacing_m": 39875.97581363136,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "gravity_currents_global",
+  "group": "global",
+  "input": "input-failure.yml",
+  "page": "examples/generated/gravity_currents_global/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 50000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_global",
+   "gravity",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "spl_transport",
+   "strata",
+   "temap"
+  ],
+  "nodes": 370830,
+  "spacing_m": 39875.97581363136,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "gravity_currents_global",
+  "group": "global",
+  "input": "input-gravity.yml",
+  "page": "examples/generated/gravity_currents_global/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 50000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_global",
+   "gravity",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "spl_transport",
+   "strata",
+   "temap"
+  ],
+  "nodes": 370830,
+  "spacing_m": 39875.97581363136,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "gravity_currents_global",
+  "group": "global",
+  "input": "input-nogravity.yml",
+  "page": "examples/generated/gravity_currents_global/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": 50000.0,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "dual",
+   "flexure_global",
+   "hillslope",
+   "marine_deposition",
+   "sea",
+   "spl_transport",
+   "strata",
+   "temap"
+  ],
+  "nodes": 370830,
+  "spacing_m": 39875.97581363136,
+  "flat": false,
+  "radius_km": 6371.0
+ },
+ {
+  "example": "plate_mvt",
+  "group": "global",
+  "input": "input-global_plates.yml",
+  "page": "examples/generated/plate_mvt/index",
+  "duration_yr": 1000000.0,
+  "dt_yr": 50000.0,
+  "steps": 20,
+  "strat_yr": null,
+  "modules": [
+   "climate",
+   "core",
+   "deposition",
+   "hillslope",
+   "interp_remap",
+   "marine_deposition",
+   "plate_interp",
+   "sea",
+   "tectonics_vertical"
+  ],
+  "nodes": 658605,
+  "spacing_m": 29923.776757713465,
+  "flat": false,
+  "radius_km": 6371.0
+ }
+]

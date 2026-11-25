@@ -34,7 +34,7 @@
     "unit": "- (number of receivers)",
     "default": "8",
     "meaning": "Maximum number of downslope receivers of the multiple-flow-direction routing (1 = single flow direction).",
-    "range": "1 (SFD) to 6 (MFD) per the docs; examples use 1, 2, 3, 5, 6. Higher values spread flow on hillslopes and flats.",
+    "range": "1 (single flow direction) up to the vertex degree (multiple flow direction); examples use 1, 2, 3, 5, 6; higher values spread the flow on hillslopes and flats",
     "resolution": "With MFD the hillslope flow accumulation scales with the cell size (spread over neighbours), so the erosion of non-channel cells changes slightly with resolution.",
     "notes": "Code default is 8 while the user guide says 1 to 6; the Fortran neighbour tables allow up to 12. Doc/code mismatch worth fixing. The partition exponent is fixed at 1.1 (a `flowexp` key is commented out in the parser and not read)."
    },
@@ -783,16 +783,16 @@
     "meaning": "Maximum soil production rate P0 in the exponential law P0 exp(-H/Hs).",
     "range": "1e-5 to 3e-4 m/yr (10 to 300 m/Myr; examples 3e-5 to 5e-5)",
     "resolution": "none",
-    "notes": "With tempMap the code multiplies maxProd by the rainfall (Norton et al. 2013 precipitation factor), so it becomes a factor per m of rain: the user guide does not say this."
+    "notes": "With tempMap the production is maxProd times the local rainfall times the Arrhenius factor (Norton et al. 2013, Eq. 8), so maxProd is then a production per metre of rain."
    },
    {
     "key": "depthProd",
     "unit": "m",
-    "default": "0.0",
+    "default": "required",
     "meaning": "Soil production decay depth Hs.",
     "range": "0.3 to 1 m (examples 0.5 to 1)",
     "resolution": "none",
-    "notes": "Code default 0 makes exp(-H/0) degenerate: always set it."
+    "notes": "Must be positive."
    },
    {
     "key": "roughnessL",
@@ -1003,15 +1003,6 @@
     "range": "0.3 to 0.8 (example 0.6)",
     "resolution": "none",
     "notes": ""
-   },
-   {
-    "key": "fine_efficiency",
-    "unit": "-",
-    "default": "0.5",
-    "meaning": "Planned marine per-fraction deposition efficiency of fines.",
-    "range": "n/a",
-    "resolution": "none",
-    "notes": "Parsed but not used anywhere in the code (inert); not in the user guide."
    },
    {
     "key": "bedrock_sentinel",
@@ -1743,7 +1734,7 @@
     "meaning": "Uniform wind speed.",
     "range": "5 to 20 m/s",
     "resolution": "The advection length wind_speed x conv_time (or fall_time), 10 km with the defaults, should span several cells for the rain shadow to be resolved.",
-    "notes": ""
+    "notes": "The orography block works on flat meshes only (refused on a sphere)."
    },
    {
     "key": "wind_dir",
@@ -1888,11 +1879,11 @@
    {
     "key": "method",
     "unit": "- (fem | global)",
-    "default": "fem",
+    "default": "follows the mesh (fem flat, global sphere)",
     "meaning": "fem: parallel finite-volume biharmonic on flat meshes; global: spherical-harmonic solve (rank 0) on global meshes.",
     "range": "fem (flat), global (sphere)",
     "resolution": "none",
-    "notes": "FD/FFT no longer accepted."
+    "notes": "A method set for the other kind of mesh stops at start-up with a message."
    },
    {
     "key": "thick",
@@ -2052,7 +2043,7 @@
     "meaning": "Uniform Te for this event.",
     "range": "5e3 to 1e5 m",
     "resolution": "As flexure: thick.",
-    "notes": "One of uniform or map is required. Only honoured by method: fem; the global method always reads the map. uniform: 0 is treated as a map event."
+    "notes": "A uniform 0 is allowed (Airy isostasy). Before the first event, the flexure block's thick is used. Works on flat and spherical meshes."
    },
    {
     "key": "map",

@@ -62,7 +62,7 @@ strata:
   bedrock_coarse_frac: 0.5            # composition of the layer-0 bedrock sentinel
   bedrock_sentinel: False            # True -> dedicated infinite bedrock beneath npstrata layers
   # transport / deposition contrast (the "fines travel farther" knobs):
-  fine_efficiency: <factor>           # marine: per-fraction Gmar (fine deposits less readily)
+  fine_efficiency: <factor>           # NOT IMPLEMENTED (ignored, with a warning): per-fraction Gmar
   pitInletBias: {coarse: 0.5, fine: 0.0}   # lacustrine: coarse delta vs fine depocenter
   fine_diff_factor: 1.0               # fine diffusivity relative to coarse (1.0 = no contrast)
 ```
