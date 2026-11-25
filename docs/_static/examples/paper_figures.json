@@ -46,5 +46,9 @@
  "stratigraphic_record": {
   "image": "fig_ex_strat.jpg",
   "caption": "Stratigraphic-record and dual-lithology examples, analysed with the `gospl.analyse` tools. (a) Cross-section along the margin (vertical exaggeration ×100) with layers coloured by palaeo-water-depth facies, prograding clinoforms, the shoreline (blue) and three well sites (triangles). (b) Wheeler diagram (distance against time of deposition) coloured by facies, with the shoreline trajectory (black) and hiatuses left blank. (c) Imposed relative sea level. (d, e) Synthetic wells of the dual-lithology run at 130, 145 and 158 km (triangles in panel a; this run progrades about 5 km further than the section shown), on a shared elevation axis, coloured by (d) layer thickness and (e) coarse fraction."
+ },
+ "generate_2Dmesh": {
+  "image": "fig_ex_flowdir.jpg",
+  "caption": "Flow-direction example (`flow_direction`): water discharge Q on land at 10 kyr for three otherwise identical runs (log scale). Top row, the full 100 km radial domain; bottom row, the 20×20 km window outlined in black. Left to right: single-flow routing (`flowdir`=1), two receivers (`flowdir`=2) and multiple-flow routing (`flowdir`=6). Single-flow routing concentrates the flow into thin threads set by the mesh; multiple-flow routing spreads it into a smoother field less dependent on the mesh."
  }
 }
