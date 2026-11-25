@@ -108,7 +108,18 @@ templates_path = ["_templates"]
 # You can specify multiple suffix as a list of string:
 #
 # source_suffix = ['.rst', '.md']
-source_suffix = ".rst"
+source_suffix = {".rst": "restructuredtext", ".md": "myst-nb", ".ipynb": "myst-nb"}
+
+# The examples gallery: built from goSPL-examples at every build
+# (docs/examples/build_gallery.py; GOSPL_EXAMPLES_DIR uses a local copy).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples"))
+import build_gallery  # noqa: E402
+build_gallery.build()
+
+# The example notebooks are shown as they were last run, never executed here.
+nb_execution_mode = "off"
+myst_enable_extensions = ["colon_fence", "dollarmath"]
+myst_heading_anchors = 3
 
 # The master toctree document.
 master_doc = "index"
@@ -123,7 +134,11 @@ language = 'en'
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_examples_src",
+                    "*.md", "dev", "examples/build_gallery.py",
+                    "examples/generated/gallery.rst"]
+# the example notebooks start at H2 or skip levels: not worth a warning each
+suppress_warnings = ["myst.header"]
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"
@@ -142,8 +157,8 @@ todo_include_todos = False
 # html_theme = "classic"
 # html_theme = "sphinx_rtd_theme"
 html_theme = "pydata_sphinx_theme"
-html_logo = "_static/gospl.svg"
-html_favicon = "images/favicon2.ico"
+html_logo = "_static/gospl_logo.svg"
+html_favicon = "_static/favicon.ico"
 
 
 html_sidebars = {
@@ -155,7 +170,7 @@ html_sidebars = {
 html_theme_options = {
     "github_url": "https://github.com/Geodels/gospl",
     "search_bar_text": "Search goSPL docs ...",
-    "header_links_before_dropdown": 6,
+    "header_links_before_dropdown": 7,
     "icon_links": [],
     "logo": {
         "text": "goSPL",
@@ -164,7 +179,9 @@ html_theme_options = {
     "navbar_end": ["version-switcher", "theme-switcher", "navbar-icon-links"],
     "navbar_persistent": [],
     "switcher": {
-        "json_url": "https://raw.githubusercontent.com/Geodels/gospl/master/docs/_static/version_switch.json",
+        # The list of the development docs, like SciPy's devdocs: one list
+        # for every version, updated without a release.
+        "json_url": "https://gospl.readthedocs.io/en/dev/_static/version_switch.json",
         "version_match": version,
     },
     "show_version_warning_banner": False,
@@ -179,11 +196,19 @@ html_theme_options = {
     # },
 }
 
-if 'dev' in version or 'rc' in version:
+# Which entry of docs/_static/version_switch.json this build is. On Read the
+# Docs the release number is the same on `dev` and on the latest release, so
+# the RTD version name decides: `dev`/`latest` are the development docs, a
+# feature branch its own entry, `stable` and the tags the release number.
+_rtd = os.environ.get("READTHEDOCS_VERSION", "")
+if _rtd in ("dev", "latest") or 'dev' in version or 'rc' in version:
     # Development and release-candidate builds both live on the `dev`
-    # branch (RCs are tagged on dev), so highlight the "Development"
-    # entry in docs/_static/version_switch.json.
+    # branch (RCs are tagged on dev).
     html_theme_options["switcher"]["version_match"] = "development"
+elif _rtd.startswith("feat"):
+    html_theme_options["switcher"]["version_match"] = "feature"
+html_theme_options["show_version_warning_banner"] = (
+    html_theme_options["switcher"]["version_match"] not in ("development", "feature"))
 
 if 'versionwarning' in tags:  # noqa: F821
     # Specific to docs.scipy.org deployment.

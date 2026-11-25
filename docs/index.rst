@@ -95,6 +95,24 @@ Quick links to the Doc
             To the user guide
 
     .. grid-item-card::
+        :img-top: _static/gospl_logo_512.png
+        :text-align: center
+
+        **Examples**
+        ^^^
+
+        A gallery of ready-to-run models, regional and global, each with
+        its description and its results notebook.
+
+        +++
+
+        .. button-ref:: examples
+            :color: secondary
+            :click-parent:
+
+            To the examples
+
+    .. grid-item-card::
         :img-top: _static/index_api.svg
         :text-align: center
 
@@ -177,9 +195,9 @@ Details are available in the :doc:`contributing guide <contributing>`.
     :hidden:
     :titlesonly:
 
-    Home <self>
     getting_started/index
     tech_guide/index
     user_guide/index
+    examples/index
     api_ref/index
     Contributing <contributing>

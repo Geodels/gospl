@@ -1,28 +1,28 @@
 [
     {
-        "name": "stable (latest)",
-        "version": "v2026.7.14",
+        "name": "development",
+        "version": "development",
+        "url": "https://gospl.readthedocs.io/en/dev/"
+    },
+    {
+        "name": "2026.7.14 (stable)",
+        "version": "2026.7.14",
         "preferred": true,
         "url": "https://gospl.readthedocs.io/en/stable/"
     },
     {
-        "name": "v2026.7.14",
-        "version": "v2026.7.14",
-        "url": "https://gospl.readthedocs.io/en/v2026.7.14/"
-    },
-    {
-        "name": "v2026.6.30",
-        "version": "v2026.6.30",
+        "name": "2026.6.30",
+        "version": "2026.6.30",
         "url": "https://gospl.readthedocs.io/en/v2026.6.30/"
     },
     {
-        "name": "v2026.6.13",
-        "version": "v2026.6.13",
+        "name": "2026.6.13",
+        "version": "2026.6.13",
         "url": "https://gospl.readthedocs.io/en/v2026.6.13/"
     },
     {
-        "name": "Development",
-        "version": "dev",
-        "url": "https://gospl.readthedocs.io/en/dev/"
+        "name": "feature: gravity, carbonates, karst",
+        "version": "feature",
+        "url": "https://gospl.readthedocs.io/en/feat-gravity-carbonates-karst/"
     }
 ]
