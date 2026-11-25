@@ -95,7 +95,7 @@ Quick links to the Doc
             To the user guide
 
     .. grid-item-card::
-        :img-top: _static/gospl_logo_512.png
+        :img-top: _static/index_examples.svg
         :text-align: center
 
         **Examples**
