@@ -128,3 +128,13 @@ div.empty + section>h1 {
   font-size: 0.9rem;
 }
 
+
+/* "goSPL" next to the logo, top left of every page */
+.navbar-brand .logo__title {
+  font-weight: 700;
+  font-size: 1.6rem;
+  letter-spacing: 0.01em;
+}
+.navbar-brand .logo__image {
+  height: 2.6rem;
+}
