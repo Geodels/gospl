@@ -95,6 +95,22 @@ solution:
      - dissolved = precipitated + exported; 1-D strip
        :math:`c = D_0/(R+p)\,(L_s/u)^{1+p/R}`
      - budget closed to 1e-15 (also in parallel); strip within 2e-5
+   * - Gravity currents (``test_gravity.py``)
+     - run-out down a uniform slope,
+       :math:`D_k = Q_0 (1 - e^{-\Delta x/L}) e^{-k \Delta x/L}`
+     - round-off at 1000 and 500 m spacing, one and six receivers; fitted
+       run-out length equal to :math:`L`
+   * - Carbonate production (``test_carbonate.py``)
+     - keep-up and give-up depth :math:`w^*`; drowning at the subsidence
+       rate; the production ODE; open-water index on a ridge; clay decay on
+       a strip
+     - both sides of :math:`w^*` as predicted; drowning rate within 2 %;
+       1e-4 at 1 and 10 kyr steps; index 2e-6; clay 1e-10 (details on
+       :ref:`the carbonate page <carb>`)
+   * - Waves and coastal erosion (``test_waves.py``)
+     - energy decay on a strip; island shadow; Snell refraction on a planar
+       beach; abrasion and cliff retreat
+     - 1e-14 and nothing in the lee; refraction angle 1e-16; erosion 1e-15 m
 
 The geometry and parameters of the four benchmarks of the figure:
 
