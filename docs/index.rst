@@ -38,9 +38,8 @@ goSPL documentation
         geological time, on meshes of tens of millions of nodes. Beyond river incision,
         hillslope and marine sediment transport, it couples near-surface hydrology
         (water table and duricrust), weathering geochemistry, soil production, glacial
-        erosion, flexural isostasy, orographic rainfall and stratigraphy, as well as
-        marine gravity currents, carbonate platforms and karst, each optional and solved
-        in parallel. It can be used to study how the Earth's surface interacts with the
+        erosion, flexural isostasy, orographic rainfall and stratigraphy, each optional
+        and solved in parallel. It can be used to study how the Earth's surface interacts with the
         atmosphere, the hydrosphere and tectonic and mantle dynamics: the role of
         atmospheric circulation in denudation, the influence of sediment erosion and
         deposition on mantle convection, the location and abundance of natural
