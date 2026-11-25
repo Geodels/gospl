@@ -18,3 +18,26 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   });
 });
+
+/* "Contents" button below the top bar (computers): opens the same section
+   navigation panel as the header menu icon, which the CSS hides there. */
+document.addEventListener("DOMContentLoaded", function () {
+  var toggle = document.querySelector(".primary-toggle");
+  // only on pages with a section list (not the main page, search, index)
+  if (!toggle || !document.querySelector("#pst-primary-sidebar .bd-sidenav")) return;
+  document.documentElement.classList.add("gospl-has-contents");
+  var btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "gospl-contents-btn";
+  btn.setAttribute("aria-label", "Section navigation");
+  btn.innerHTML = '<i class="fa-solid fa-bars" aria-hidden="true"></i><span>Contents</span>';
+  btn.addEventListener("click", function () { toggle.click(); });
+  document.body.appendChild(btn);
+  // just below the top bar, whose height grows when its links wrap
+  var header = document.querySelector(".bd-header");
+  function place() {
+    if (header) btn.style.top = (header.getBoundingClientRect().height + 16) + "px";
+  }
+  place();
+  window.addEventListener("resize", place);
+});
