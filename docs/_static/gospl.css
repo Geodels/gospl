@@ -313,5 +313,17 @@ html[data-theme=dark] .modchart-domain, html[data-theme=dark] .modchart-dom + .m
 .gospl-ref-count { margin-left: 0.8rem; font-size: 0.85rem; color: var(--pst-color-text-muted); }
 
 /* QuESt-lab logo in the footer (light and dark versions) */
-.gospl-quest-logo { margin: 0.6rem 0 0.2rem; }
+.gospl-quest-logo { margin: 0 0 0.4rem; text-align: right; }
+.bd-footer .footer-items__end { align-items: flex-end; text-align: right; }
 .gospl-quest-logo img { height: 3.2rem; width: auto; }
+
+/* chooser: skeleton input file and links */
+.modchart-yaml { max-height: 32rem; overflow: auto; font-size: 0.78rem; line-height: 1.4;
+  padding: 0.6rem 0.8rem; border-radius: 6px; border: 1px solid var(--pst-color-border);
+  background: var(--pst-color-background); white-space: pre; }
+.modchart-skelbar { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.4rem; }
+.modchart-skelbar .modchart-add { margin: 0; font-size: 0.85rem; padding: 0.15rem 0.8rem; }
+.modchart-links { font-size: 0.85rem; width: 100%; }
+.modchart-links td, .modchart-links th { padding: 0.2rem 0.5rem; border-bottom: 1px solid var(--pst-color-border); text-align: left; }
+.modchart-mesh { font-size: 0.88rem; margin: 0.2rem 0 0.6rem; padding: 0.4rem 0.7rem;
+  border-left: 3px solid #2a78d6; background: var(--pst-color-background); }

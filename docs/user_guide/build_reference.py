@@ -81,6 +81,11 @@ def _rst(text):
     return "".join(out)
 
 
+def _anchor(path):
+    """Stable anchor of an input block on the input reference page."""
+    return "in-" + re.sub(r"[^a-z0-9]+", "-", path.lower()).strip("-")
+
+
 def _title(text, char):
     return "%s\n%s\n\n" % (text, char * max(len(text), 3))
 
@@ -129,6 +134,7 @@ def _inputs(blocks):
     for theme in order:
         s.append(_title(theme, "-"))
         for b in groups[theme]:
+            s.append(".. _%s:\n\n" % _anchor(b["path"]))
             s.append(_title("``%s``" % b["path"], "^"))
             if b.get("summary"):
                 s.append(_rst(b["summary"]) + "\n\n")
@@ -231,6 +237,126 @@ MOD_INPUTS = {
     "cyclic": [("domain", ["bc"])],
 }
 
+# where to get a mesh, shown with the skeleton input file
+MESH_LINKS = {
+    "global_download": "https://www.dropbox.com/scl/fo/kior7a0kf9ylqxnnn7vk5/"
+                       "AJfSqKiefxvb4fHik_uRfeQ?rlkey=mh9hpd1z0i7u8qwlgspdo2zdf&st=8c3i8fir&dl=0",
+    "global_build": "examples/generated/continental_flux/build_inputs",
+    "global_data": "examples/generated/global_mesh_data/index",
+    "regional_build": "examples/generated/generate_2Dmesh/index",
+}
+
+# technical guide page (docname) explaining each module
+MOD_TECH = {
+    "core": "tech_guide/flow", "climate": "tech_guide/flow", "evaporation": "tech_guide/flow",
+    "sedfactor": "tech_guide/ero", "spl_transport": "tech_guide/ero", "nlspl": "tech_guide/ero",
+    "soil": "tech_guide/ero", "deposition": "tech_guide/dep", "hillslope": "tech_guide/hill",
+    "channelQ": "tech_guide/hill", "marine_deposition": "tech_guide/hill",
+    "gravity": "tech_guide/gravity", "waves": "tech_guide/carb", "coastal_erosion": "tech_guide/carb",
+    "strata": "tech_guide/strat", "dual": "tech_guide/strat", "lithologies": "tech_guide/strat",
+    "provenance": "tech_guide/provenance", "sst": "tech_guide/carb", "carbonate": "tech_guide/carb",
+    "pelagic": "tech_guide/carb", "carbonate_supply": "tech_guide/carb", "karst": "tech_guide/carb",
+    "groundwater": "tech_guide/groundwater", "duricrust": "tech_guide/groundwater",
+    "geochem": "tech_guide/groundwater", "river_load": "tech_guide/groundwater",
+    "marine_coupling": "tech_guide/groundwater", "ice": "tech_guide/ice",
+    "flexure_flat": "tech_guide/tecto", "flexure_global": "tech_guide/tecto", "temap": "tech_guide/tecto",
+    "tectonics_vertical": "tech_guide/tecto", "advection": "tech_guide/tecto",
+    "plate_interp": "tech_guide/tecto", "interp_remap": "tech_guide/tecto", "cyclic": "tech_guide/tecto",
+}
+
+# minimal input of each module for the skeleton YAML of the chooser:
+# (block path, key, value, input-reference path or None); a value starting
+# with "\n" is a YAML list written as is under the key. "{end}", "{dt}",
+# "{tout}", "{strat}" are filled from the resource form.
+MOD_YAML = {
+    "core": [("", "name", "'my goSPL run'", None),
+             ("domain", "npdata", "['mesh', 'v', 'c', 'z']", "domain"),
+             ("domain", "flowdir", "5", "domain"),
+             ("domain", "bc", "'oooo'", "domain"),
+             ("time", "start", "0.", "time"), ("time", "end", "{end}", "time"),
+             ("time", "dt", "{dt}", "time"), ("time", "tout", "{tout}", "time"),
+             ("output", "dir", "'output'", "output"), ("output", "makedir", "True", "output"),
+             ("spl", "K", "1.e-6", "spl"), ("spl", "d", "0.", "spl"), ("spl", "m", "0.5", "spl")],
+    "sea": [("sea", "position", "0.", "sea")],
+    "climate": [("", "climate", "\n  - start: 0.\n    uniform: 1.   # rainfall (m/yr), or map: ['rain', 'r']", "climate[]")],
+    "evaporation": [],
+    "orography": [("orography", "wind_speed", "10.", "orography"), ("orography", "wind_dir", "270.", "orography"),
+                  ("orography", "conv_time", "1000.", "orography"), ("orography", "fall_time", "1000.", "orography"),
+                  ("orography", "precip_base", "1.", "orography"), ("orography", "precip_min", "0.01", "orography")],
+    "sedfactor": [("", "sedfactor", "\n  - start: 0.\n    uniform: 1.   # erodibility factor, or map: ['efac', 'f']", "sedfactor[]")],
+    "spl_transport": [("spl", "G", "1.", "spl")],
+    "nlspl": [("spl", "n", "1.5", "spl")],
+    "soil": [("soil", "soilK", "1.e-5", "soil"), ("soil", "maxProd", "5.e-5", "soil"),
+             ("soil", "depthProd", "0.5", "soil"), ("soil", "uniform", "1.", "soil")],
+    "deposition": [("domain", "nodep", "False", "domain")],
+    "hillslope": [("diffusion", "hillslopeKa", "0.02", "diffusion"), ("diffusion", "hillslopeKm", "0.2", "diffusion")],
+    "channelQ": [("diffusion", "channelQ", "1.e6", "diffusion")],
+    "marine_deposition": [("domain", "seadepo", "True", "domain"), ("diffusion", "nonlinKm", "10.", "diffusion"),
+                          ("diffusion", "clinSlp", "1.e-5", "diffusion")],
+    "gravity": [("gravity", "fraction", "0.2", "gravity"), ("gravity", "runout", "5.e4", "gravity")],
+    "waves": [("waves", "climate", "\n    - from: 270.   # bearing the waves come from (degrees)\n      weight: 1.", "waves.climate[]")],
+    "coastal_erosion": [("coastal_erosion", "rate", "1.e-3", "coastal_erosion")],
+    "strata": [("time", "strat", "{strat}", "time"), ("compaction", "phis", "0.49", "compaction"),
+               ("compaction", "z0s", "3700.", "compaction")],
+    "dual": [("strata", "dual", "True", "strata")],
+    "lithologies": [("strata", "lithologies", "\n    - name: silt   # one more lithology\n      size: fine", "strata.lithologies[]")],
+    "provenance": [("provenance", "classes", "2", "provenance"),
+                   ("provenance", "source", "['provenance', 'rock']", "provenance")],
+    "sst": [("sst", "events", "\n    - start: 0.\n      uniform: 25.   # sea-surface temperature (degC)", "sst.events[]")],
+    "carbonate": [("carbonate", "factories", "\n    - name: euphotic\n      growth: 500.      # m/Myr\n      extinction: 0.1   # 1/m\n      saturation: 60.   # W/m2\n      framework: 0.5    # share built in place (reef)", "carbonate.factories[]")],
+    "pelagic": [("", "pelagic", "\n  - start: 0.\n    carbonate: 10.    # m/Myr\n    lysocline: 3500.  # m\n    ccd: 4500.        # m", "pelagic[]")],
+    "carbonate_supply": [("carbonate_supply", "species", "'carbonate'", "carbonate_supply"),
+                         ("carbonate_supply", "yield", "1.", "carbonate_supply")],
+    "karst": [("karst", "rate", "5.e-5", "karst")],
+    "groundwater": [("groundwater", "Ksat", "3.65e4", "groundwater"), ("groundwater", "specific_yield", "0.1", "groundwater"),
+                    ("groundwater", "aquifer_base", "50.", "groundwater"), ("groundwater", "infiltration", "0.3", "groundwater")],
+    "duricrust": [("groundwater.duricrust", "form_rate", "1.e-4", "groundwater.duricrust"),
+                  ("groundwater.duricrust", "max_thickness", "5.", "groundwater.duricrust"),
+                  ("groundwater.duricrust", "fringe_depth", "3.", "groundwater.duricrust"),
+                  ("groundwater.duricrust", "fringe_width", "2.", "groundwater.duricrust")],
+    "geochem": [("groundwater.geochem", "species", "\n        - name: carbonate\n          weatherability: 1.\n          precip_rate: 1.e-6", "groundwater.geochem.species[]")],
+    "river_load": [("groundwater.geochem", "river_load", "True", "groundwater.geochem")],
+    "marine_coupling": [("groundwater.geochem", "marine_coupling", "True", "groundwater.geochem")],
+    "ice": [("ice", "hela", "2000.", "ice"), ("ice", "hice", "2400.", "ice")],
+    "flexure_flat": [("flexure", "method", "'fem'", "flexure"), ("flexure", "thick", "3.e4", "flexure"),
+                     ("flexure", "rhoc", "2300.", "flexure"), ("flexure", "rhoa", "3300.", "flexure")],
+    "flexure_global": [("flexure", "method", "'global'", "flexure"), ("flexure", "thick", "3.e4", "flexure"),
+                       ("flexure", "rhoc", "2300.", "flexure"), ("flexure", "rhoa", "3300.", "flexure")],
+    "temap": [("", "temap", "\n  - start: 0.\n    uniform: 3.e4   # elastic thickness (m), or map: ['te', 't']", "temap[]")],
+    "tectonics_vertical": [("", "tectonics", "\n  - start: 0.\n    end: {end}\n    upsub: ['uplift', 'u']   # npz: uplift rate per vertex (m/yr)", "tectonics[]")],
+    "advection": [("domain", "advect", "'iioe2'", "domain"),
+                  ("", "tectonics", "\n  - start: 0.\n    end: {end}\n    hdisp: ['hdisp', 'h']   # npz: horizontal velocity per vertex (m/yr)", "tectonics[]")],
+    "plate_interp": [("domain", "advect", "'interp'", "domain"),
+                     ("", "tectonics", "\n  - start: 0.\n    end: {end}\n    hdisp: ['hdisp', 'h']   # npz: horizontal velocity per vertex (m/yr)", "tectonics[]")],
+    "interp_remap": [("domain", "interp_remap", "1", "domain")],
+    "cyclic": [("domain", "bc", "'cfcf'", "domain")],
+}
+
+
+def _yaml_entries(inputs):
+    """MOD_YAML with the comment of each key (unit and meaning, from the
+    input reference) and the anchor of its block."""
+    by_path = {b["path"]: b for b in inputs}
+    out = {}
+    for mid, rows in MOD_YAML.items():
+        ents = []
+        for block, key, value, ref in rows:
+            com = ""
+            if ref and ref in by_path:
+                for k in by_path[ref]["keys"]:
+                    if k["key"].split()[0] == key:
+                        mean = re.split(r"(?<=[a-z0-9)]{3})\. (?=[A-Z])", k.get("meaning", ""))[0].rstrip(".")
+                        unit = k.get("unit", "")
+                        com = (unit + "; " if unit and unit != "-" else "") + mean
+                        break
+            if len(com) > 110:
+                com = com[:107].rsplit(" ", 1)[0] + "..."
+            ents.append({"block": block, "key": key, "value": value, "comment": com,
+                         "anchor": _anchor(ref) if ref else ""})
+        out[mid] = ents
+    return out
+
+
 # measured extra time of each option, % of the base step (rows of the cost
 # table, docs/user_guide/scaling/option_cost_table.rst, "added time")
 COST_ROWS = {
@@ -316,17 +442,23 @@ def _modules(data):
     data = _strip_refs(data)
     costs = _costs()
     ip = os.path.join(HERE, "inputs.json")
-    params = _params(json.load(open(ip))) if os.path.exists(ip) else {}
+    inputs = json.load(open(ip)) if os.path.exists(ip) else []
+    params = _params(inputs)
+    yaml_ents = _yaml_entries(inputs)
     ids = {m["id"] for m in data["modules"]}
     for m in data["modules"]:
         m["domain"] = MOD_DOMAIN.get(m["id"], "both")
         m["cost"] = costs.get(m["id"], 0.0)
         if m["id"] in params:
             m["params"] = params[m["id"]]
+        m["tech"] = MOD_TECH.get(m["id"], "")
+        if m["id"] in yaml_ents:
+            m["yaml"] = yaml_ents[m["id"]]
     ex = _examples()
     for r in ex:
         r["modules"] = [i for i in r["modules"] if i in ids]
     data["examples"] = ex
+    data["meshes"] = MESH_LINKS
     js = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     return "".join([
         ".. _module_chooser:\n\n", "=" * 26 + "\n", "Which modules do I need?\n", "=" * 26 + "\n\n",
