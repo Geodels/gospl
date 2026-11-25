@@ -253,7 +253,12 @@ just like the head):
   spike the concentration. The steady transport is solved with a **direct LU
   factorisation** (MUMPS in parallel), which is exact and robust to the weak
   diagonal dominance at those poorly-drained nodes (an iterative solve can stall
-  there and silently break the mass balance).
+  there and silently break the mass balance). The diagonal is also floored at
+  ``SOLUTE_DISCHARGE_FLOOR`` (1e-6 m/yr, added to the export so the budget
+  closes): under the sea or a lake on a flat bed the head is the surface and
+  neighbouring cells share it, so a flat patch has no lateral flux, no seepage
+  and no recharge, and its rows would be empty or round-off, a singular
+  factorisation.
 - **Precipitation** :math:`P = k_p\,\Phi\,c` — a linear sink at the capillary
   fringe ``Φ`` that **feeds the crust** ``duriH`` (replacing the local proxy
   supply when geochem is on). The saturation threshold ``c_sat`` is a future
