@@ -314,6 +314,44 @@ Over many steps the burial is bounded by the supply from weathering; when the
 supply exceeds the potential production, the reservoir accumulates.
 
 
+Karst dissolution
+-----------------
+
+Dissolution of carbonate rock is limited by the water that reaches
+equilibrium with it (White, 1984; Kaufmann and Braun, 2001). goSPL uses the
+runoff form
+
+.. math::
+
+    D = \alpha\, R\, \max\left(\frac{Q}{R A_0}, 1\right)^p f_T(T),
+
+with :math:`\alpha = C_{eq}/\rho_r` the volume of rock dissolved per volume
+of water, :math:`R = \max(P - E, 0)` the runoff, :math:`Q` the discharge of
+the step's flow accumulation (so :math:`Q/R` is the contributing area under
+uniform rain), :math:`A_0` the reference area and :math:`f_T` an optional
+table on the sea-surface temperature field. :math:`D` is applied on
+subaerial land only, capped at ``max_dissolution`` per step, after the flow
+accumulation and before the groundwater step (whose river routing carries
+the same step's dissolved load).
+
+The demand :math:`d = D \Delta t` (bulk thickness) is taken from the soluble
+lithology piles layer by layer from the top. In layer :math:`k` with soluble
+bulk :math:`C_k`, :math:`x_k = \min(C_k, d)` is removed, split among the
+soluble piles in proportion; the insoluble remainder stays in the layer, and
+the dissolution stops once the remainders met from the surface exceed the
+residue ``cover``. The provenance piles of a layer are scaled with its bulk.
+The surface and the cumulative erosion drop by :math:`\sum_k x_k`; the
+dissolved solid volume is :math:`\sum_k x_k (1 - \phi_k)` per lithology.
+With ``species`` it is added, times ``solute_per_m3``, to the source of the
+river routing of that species, :math:`(I - W^T) L = s + s_{karst}`.
+
+Tests (``tests/test_karst.py``): uniform lowering :math:`\alpha R t` to
+round-off for :math:`p = 0` on a pure carbonate bedrock, lakes and the sea
+untouched; selective removal and the residue cover on constructed columns;
+a half-carbonate bedrock keeps its clastic pile; the focused rate against
+its formula; the routed karst load between 0 and the dissolved amount; the
+same surface at np=1 and np=3; a restart that reproduces the continuous run.
+
 Numerics and parallel consistency
 ---------------------------------
 

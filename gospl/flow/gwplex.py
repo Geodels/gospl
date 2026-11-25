@@ -1428,8 +1428,13 @@ class GWMesh(object):
 
         self.riverSolute[:] = 0.0
         for k in range(int(self.gwNspecies)):
-            # RHS = this species' per-node seepage export (m³/yr, extensive).
-            self.soluteL.setArray(self.gwSoluteFluxSp[:, k])
+            # RHS = this species' per-node seepage export (m³/yr, extensive),
+            # plus the carbonate dissolved by the karst (carbplex) for its
+            # species.
+            src = self.gwSoluteFluxSp[:, k]
+            if k == getattr(self, "_karstSp", None) and getattr(self, "_karstSolute", None) is not None:
+                src = src + self._karstSolute
+            self.soluteL.setArray(src)
             self.dm.localToGlobal(self.soluteL, self.tmp)
             kappa = float(self.gwGeoRiverDecay[k])
             if kappa > 0.0:                           # in-transit first-order loss

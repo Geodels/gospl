@@ -33,6 +33,8 @@ CARB = ("carbonate:\n    factories:\n"
         "      - {name: deep, growth: 200., extinction: 0.005, sand: 0.3}\n\n"
         "pelagic:\n  - start: 0.\n    carbonate: 50.\n    lysocline: 3500.\n"
         "    ccd: 4500.\n    clay: 20.\n\n")
+# a bedrock of 70 % carbonate dissolved by the runoff, focused on the drainage
+KARST = "karst:\n    rate: 1.e-4\n    lithologies: [carb]\n    focus: 0.5\n\n"
 
 
 def _case(tmp_path, name, extra="", restart=False):
@@ -49,6 +51,10 @@ def _case(tmp_path, name, extra="", restart=False):
     text = text.replace("    strat: 50\n", "    strat: 25\n")         # 2 layers per output
     text = text.replace("    position: -100.\n", "    position: -100.\n    curve: 'sea.csv'\n")
     text = text.replace("output:", extra + "output:", 1)
+    if "karst:" in extra:
+        text = text.replace("    bedrock_coarse_frac: 0.6\n",
+                            "    bedrock_coarse_frac: 1.0\n    lithologies:\n"
+                            "      - {name: carb, size: coarse, phi0: 0.3, bedrock_frac: 0.7}\n")
     (tmp_path / f"{name}.yml").write_text(text)
     return f"{name}.yml"
 
@@ -64,13 +70,15 @@ def _run(tmp_path, yml):
                "ed": m.cumEDLocal.getArray().copy(), "top": top}
         if getattr(m, "carbOn", False):
             out["reef"] = m.stratHL[m.litName.index("reef")][:, :top].copy()
+        if getattr(m, "karstOn", False):
+            out["karst"] = m.karstDiss.copy()
     finally:
         m.destroy()
     return out
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("extra", ["", CARB], ids=["base", "carbonate"])
+@pytest.mark.parametrize("extra", ["", CARB, KARST], ids=["base", "carbonate", "karst"])
 def test_restart_reproduces_continuous_run(tmp_path, monkeypatch, extra):
     """Restarted from the output at 100 yr, the run ends (200 yr) with the
     elevation, cumulative erosion-deposition and stratigraphy of the run that
@@ -85,6 +93,9 @@ def test_restart_reproduces_continuous_run(tmp_path, monkeypatch, extra):
     np.testing.assert_allclose(b["h"], a["h"], rtol=0.0, atol=1.0e-6 * scale)
     np.testing.assert_allclose(b["ed"], a["ed"], rtol=0.0, atol=1.0e-6 * scale)
     np.testing.assert_allclose(b["H"], a["H"], rtol=0.0, atol=1.0e-6 * scale)
-    if extra:
+    if "karst" in a:
+        assert a["karst"].max() > 0.0
+        np.testing.assert_allclose(b["karst"], a["karst"], rtol=0.0, atol=1.0e-6 * scale)
+    elif extra:
         assert a["reef"].sum() > 0.0
         np.testing.assert_allclose(b["reef"], a["reef"], rtol=0.0, atol=1.0e-6 * scale)

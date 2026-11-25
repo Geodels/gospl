@@ -561,6 +561,58 @@ concentration units of your geochemistry: check the ``carbonate_supply``
 record of ``--summary`` (available, demand, scale, reservoir) to calibrate it.
 The reservoir is saved in the outputs and restored on restart.
 
+.. _carb_karst:
+
+Karst dissolution
+-----------------
+
+Exposed carbonate dissolves in the runoff. With a ``karst`` block, the
+carbonate lithologies of the stratigraphy that reach the surface on land are
+lowered at
+
+.. math::
+
+    D = \alpha\, R\, \max\left(\frac{Q}{R A_0}, 1\right)^p f_T,
+
+with :math:`R` the runoff (rain minus evaporation, m/yr), :math:`Q` the
+discharge through the cell, :math:`\alpha` the volume of rock one volume of
+water dissolves (``rate``), :math:`A_0` a reference area and :math:`p` the
+focusing exponent:
+
+.. code:: yaml
+
+    karst:
+        rate: 5.e-5           # m of rock per m of runoff (Ceq / rho, 2e-5 to 1e-4)
+        lithologies: [reef, carb_sand, carb_mud]   # the default where defined
+        focus: 0.3            # 0: uniform lowering; > 0: along the drainage
+        focus_area: 1.e6      # m2, default the mean cell area
+        cover: 0.5            # insoluble residue (m) that stops the dissolution
+        max_dissolution: 5.   # cap per step (m)
+        temperature: {x: [0., 25.], f: [0.3, 1.]}  # optional, needs `sst`
+        species: carbonate    # optional: into the river load of this species
+        solute_per_m3: 1.     # units of solute per m3 of dissolved rock
+
+``rate: 5.e-5`` with 1 m/yr of runoff lowers bare limestone by 50 m/Myr, the
+range of measured karst denudation (10 to 100 mm/kyr). Only the listed
+lithologies dissolve, layer by layer from the top: the insoluble part of a
+layer stays as residue, and once the residue met from the surface exceeds
+``cover`` the layers below are protected (a clastic cover over a platform).
+The sea, lakes and ice-covered cells do not dissolve. With ``focus`` the
+dissolution concentrates where the water does (karst valleys, closed
+depressions). The lithologies can be the carbonate ones of the ``carbonate``
+block or any listed in ``strata: lithologies`` (for a carbonate bedrock, give
+a lithology a ``bedrock_frac``).
+
+With ``species`` (groundwater geochemistry with ``river_load: True``), the
+dissolved solid volume times ``solute_per_m3`` joins the river dissolved load
+of that species in the same step: it reaches the coast and, with
+``marine_coupling``, the marine reservoir that limits the carbonate burial
+(``carbonate_supply``). Without it the dissolved carbonate leaves the model
+and is only reported.
+
+Output ``karstDiss`` (m, cumulative dissolution); ``--summary`` record
+``karst`` (dissolved bulk and solid volumes per step, m³).
+
 .. _carb_resolution:
 
 Setting it up for your resolution
@@ -677,6 +729,7 @@ Outputs
 - ``waveE`` (0 to 1): relative wave energy (with a ``waves`` block, when a
   factory or the coastal erosion uses it).
 - ``coastEro`` (m): cumulative coastal erosion (with ``coastal_erosion``).
+- ``karstDiss`` (m): cumulative karst dissolution (with ``karst``).
 - Stratigraphy: one pile per lithology, ``stratH_<name>`` and ``phi_<name>``
   (``stratHf``/``phiF`` for the dual-lithology fine fraction), in the
   ``stratal`` files.

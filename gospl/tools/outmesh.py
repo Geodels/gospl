@@ -20,7 +20,7 @@ from gospl.tools.constants import DISCHARGE_FLOOR
 # whole run, diverged after a restart (2026-11-24). The other outputs are for
 # viewing and stay single precision.
 _RESTART_F64 = ("elev", "erodep", "EDrate", "sedLoad", "sedLoadF", "FA", "fillFA",
-                "iceH", "flexIso", "gravDep", "soilH", "wtable", "duricrust", "coastEro")
+                "iceH", "flexIso", "gravDep", "soilH", "wtable", "duricrust", "coastEro", "karstDiss")
 _F64_XMF = re.compile(r'Precision="4" (Dimensions="[^"]*">[^<]*:/(?:%s)</DataItem>)'
                       % "|".join(_RESTART_F64))
 
@@ -528,6 +528,14 @@ class WriteMesh(object):
                     **self._h5opts,
                 )
                 f["coastEro"][:, 0] = self.coastEro
+            if getattr(self, "karstOn", False) and getattr(self, "karstDiss", None) is not None:
+                f.create_dataset(
+                    "karstDiss",
+                    shape=(self.lpoints, 1),
+                    dtype="float64",
+                    **self._h5opts,
+                )
+                f["karstDiss"][:, 0] = self.karstDiss
             # Carbonate state carried from one step to the next, kept for a
             # restart only (no XDMF entry): the previous step's clastic
             # deposition rate (`sedrate`), the mud throughflow (`turbidity`,
@@ -908,6 +916,8 @@ class WriteMesh(object):
             # a new run are kept).
             if getattr(self, "coastOn", False) and "/coastEro" in hf:
                 self.coastEro = np.array(hf["/coastEro"], dtype=np.float64)[:, 0]
+            if getattr(self, "karstOn", False) and "/karstDiss" in hf:
+                self.karstDiss = np.array(hf["/karstDiss"], dtype=np.float64)[:, 0]
             if getattr(self, "carbOn", False):
                 if "/carbSedRate" in hf:
                     self._carbSedRate = np.array(hf["/carbSedRate"], dtype=np.float64)[:, 0]
@@ -1173,6 +1183,15 @@ class WriteMesh(object):
                 )
                 f.write(
                     'Dimensions="%d 1">%s:/coastEro</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+            if getattr(self, "karstOn", False) and getattr(self, "karstDiss", None) is not None:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="karstDiss">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/karstDiss</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
 

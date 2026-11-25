@@ -224,6 +224,9 @@ class RunSummary(object):
             rec["coastal_erosion"] = {"eroded": float(cb2[0]), "routed": float(cb2[1])}
             if getattr(model, "coastRubble", None) is not None:
                 rec["coastal_erosion"]["rubble_solid"] = float(cb2[2])
+        kb = getattr(model, "karstBudget", None)
+        if getattr(model, "karstOn", False) and kb is not None:
+            rec["karst"] = {"dissolved": float(kb[0]), "solid": float(sum(kb[1:]))}
         pb = getattr(model, "pelBudget", None)
         if getattr(model, "pelOn", False) and pb is not None:
             rec["pelagic"] = {"carbonate_rain": float(pb[0]), "carbonate": float(pb[1]),

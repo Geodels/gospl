@@ -3,7 +3,7 @@ import petsc4py
 from mpi4py import MPI
 from time import process_time
 
-from gospl.tools.constants import CARB_SUBSTEP_GROWTH, DEPOSIT_FLOOR
+from gospl.tools.constants import CARB_SUBSTEP_GROWTH, DEPOSIT_FLOOR, ICE_COVER_MIN
 
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
 
@@ -66,6 +66,11 @@ class CarbMesh(object):
             self._initGeoLink()
         if getattr(self, "pelOn", False):
             self._initPelagic()
+        self.karstDiss = None
+        self.karstBudget = None
+        self._karstSolute = None
+        if getattr(self, "karstOn", False):
+            self._initKarst()
         if not getattr(self, "carbOn", False):
             return
         if not getattr(self, "seaDepo", False) or getattr(self, "nodep", False):
@@ -775,4 +780,102 @@ class CarbMesh(object):
             if name != "reef":
                 carb += self._litDepoFrac(l, self.depoFineFrac, sh)
         self._carbSedRate = dep * np.clip(1.0 - carb, 0.0, 1.0) / self.dt
+        return
+
+    def _initKarst(self):
+        """Allocate the karst state (docs/DESIGN_KARST.md): the cumulative
+        dissolution ``karstDiss`` (m), the reference area of the focusing
+        (the mean cell area by default) and the geochemistry species fed.
+        Collective (one reduction)."""
+        k = self.karst
+        self.karstDiss = np.zeros(self.lpoints, dtype=np.float64)
+        self._karstSolid = np.zeros(len(k["lit"]), dtype=np.float64)
+        self._karstBulk = 0.0
+        if k["area"] is None:
+            own = self.inIDs == 1
+            a = MPI.COMM_WORLD.allreduce(np.array([self.larea[own].sum(), own.sum()],
+                                                  dtype=np.float64), op=MPI.SUM)
+            k["area"] = float(a[0] / max(a[1], 1.0))
+        self._karstSp = None
+        if k["species"] is not None:
+            names = list(getattr(self, "gwGeoName", []) or [])
+            if not getattr(self, "gwGeochemOn", False) or \
+                    not getattr(self, "gwRiverLoad", False) or not names:
+                raise ValueError(
+                    "karst: `species` needs the groundwater geochemistry with "
+                    "`river_load: True` (the river dissolved load).")
+            if k["species"] not in names:
+                raise ValueError("karst: geochemistry species '%s' not found "
+                                 "(species: %s)." % (k["species"], ", ".join(names)))
+            self._karstSp = names.index(k["species"])
+
+    def _karstRate(self):
+        """Karst dissolution rate (m/yr of rock, bulk) per node,
+        ``rate * R * max(Q / (R A0), 1)^focus * f_T`` on subaerial land
+        (not the sea, lakes or ice), ``R`` the runoff (rain minus
+        evaporation) and ``Q`` the discharge of this step's
+        ``flowAccumulation``. Rank-local."""
+        k = self.karst
+        h = self.hLocal.getArray()
+        rain = np.asarray(self.rainVal, dtype=np.float64) * np.ones(self.lpoints)
+        evap = getattr(self, "evapVal", None)
+        R = np.maximum(rain - (0.0 if evap is None else evap), 0.0)
+        land = h > self.sealevel
+        land &= ~self._underLake(h)
+        if getattr(self, "iceOn", False) and getattr(self, "iceHL", None) is not None:
+            land &= self.iceHL.getArray() <= ICE_COVER_MIN
+        D = k["rate"] * R
+        if k["focus"] > 0.0:
+            Q = np.maximum(self.FAL.getArray(), 0.0)
+            ratio = np.divide(Q, R * k["area"], out=np.ones_like(Q), where=R > 0.0)
+            D = D * np.maximum(ratio, 1.0) ** k["focus"]
+        if k["temp"] is not None:
+            D = D * np.interp(self._sst(), k["temp"][0], k["temp"][1])
+        return np.where(land, D, 0.0)
+
+    def karstDissolution(self):
+        """
+        Karst (docs/DESIGN_KARST.md): dissolve the carbonate lithologies of
+        the exposed stratigraphy at the rate of ``_karstRate`` (capped at
+        ``max_dissolution`` per step), lithology by lithology from the top
+        layer down (``dissolveStrat``: the insoluble residue stays, a residue
+        ``cover`` stops it). Lowers the elevation, the cumulative erosion and
+        the rate field; the dissolved solid volume (m3/yr) is kept in
+        ``_karstSolute`` (times ``solute_per_m3``) for the river routing of
+        the geochemistry species. Collective (halo sync, budget).
+        Scratch: ``tmp``, ``tmpL``.
+        """
+        k = self.karst
+        d = np.clip(self._karstRate() * self.dt, 0.0, k["max"])
+        # halo: the owners' demand on the ghosts
+        self.tmpL.setArray(d)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.dm.globalToLocal(self.tmp, self.tmpL)
+        d = self.tmpL.getArray().copy()
+        removed, solid = self.dissolveStrat(d, k["lit"], k["cover"])
+
+        self.tmpL.setArray(-removed)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        self.cumED.axpy(1.0, self.tmp)
+        self.hGlobal.axpy(1.0, self.tmp)
+        self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+        self.dm.globalToLocal(self.hGlobal, self.hLocal)
+        self.tmpL.setArray(-removed / self.dt)
+        self.EbLocal.axpy(1.0, self.tmpL)
+        self.tmp.set(0.0)
+        self.tmpL.set(0.0)
+        self.karstDiss += removed
+
+        svol = solid * self.larea[:, None]
+        self._karstSolute = svol.sum(axis=1) * k["solute"] / self.dt
+        own = self.inIDs == 1
+        b = MPI.COMM_WORLD.allreduce(
+            np.concatenate([[float((removed * self.larea)[own].sum())],
+                            svol[own].sum(axis=0)]), op=MPI.SUM)
+        self.karstBudget = b
+        self._karstBulk += b[0]
+        self._karstSolid += b[1:]
+        if MPIrank == 0 and self.verbose:
+            print("[karst] dissolved %0.4g km3 (solid %0.4g km3)"
+                  % (b[0] * 1e-9, b[1:].sum() * 1e-9), flush=True)
         return

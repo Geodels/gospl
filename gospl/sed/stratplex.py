@@ -1266,6 +1266,62 @@ class STRAMesh(object):
 
         return
 
+    def dissolveStrat(self, demand, lits, cover):
+        """
+        Karst (docs/DESIGN_KARST.md): dissolve up to ``demand`` (bulk
+        thickness, m, per node) of the lithology piles ``lits`` from the top
+        layer down. In each layer the soluble bulk ``C`` (the sum of those
+        piles) gives ``min(C, remaining demand)``, split among the piles in
+        proportion; the insoluble rest of the layer stays as residue, and the
+        dissolution stops once the residue met from the top exceeds
+        ``cover`` (m). The provenance piles of a layer scale with its bulk.
+        Rank-local (pass a halo-synced ``demand``).
+
+        :arg demand: bulk thickness to dissolve (lpoints)
+        :arg lits: indices of the soluble lithologies
+        :arg cover: residue thickness (m) that stops the dissolution
+        :return: ``(removed, solid)``: bulk thickness removed per node
+            (lpoints) and solid thickness removed per soluble lithology
+            (lpoints, len(lits)), i.e. bulk times one minus its porosity
+        """
+        rem = np.maximum(np.asarray(demand, dtype=np.float64), 0.0).copy()
+        removed = np.zeros(self.lpoints)
+        solid = np.zeros((self.lpoints, len(lits)))
+        residue = np.zeros(self.lpoints)
+        provOn = getattr(self, "provOn", False) and getattr(self, "stratP", None) is not None
+        for k in range(self.stratStep, -1, -1):
+            act = (rem > 0.0) & (residue < cover)
+            if not act.any():
+                break
+            H = self.stratH[:, k]
+            C = np.zeros(self.lpoints)
+            for l in lits:
+                C += self.stratHL[l][:, k]
+            x = np.where(act, np.minimum(C, rem), 0.0)
+            frac = np.divide(x, C, out=np.zeros_like(x), where=C > 0.0)
+            for j, l in enumerate(lits):
+                dl = self.stratHL[l][:, k] * frac
+                solid[:, j] += dl * (1.0 - self.phiL[l][:, k])
+                self.stratHL[l][:, k] -= dl
+            if provOn:
+                keep = np.divide(H - x, H, out=np.ones_like(H), where=H > 0.0)
+                self.stratP[:, k, :] *= keep[:, None]
+            self.stratH[:, k] = H - x
+            residue += np.where(act, np.maximum(self.stratH[:, k] - (C - x), 0.0), 0.0)
+            rem -= x
+            removed += x
+        top = self.stratStep + 1
+        empty = self.stratH[:, :top] <= 1.0e-12
+        if empty.any():
+            self.stratH[:, :top][empty] = 0.0
+            for h in self.stratHL:
+                h[:, :top][empty] = 0.0
+            if provOn:
+                self.stratP[:, :top, :][empty] = 0.0
+        for h in self.stratHL:
+            np.clip(h[:, :top], 0.0, None, out=h[:, :top])
+        return removed, solid
+
     def elevStrat(self):
         """
         This function updates the current stratigraphic layer elevation.

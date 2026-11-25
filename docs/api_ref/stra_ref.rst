@@ -19,6 +19,7 @@ Class StraMesh
       ~STRAMesh.readStratLayers
       ~STRAMesh.deposeStrat
       ~STRAMesh.erodeStrat
+      ~STRAMesh.dissolveStrat
       ~STRAMesh.elevStrat
       ~STRAMesh.getCompaction
       ~STRAMesh.stratalRecord
@@ -56,6 +57,7 @@ Public functions
 .. automethod:: sed.stratplex.STRAMesh.readStratLayers
 .. automethod:: sed.stratplex.STRAMesh.deposeStrat
 .. automethod:: sed.stratplex.STRAMesh.erodeStrat
+.. automethod:: sed.stratplex.STRAMesh.dissolveStrat
 .. automethod:: sed.stratplex.STRAMesh.elevStrat
 .. automethod:: sed.stratplex.STRAMesh.getCompaction
 .. automethod:: sed.stratplex.STRAMesh.stratalRecord

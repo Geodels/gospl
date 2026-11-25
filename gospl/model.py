@@ -451,6 +451,14 @@ class Model(
                 with self.profiler.phase("flow"), self._phase("flow"):
                     _FAMesh.flowAccumulation(self)
 
+                # Karst (opt-in): runoff dissolution of exposed carbonate, after
+                # the discharge is known and before the groundwater step, whose
+                # river routing carries the dissolved carbonate of this step.
+                if getattr(self, "karstOn", False):
+                    with self.profiler.phase("karst"), self._phase("karst"):
+                        _CarbMesh.karstDissolution(self)
+                    _probeZ(self, "after karst")
+
                 # Groundwater (water table) + duricrust (opt-in). After
                 # flowAccumulation (needs seaID / drainage) and before erosion
                 # (which will read the duricrust K-armoring). No-op when gwOn off.

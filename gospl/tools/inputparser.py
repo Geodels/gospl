@@ -1639,6 +1639,7 @@ class ReadYaml(object):
         self._readLithologies()
         self._readWaves()
         self._readCoastalErosion()
+        self._readKarst()
         self._extraProvenance()
 
         return
@@ -1864,6 +1865,92 @@ class ReadYaml(object):
                              "block.")
         self.carbSupply = {"species": str(cs["species"]), "yield": y,
                            "pelagic": bool(cs.get("pelagic", True))}
+
+    def _readKarst(self):
+        """
+        Parse the optional ``karst:`` block (dissolution of exposed carbonate
+        by the runoff, docs/DESIGN_KARST.md; needs lithologies)::
+
+            karst:
+                rate: 5.e-5          # m of rock dissolved per m of runoff
+                lithologies: [reef, carb_sand, carb_mud]   # default: these
+                                     # three where defined
+                focus: 0.3           # exponent on the contributing area
+                focus_area: 1.e6     # reference area (m2), default the mean
+                                     # cell area
+                cover: 0.5           # insoluble residue (m) that stops it
+                max_dissolution: 5.  # cap per step (m)
+                temperature: {x: [0., 25.], f: [0.3, 1.]}   # needs `sst:`
+                species: carbonate   # geochemistry species fed (river_load)
+                solute_per_m3: 1.    # units of solute per m3 of rock
+
+        Sets ``karstOn`` and ``karst`` (dict: ``rate``, ``lit`` lithology
+        indices, ``focus``, ``area`` (None: mean cell area), ``cover``,
+        ``max``, ``temp`` ((x, f) or None), ``species`` (name or None),
+        ``solute``).
+        """
+        self.karstOn = False
+        self.karst = None
+        kd = self.input.get("karst", None)
+        if kd is None:
+            return
+        if not isinstance(kd, dict):
+            raise ValueError("karst: must be a mapping.")
+        if not self.stratLith or self.litNb < 1:
+            raise ValueError(
+                "karst: needs lithologies (strata: dual: True, a positive `strat` "
+                "interval and carbonate lithologies): only the carbonate piles of "
+                "the stratigraphy dissolve.")
+        names = kd.get("lithologies", None)
+        if names is None:
+            names = [n for n in ("reef", "carb_sand", "carb_mud") if n in self.litName]
+        else:
+            names = [str(n) for n in (names if isinstance(names, (list, tuple)) else [names])]
+            bad = [n for n in names if n not in self.litName]
+            if bad:
+                raise ValueError("karst: unknown lithologies %s (defined: %s)."
+                                 % (bad, self.litName))
+        if not names:
+            raise ValueError(
+                "karst: no carbonate lithology to dissolve; define reef, carb_sand "
+                "or carb_mud (carbonate: or strata: lithologies:) or list them "
+                "in `lithologies`.")
+        rate = float(kd.get("rate", 5.0e-5))
+        if rate <= 0.0:
+            raise ValueError("karst: rate must be positive (m of rock per m of runoff).")
+        focus = float(kd.get("focus", 0.0))
+        if focus < 0.0:
+            raise ValueError("karst: focus must be >= 0.")
+        area = kd.get("focus_area", None)
+        if area is not None and float(area) <= 0.0:
+            raise ValueError("karst: focus_area must be positive (m2).")
+        temp = None
+        if kd.get("temperature", None) is not None:
+            t = kd["temperature"]
+            if not isinstance(t, dict) or "x" not in t or "f" not in t \
+                    or len(t["x"]) != len(t["f"]) or len(t["x"]) < 1 \
+                    or np.any(np.diff(np.asarray(t["x"], dtype=float)) <= 0.0):
+                raise ValueError("karst: temperature needs increasing `x` (deg C) and "
+                                 "`f` of the same length.")
+            if not getattr(self, "sstOn", False):
+                raise ValueError("karst: a temperature response needs an `sst:` block "
+                                 "(the temperature field of the model).")
+            temp = (np.asarray(t["x"], dtype=float), np.asarray(t["f"], dtype=float))
+        sol = float(kd.get("solute_per_m3", 1.0))
+        if sol <= 0.0:
+            raise ValueError("karst: solute_per_m3 must be positive.")
+        self.karst = {
+            "rate": rate,
+            "lit": [self.litName.index(n) for n in names],
+            "focus": focus,
+            "area": None if area is None else float(area),
+            "cover": float(kd.get("cover", 0.5)),
+            "max": float(kd.get("max_dissolution", 5.0)),
+            "temp": temp,
+            "species": None if kd.get("species", None) is None else str(kd["species"]),
+            "solute": sol,
+        }
+        self.karstOn = True
 
     def _readCoastalErosion(self):
         """
