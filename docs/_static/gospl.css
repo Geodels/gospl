@@ -304,20 +304,26 @@ html[data-theme=dark] .modchart-domain, html[data-theme=dark] .modchart-dom + .m
    theme moves it into a slide-in panel, #pst-primary-sidebar-modal). */
 @media (min-width: 960px) {
   #pst-primary-sidebar { display: none !important; }
-  /* a labelled, outlined button: easier to find than the bare icon */
-  .bd-header button.primary-toggle {
-    display: inline-flex !important; align-items: center; gap: 0.45rem;
-    padding: 0.3rem 0.75rem; margin-right: 1rem;
-    border: 1.5px solid var(--pst-color-border); border-radius: 8px;
-    background: var(--pst-color-surface); color: var(--pst-color-text-base);
-    font-size: 0.95rem; font-weight: 600; line-height: 1;
-    transition: border-color 0.15s, color 0.15s;
+  /* the header icon is replaced by the Contents button below the top bar */
+  .bd-header button.primary-toggle { display: none !important; }
+}
+
+/* Contents button: below the top bar, where the section list used to be,
+   always visible (fixed), opens the section navigation panel */
+.gospl-contents-btn { display: none; }
+@media (min-width: 960px) {
+  .gospl-contents-btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    position: fixed; left: 1rem; top: calc(var(--pst-header-height) + 1.6rem); z-index: 1030;
+    padding: 0.45rem 0.95rem; border: 0; border-radius: 8px; cursor: pointer;
+    background: #150458; color: #ffffff; font-size: 0.95rem; font-weight: 600; line-height: 1;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18); transition: background 0.15s;
   }
-  .bd-header button.primary-toggle::after { content: "Sections"; }
-  .bd-header button.primary-toggle:hover,
-  .bd-header button.primary-toggle:focus-visible {
-    border-color: var(--pst-color-primary); color: var(--pst-color-primary);
-  }
+  .gospl-contents-btn:hover, .gospl-contents-btn:focus-visible { background: #2a2190; }
+  html[data-theme=dark] .gospl-contents-btn { background: #8fa6ff; color: #10131a; }
+  html[data-theme=dark] .gospl-contents-btn:hover { background: #b3c2ff; }
+  /* keep a left column free for the button, where the section list was */
+  html.gospl-has-contents .bd-main { padding-left: 9.5rem; }
 }
 
 /* filter box of the reference pages: pinned under the header */
