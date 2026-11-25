@@ -38,6 +38,11 @@ Class Tectonics
       ~Tectonics._ownerPetscIndex
       ~Tectonics._cylinderDisplace
       ~Tectonics._cylinderVelocity
+      ~Tectonics._advSolve
+      ~Tectonics._iioe2Halo
+      ~Tectonics._iioe2MassNeutral
+      ~Tectonics._advectField
+      ~Tectonics._resetEdges
 
 Public functions
 ---------------------
@@ -63,3 +68,8 @@ Private functions
 .. automethod:: mesher.tectonics.Tectonics._ownerPetscIndex
 .. automethod:: mesher.tectonics.Tectonics._cylinderDisplace
 .. automethod:: mesher.tectonics.Tectonics._cylinderVelocity
+.. automethod:: mesher.tectonics.Tectonics._advSolve
+.. automethod:: mesher.tectonics.Tectonics._iioe2Halo
+.. automethod:: mesher.tectonics.Tectonics._iioe2MassNeutral
+.. automethod:: mesher.tectonics.Tectonics._advectField
+.. automethod:: mesher.tectonics.Tectonics._resetEdges

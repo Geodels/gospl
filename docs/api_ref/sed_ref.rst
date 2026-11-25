@@ -34,6 +34,7 @@ Class SEDMesh
       ~SEDMesh._pitFineFraction
       ~SEDMesh._pitProvFraction
       ~SEDMesh._updateSinks
+      ~SEDMesh._keepRoutingPond
 
 Public functions
 ---------------------
@@ -55,3 +56,4 @@ Private functions
 .. automethod:: sed.sedplex.SEDMesh._pitFineFraction
 .. automethod:: sed.sedplex.SEDMesh._pitProvFraction
 .. automethod:: sed.sedplex.SEDMesh._updateSinks
+.. automethod:: sed.sedplex.SEDMesh._keepRoutingPond

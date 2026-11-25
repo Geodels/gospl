@@ -43,6 +43,10 @@ Class GWMesh
       ~GWMesh._soluteSolveRHS
       ~GWMesh._updateSolute
       ~GWMesh._routeRiverSolute
+      ~GWMesh._syncHalo
+      ~GWMesh._subaerialMask
+      ~GWMesh._underLake
+      ~GWMesh._soluteKSPSolve
 
 
 Public functions
@@ -74,3 +78,7 @@ Private functions
 .. automethod:: flow.gwplex.GWMesh._soluteSolveRHS
 .. automethod:: flow.gwplex.GWMesh._updateSolute
 .. automethod:: flow.gwplex.GWMesh._routeRiverSolute
+.. automethod:: flow.gwplex.GWMesh._syncHalo
+.. automethod:: flow.gwplex.GWMesh._subaerialMask
+.. automethod:: flow.gwplex.GWMesh._underLake
+.. automethod:: flow.gwplex.GWMesh._soluteKSPSolve

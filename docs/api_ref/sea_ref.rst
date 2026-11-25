@@ -30,6 +30,7 @@ Class SEAMesh
       ~SEAMesh._distOcean
       ~SEAMesh._marineFineFraction
       ~SEAMesh._marineProvFraction
+      ~SEAMesh._conservingFineFraction
 
 Public functions
 ---------------------
@@ -47,3 +48,4 @@ Private functions
 .. automethod:: sed.seaplex.SEAMesh._distOcean
 .. automethod:: sed.seaplex.SEAMesh._marineFineFraction
 .. automethod:: sed.seaplex.SEAMesh._marineProvFraction
+.. automethod:: sed.seaplex.SEAMesh._conservingFineFraction

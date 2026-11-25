@@ -321,6 +321,22 @@ API reference
 
             See functions and source code.
 
+    .. grid-item-card::
+        :text-align: center
+
+        **Run-time utilities**
+        ^^^
+
+        The ``gospl`` command, the wall-clock profiler, the elevation-spike probe, the PETSc garbage-collection wrapper and the shared constants.
+
+        +++
+
+        .. button-ref:: utils_ref
+            :color: secondary
+            :click-parent:
+
+            See functions and source code.
+
 .. toctree::
     :maxdepth: 3
     :hidden:
@@ -344,3 +360,4 @@ API reference
     grid_ref
     out_ref
     analyse_ref
+    utils_ref

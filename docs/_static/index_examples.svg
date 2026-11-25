@@ -1,22 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- goSPL docs: examples icon (a hand writing with a pen), same style as the other index icons -->
-<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="90mm" viewBox="0 2 100 90">
-  <!-- the line being written -->
-  <path d="M3 84 C 9 76, 15 90, 21 82 S 31 77, 34 83" fill="none" stroke="#150458"
-        stroke-width="7.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- pen: nib and barrel -->
-  <path d="M33 82 L 30 88 L 36 85 Z" fill="#150458"/>
-  <path d="M31 80 L 82 12 Q 87 6 92 10 Q 97 14 92 20 L 41 88 Z" fill="#150458"/>
-  <path d="M33 79 L 40 86" stroke="#ffffff" stroke-width="2.5"/>
-  <!-- hand: a fist around the barrel -->
-  <path d="M50 40 C 54 27, 70 20, 82 26 C 95 33, 97 52, 88 63 C 80 73, 64 75, 55 68
-           C 48 62, 46 51, 50 40 Z" fill="#ffffff" stroke="#150458" stroke-width="6.8"
-        stroke-linejoin="round"/>
-  <!-- folded fingers -->
-  <path d="M57 67 C 62 72, 70 73, 76 69" fill="none" stroke="#150458" stroke-width="6.1" stroke-linecap="round"/>
-  <path d="M66 61 C 71 65, 79 65, 84 60" fill="none" stroke="#150458" stroke-width="6.1" stroke-linecap="round"/>
-  <path d="M73 52 C 78 55, 85 54, 89 49" fill="none" stroke="#150458" stroke-width="6.1" stroke-linecap="round"/>
-  <!-- thumb over the pen -->
-  <path d="M52 45 C 46 47, 40 52, 41 58 C 42 63, 48 64, 52 60 C 56 56, 60 52, 64 49"
-        fill="#ffffff" stroke="#150458" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round"/>
+<!-- goSPL docs: examples icon (a hand writing with a pen), line art in the navy of the other index icons -->
+<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="90mm" viewBox="0 0 500 450">
+  <g fill="none" stroke="#150458" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <!-- pen: tip and barrel, grip ring, cap, clip -->
+    <path d="M18 437 L 82.4 322.5 L 298.7 114.6 L 351.3 169.4 L 135 377.3 Z"/>
+    <path d="M96.9 308.6 L 149.5 363.4"/>
+    <path d="M309.8 126.1 L 363.9 74.1 A 22 22 0 0 1 394.3 105.9 L 340.2 157.9"/>
+    <path d="M204.5 160.8 L 266 101.7 L 291 104"/>
+    <!-- fingers behind the pen -->
+    <path d="M220 190 L 152 194 C 120 197 104 216 94 240 L 80 282"/>
+    <!-- back of the hand, cuff and thumb -->
+    <path d="M300 228 C 360 232 410 262 486 262 L 486 408 L 232 398 C 186 395 160 372 160 346 C 160 320 180 306 210 306 L 300 306 C 320 306 336 301 348 294"/>
+    <path d="M440 298 L 456 298 M440 334 L 456 334 M440 370 L 456 370"/>
+  </g>
 </svg>

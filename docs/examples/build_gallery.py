@@ -13,8 +13,10 @@ that matches the docs being built), and for every example folder of
 - ``<name>/view_Results.ipynb`` (and the other notebooks): copied as they
   are, rendered by myst-nb without being executed, so the figures are the
   ones stored in the notebook;
-- ``<name>/thumb.png``: the first figure of ``view_Results.ipynb``, the card
-  image of the gallery;
+- ``<name>/thumb.png``: the card image of the gallery, the example's figure
+  of the goSPL model-description paper when it has one
+  (``docs/_static/examples/paper_figures.json``, shown at the top of its page
+  with the paper's caption), else the first figure of ``view_Results.ipynb``;
 
 and ``docs/examples/generated/gallery.rst``: the grid of cards included by
 ``docs/examples/index.rst``. Nothing is written into goSPL-examples.
@@ -35,6 +37,19 @@ GEN = os.path.join(HERE, "generated")
 SRC = os.path.join(os.path.dirname(HERE), "_examples_src")
 GROUPS = [("Local-examples", "Regional examples"), ("Global-examples", "Global examples")]
 NOTEBOOKS = ["view_Results.ipynb", "model_setup.ipynb", "build_inputs.ipynb"]
+PAPER = os.path.join(os.path.dirname(HERE), "_static", "examples")
+PAPER_NOTE = ("*Figure of the goSPL model-description paper "
+              "(Geoscientific Model Development, in review).*")
+
+
+def _paper_figure(page, fig):
+    """Insert the paper figure and its caption below the page title."""
+    block = ("\n```{figure} /_static/examples/%s\n:width: 100%%\n:alt: Figure of the example in the goSPL paper\n\n%s\n\n%s\n```\n"
+             % (fig["image"], fig["caption"], PAPER_NOTE))
+    m = re.search(r"^#\s+.+$", page, re.M)
+    if m is None:
+        return block + page
+    return page[:m.end()] + "\n" + block + page[m.end():]
 
 
 def _branch():
@@ -126,6 +141,8 @@ def build():
             "repository, which was not available for this build.\n")
         return
     branch = _branch()
+    pfile = os.path.join(PAPER, "paper_figures.json")
+    paper = json.load(open(pfile)) if os.path.exists(pfile) else {}
     # one-line descriptions of the examples table of the repository README:
     # the card text and the page of an example that has no README of its own
     index = {}
@@ -156,14 +173,20 @@ def build():
                 title, index.get(name, "This example does not have a description yet."))
             # links in the README to other files of the example point to GitHub
             page = re.sub(r"\]\((?!https?://|#)([^)]+)\)", lambda m: "](%s/%s)" % (url, m.group(1)), page)
+            if name in paper:
+                page = _paper_figure(page, paper[name])
             page += "\n\n---\n\nSource, inputs and scripts: [%s on GitHub](%s).\n" % (name, url)
             done = [n for n in nbs if _executed(os.path.join(out, n))]
             if nbs:
                 page += "\n```{toctree}\n:maxdepth: 1\n:caption: Notebooks\n\n"
                 page += "".join("%s\n" % n[:-6] for n in nbs) + "```\n"
             open(os.path.join(out, "index.md"), "w").write(page)
-            has_thumb = "view_Results.ipynb" in done and _thumb(
-                os.path.join(out, "view_Results.ipynb"), os.path.join(out, "thumb.png"))
+            if name in paper:
+                shutil.copy(os.path.join(PAPER, paper[name]["image"]), os.path.join(out, "thumb.png"))
+                has_thumb = True
+            else:
+                has_thumb = "view_Results.ipynb" in done and _thumb(
+                    os.path.join(out, "view_Results.ipynb"), os.path.join(out, "thumb.png"))
             summ = _summary(readme) or index.get(name, "")
             if len(summ) > 170:
                 summ = summ[:167].rsplit(" ", 1)[0] + "..."

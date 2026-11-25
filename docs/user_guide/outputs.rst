@@ -14,6 +14,10 @@ field below as a node-centred scalar that can be coloured, warped and filtered.
 This page lists the fields goSPL can write and what they mean, then shows how to
 turn the flat-mesh or global-sphere output into a 3-D surface in ParaView.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 Output fields
 -------------
 

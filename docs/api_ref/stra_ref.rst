@@ -22,6 +22,8 @@ Class StraMesh
       ~STRAMesh.elevStrat
       ~STRAMesh.getCompaction
       ~STRAMesh.stratalRecord
+      ~STRAMesh.logDualState
+      ~STRAMesh.logProvState
 
    .. rubric:: Private Methods
 
@@ -37,6 +39,10 @@ Class StraMesh
       ~STRAMesh._surfaceLithoD
       ~STRAMesh._depthPorosity
       ~STRAMesh._depthPorosityDual
+      ~STRAMesh._checkStrataFile
+      ~STRAMesh._logStratInit
+      ~STRAMesh._logProvInit
+      ~STRAMesh._netRoutedSource
 
 Public functions
 ---------------------
@@ -47,6 +53,8 @@ Public functions
 .. automethod:: sed.stratplex.STRAMesh.elevStrat
 .. automethod:: sed.stratplex.STRAMesh.getCompaction
 .. automethod:: sed.stratplex.STRAMesh.stratalRecord
+.. automethod:: sed.stratplex.STRAMesh.logDualState
+.. automethod:: sed.stratplex.STRAMesh.logProvState
 
 
 Private functions
@@ -62,3 +70,7 @@ Private functions
 .. automethod:: sed.stratplex.STRAMesh._surfaceLithoD
 .. automethod:: sed.stratplex.STRAMesh._depthPorosity
 .. automethod:: sed.stratplex.STRAMesh._depthPorosityDual
+.. automethod:: sed.stratplex.STRAMesh._checkStrataFile
+.. automethod:: sed.stratplex.STRAMesh._logStratInit
+.. automethod:: sed.stratplex.STRAMesh._logProvInit
+.. automethod:: sed.stratplex.STRAMesh._netRoutedSource

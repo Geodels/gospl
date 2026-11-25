@@ -11,6 +11,10 @@ halves when the core count doubles. We report both the **speedup** and the
 **parallel efficiency**, and we are explicit about where — and why — efficiency
 falls away.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 All runs exercise the full model (flow accumulation, river incision/deposition,
 continental and marine sediment routing, hillslope diffusion, flexural isostasy,
 tectonic forcing) so the numbers reflect a realistic workload, not a single

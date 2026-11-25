@@ -1,0 +1,50 @@
+{
+ "implicit_timestepping": {
+  "image": "fig_ex_timestep.jpg",
+  "caption": "Implicit time-stepping example (`implicit_timestepping`): the same uplifted landscape run to steady state with four time steps. (a) Mean elevation through time; the four runs reach the same steady relief, their final means differing by 0.5 % between Δt = 5 and 0.5 kyr. (b, c) Steady topography for the smallest and largest step, on a shared colour scale: the relief and drainage organisation are the same, only the detailed valley and divide positions differ. Rasterised with `gospl-grid`."
+ },
+ "escarpment_retreat": {
+  "image": "fig_ex_escarpment.jpg",
+  "caption": "Escarpment-retreat example (`escarpment_retreat`), rasterised with `gospl-grid`. (a) Topography at 50 Myr with the shoreline (black): the plateau (high y) is dissected by a drainage network and separated from the coastal plain by the retreating escarpment. (b) Erosion and deposition rate at 50 Myr, concentrated on the scarp face. (c) Mean elevation profiles across the margin every 5 Myr (initial and final in bold), with the mid-scarp (500 m) position (red) retreating ≈135 km. (d) Cumulative flexural deflection along the profile at 10 to 50 Myr, growing to a  830 m bulge beneath the eroding margin. Land diffusivity D = 0.01 m² yr⁻¹."
+ },
+ "groundwater_geochem": {
+  "image": "fig_ex_gwgeochem.jpg",
+  "caption": "Groundwater and geochemistry example (`groundwater_geochem`) at 100 kyr, rasterised with `gospl-grid`. (a) Water-table depth. (b) Groundwater baseflow returned to the rivers (log scale, over greyscale topography). (c) Duricrust thickness, localised in the lowlands with a shallow water table. (d) Carbonate fraction of the dissolved load, nearly uniform. (e) Dissolved load routed down the rivers to the outlets (log scale). (f) Cumulative dissolved mass exported by seepage (solid) and precipitated in the crust (dashed) for carbonate and silica (log scale); the two sum to the dissolved total. The terrain is land-locked, so the export does not reach an ocean."
+ },
+ "ferricrete_inversion": {
+  "image": "fig_ex_ferricrete.jpg",
+  "caption": "The two duricrust styles on the same plain (about 50×50 km, draining south to a fixed outlet). Top row, in-situ cuirasse (`ferricrete_inversion`, discharge gate off): crust at (a) 5 and (b) 15 Myr over a greyscale hillshade; (c) cross-section at 15 Myr along the dashed line of panel b (crust exaggerated ×6); (d) mean elevation percentile of the crust and relief through time. Bottom row, valley ferricrete (`valley_ferricrete`, gate on): crust at (e) 5 and (f) 15 Myr; (g) dissolved iron exported by the rivers at 1.5 Myr; (h) area with more than 1 m of crust and iron dissolution rate through time. Rasterised with `gospl-grid`."
+ },
+ "valley_ferricrete": {
+  "image": "fig_ex_ferricrete.jpg",
+  "caption": "The two duricrust styles on the same plain (about 50×50 km, draining south to a fixed outlet). Top row, in-situ cuirasse (`ferricrete_inversion`, discharge gate off): crust at (a) 5 and (b) 15 Myr over a greyscale hillshade; (c) cross-section at 15 Myr along the dashed line of panel b (crust exaggerated ×6); (d) mean elevation percentile of the crust and relief through time. Bottom row, valley ferricrete (`valley_ferricrete`, gate on): crust at (e) 5 and (f) 15 Myr; (g) dissolved iron exported by the rivers at 1.5 Myr; (h) area with more than 1 m of crust and iron dissolution rate through time. Rasterised with `gospl-grid`."
+ },
+ "erodep_1My": {
+  "image": "fig_ex_global.jpg",
+  "caption": "Global `erodep_1My` example after 1 Myr (Winkel Tripel projection; black lines: palaeo-shoreline). (a) Elevation. (b) Cumulative erosion (blue) and deposition (red). (c) Water discharge and (d) sediment load at the outlets of the 200 largest basins (log10, m³ yr⁻¹)."
+ },
+ "continental_geochem": {
+  "image": "fig_ex_globalgeochem.jpg",
+  "caption": "Global geochemistry example (`continental_geochem`) after 1 Myr (Winkel Tripel projection; black lines: palaeo-shoreline). (a) Temperature driving the weathering. (b) Duricrust thickness. (c) Dissolved export to the surface drainage and (d) river dissolved load (log10). (e) Cumulative mass of each species exported to the ocean (solid) and held in the crust (dashed)."
+ },
+ "flow_direction": {
+  "image": "fig_ex_flowdir.jpg",
+  "caption": "Flow-direction example (`flow_direction`): water discharge Q on land at 10 kyr for three otherwise identical runs (log scale). Top row, the full 100 km radial domain; bottom row, the 20×20 km window outlined in black. Left to right: single-flow routing (`flowdir`=1), two receivers (`flowdir`=2) and multiple-flow routing (`flowdir`=6). Single-flow routing concentrates the flow into thin threads set by the mesh; multiple-flow routing spreads it into a smoother field less dependent on the mesh."
+ },
+ "soil_generation": {
+  "image": "fig_ex_soil.jpg",
+  "caption": "Soil example (`soil_generation`) at 100 kyr, analysed with `gospl-grid` and the `basin_rivers` helper. (a) Cumulative erosion and deposition. (b) Soil thickness. (c) D8 drainage basins with the stream network of basin 1179 (black main stem, blue tributaries, white triangle at the outlet). (d) Longitudinal profile of basin 1179 (black) with the soil thickness along the main stem (orange, right axis). (e) Soil thickness against elevation over basin 1179 (log-count hexbin) with the median per elevation bin (orange)."
+ },
+ "glacial_erosion": {
+  "image": "fig_ex_glacier.jpg",
+  "caption": "Glacial-erosion example (`glacial_erosion`) at 100 kyr, rasterised with `gospl-grid`. (a) Ice thickness over greyscale topography, with the equilibrium-line altitude (ELA) dashed. (b) Basal sliding velocity. (c) Cumulative erosion and deposition: abrasion lowers the ice-covered highlands. (d) Transect at constant y: initial (grey dashed) and final (black) surfaces with the ice (blue) capping the peaks above the ELA (red dotted)."
+ },
+ "dual_lithology": {
+  "image": "fig_ex_strat.jpg",
+  "caption": "Stratigraphic-record and dual-lithology examples, analysed with the `gospl.analyse` tools. (a) Cross-section along the margin (vertical exaggeration ×100) with layers coloured by palaeo-water-depth facies, prograding clinoforms, the shoreline (blue) and three well sites (triangles). (b) Wheeler diagram (distance against time of deposition) coloured by facies, with the shoreline trajectory (black) and hiatuses left blank. (c) Imposed relative sea level. (d, e) Synthetic wells of the dual-lithology run at 130, 145 and 158 km (triangles in panel a; this run progrades about 5 km further than the section shown), on a shared elevation axis, coloured by (d) layer thickness and (e) coarse fraction."
+ },
+ "stratigraphic_record": {
+  "image": "fig_ex_strat.jpg",
+  "caption": "Stratigraphic-record and dual-lithology examples, analysed with the `gospl.analyse` tools. (a) Cross-section along the margin (vertical exaggeration ×100) with layers coloured by palaeo-water-depth facies, prograding clinoforms, the shoreline (blue) and three well sites (triangles). (b) Wheeler diagram (distance against time of deposition) coloured by facies, with the shoreline trajectory (black) and hiatuses left blank. (c) Imposed relative sea level. (d, e) Synthetic wells of the dual-lithology run at 130, 145 and 158 km (triangles in panel a; this run progrades about 5 km further than the section shown), on a shared elevation axis, coloured by (d) layer thickness and (e) coarse fraction."
+ }
+}

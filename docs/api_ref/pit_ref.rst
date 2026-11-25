@@ -34,6 +34,8 @@ Class PITFill
       ~PITFill._getPitParams
       ~PITFill._performFilling
       ~PITFill._pitInformation
+      ~PITFill._unshiftFill
+      ~PITFill._fillLevel
 
 Public functions
 ---------------------
@@ -55,3 +57,5 @@ Private functions
 .. automethod:: flow.pitfilling.PITFill._getPitParams
 .. automethod:: flow.pitfilling.PITFill._performFilling
 .. automethod:: flow.pitfilling.PITFill._pitInformation
+.. automethod:: flow.pitfilling.PITFill._unshiftFill
+.. automethod:: flow.pitfilling.PITFill._fillLevel

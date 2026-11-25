@@ -29,6 +29,7 @@ Class WriteMesh
       ~WriteMesh._outputMesh
       ~WriteMesh._save_DMPlex_XMF
       ~WriteMesh._save_XDMF
+      ~WriteMesh._outputSoluteBudget
 
 
 Public functions
@@ -46,3 +47,4 @@ Private functions
 .. automethod:: tools.outmesh.WriteMesh._outputMesh
 .. automethod:: tools.outmesh.WriteMesh._save_DMPlex_XMF
 .. automethod:: tools.outmesh.WriteMesh._save_XDMF
+.. automethod:: tools.outmesh.WriteMesh._outputSoluteBudget

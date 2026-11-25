@@ -55,6 +55,7 @@ Class ReadYaml
       ~ReadYaml._loadIceMap
       ~ReadYaml._readGroundwater
       ~ReadYaml._readOut
+      ~ReadYaml._concatRows
 
 
 Private functions
@@ -98,3 +99,4 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._loadIceMap
 .. automethod:: tools.inputparser.ReadYaml._readGroundwater
 .. automethod:: tools.inputparser.ReadYaml._readOut
+.. automethod:: tools.inputparser.ReadYaml._concatRows

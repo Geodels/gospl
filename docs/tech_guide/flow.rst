@@ -4,6 +4,10 @@
 River Discharge
 =========================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 
 Flow accumulation
 ------------------------------------
