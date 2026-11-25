@@ -13,11 +13,13 @@
  },
  "ferricrete_inversion": {
   "image": "fig_ex_ferricrete.jpg",
-  "caption": "The two duricrust styles on the same plain (about 50×50 km, draining south to a fixed outlet). Top row, in-situ cuirasse (`ferricrete_inversion`, discharge gate off): crust at (a) 5 and (b) 15 Myr over a greyscale hillshade; (c) cross-section at 15 Myr along the dashed line of panel b (crust exaggerated ×6); (d) mean elevation percentile of the crust and relief through time. Bottom row, valley ferricrete (`valley_ferricrete`, gate on): crust at (e) 5 and (f) 15 Myr; (g) dissolved iron exported by the rivers at 1.5 Myr; (h) area with more than 1 m of crust and iron dissolution rate through time. Rasterised with `gospl-grid`."
+  "caption": "The two duricrust styles on the same plain (about 50×50 km, draining south to a fixed outlet). Top row, in-situ cuirasse (`ferricrete_inversion`, discharge gate off): crust at (a) 5 and (b) 15 Myr over a greyscale hillshade; (c) cross-section at 15 Myr along the dashed line of panel b (crust exaggerated ×6); (d) mean elevation percentile of the crust and relief through time. Bottom row, valley ferricrete (`valley_ferricrete`, gate on): crust at (e) 5 and (f) 15 Myr; (g) dissolved iron exported by the rivers at 1.5 Myr; (h) area with more than 1 m of crust and iron dissolution rate through time. Rasterised with `gospl-grid`.",
+  "thumb": "thumb_ferricrete_inversion.jpg"
  },
  "valley_ferricrete": {
   "image": "fig_ex_ferricrete.jpg",
-  "caption": "The two duricrust styles on the same plain (about 50×50 km, draining south to a fixed outlet). Top row, in-situ cuirasse (`ferricrete_inversion`, discharge gate off): crust at (a) 5 and (b) 15 Myr over a greyscale hillshade; (c) cross-section at 15 Myr along the dashed line of panel b (crust exaggerated ×6); (d) mean elevation percentile of the crust and relief through time. Bottom row, valley ferricrete (`valley_ferricrete`, gate on): crust at (e) 5 and (f) 15 Myr; (g) dissolved iron exported by the rivers at 1.5 Myr; (h) area with more than 1 m of crust and iron dissolution rate through time. Rasterised with `gospl-grid`."
+  "caption": "The two duricrust styles on the same plain (about 50×50 km, draining south to a fixed outlet). Top row, in-situ cuirasse (`ferricrete_inversion`, discharge gate off): crust at (a) 5 and (b) 15 Myr over a greyscale hillshade; (c) cross-section at 15 Myr along the dashed line of panel b (crust exaggerated ×6); (d) mean elevation percentile of the crust and relief through time. Bottom row, valley ferricrete (`valley_ferricrete`, gate on): crust at (e) 5 and (f) 15 Myr; (g) dissolved iron exported by the rivers at 1.5 Myr; (h) area with more than 1 m of crust and iron dissolution rate through time. Rasterised with `gospl-grid`.",
+  "thumb": "thumb_valley_ferricrete.jpg"
  },
  "erodep_1My": {
   "image": "fig_ex_global.jpg",
@@ -41,14 +43,17 @@
  },
  "dual_lithology": {
   "image": "fig_ex_strat.jpg",
-  "caption": "Stratigraphic-record and dual-lithology examples, analysed with the `gospl.analyse` tools. (a) Cross-section along the margin (vertical exaggeration ×100) with layers coloured by palaeo-water-depth facies, prograding clinoforms, the shoreline (blue) and three well sites (triangles). (b) Wheeler diagram (distance against time of deposition) coloured by facies, with the shoreline trajectory (black) and hiatuses left blank. (c) Imposed relative sea level. (d, e) Synthetic wells of the dual-lithology run at 130, 145 and 158 km (triangles in panel a; this run progrades about 5 km further than the section shown), on a shared elevation axis, coloured by (d) layer thickness and (e) coarse fraction."
+  "caption": "Stratigraphic-record and dual-lithology examples, analysed with the `gospl.analyse` tools. (a) Cross-section along the margin (vertical exaggeration ×100) with layers coloured by palaeo-water-depth facies, prograding clinoforms, the shoreline (blue) and three well sites (triangles). (b) Wheeler diagram (distance against time of deposition) coloured by facies, with the shoreline trajectory (black) and hiatuses left blank. (c) Imposed relative sea level. (d, e) Synthetic wells of the dual-lithology run at 130, 145 and 158 km (triangles in panel a; this run progrades about 5 km further than the section shown), on a shared elevation axis, coloured by (d) layer thickness and (e) coarse fraction.",
+  "thumb": "thumb_dual_lithology.jpg"
  },
  "stratigraphic_record": {
   "image": "fig_ex_strat.jpg",
-  "caption": "Stratigraphic-record and dual-lithology examples, analysed with the `gospl.analyse` tools. (a) Cross-section along the margin (vertical exaggeration ×100) with layers coloured by palaeo-water-depth facies, prograding clinoforms, the shoreline (blue) and three well sites (triangles). (b) Wheeler diagram (distance against time of deposition) coloured by facies, with the shoreline trajectory (black) and hiatuses left blank. (c) Imposed relative sea level. (d, e) Synthetic wells of the dual-lithology run at 130, 145 and 158 km (triangles in panel a; this run progrades about 5 km further than the section shown), on a shared elevation axis, coloured by (d) layer thickness and (e) coarse fraction."
+  "caption": "Stratigraphic-record and dual-lithology examples, analysed with the `gospl.analyse` tools. (a) Cross-section along the margin (vertical exaggeration ×100) with layers coloured by palaeo-water-depth facies, prograding clinoforms, the shoreline (blue) and three well sites (triangles). (b) Wheeler diagram (distance against time of deposition) coloured by facies, with the shoreline trajectory (black) and hiatuses left blank. (c) Imposed relative sea level. (d, e) Synthetic wells of the dual-lithology run at 130, 145 and 158 km (triangles in panel a; this run progrades about 5 km further than the section shown), on a shared elevation axis, coloured by (d) layer thickness and (e) coarse fraction.",
+  "thumb": "thumb_stratigraphic_record.jpg"
  },
  "generate_2Dmesh": {
   "image": "fig_ex_flowdir.jpg",
-  "caption": "Flow-direction example (`flow_direction`): water discharge Q on land at 10 kyr for three otherwise identical runs (log scale). Top row, the full 100 km radial domain; bottom row, the 20×20 km window outlined in black. Left to right: single-flow routing (`flowdir`=1), two receivers (`flowdir`=2) and multiple-flow routing (`flowdir`=6). Single-flow routing concentrates the flow into thin threads set by the mesh; multiple-flow routing spreads it into a smoother field less dependent on the mesh."
+  "caption": "Flow-direction example (`flow_direction`): water discharge Q on land at 10 kyr for three otherwise identical runs (log scale). Top row, the full 100 km radial domain; bottom row, the 20×20 km window outlined in black. Left to right: single-flow routing (`flowdir`=1), two receivers (`flowdir`=2) and multiple-flow routing (`flowdir`=6). Single-flow routing concentrates the flow into thin threads set by the mesh; multiple-flow routing spreads it into a smoother field less dependent on the mesh.",
+  "thumb": "thumb_generate_2Dmesh.png"
  }
 }

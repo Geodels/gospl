@@ -13,10 +13,11 @@ that matches the docs being built), and for every example folder of
 - ``<name>/view_Results.ipynb`` (and the other notebooks): copied as they
   are, rendered by myst-nb without being executed, so the figures are the
   ones stored in the notebook;
-- ``<name>/thumb.png``: the card image of the gallery, the example's figure
+- ``<name>/thumb_<name>.*``: the card image of the gallery, the example's figure
   of the goSPL model-description paper when it has one
   (``docs/_static/examples/paper_figures.json``, shown at the top of its page
-  with the paper's caption), else the first figure of ``view_Results.ipynb``;
+  with the paper's caption; ``thumb`` there gives a crop of a figure that
+  two examples share, or ``notebook``), else the first figure of ``view_Results.ipynb``;
 
 and ``docs/examples/generated/gallery.rst``: the grid of cards included by
 ``docs/examples/index.rst``. Nothing is written into goSPL-examples.
@@ -237,17 +238,24 @@ def build():
                 page += "\n```{toctree}\n:maxdepth: 1\n:caption: Notebooks\n\n"
                 page += "".join("%s\n" % n[:-6] for n in nbs) + "```\n"
             open(os.path.join(out, "index.md"), "w").write(page)
-            if name in paper:
-                shutil.copy(os.path.join(PAPER, paper[name]["image"]), os.path.join(out, "thumb.png"))
-                has_thumb = True
+            # card image, under a name of its own (a shared name such as
+            # thumb.png is renumbered by Sphinx in build order, and browsers
+            # then show a cached picture of another example)
+            fig = paper.get(name, {})
+            choice = fig.get("thumb", fig.get("image"))
+            if choice and choice != "notebook":
+                thumb = "thumb_%s%s" % (name, os.path.splitext(choice)[1])
+                shutil.copy(os.path.join(PAPER, choice), os.path.join(out, thumb))
             else:
-                has_thumb = "view_Results.ipynb" in done and _thumb(
-                    os.path.join(out, "view_Results.ipynb"), os.path.join(out, "thumb.png"))
+                thumb = "thumb_%s.png" % name
+                if not ("view_Results.ipynb" in done and _thumb(
+                        os.path.join(out, "view_Results.ipynb"), os.path.join(out, thumb))):
+                    thumb = None
             summ = _summary(readme) or index.get(name, "")
             if len(summ) > 170:
                 summ = summ[:167].rsplit(" ", 1)[0] + "..."
             summ = re.sub(r"[`*_]", "", re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", summ))
-            items.append((name, title, summ, has_thumb))
+            items.append((name, title, summ, thumb))
         cards.append((gtitle, items))
 
     L = []
@@ -257,7 +265,7 @@ def build():
             L += ["    .. grid-item-card:: %s" % title, "        :link: generated/%s/index" % name,
                   "        :link-type: doc", "        :class-card: gospl-example-card"]
             if thumb:
-                L += ["        :img-top: generated/%s/thumb.png" % name]
+                L += ["        :img-top: generated/%s/%s" % (name, thumb)]
             L += ["", "        %s" % (summ or name.replace("_", " ")), ""]
         L += [""]
     L += [".. toctree::", "    :hidden:", ""]
