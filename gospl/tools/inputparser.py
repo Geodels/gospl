@@ -606,13 +606,17 @@ class ReadYaml(object):
             # bottom-up baseline. 0.0 = pure bowl fill, 1.0 = original
             # inlet-only spike.
             self.nl_pit_inlet_bias = hillDict.get("pitInletBias", 0.10)
-            # Marine/lake non-linear-diffusion solver. 'ts' (default) = adaptive
-            # non-linear PETSc TS (rosw). 'picard' = lagged-diffusivity backward-
-            # Euler with linear solves (faster, robust at the C_d kink), an
-            # opt-in approximation; picardSub sub-steps over dt, picardIts Picard
-            # iterations per sub-step. See sed/hillslope._diffuseImplicitPicard.
-            self.marineSolver = str(hillDict.get("marineSolver", "ts")).lower()
-            self.picardSub = int(hillDict.get("picardSub", 10))
+            # Marine/lake non-linear-diffusion solver. 'picard' (default) =
+            # lagged-diffusivity backward-Euler with linear solves, picardSub
+            # sub-steps over dt, picardIts Picard iterations per sub-step (see
+            # sed/hillslope._diffuseImplicitPicard). 'ts' = adaptive non-linear
+            # PETSc TS (rosw). Default 'ts' and 10 sub-steps until 2026-11-25:
+            # on a 190k-node margin picard with 20 sub-steps took 68 % of the
+            # ts step and its deposits were within 1.4 % rms of ts (9 % with 10
+            # sub-steps); its cost grows more slowly with the mesh, and it limits
+            # each cell's export to its deposit (ts does not).
+            self.marineSolver = str(hillDict.get("marineSolver", "picard")).lower()
+            self.picardSub = int(hillDict.get("picardSub", 20))
             self.picardIts = int(hillDict.get("picardIts", 2))
             # Optional channel threshold (m3/yr): land cells whose discharge
             # reaches it are rivers, held fixed in the hillslope diffusion; the
@@ -631,14 +635,14 @@ class ReadYaml(object):
             self.nl_pit_depth = 100.0
             self.nl_pit_K = self.nlK
             self.nl_pit_inlet_bias = 0.50
-            self.marineSolver = "ts"
-            self.picardSub = 10
+            self.marineSolver = "picard"
+            self.picardSub = 20
             self.picardIts = 2
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
         self.nl_pit_inlet_bias = min(1.0, max(0.0, self.nl_pit_inlet_bias))
         if self.marineSolver not in ("ts", "picard"):
-            self.marineSolver = "ts"
+            self.marineSolver = "picard"
         self.picardSub = max(1, self.picardSub)
         self.picardIts = max(1, self.picardIts)
         if self.hillChannelQ is not None:

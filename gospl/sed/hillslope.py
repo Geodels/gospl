@@ -1293,7 +1293,7 @@ class hillSLP(object):
 
         mask = self.seaID
         nC = provThick.shape[1]
-        nsub = int(getattr(self, "picardSub", 10))
+        nsub = int(getattr(self, "picardSub", 20))
         dt_sub = self.dt / nsub
 
         # Converged marine diffusivity at the post-diffusion deposit state,
@@ -1471,7 +1471,7 @@ class hillSLP(object):
                         label,
                         ts.getConvergedReason(),
                         ts.getStepRejections(),
-                        int(getattr(self, "picardSub", 10)),
+                        int(getattr(self, "picardSub", 20)),
                         int(getattr(self, "picardIts", 2)),
                     ),
                     flush=True,
@@ -1536,7 +1536,7 @@ class hillSLP(object):
         """
 
         t0 = process_time()
-        nsub = int(getattr(self, "picardSub", 10))
+        nsub = int(getattr(self, "picardSub", 20))
         npic = int(getattr(self, "picardIts", 2))
         dt_sub = self.dt / nsub
 

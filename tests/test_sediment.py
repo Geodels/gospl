@@ -619,6 +619,7 @@ def test_marine_ts_failure_falls_back_to_picard(minimal_model):
         bed = _steep_marine_setup(model, dt=5.0e5, nlK=5.0e6)
         dh = np.zeros(model.lpoints)
         dh[model.seaID & (bed > 1000.0)] = 500.0
+        model.marineSolver = "ts"           # picard is the default since 2026-11-25
         model._diffuseImplicit(dh, model.seaID, model.nlK, label="marine")
         assert model.marineSolver == "ts"
         # Any rejected step now exhausts the TS.
