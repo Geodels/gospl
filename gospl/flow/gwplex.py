@@ -1037,7 +1037,8 @@ class GWMesh(object):
     def _makeSoluteKSP(self):
         """
         Cached KSP for the solute-transport solve: a **direct LU factorisation**
-        (``preonly`` + ``lu``; MUMPS in parallel), ``gw_solute_`` prefix.
+        (``preonly`` + ``lu`` with MUMPS, also on one rank when PETSc has it),
+        ``gw_solute_`` prefix.
 
         The upwind advection operator is a non-symmetric M-matrix, but its
         diagonal is only weakly dominant: at a flat, poorly-drained *saturated*
@@ -1058,8 +1059,12 @@ class GWMesh(object):
         ksp.setType("preonly")
         pc = ksp.getPC()
         pc.setType("lu")
-        if MPIsize > 1:
-            pc.setFactorSolverType("mumps")              # parallel direct solve
+        # MUMPS on any rank count: in serial, PETSc's own LU (natural
+        # ordering) was ~10x slower on a 47k-node margin (the geochemistry
+        # step 5x the base step instead of 1.1x, 2026-11-25). PETSc's LU only
+        # where MUMPS is not installed (it is required in parallel).
+        if MPIsize > 1 or petsc4py.PETSc.Sys.hasExternalPackage("mumps"):
+            pc.setFactorSolverType("mumps")
         ksp.setOptionsPrefix("gw_solute_")
         ksp.setFromOptions()
         return ksp
