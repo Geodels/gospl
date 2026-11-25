@@ -493,15 +493,15 @@ Soil production, erosion, transport and deposition
         m. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
         n. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
         o. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
-        p. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+        p. ``solver`` selects the primary non-linear solver: ``'ngmres'`` (default, accelerator + multigrid preconditioner) or ``'qn'`` (limited-memory quasi-Newton / L-BFGS).
 
         .. tip::
 
-            The soil solve is usually the dominant cost of a soil-enabled run. The default ``solver: 'qn'`` was chosen because on a global model it cut the soil-solve wall time roughly in half (or more) versus ``'ngmres'`` at the **same** tolerance and solution — L-BFGS reaches a comparable iteration count but each iteration is far cheaper than an ``ngmres``/multigrid sweep. If ``'qn'`` struggles on a particular configuration, set ``solver: 'ngmres'``. Prefer switching ``solver`` over relaxing ``rtol``: a loose ``rtol`` can leave the elevation field under-resolved and **destabilise the downstream sediment-routing solver**, which is both slower and less accurate.
+            The soil solve is usually the dominant cost of a soil-enabled run. The default ``solver: 'ngmres'`` (with ``pcType: 'hypre'``) converges to the full tolerance on regional and global models. ``'qn'`` was the default until November 2026: on those models it now fails at nearly every step (iteration limit or failed line search) and the step is finished by the fallback at a relaxed tolerance (100 times ``rtol``). Prefer switching ``solver`` over relaxing ``rtol``: a loose ``rtol`` can leave the elevation field under-resolved and **destabilise the downstream sediment-routing solver**, which is both slower and less accurate.
 
         .. tip::
 
-            **Validated fast preset for a stiff regional soil run.** Where the default ``'qn'`` stalls, ::
+            **Validated fast preset for a stiff regional soil run.** ::
 
                 soil:
                     solver: 'ngmres'

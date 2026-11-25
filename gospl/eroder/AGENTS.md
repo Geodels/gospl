@@ -24,6 +24,8 @@ the original section names (most now live in the files listed in the root
 
 ## SNES stopping criteria (2026-11-24)
 
+**The soil SNES primary is `ngmres` + hypre by default (2026-11-25).** `qn` (L-BFGS, `cp` line search) was the default; with `stol=0` it failed at nearly every step on the 47k/190k regional margin and on the global continental_geochem example (reason -5 at 500 its, or -9), and the `ngmres` fallback finished at `rtol*100` = 1e-4, the tolerance the user guide warns gives needles. `ngmres` primary: no fallback, full tolerance, same or lower wall time (109 % vs 187 % of the base step at 47k). `solver: qn` remains available.
+
 Every outer SNES (`soilspl_`, `soilsplfb_`, `nlspled_`, `nlspledfb_`, the no-deposition `_snes_nl`, `hillnl_`) sets `stol=0.0`: PETSc's default `stol = 1e-8` let the quasi-Newton solves report `CONVERGED_SNORM_RELATIVE` when the line search stalled, with the residual ~1e3 times `rtol`. Check with `-<prefix>snes_converged_reason`; a solve must end on `CONVERGED_FNORM_ABS`/`FNORM_RELATIVE` (or diverge to the fallbacks). Guard `test_snes_converge_on_the_residual`. Any new SNES: set `stol=0.0` too.
 
 ## The `fDep` cap (transport-limited deposition)

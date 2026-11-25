@@ -737,11 +737,16 @@ class ReadYaml(object):
             # Preconditioner for the soil SNES Krylov solve: 'hypre'
             # (BoomerAMG, default), 'gamg', 'bjacobi', 'asm', ...
             self.soil_pc = str(soilDict.get("pcType", "hypre"))
-            # Primary nonlinear solver: 'qn' (limited-memory quasi-Newton /
-            # L-BFGS, default — ~2.4x faster than ngmres at the same tolerance
-            # and solution on a global soil model) or 'ngmres' (accelerator +
-            # multigrid PC). Whichever is chosen, the other is the fallback.
-            self.soil_solver = str(soilDict.get("solver", "qn"))
+            # Primary nonlinear solver: 'ngmres' (accelerator + multigrid PC,
+            # default) or 'qn' (limited-memory quasi-Newton / L-BFGS).
+            # Whichever is chosen, the other is the fallback. 'qn' was the
+            # default until 2026-11-25: once the SNES stopped on its residual
+            # (stol = 0), it failed at every step on a regional margin (47k and
+            # 190k nodes) and on the global continental_geochem example
+            # (500 iterations or a failed line search), and the fallback
+            # finished at its relaxed 1e-4; 'ngmres' + hypre converged to the
+            # full tolerance with no fallback, as fast or faster.
+            self.soil_solver = str(soilDict.get("solver", "ngmres"))
 
         except KeyError:
             self.cptSoil = False
@@ -763,7 +768,7 @@ class ReadYaml(object):
             self.soil_rtol = 1.0e-6
             self.soil_atol = 1.0e-6
             self.soil_pc = "hypre"
-            self.soil_solver = "qn"
+            self.soil_solver = "ngmres"
 
         return
 
