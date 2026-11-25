@@ -4,6 +4,11 @@
 Installation via PyPI
 ==========================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
+
 .. _install.pypi:
 
 goSPL is published on `PyPI <https://pypi.org/project/gospl/>`_ as a **source

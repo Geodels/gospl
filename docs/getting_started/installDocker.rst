@@ -5,6 +5,10 @@
 Installation via Docker
 =========================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 
 Getting Docker
 --------------

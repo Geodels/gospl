@@ -4,6 +4,11 @@
 Installation via Source
 =========================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
+
 .. note::
 
   The instructions below describe how to build goSPL from the git source tree.

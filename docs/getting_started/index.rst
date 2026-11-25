@@ -4,6 +4,10 @@
 Getting started
 ===============
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 
 Python version support
 ----------------------
