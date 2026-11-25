@@ -220,6 +220,23 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
 
             Learn more about the carbonates.
 
+    .. grid-item-card::
+        :text-align: center
+
+        **Solvers**
+        ^^^
+
+        The PETSc solver of every process, the tested alternatives and how to
+        select them for a run.
+
+        +++
+
+        .. button-ref:: solvers
+            :color: secondary
+            :click-parent:
+
+            Learn more about the solvers.
+
 
 .. toctree::
     :maxdepth: 3
@@ -236,3 +253,4 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     groundwater
     gravity
     carb
+    solvers

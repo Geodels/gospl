@@ -250,10 +250,13 @@ just like the head):
   anchors the operator as a well-posed M-matrix; the recharge term is essential
   where the groundwater carries no lateral flow — a fully **saturated** seepage
   node or a **dry** aquifer node — which would otherwise have a zero diagonal and
-  spike the concentration. The steady transport is solved with a **direct LU
-  factorisation** (MUMPS in parallel), which is exact and robust to the weak
-  diagonal dominance at those poorly-drained nodes (an iterative solve can stall
-  there and silently break the mass balance). The diagonal is also floored at
+  spike the concentration. The steady transport is solved with ``fgmres`` and
+  algebraic multigrid (hypre BoomerAMG, relative tolerance 1e-10, warm-started
+  from the previous concentration), with a direct factorisation (MUMPS) as the
+  automatic fallback of a failed solve (:ref:`solvers`). The direct solve was the
+  default until November 2026: before the floor below, the operator had empty
+  or tiny rows and an iterative solve could stall and break the mass balance.
+  The diagonal is also floored at
   ``SOLUTE_DISCHARGE_FLOOR`` (1e-6 m/yr, added to the export so the budget
   closes): under the sea or a lake on a flat bed the head is the surface and
   neighbouring cells share it, so a flat patch has no lateral flux, no seepage

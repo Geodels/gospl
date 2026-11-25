@@ -607,13 +607,17 @@ class ReadYaml(object):
             # bottom-up baseline. 0.0 = pure bowl fill, 1.0 = original
             # inlet-only spike.
             self.nl_pit_inlet_bias = hillDict.get("pitInletBias", 0.10)
-            # Marine/lake non-linear-diffusion solver. 'ts' (default) = adaptive
-            # non-linear PETSc TS (rosw). 'picard' = lagged-diffusivity backward-
-            # Euler with linear solves (faster, robust at the C_d kink), an
-            # opt-in approximation; picardSub sub-steps over dt, picardIts Picard
-            # iterations per sub-step. See sed/hillslope._diffuseImplicitPicard.
-            self.marineSolver = str(hillDict.get("marineSolver", "ts")).lower()
-            self.picardSub = int(hillDict.get("picardSub", 10))
+            # Marine/lake non-linear-diffusion solver. 'picard' (default) =
+            # lagged-diffusivity backward-Euler with linear solves, picardSub
+            # sub-steps over dt, picardIts Picard iterations per sub-step (see
+            # sed/hillslope._diffuseImplicitPicard). 'ts' = adaptive non-linear
+            # PETSc TS (rosw). Default 'ts' and 10 sub-steps until 2026-11-25:
+            # on a 190k-node margin picard with 20 sub-steps took 68 % of the
+            # ts step and its deposits were within 1.4 % rms of ts (9 % with 10
+            # sub-steps); its cost grows more slowly with the mesh, and it limits
+            # each cell's export to its deposit (ts does not).
+            self.marineSolver = str(hillDict.get("marineSolver", "picard")).lower()
+            self.picardSub = int(hillDict.get("picardSub", 20))
             self.picardIts = int(hillDict.get("picardIts", 2))
             # Optional channel threshold (m3/yr): land cells whose discharge
             # reaches it are rivers, held fixed in the hillslope diffusion; the
@@ -632,14 +636,14 @@ class ReadYaml(object):
             self.nl_pit_depth = 100.0
             self.nl_pit_K = self.nlK
             self.nl_pit_inlet_bias = 0.50
-            self.marineSolver = "ts"
-            self.picardSub = 10
+            self.marineSolver = "picard"
+            self.picardSub = 20
             self.picardIts = 2
 
         self.clinSlp = max(1.0e-6, self.clinSlp)
         self.nl_pit_inlet_bias = min(1.0, max(0.0, self.nl_pit_inlet_bias))
         if self.marineSolver not in ("ts", "picard"):
-            self.marineSolver = "ts"
+            self.marineSolver = "picard"
         self.picardSub = max(1, self.picardSub)
         self.picardIts = max(1, self.picardIts)
         if self.hillChannelQ is not None:
@@ -738,11 +742,16 @@ class ReadYaml(object):
             # Preconditioner for the soil SNES Krylov solve: 'hypre'
             # (BoomerAMG, default), 'gamg', 'bjacobi', 'asm', ...
             self.soil_pc = str(soilDict.get("pcType", "hypre"))
-            # Primary nonlinear solver: 'qn' (limited-memory quasi-Newton /
-            # L-BFGS, default — ~2.4x faster than ngmres at the same tolerance
-            # and solution on a global soil model) or 'ngmres' (accelerator +
-            # multigrid PC). Whichever is chosen, the other is the fallback.
-            self.soil_solver = str(soilDict.get("solver", "qn"))
+            # Primary nonlinear solver: 'ngmres' (accelerator + multigrid PC,
+            # default) or 'qn' (limited-memory quasi-Newton / L-BFGS).
+            # Whichever is chosen, the other is the fallback. 'qn' was the
+            # default until 2026-11-25: once the SNES stopped on its residual
+            # (stol = 0), it failed at every step on a regional margin (47k and
+            # 190k nodes) and on the global continental_geochem example
+            # (500 iterations or a failed line search), and the fallback
+            # finished at its relaxed 1e-4; 'ngmres' + hypre converged to the
+            # full tolerance with no fallback, as fast or faster.
+            self.soil_solver = str(soilDict.get("solver", "ngmres"))
 
         except KeyError:
             self.cptSoil = False
@@ -764,7 +773,7 @@ class ReadYaml(object):
             self.soil_rtol = 1.0e-6
             self.soil_atol = 1.0e-6
             self.soil_pc = "hypre"
-            self.soil_solver = "qn"
+            self.soil_solver = "ngmres"
 
         return
 

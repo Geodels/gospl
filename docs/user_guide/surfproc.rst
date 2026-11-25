@@ -98,11 +98,11 @@ Hillslope and marine deposition parameters
 
             diffusion:
                 # ... above keys ...
-                marineSolver: picard   # 'ts' (default) | 'picard'
-                picardSub: 10
+                marineSolver: picard   # 'picard' (default) | 'ts'
+                picardSub: 20
                 picardIts: 2
 
-        By default the marine and lake non-linear diffusion is integrated with an adaptive non-linear PETSc time-stepper (``marineSolver: ts``). On large, stiff marine inputs this can dominate the run (the adaptive controller takes many sub-steps and stalls at the diffusivity threshold). The opt-in ``marineSolver: picard`` uses a **lagged-diffusivity** backward-Euler scheme instead: it takes ``picardSub`` sub-steps over the goSPL step (default 10), freezing the diffusivity within each and solving the resulting *linear* system with ``picardIts`` Picard updates (default 2). Each solve is linear (no non-linear stalls or step rejections), which is markedly faster on production meshes. It is an **approximation** — on small problems it matches the default solver almost exactly, but on large runs the deposit geometry differs slightly; increase ``picardSub`` to converge toward the time-stepper solution. The default remains ``ts``. The diffusion number of a sub-step grows as ``1/dx²``, so when you refine the mesh scale ``picardSub`` by about ``(dx_old/dx_new)²`` to keep the same accuracy (about 4× per halving of the cell size, for example 10 at 10 km to 40 at 5 km; 20 is a reasonable minimum).
+        By default the marine and lake non-linear diffusion uses a **lagged-diffusivity** backward-Euler scheme (``marineSolver: picard``): it takes ``picardSub`` sub-steps over the goSPL step (default 20), freezing the diffusivity within each and solving the resulting *linear* system with ``picardIts`` Picard updates (default 2). Each solve is linear (no non-linear stalls or step rejections). The alternative ``marineSolver: ts`` integrates the non-linear diffusion with an adaptive PETSc time-stepper (``rosw``), the default until November 2026. On a 190,000-node regional margin, ``picard`` with 20 sub-steps took 68 % of the ``ts`` step and its deposits were within 1.4 % (rms) of ``ts``; with 10 sub-steps it was faster (51 %) but 9 % off, and the ``ts`` time grows faster with the mesh size. The diffusion number of a sub-step grows as ``1/dx²``, so when you refine the mesh scale ``picardSub`` by about ``(dx_old/dx_new)²`` to keep the same accuracy (about 4× per halving of the cell size); use ``ts`` when you need the error-controlled solution. All solver choices and their settings are on the :ref:`solvers page <solvers>`.
 
         If the adaptive ``ts`` solver gives up during a run (too many rejected internal steps, typically with km-thick river-mouth deposits over steep slopes on a global mesh), goSPL prints a warning and switches to the ``picard`` solver for the rest of the run instead of stopping (it uses ``picardSub``/``picardIts``, or their defaults).
 
@@ -493,15 +493,15 @@ Soil production, erosion, transport and deposition
         m. ``maxIter`` is the maximum number of non-linear iterations (default ``500``),
         n. ``rtol`` / ``atol`` are the relative / absolute convergence tolerances (default ``1.e-6``),
         o. ``pcType`` is the preconditioner for the ``ngmres`` Krylov solve (default ``'hypre'`` BoomerAMG; ``'gamg'``, ``'bjacobi'`` or ``'asm'`` can help on heavily-decomposed / ocean-dominated partitions),
-        p. ``solver`` selects the primary non-linear solver: ``'qn'`` (default, limited-memory quasi-Newton / L-BFGS) or ``'ngmres'`` (accelerator + multigrid preconditioner).
+        p. ``solver`` selects the primary non-linear solver: ``'ngmres'`` (default, accelerator + multigrid preconditioner) or ``'qn'`` (limited-memory quasi-Newton / L-BFGS).
 
         .. tip::
 
-            The soil solve is usually the dominant cost of a soil-enabled run. The default ``solver: 'qn'`` was chosen because on a global model it cut the soil-solve wall time roughly in half (or more) versus ``'ngmres'`` at the **same** tolerance and solution — L-BFGS reaches a comparable iteration count but each iteration is far cheaper than an ``ngmres``/multigrid sweep. If ``'qn'`` struggles on a particular configuration, set ``solver: 'ngmres'``. Prefer switching ``solver`` over relaxing ``rtol``: a loose ``rtol`` can leave the elevation field under-resolved and **destabilise the downstream sediment-routing solver**, which is both slower and less accurate.
+            The soil solve is usually the dominant cost of a soil-enabled run. The default ``solver: 'ngmres'`` (with ``pcType: 'hypre'``) converges to the full tolerance on regional and global models. ``'qn'`` was the default until November 2026: on those models it now fails at nearly every step (iteration limit or failed line search) and the step is finished by the fallback at a relaxed tolerance (100 times ``rtol``). Prefer switching ``solver`` over relaxing ``rtol``: a loose ``rtol`` can leave the elevation field under-resolved and **destabilise the downstream sediment-routing solver**, which is both slower and less accurate.
 
         .. tip::
 
-            **Validated fast preset for a stiff regional soil run.** Where the default ``'qn'`` stalls, ::
+            **Validated fast preset for a stiff regional soil run.** ::
 
                 soil:
                     solver: 'ngmres'

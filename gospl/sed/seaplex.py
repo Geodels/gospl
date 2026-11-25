@@ -1116,12 +1116,14 @@ class SEAMesh(object):
                     vdepP[self.is_sink_local, :] += sinkVolP[self.is_sink_local, :]
                     sinkVolP[self.is_sink_local, :] = 0.0
 
-        self.tmpL.setArray(sinkVol)
-        self.dm.localToGlobal(self.tmpL, self.tmp)
+        # Owned rows straight into the global Vecs: the same as an INSERT
+        # localToGlobal, without its ~1.5 ms per call, paid once per column
+        # per pass (2026-11-25: 2.8 s of 4 steps on a 47k-node margin with
+        # carbonate columns). Collective-free.
+        self.tmp.setArray(sinkVol[self.glIDs])
         if prov:
             for c in range(nC):
-                self.tmpL.setArray(sinkVolP[:, c])
-                self.dm.localToGlobal(self.tmpL, pvCur[c])
+                pvCur[c].setArray(sinkVolP[self.glIDs, c])
 
         # Turbidity source (carbonate `turbidity` response, `source:
         # transport`): the river mud (lithology-0 column) that reaches each
@@ -1224,12 +1226,10 @@ class SEAMesh(object):
                 sinkVolP *= frac_cont[:, None]
 
             # Find where excess and sink
-            self.tmpL.setArray(sinkVol)
-            self.dm.localToGlobal(self.tmpL, self.tmp)
+            self.tmp.setArray(sinkVol[self.glIDs])
             if prov:
                 for c in range(nC):
-                    self.tmpL.setArray(sinkVolP[:, c])
-                    self.dm.localToGlobal(self.tmpL, pvCur[c])
+                    pvCur[c].setArray(sinkVolP[self.glIDs, c])
 
             # One Allreduce per iteration that doubles as the loop condition
             # for the next pass and the print value for this pass.

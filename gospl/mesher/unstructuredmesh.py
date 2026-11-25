@@ -1409,7 +1409,7 @@ class UnstMesh(object):
             "_waveMat", "_ksp_wave", "_waveSmMat", "_ksp_wavesm",
             # geochemistry plume of the carbonate factories (carbplex)
             "_plumeMat", "_ksp_plume",
-            "_soluteMat", "_ksp_solute",
+            "_soluteMat", "_ksp_solute", "_ksp_solute_lu",
         ):
             obj = getattr(self, name, None)
             if obj is not None:

@@ -5,6 +5,7 @@ import numpy as np
 from time import process_time
 from mpi4py import MPI
 
+from gospl.tools import runsummary as _rs
 from gospl.tools.constants import ICE_COVER_MIN, FILL_LEVEL_TOL, SOLUTE_DISCHARGE_FLOOR
 
 if "READTHEDOCS" not in os.environ:
@@ -70,6 +71,7 @@ class GWMesh(object):
         # Cached Level-B solute-transport solver + operator (built lazily; G1+).
         self._soluteMat = None
         self._ksp_solute = None
+        self._ksp_solute_lu = None
 
         if getattr(self, "gwOn", False):
             # --- PETSc state (persistent, halo-synced; in destroy_DMPlex) ---
@@ -1034,40 +1036,70 @@ class GWMesh(object):
     #  dissolution source, fringe precipitation and export land in G2/G3. #
     # ------------------------------------------------------------------ #
 
-    def _makeSoluteKSP(self):
+    def _makeSoluteKSP(self, direct=False):
         """
-        Cached KSP for the solute-transport solve: a **direct LU factorisation**
-        (``preonly`` + ``lu`` with MUMPS, also on one rank when PETSc has it),
-        ``gw_solute_`` prefix.
+        Cached KSP for the solute-transport solve, ``gw_solute_`` prefix:
+        ``fgmres`` with hypre BoomerAMG (rtol 1e-10, warm start from the
+        previous concentration) by default; ``direct=True`` gives the direct
+        factorisation (``preonly`` + ``lu``, MUMPS when PETSc has it, prefix
+        ``gw_solutelu_``), used when hypre is not installed and as the fallback
+        of a failed iterative solve (``_soluteKSPSolve``).
 
-        The upwind advection operator is a non-symmetric M-matrix, but its
-        diagonal is only weakly dominant: at a flat, poorly-drained *saturated*
-        node the lateral outflow, the seepage sink and the recharge floor are all
-        small, so the operator is **badly conditioned**. A Krylov + block-Jacobi
-        solve then STALLS there for the strong (high-weatherability) tracers —
-        it returns a non-converged iterate with a concentration ~10× too large,
-        which silently breaks the per-step ``dissolved = precipitated + exported``
-        mass balance (the ocean/marine budget then drifts by an order of
-        magnitude). A direct solve is exact, so it is both robust to the
-        conditioning and conservative to round-off; the operator is the same size
-        / sparsity as the flexure biharmonic that already uses this path, and the
-        per-species factorisation is reused across the provenance right-hand
-        sides. Env-overridable via the ``gw_solute_`` prefix (e.g. request an
-        iterative solver for meshes too large to factorise).
+        The upwind advection operator is a non-symmetric M-matrix. Before the
+        discharge floor (``SOLUTE_DISCHARGE_FLOOR``) its diagonal could be
+        empty or tiny at flat saturated or submerged nodes, and a Krylov +
+        block-Jacobi solve stalled there and broke the mass balance, so the
+        direct solve was the default. With the floor, fgmres + AMG converges
+        and keeps the budget (``test_geochem_conserves``); on a 190k-node margin
+        it was 3x faster than MUMPS at 4-8 ranks, scaled better and used less
+        memory (2026-11-25). Override with the ``gw_solute_`` options (for
+        example ``-gw_solute_ksp_type preonly -gw_solute_pc_type lu``).
         """
         ksp = petsc4py.PETSc.KSP().create(petsc4py.PETSc.COMM_WORLD)
-        ksp.setType("preonly")
         pc = ksp.getPC()
-        pc.setType("lu")
-        # MUMPS on any rank count: in serial, PETSc's own LU (natural
-        # ordering) was ~10x slower on a 47k-node margin (the geochemistry
-        # step 5x the base step instead of 1.1x, 2026-11-25). PETSc's LU only
-        # where MUMPS is not installed (it is required in parallel).
-        if MPIsize > 1 or petsc4py.PETSc.Sys.hasExternalPackage("mumps"):
-            pc.setFactorSolverType("mumps")
-        ksp.setOptionsPrefix("gw_solute_")
+        if direct or not petsc4py.PETSc.Sys.hasExternalPackage("hypre"):
+            ksp.setType("preonly")
+            pc.setType("lu")
+            # MUMPS on any rank count: PETSc's own LU (natural ordering) was
+            # ~10x slower in serial; required in parallel.
+            if MPIsize > 1 or petsc4py.PETSc.Sys.hasExternalPackage("mumps"):
+                pc.setFactorSolverType("mumps")
+            ksp.setOptionsPrefix("gw_solutelu_" if direct else "gw_solute_")
+        else:
+            ksp.setType("fgmres")
+            pc.setType("hypre")
+            pc.setHYPREType("boomeramg")
+            ksp.setTolerances(rtol=1.0e-10, atol=1.0e-30, max_it=2000)
+            ksp.setInitialGuessNonzero(True)
+            ksp.setOptionsPrefix("gw_solute_")
         ksp.setFromOptions()
         return ksp
+
+    def _soluteKSPSolve(self, M, b, x):
+        """
+        Solve ``M x = b`` (global Vecs; ``x`` holds the starting guess) with the
+        cached solute KSP, and with the cached direct fallback
+        (``_ksp_solute_lu``) from the same guess if the primary fails, so a
+        hard case never leaves an unconverged iterate in the budget. Collective;
+        the fallback decision is on the converged reason, the same on every
+        rank.
+        """
+        if self._ksp_solute is None:
+            self._ksp_solute = self._makeSoluteKSP()
+        ksp = self._ksp_solute
+        x0 = x.copy()
+        ksp.setOperators(M, M)
+        ksp.solve(b, x)
+        if ksp.getConvergedReason() < 0:
+            if self._ksp_solute_lu is None:
+                self._ksp_solute_lu = self._makeSoluteKSP(direct=True)
+            x0.copy(result=x)
+            self._ksp_solute_lu.setOperators(M, M)
+            self._ksp_solute_lu.solve(b, x)
+            _rs.record(self, "solute_ksp_fallback", reason=int(ksp.getConvergedReason()),
+                       its=int(ksp.getIterationNumber()),
+                       fallback_reason=int(self._ksp_solute_lu.getConvergedReason()))
+        x0.destroy()
 
     def _soluteAdvecCoeffs(self, h, T):
         r"""
@@ -1145,14 +1177,10 @@ class GWMesh(object):
 
         rhs = np.asarray(source, dtype=np.float64).copy()
         rhs[dmask] = dval[dmask]
-        if self._ksp_solute is None:
-            self._ksp_solute = self._makeSoluteKSP()
-        ksp = self._ksp_solute
         self.soluteL.setArray(rhs)
         self.dm.localToGlobal(self.soluteL, self.tmp)     # rhs (global)
         self.dm.localToGlobal(self.soluteL, self.soluteG)  # nonzero guess = rhs
-        ksp.setOperators(M, M)
-        ksp.solve(self.tmp, self.soluteG)
+        self._soluteKSPSolve(M, self.tmp, self.soluteG)
         M.destroy()
         self.dm.globalToLocal(self.soluteG, self.soluteL)
         return self.soluteL.getArray().copy()
@@ -1165,15 +1193,11 @@ class GWMesh(object):
         several right-hand sides (the per-source-class provenance solves, G5).
         Collective (KSP).
         """
-        if self._ksp_solute is None:
-            self._ksp_solute = self._makeSoluteKSP()
-        ksp = self._ksp_solute
         self.soluteL.setArray(rhs)
         self.dm.localToGlobal(self.soluteL, self.tmp)          # rhs (global)
         self.soluteL.setArray(guess)
         self.dm.localToGlobal(self.soluteL, self.soluteG)      # nonzero guess
-        ksp.setOperators(M, M)
-        ksp.solve(self.tmp, self.soluteG)
+        self._soluteKSPSolve(M, self.tmp, self.soluteG)
         self.dm.globalToLocal(self.soluteG, self.soluteL)
         return np.maximum(self.soluteL.getArray().copy(), 0.0)
 
