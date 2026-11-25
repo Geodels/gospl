@@ -126,9 +126,9 @@ Each climate event may additionally declare an **evaporation rate** that is subt
 
 .. note::
 
-    Evaporation is applied as a **single rate**, used identically over channels and over lake surfaces. Cells with ``evap > rain`` produce zero runoff (the excess evaporative capacity is dropped — groundwater is out of scope). Lakes whose lake-surface evaporation budget exceeds their inflow simply do not form; ``waterFill`` stays at the bare-topography level in those depressions.
+    Evaporation is applied as a **single rate**, used identically over channels and over lake surfaces. Each cell evaporates at most ``evap * area`` in total: its own rain first (cells with ``evap > rain`` produce zero runoff), then, on a lake cell, the rest from the water reaching the lake, ``max(evap - rain, 0) * area``. A lake in a wet region (rain above evaporation) therefore loses nothing more than its cells' rain does. A depression spills only when the water reaching it exceeds this net evaporation over its full surface at the sill (a spilling lake covers its sill area). Otherwise it is a **closed lake**: all its inflow evaporates, and ``waterFill`` shows it at the level where the evaporation of the flooded cells balances the inflow (an endorheic lake of area ``inflow / (evap - rain)``), or lower if the step's inflow cannot fill it that high.
 
-    The lake-evaporation budget per depression is computed using the **maximum-fill surface area** (the full extent the lake would occupy at spillover) rather than the actual fill area. This is intentionally conservative: it over-estimates lake evaporation at partial-fill levels, which biases the model towards drier basins — the physically appropriate direction when potential evaporation is the limiting term.
+    Before November 2026 a lake cell evaporated its rain through the channel evaporation and then the full ``evap * area`` again from the lake inflow (up to twice the rate), so wet basins could stay closed, and closed lakes were shown dry.
 
     Channels and lakes share the same per-cell rate; users who need a higher lake-surface rate (e.g. to capture open-water evaporation over endorheic basins) should encode the spatial pattern directly in ``evap_map``.
 
@@ -150,7 +150,7 @@ Each climate event may additionally declare an **evaporation rate** that is subt
 
 .. important::
 
-    The ``Evap`` per-node field is written to the HDF5/XDMF output whenever the YAML declares any evaporation; it can be visualised in Paraview alongside ``Rain`` to verify the input pattern. The reduced flow accumulation ``FA``, the reduced lake levels in ``waterFill``, and the lake-erosion proxy ``fillFA`` all propagate the evaporation losses automatically.
+    The ``Evap`` per-node field is written to the HDF5/XDMF output whenever the YAML declares any evaporation; it can be visualised in Paraview alongside ``Rain`` to verify the input pattern. The reduced flow accumulation ``FA``, the reduced lake levels in ``waterFill``, and ``fillFA`` (on lake cells, the water flowing into the lake) all propagate the evaporation losses automatically.
 
 
 Orographic precipitation definition

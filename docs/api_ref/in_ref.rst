@@ -56,6 +56,7 @@ Class ReadYaml
       ~ReadYaml._readGroundwater
       ~ReadYaml._readOut
       ~ReadYaml._concatRows
+      ~ReadYaml._checkRain
 
 
 Private functions
@@ -100,3 +101,4 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._readGroundwater
 .. automethod:: tools.inputparser.ReadYaml._readOut
 .. automethod:: tools.inputparser.ReadYaml._concatRows
+.. automethod:: tools.inputparser.ReadYaml._checkRain

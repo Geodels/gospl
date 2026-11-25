@@ -258,3 +258,24 @@ def test_erosion_sign_conventions(incising_model):
         f"Diagnostic: max(EbLocal on incising nodes) = "
         f"{incising_eb.max():.3e} m/yr"
     )
+
+
+def test_every_method_is_in_the_api_reference():
+    """
+    Protects: the API reference lists every method of the documented model
+    classes (AGENTS.md > Docs: the autosummary and automethod lists of
+    docs/api_ref/*_ref.rst are written by hand).
+
+    Failure prevented: methods added in a fix or a feature and never listed,
+    so the API pages silently fell behind the code (47 were missing in
+    November 2026). The message names the file, class and method to add.
+    """
+    import importlib.util
+    import pathlib
+
+    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "check_api_docs.py"
+    spec = importlib.util.spec_from_file_location("check_api_docs", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    miss = mod.missing()
+    assert not miss, "add to the API reference (autosummary AND automethod):\n" + "\n".join(miss)

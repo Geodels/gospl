@@ -1156,17 +1156,22 @@ class FAMesh(object):
 
     def _potentialLakeEvap(self):
         """
-        Per-pit max evaporation volume (m^3) for one timestep, assuming
-        the lake fills to the spillover (= max-fill surface).
+        Per-pit evaporation volume (m^3) for one timestep with the lake full
+        to its sill (the whole depression): the budget a lake must exceed to
+        spill. A lake that spills covers its sill area, so this is the right
+        surface for the spill test; a closed lake's level is set separately
+        (``_equilibriumLakeLevel``).
 
         Surface = Σ larea over cells with pitIDs >= 0 (the lake's potential
-        extent at spillover). The `inIDs == 1` mask prevents MPI halo
+        extent at spillover). Each cell contributes the evaporation it has not
+        already lost to the channel (or losing-stream) evaporation of the same
+        call, ``max(E * larea - taken, 0)``, so a lake cell never evaporates
+        more than ``E * larea`` in total (it evaporated up to twice that). The `inIDs == 1` mask prevents MPI halo
         double-counting; the per-pit total is then Allreduce-summed across
         ranks so every rank ends up with the same evap budget array.
 
-        See DESIGN_EVAPORATION.md §1 D3 for the design rationale (we use
-        max-fill rather than current-fill to avoid the circular dependency
-        between fill level and evap rate).
+        See DESIGN_EVAPORATION.md §1 D3 and the technical guide
+        (``flow.rst``, Evaporation, lakes and endorheic basins).
 
         :return: numpy array of shape (nbpits,) with per-pit evap m^3
         """
@@ -1175,7 +1180,16 @@ class FAMesh(object):
             return out
         isPitCell = (self.pitIDs >= 0) & (self.inIDs == 1)
         if isPitCell.any():
-            cellEvap = self.evapVal * self.larea * self.dt
+            # Only what the cell has not evaporated yet: the channel loss (or,
+            # in losing-stream mode, the sink taken from the passing water)
+            # already removed part of each cell's E * area from its own rain.
+            # Debiting the full E * area again evaporated up to twice E over a
+            # lake, so a wet basin (P > E) never filled and spilled.
+            taken = getattr(self, "_evapTaken", None)
+            cap = self.evapVal * self.larea
+            if taken is not None:
+                cap = np.maximum(cap - taken, 0.0)
+            cellEvap = cap * self.dt
             grp = npi.group_by(self.pitIDs[isPitCell])
             uIDs = grp.unique
             _, vol = grp.sum(cellEvap[isPitCell])
@@ -1183,6 +1197,70 @@ class FAMesh(object):
             out[uIDs[ids]] = vol[ids]
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, out, op=MPI.SUM)
         return out
+
+    def _lakeEvapCurve(self, hl):
+        """
+        Net lake evaporation (m^3 over the step) of each depression when its
+        water stands at each level of its depth-volume table
+        (``filled_lvl``, 5 levels from the bottom to the sill): the sum over
+        its cells lying below that level of what they have not already
+        evaporated (``max(E * larea - taken, 0) * dt``, as in
+        ``_potentialLakeEvap``). The last column is the sill-level budget.
+        Collective (one Allreduce); call it on every rank.
+
+        :arg hl: local elevation array
+        :return: array (nbpits, 5)
+        """
+        npit = len(self.pitParams)
+        curve = np.zeros((npit, 5), dtype=np.float64)
+        if self.evapVal is not None and npit > 0:
+            taken = getattr(self, "_evapTaken", None)
+            cap = self.evapVal * self.larea
+            if taken is not None:
+                cap = np.maximum(cap - taken, 0.0)
+            cap = cap * self.dt
+            pit = (self.pitIDs >= 0) & (self.inIDs == 1)
+            ids = self.pitIDs[pit]
+            h = hl[pit]
+            c = cap[pit]
+            for k in range(5):
+                below = h < self.filled_lvl[ids, k]
+                curve[:, k] = np.bincount(ids[below], weights=c[below], minlength=npit)[:npit]
+        MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, curve, op=MPI.SUM)
+        return curve
+
+    def _equilibriumLakeLevel(self, inV0, curve, closed=None):
+        """
+        Water level of a depression whose inflow does not exceed its
+        evaporation at the sill: the level where the net evaporation of the
+        flooded cells equals the inflow (a closed, endorheic lake, area
+        ``inflow / (E - P)``), capped at the level the step's inflow can fill
+        (depth-volume table). Linear between the table levels, from the
+        bottom of the depression (no evaporation) upwards.
+
+        :arg inV0: inflow of each depression over the step (m^3), before
+            evaporation
+        :arg curve: ``_lakeEvapCurve`` (nbpits, 5)
+        :arg closed: optional mask of the depressions left with nothing to
+            spill (after evaporation and the groundwater exchange)
+        :return: level of each depression (m; NaN where not a closed lake)
+        """
+        npit = len(inV0)
+        lvl = np.full(npit, np.nan)
+        if closed is None:
+            closed = curve[:, -1] >= inV0
+        closed = closed & (inV0 > 0.0) & (self.pitParams[:, 0] > 0.0)
+        if not closed.any():
+            return lvl
+        bottom = self.pitParams[:, 1] - self.pitParams[:, 2]
+        L = np.column_stack([bottom, self.filled_lvl])               # 6 levels
+        E = np.column_stack([np.zeros(npit), curve])
+        V = np.column_stack([np.zeros(npit), self.filled_vol])
+        for i in np.where(closed)[0]:
+            lv_e = np.interp(inV0[i], E[i], L[i]) if E[i, -1] > 0 else L[i, -1]
+            lv_v = np.interp(inV0[i], V[i], L[i])
+            lvl[i] = min(lv_e, lv_v)
+        return lvl
 
     def _distributeDownstream(self, pitVol, FA, hl, step):
         """
@@ -1215,16 +1293,32 @@ class FAMesh(object):
 
         # Combine incoming volume globally
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, inV, op=MPI.SUM)
+        # Water entering each lake over the step, summed over the cascade
+        # passes (the catchment, then what upstream lakes spill): the
+        # discharge shown on lake cells in the `fillFA` output.
+        if step == 0 or getattr(self, "_lakeIn", None) is None \
+                or len(self._lakeIn) != len(inV):
+            self._lakeIn = np.zeros(len(inV), dtype=np.float64)
+        self._lakeIn += inV
 
-        # Lake-surface evaporation (DESIGN_EVAPORATION.md §2.2). Subtract
-        # the per-pit max-fill evap budget from inflow exactly once per
-        # outer step (step==0). Cascading spillover iterations (step>0)
-        # carry already-net-of-evap water and must NOT be debited again.
-        # When the evap budget exceeds inflow, lakeLoss is clamped at inV
-        # so the pit ends with zero net inflow — the partial-fill branch
-        # below skips it via the inV>0 mask, leaving waterFilled at hl.
+        # Lake-surface evaporation (technical guide flow.rst, Evaporation,
+        # lakes and endorheic basins). Subtract the per-pit sill-level budget
+        # (what the cells have not already evaporated) from the inflow
+        # exactly once per outer step (step==0). Cascading spillover
+        # iterations (step>0) carry already-net-of-evap water and must NOT be
+        # debited again. When the budget exceeds the inflow the lake is
+        # closed: lakeLoss is clamped at inV, the partial-fill branch below
+        # skips it (inV > 0 mask) and its level is set from the balance
+        # (_equilibriumLakeLevel) further down.
+        lakeLvl = None
+        lakeCurve = None
+        lakeLoss = None
         if self.evapVal is not None and step == 0:
             evapBudget = self._potentialLakeEvap()
+            # A depression spills only if its inflow exceeds the evaporation
+            # over its full (sill-level) surface; otherwise it holds a closed
+            # lake at the level where evaporation balances the inflow.
+            lakeCurve = self._lakeEvapCurve(hl)
             lakeLoss = np.minimum(inV, evapBudget)
             inV = inV - lakeLoss
             self.evapLoss += lakeLoss.sum()
@@ -1252,6 +1346,13 @@ class FAMesh(object):
             loss = np.minimum(inV + gain, np.maximum(-gwV, 0.0))
             inV = inV + gain - loss
             self.gwLakeInflow += float((gain - loss).sum())
+
+        # Closed lakes: the water reaching the surface (inflow, plus the
+        # groundwater gain, minus the leakage) all evaporates and nothing is
+        # left to spill; the lake stands where evaporation balances it.
+        if lakeCurve is not None:
+            water = inV + lakeLoss
+            lakeLvl = self._equilibriumLakeLevel(water, lakeCurve, closed=inV <= 0.0)
 
         # Get excess volume to distribute downstream
         eV = inV - pitVol
@@ -1286,6 +1387,19 @@ class FAMesh(object):
             node_lvl = pit_fill_lvl[self.pitIDs]
             mask = in_eIDs & (self.waterFilled <= node_lvl)
             self.waterFilled[mask] = node_lvl[mask]
+
+        # Closed (evaporation-balanced) lakes: all their inflow evaporates, so
+        # they hold no routed water, but their surface stands at the level
+        # where evaporation balances the inflow instead of being shown dry.
+        if lakeLvl is not None:
+            okl = ~np.isnan(lakeLvl)
+            if okl.any():
+                pitLvl = np.where(okl, lakeLvl, -np.inf)
+                node_lvl = np.full(self.lpoints, -np.inf)
+                inpit = self.pitIDs > -1
+                node_lvl[inpit] = pitLvl[self.pitIDs[inpit]]
+                mask = (hl < node_lvl) & (self.waterFilled < node_lvl)
+                self.waterFilled[mask] = node_lvl[mask]
 
         # In case there is still remaining water flux to distribute downstream
         if (eV > 1.0e-3).any():  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (water-routing convergence threshold); do not replace  # mpi-lint: ok eV = inV - pitVol is global (inV Allreduced, pitVol from pitParams)
@@ -1453,6 +1567,7 @@ class FAMesh(object):
             # available to evaporate.
             arriving = np.clip(q + s, 0.0, None)
             s = np.minimum(e, arriving)
+            self._evapTaken = s
             tot = MPI.COMM_WORLD.allreduce(float(s[owned].sum()), op=MPI.SUM)
             if prev is not None and abs(tot - prev) <= 1.0e-4 * max(prev, 1.0):
                 converged = True
@@ -1537,6 +1652,7 @@ class FAMesh(object):
         if self.evapVal is not None and not self.evapStream:
             channelLoss = np.minimum(rainA, self.evapVal * self.larea)
             rainA = rainA - channelLoss
+            self._evapTaken = channelLoss
             self.evapLoss += channelLoss.sum() * self.dt
         if self.iceOn:
             # ELA / ice-cap altitude: per-vertex maps when in spatial /
@@ -1671,11 +1787,16 @@ class FAMesh(object):
             self.FAL.setArray(FA)
             self.dm.localToGlobal(self.FAL, self.FAG)
             self.dm.globalToLocal(self.FAG, self.FAL)
-            # Lake-erosion proxy: assign a background discharge (10% of the
-            # global max) at filled-depression nodes so that SPL still produces
-            # some erosion on the filled topography. FAL itself stays zero
-            # there because no water actually flows.
-            FA[ids] = self.FAG.max()[1] * 0.1
+            # `fillFA` on lake cells: the water flowing into the lake (m3/yr;
+            # through-flow for a lake that spills, evaporated for a closed
+            # one). FAL stays zero there (no channel flow, no erosion). It was
+            # 10 % of the global maximum discharge on every lake cell, which
+            # drew every lake as a major river in the outputs.
+            lakeQ = getattr(self, "_lakeIn", None)
+            if lakeQ is not None and len(lakeQ) == len(self.pitParams):
+                FA[ids] = lakeQ[self.pitIDs[ids]] / self.dt
+            else:
+                FA[ids] = 0.0
             self.fillFAL.setArray(FA)
         else:
             self.FAL.copy(result=self.fillFAL)

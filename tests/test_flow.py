@@ -1190,3 +1190,101 @@ def test_landlocked_lowest_point_is_filled(tmp_path, monkeypatch):
         assert MPI.COMM_WORLD.allreduce(ok, op=MPI.LAND)
     finally:
         m.destroy()
+
+
+@pytest.mark.parametrize("ratio", [0.5, 2.0])
+def test_lake_evaporation_not_counted_twice(minimal_model, ratio):
+    """
+    Protects: `FAMesh._potentialLakeEvap` debits only what a lake cell has
+    not already evaporated.
+
+    Silent failure prevented: every cell first loses min(P, E) * area to the
+    channel evaporation; the lake budget then removed the full E * area of
+    every depression cell again from the water reaching the lake, so a lake
+    evaporated up to 2E. In a wet basin (P > E, the Congo in an IPSL run,
+    P - E = +1.1 m/yr) the lakes lost water they should have kept and never
+    spilled to the sea. Now, with uniform P and E: P > E gives no extra lake
+    evaporation; E > P gives exactly sum((E - P) * area * dt) over the lake
+    cells.
+    """
+    import pandas as pd
+    from mpi4py import MPI
+
+    m = minimal_model
+    if m.raindata is None or pd.isnull(m.raindata.at[0, "rUni"]):
+        pytest.skip("minimal.yml rain is not uniform")
+    rain = float(m.raindata.at[0, "rUni"])
+    m.evapdata = pd.DataFrame([{"start": 0.0, "eUni": ratio * rain, "eMap": None, "eKey": None}])
+    m.evapNb, m.evapVal, m.evapMesh, m.evapLoss = -1, None, None, 0.0
+    m.applyForces()
+    m.flowAccumulation()
+    if len(m.pitParams) == 0:
+        pytest.skip("no depression on the fixture mesh")
+    budget = m._potentialLakeEvap()
+    land = (m.pitIDs >= 0) & (m.inIDs == 1)
+    if ratio < 1.0:
+        assert np.all(budget <= 1.0e-9 * max(1.0, rain)), (
+            "P > E: lakes must not evaporate more (max extra %.3e m3)" % budget.max())
+    else:
+        rainCell = m.rainVal * m.larea
+        expect = np.maximum(m.evapVal * m.larea - rainCell, 0.0)[land].sum() * m.dt
+        expect = MPI.COMM_WORLD.allreduce(expect, op=MPI.SUM)
+        assert budget.sum() == pytest.approx(expect, rel=1.0e-9), (budget.sum(), expect)
+
+
+def test_equilibrium_lake_level_unit():
+    """
+    Protects: `FAMesh._equilibriumLakeLevel`.
+
+    A depression whose inflow does not exceed its evaporation at the sill
+    holds a closed lake at the level where the evaporation of the flooded
+    cells equals the inflow, capped at the level the step's inflow fills.
+    Before, such a lake evaporated all its inflow and was shown dry.
+    """
+    from gospl.flow.flowplex import FAMesh
+
+    f = FAMesh.__new__(FAMesh)
+    # one depression: sill at 100 m, depth 50 m -> levels 60, 70, 80, 90, 100
+    f.pitParams = np.array([[1.0e9, 100.0, 50.0]])
+    f.filled_lvl = np.array([[60.0, 70.0, 80.0, 90.0, 100.0]])
+    curve = np.array([[1.0e6, 2.0e6, 4.0e6, 8.0e6, 1.6e7]])      # evaporation at each level
+    # a large depression: the step's inflow fills it well above the balance
+    f.filled_vol = np.array([[1.0e5, 2.0e5, 4.0e5, 8.0e5, 1.0e9]])
+    # inflow 3e6 (evaporation-limited): between 70 (2e6) and 80 (4e6) -> 75 m
+    assert f._equilibriumLakeLevel(np.array([3.0e6]), curve)[0] == pytest.approx(75.0)
+    # inflow above the sill evaporation: spills, not a closed lake
+    assert np.isnan(f._equilibriumLakeLevel(np.array([2.0e7]), curve)[0])
+    # volume-limited: balance at 92.5 m, but 1e7 of inflow fills only to 60 m
+    f.filled_vol = np.array([[1.0e7, 4.0e7, 9.0e7, 1.6e8, 1.0e9]])
+    assert f._equilibriumLakeLevel(np.array([1.0e7]), curve)[0] == pytest.approx(60.0)
+
+
+def test_closed_lakes_are_not_dry(minimal_model):
+    """
+    Protects: closed (evaporation-balanced) lakes stand at their equilibrium
+    level in `waterFilled`, end to end.
+
+    Evaporation 50x the rain on depression cells only (none elsewhere): the
+    catchments deliver their rain, the lake surfaces evaporate it. Before,
+    every non-spilling depression was dry (waterFilled = 0); now the closed
+    lakes have water, and the evaporation of each at its level balances its
+    inflow (all of it evaporates: no water leaves a closed depression).
+    """
+    import pandas as pd
+
+    m = minimal_model
+    if m.raindata is None or pd.isnull(m.raindata.at[0, "rUni"]):
+        pytest.skip("minimal.yml rain is not uniform")
+    m.applyForces()
+    m.flowAccumulation()                       # find the depressions
+    if len(m.pitParams) == 0:
+        pytest.skip("no depression on the fixture mesh")
+    rain = float(m.raindata.at[0, "rUni"])
+    evap = np.where(m.pitIDs >= 0, 50.0 * rain, 0.0)
+    m.evapdata = pd.DataFrame([{"start": 0.0, "eUni": None, "eMap": None, "eKey": None}])
+    m.evapVal = evap
+    m.evapLoss = 0.0
+    m.flowAccumulation()
+    from mpi4py import MPI
+    depth = MPI.COMM_WORLD.allreduce(float(np.max(m.waterFilled)), op=MPI.MAX)
+    assert depth > 0.0, "closed lakes are dry"

@@ -14,7 +14,8 @@ where ``FA`` peaks (the water outlet) and the single cell where ``sedLoad`` peak
 time series, this gives the migrating river-mouth fluxes used in flux maps.
 
 The water discharge defaults to ``FA``. Pass ``flow_var="fillFA"``
-(``--flow-var fillFA``) to use the **depression-filled** accumulation instead,
+(``--flow-var fillFA``) to use the accumulation **through the lakes** instead
+(on lake cells, the water flowing into the lake),
 which routes the trunk river *through* lakes / pits so a basin's outlet carries
 its full upstream discharge even when the channel crosses a depression (raw
 ``FA`` can drop to zero inside a lake).

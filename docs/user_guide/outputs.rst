@@ -59,7 +59,7 @@ Water & drainage
      - Water **flow accumulation** (drainage discharge, m³/yr) on the actual surface.
      - always
    * - ``fillFA``
-     - Flow accumulation on the **depression-filled** surface — drainage routed through lakes/pits.
+     - Flow accumulation through the lakes (m³/yr): ``FA`` on rivers, and on lake cells the water flowing into the lake (through-flow for a lake that spills, evaporated for a closed one). Not used by the erosion (``FA`` is zero on lakes). Until November 2026 lake cells held 10 % of the maximum discharge, which drew every lake as a major river.
      - always
    * - ``waterFill``
      - Lake water depth: depth of water in filled depressions (m), 0 outside lakes.

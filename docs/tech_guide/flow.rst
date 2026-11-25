@@ -128,11 +128,75 @@ Iterative methods allow for an initial guess to be provided. When this initial g
 
   The approach presented here is run iteratively during a single time step based on identified depressions until all water *either flows to the ocean or is block within a pit* (*e.g.*, a lake). 
   
-  Water is able to spill-over a depression based on depression's volume and the incoming upstream water volume. By default **no infiltration or evaporation is considered** in the routing — unless the optional evaporation forcing (see :ref:`surfproc`) or the :ref:`groundwater module <groundwater>` is enabled, in which case part of the runoff infiltrates and returns downstream as baseflow (see *Coupling with the water table* below).
+  Water is able to spill-over a depression based on depression's volume and the incoming upstream water volume. By default **no infiltration or evaporation is considered** in the routing — unless the optional evaporation forcing (see :ref:`flow_evaporation` below) or the :ref:`groundwater module <groundwater>` is enabled, in which case part of the runoff infiltrates and returns downstream as baseflow (see *Coupling with the water table* below).
   
 .. note::
 
   The flow routing approach and corresponding flow CSR matrix (**W**) is also used in the sediment routing algorithm.
+
+.. _flow_evaporation:
+
+Evaporation, lakes and endorheic basins
+---------------------------------------
+
+With an evaporation forcing (``evap_uniform`` or ``evap_map`` in the ``climate`` events, see
+:ref:`evaporation`), every cell :math:`\mathrm{i}` of area :math:`\mathrm{A_i}` can evaporate at most
+:math:`\mathrm{E_i A_i}` (m³/yr) in total, first from its own rain, then, if it lies in a lake, from the
+water reaching the lake.
+
+**On the rivers.** The rain of a cell, :math:`\mathrm{P_i A_i}`, first loses
+
+.. math::
+
+   \mathrm{s_i = \min(P_i A_i,\ E_i A_i)},
+
+and the rest, :math:`\mathrm{P_i A_i - s_i}`, is the runoff routed by the IDA system above. A cell where
+evaporation exceeds rain produces no runoff. In the *losing-stream* mode (``evap_stream``) the evaporation
+is taken from the water passing through each cell instead (:math:`\mathrm{s_i = \min(E_i A_i,\ arriving_i)}`),
+so a river can dry out downstream.
+
+**On a lake.** A depression receives over the step the volume :math:`\mathrm{V_{in}}`: the runoff of its
+catchment, what upstream lakes spill into it in the cascade, and, with the groundwater module's
+``lake_exchange``, the gain or loss through its bed. Its cells evaporate what they have not already lost
+on the river step,
+
+.. math::
+
+   \mathrm{e_i = \max(E_i A_i - s_i,\ 0) = \max(E_i - P_i,\ 0)\,A_i}
+
+(for the default mode), so a lake in a wet region (:math:`\mathrm{P > E}`) loses nothing more than its
+cells' rain does. At its sill the lake covers its whole depression, of volume :math:`\mathrm{V_{pit}}`,
+and evaporates :math:`\mathrm{E_{sill}\,\Delta t = \sum_{pit} e_i\,\Delta t}`.
+
+* If :math:`\mathrm{V_{in} > E_{sill}\Delta t + V_{pit}}` the lake fills to its sill and spills the
+  excess, :math:`\mathrm{V_{in} - E_{sill}\Delta t - V_{pit}}`, from its spill point downstream, where it
+  is routed again (next pass of the overspill iteration). The sill-level surface is the right one for this
+  test: a lake that spills is full and covers its sill area.
+* If :math:`\mathrm{E_{sill}\Delta t \ge V_{in}}` the lake is **closed** (endorheic): all its inflow
+  evaporates and nothing leaves. Its surface stands at the level :math:`\mathrm{h^*}` where the evaporation
+  of the flooded cells balances the inflow,
+
+  .. math::
+
+     \mathrm{\sum_{i\ :\ z_i < h^*} e_i\,\Delta t = V_{in}},
+
+  that is an area of about :math:`\mathrm{V_{in} / ((E - P)\,\Delta t)}`, but not higher than the level
+  :math:`\mathrm{V_{in}}` fills in the depression in one step (goSPL keeps no lake volume between
+  steps). Both levels are interpolated on the depression's depth-volume table (5 levels between its
+  bottom and its sill). The level is written in ``waterFill``.
+* Otherwise the lake fills part of its depression and passes nothing downstream during the step.
+
+**Outputs.** ``FA`` is the discharge of the rivers (zero on lakes, where there is no channel flow and so no
+fluvial erosion). ``fillFA`` is the same on the rivers and, on lake cells, the water flowing into the lake
+over the step (:math:`\mathrm{V_{in}/\Delta t}`): the through-flow for a lake that spills, the evaporated
+inflow for a closed one. ``waterFill`` is the lake depth, and the run summary records the evaporated volume.
+
+.. note::
+
+   Until November 2026 a lake cell lost its rain to the river step and then the full
+   :math:`\mathrm{E_i A_i}` again from the lake inflow, up to twice the evaporation rate, so wet basins could
+   stay closed; closed lakes were shown dry; and ``fillFA`` held 10 % of the maximum discharge on every lake
+   cell. Runs with evaporation made before then send less water to the sea than they should.
 
 Long drainage chains
 --------------------
