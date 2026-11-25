@@ -1,8 +1,8 @@
 .. _provenance:
 
-==============================================
+================================================
 Sediment provenance & source-to-sink attribution
-==============================================
+================================================
 
 goSPL ships a post-processing tool (:mod:`gospl.analyse.provenance`) that
 attributes the sediment **deposited in sink basins** to user-defined
@@ -68,20 +68,20 @@ ordering.
 Inputs
 ------
 
-============== =========  ====================================================
-input          required   meaning
-============== =========  ====================================================
-mesh ``v``     yes        global vertex coordinates (defines the ordering)
-mesh ``c``     yes        triangular cells (routing connectivity)
-``source_class`` yes      source-rock class per vertex, in ``[0, n_classes)``
-                          (point-in-polygon of the source shapefiles; outside
-                          vertices get a background class — not -1)
-goSPL output   yes        ``elev`` + ``erodep`` series (via ``GosplOutput``)
-``area``       no         Voronoi cell area; default 1
-``basin_id``   no         sink-basin label per vertex (-1 = not a sink) —
-                          needed **only** for the per-basin roll-up
-``cu_weight``  no         copper fertility per class — for the Cu layer
-============== =========  ====================================================
+================ =========  ====================================================
+input            required   meaning
+================ =========  ====================================================
+mesh ``v``       yes        global vertex coordinates (defines the ordering)
+mesh ``c``       yes        triangular cells (routing connectivity)
+``source_class`` yes        source-rock class per vertex, in ``[0, n_classes)``
+                            (point-in-polygon of the source shapefiles; outside
+                            vertices get a background class — not -1)
+goSPL output     yes        ``elev`` + ``erodep`` series (via ``GosplOutput``)
+``area``         no         Voronoi cell area; default 1
+``basin_id``     no         sink-basin label per vertex (-1 = not a sink) —
+                            needed **only** for the per-basin roll-up
+``cu_weight``    no         copper fertility per class — for the Cu layer
+================ =========  ====================================================
 
 Use :func:`~gospl.analyse.provenance.classes_from_shapefile` to build
 ``source_class`` / ``basin_id`` from polygon shapefiles (needs ``geopandas``).
