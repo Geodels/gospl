@@ -207,5 +207,4 @@ depression spill-over graph come to dominate. The 10 km mesh (5.9 million
 nodes) reaches a speed-up of 11.7 at 288 processes, the 8 km mesh (9.2
 million) 11.8 at 384, and the 5 km mesh (23.7 million) still gains at 528.
 Details, per-phase timings and how to choose the number of processes:
-:ref:`hpc_scaling`; the cost of each option in time and memory:
-:ref:`option_cost`.
+:ref:`hpc_scaling`.
