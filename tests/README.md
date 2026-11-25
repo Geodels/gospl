@@ -28,7 +28,7 @@ one subsystem marker. They are registered in `pyproject.toml` (authoritative).
 | `parser` | `test_parser.py` | forcing DataFrames, YAML parsing (no mesh) |
 | `contracts` | `test_contracts.py` | `rcvIDi` snapshot, scratch Vecs, `Eb` sign |
 | `flow` | `test_flow.py`, `test_fill_mesh_pits.py` | flow KSP, pits, cascade, evaporation, `globalngbhs` |
-| `sediment` | `test_sediment.py`, `test_gravity.py` | mass conservation, marine routing/diffusion, `oFill`; gravity currents (budget, fine/provenance conservation, network, erosion, slope failure, spreading, defaults) |
+| `sediment` | `test_sediment.py`, `test_gravity.py`, `test_carbonate.py`, `test_waves.py`, `test_carbgeo.py`, `test_karst.py`, `test_restart.py` | mass conservation, marine routing/diffusion, `oFill`; gravity currents (budget, fine/provenance conservation, network, erosion, slope failure, spreading, defaults); carbonate production, pelagic rain, turbidity, waves, coastal erosion, the geochemistry link (budgets, partition invariance); karst dissolution (uniform lowering, residue cover, focusing, river load); restart against a continuous run |
 | `boundaries` | `test_boundaries.py` | `o/f/w/c` edges, closed-sink deposition, cyclic |
 | `advection` | `test_advection.py` | advection schemes, tectonic events, stratigraphy moved by horizontal motion (flat, cyclic, sphere; serial) |
 | `flexure` | `test_flexure.py` | flat FEM, global DH grid |
@@ -37,7 +37,7 @@ one subsystem marker. They are registered in `pyproject.toml` (authoritative).
 | `soil` | `test_soil.py` | soil/regolith |
 | `groundwater` | `test_groundwater.py` | water table, recharge, baseflow, duricrust |
 | `geochem` | `test_geochem.py` | Level-B solute transport |
-| `strata` | `test_strata.py` | stratigraphy, dual lithology |
+| `strata` | `test_strata.py`, `test_lithologies.py` | stratigraphy, dual lithology, several lithologies |
 | `provenance` | `test_provenance_tracers.py` | in-model provenance tracers |
 | `mpi` (+`parallel`) | `test_parallel.py` | `mpirun` np=1 vs np=2: partition invariance, deadlock guards, no whole-mesh copies per rank |
 | `analyse` | `test_provenance.py`, `test_gridexport.py`, `test_stratamesh.py`, `test_stratasection.py`, `test_catchment.py` | post-processing tools |

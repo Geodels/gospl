@@ -19,6 +19,12 @@ Three opt-in blocks work together:
   use: each lithology has its own pile in the stratigraphy, compaction curve,
   erodibility and transport behaviour.
 
+Other blocks build on them: ``sst:`` (sea-surface temperature), ``waves:`` and
+``coastal_erosion:`` (wave energy, shadows and wave erosion), the link to the
+groundwater geochemistry (``solute`` responses, ``carbonate_supply:``) and
+``karst:`` (the runoff dissolves the carbonate exposed on land,
+:ref:`carb_karst`).
+
 The same equations build carbonate platforms on coarse meshes and reef-rimmed
 platforms, barriers and lagoons on fine ones: what changes with the resolution
 is what the mesh resolves, and the two resolution-dependent choices you make
@@ -40,6 +46,8 @@ Requirements
   block: the loose carbonate is spread by the marine transport.
 - The ``pelagic`` block needs only the stratigraphy (it settles in place,
   unless ``resuspend`` is set).
+- The ``karst`` block needs only lithologies to dissolve (the carbonate ones,
+  or any listed in ``strata: lithologies``).
 
 goSPL stops with a message when one of these is missing. Without the blocks,
 every run is unchanged (dual-lithology runs are bitwise identical to before).
