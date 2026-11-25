@@ -168,10 +168,16 @@ html_sidebars = {
 
 # html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 html_theme_options = {
-    "github_url": "https://github.com/Geodels/gospl",
     "search_bar_text": "Search goSPL docs ...",
     "header_links_before_dropdown": 7,
-    "icon_links": [],
+    # the round GitHub icon, as SciPy (github_url gives the square one)
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/Geodels/gospl",
+            "icon": "fa-brands fa-github",
+        },
+    ],
     "logo": {
         "text": "goSPL",
     },
