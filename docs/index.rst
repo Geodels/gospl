@@ -17,7 +17,7 @@ goSPL documentation
 `goSPL Examples <https://github.com/Geodels/goSPL-examples>`__ |
 `Issues & Ideas <https://github.com/Geodels/gospl/issues>`__ 
 
-**goSPL** (short for ``Global Scalable Paleo Landscape Evolution``) is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale. goSPL is developed by the `EarthCodeLab Group <https://earthcolab.org>`_ at the University of Sydney.
+**goSPL** (short for ``Global Scalable Paleo Landscape Evolution``) is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale. goSPL is developed by the `QuESt-Lab Group <https://www.questlab.au>`_ at the University of Sydney.
 
 
 .. grid:: 1
