@@ -258,6 +258,9 @@ html_title = f"{project} v{version} Manual"
 html_static_path = ['_static']
 html_last_updated_fmt = '%b %d, %Y'
 
+# Section navigation: one branch open at a time (_static/navfold.js)
+html_js_files = globals().get("html_js_files", []) + ["navfold.js"]
+
 html_css_files = [
     "gospl.css",
     "try_examples.css",
