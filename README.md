@@ -1,6 +1,6 @@
 ## gospl / Global Scalable Paleo Landscape Evolution  /
 
-**gospl** is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale.
+**gospl** is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate the evolution of landscapes and sedimentary basins from catchment to global scale.
 
 ![gospl](https://github.com/Geodels/gospl/blob/master/docs/images/earth.png?raw=true)
 
@@ -9,12 +9,13 @@
 
 ## Statement of need
 
-> Since the ’90s, much software has been designed to estimate long-term catchment dynamics, drainage evolution as well as sedimentary basin formation in response to various mechanisms such as tectonic or climatic forcing. These models rely on a set of mathematical and physical expressions that simulates sediment erosion, transport and deposition and can reproduce the first order complexity of Earth’s surface geomorphological evolution.
+> Since the 1990s, landscape evolution models have been used to estimate long-term catchment dynamics, drainage evolution and the formation of sedimentary basins in response to tectonic and climatic forcing. They rely on a set of mathematical and physical laws for sediment erosion, transport and deposition, and reproduce the first-order complexity of the Earth's surface.
 
-> Yet, we were still missing a tool to evaluate global scale evolution of Earth surface and its interaction with the atmosphere, the hydrosphere, the tectonic and mantle dynamics. gospl is the first model designed to address this gap. It can be used to better characterise many aspects of the Earth system ranging from the role of atmospheric circulation on physical denudation, from the influence of erosion and deposition of sediments on mantle convection, from the location and abundance of natural resources to the evolution of life.
+> goSPL extends this approach from catchment to **global scale** and over geological time, on meshes of tens of millions of nodes. Beyond river incision, hillslope and marine sediment transport, it couples near-surface hydrology (water table and duricrust), weathering geochemistry, soil production, glacial erosion, flexural isostasy, orographic rainfall and stratigraphy, as well as marine gravity currents, carbonate platforms and karst, each optional and solved in parallel. It can be used to study how the Earth's surface interacts with the atmosphere, the hydrosphere and tectonic and mantle dynamics: the role of atmospheric circulation in denudation, the influence of sediment erosion and deposition on mantle convection, the location and abundance of natural resources, or the evolution of life.
 
 [![PyPI](https://img.shields.io/pypi/v/gospl?logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/gospl/)
 [![Conda](https://img.shields.io/conda/vn/geodels/gospl?logo=anaconda&logoColor=white&label=conda)](https://anaconda.org/geodels/gospl)
+[![Docs](https://readthedocs.org/projects/gospl/badge/?version=feat-gravity-carbonates-karst)](https://gospl.readthedocs.io/en/feat-gravity-carbonates-karst/)
 [![Docker](https://img.shields.io/docker/v/geodels/gospl-hpc?sort=semver&logo=docker&logoColor=white&label=Docker%20Hub)](https://hub.docker.com/r/geodels/gospl-hpc)
 
 ## Documentation
@@ -32,7 +33,7 @@ All contributions should go through our GitHub repository. Bug reports, ideas or
 
 If you decide to contribute to the codebase, ensure that you are using an up-to-date master branch. The latest development version will always be there, including the documentation (powered by sphinx).
 
-Full docs are available at: https://gospl.readthedocs.io/en/latest/
+Full docs are available at: https://gospl.readthedocs.io/en/feat-gravity-carbonates-karst/ (the documentation of this branch).
 
 ## License
 
