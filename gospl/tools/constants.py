@@ -160,3 +160,12 @@ ICE_DISCHARGE_REL_FLOOR = 1.0e-6
 # on a 1-ulp coin flip that differed with the rank count (2026-11-24).
 FILL_LEVEL_TOL = 1.0e-9
 
+
+# Minimum discharge rate (m/yr) on the diagonal of the groundwater solute
+# transport operator (gwplex._updateSolute), added to the export too so the
+# budget closes. Under the sea or a lake on a flat bed the head is the surface
+# and neighbours share it: the row was empty or round-off (1e-19), the direct
+# LU failed and every solute field became NaN (a bathymetry clipped at a
+# constant depth, 2026-11-25). Far below any recharge: well-posed rows are
+# unchanged.
+SOLUTE_DISCHARGE_FLOOR = 1.0e-6
