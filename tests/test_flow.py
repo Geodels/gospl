@@ -1149,3 +1149,44 @@ def test_receiver_distances_match_their_receivers(incising_model):
     assert not bad.any(), (
         "%d of %d receiver distances do not match their receiver (max rel err %.2e)"
         % (bad.sum(), use.sum(), np.max(np.abs(d[use] - true) / true)))
+
+
+def test_landlocked_lowest_point_is_filled(tmp_path, monkeypatch):
+    """
+    Protects: on a flat model with the sea below the whole mesh, the lowest
+    point is the bottom of a closed basin, not an outlet. The depression fill
+    took `max(minh, sealevel + oFill)` as its level, so that point became a
+    fill seed: every basin draining to it emptied through it, it was never
+    filled and, with subsidence, became an ever deeper hole (a rift basin:
+    -461 m against -62 m around it after 3 Myr, 2026-11-25). The open edges
+    are the outlets of a landlocked model.
+    """
+    from mpi4py import MPI
+    from gospl.model import Model
+    from gospl.flow.flowplex import FAMesh
+    from _helpers import FIXTURES_DIR
+
+    d = dict(np.load(FIXTURES_DIR / "flatbig.npz"))
+    xy = d["v"][:, :2]
+    c = 0.5 * (xy.min(axis=0) + xy.max(axis=0))
+    r2 = ((xy - c) ** 2).sum(axis=1)
+    d["z"] = 100.0 + 1.0e-5 * r2                  # a bowl: lowest at the centre
+    np.savez(tmp_path / "bowl.npz", **d)
+    text = (FIXTURES_DIR / "flat_wall.yml").read_text()
+    text = text.replace("['flatbig','v','c','z']", "['bowl','v','c','z']")
+    text = text.replace("bc: 'wwww'", "bc: 'oooo'").replace("position: -1000.", "position: -10000.")
+    text = text.replace("dir: 'flat_wall'", "dir: 'bowl_out'")
+    (tmp_path / "bowl.yml").write_text(text)
+    monkeypatch.chdir(tmp_path)
+    m = Model("bowl.yml", verbose=False, showlog=False)
+    try:
+        FAMesh.flowAccumulation(m)
+        h = m.hLocal.getArray()
+        own = m.inIDs == 1
+        hmin = MPI.COMM_WORLD.allreduce(float(h[own].min()), op=MPI.MIN)
+        at_min = own & (h <= hmin + 1.0e-9)
+        # the bowl's bottom is in a depression, filled well above itself
+        ok = bool((m.pitIDs[at_min] > -1).all() and (m.lFill[at_min] > h[at_min] + 1.0).all())
+        assert MPI.COMM_WORLD.allreduce(ok, op=MPI.LAND)
+    finally:
+        m.destroy()
