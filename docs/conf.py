@@ -237,6 +237,27 @@ elif _rtd.startswith("feat"):
 html_theme_options["show_version_warning_banner"] = (
     html_theme_options["switcher"]["version_match"] not in ("development", "feature"))
 
+# The version shown on the pages (main page, title) follows the docs being
+# built: the release number only for a release; the development and feature
+# docs say what they are (the release number in conf.py is the last release).
+_branch_name = _rtd
+if not _branch_name:                            # local build: the git branch
+    try:
+        import subprocess
+        _branch_name = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                      cwd=os.path.dirname(os.path.abspath(__file__)),
+                                      capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        _branch_name = ""
+if html_theme_options["switcher"]["version_match"] == "development" or _branch_name in ("dev", "latest"):
+    doc_version = "development (dev branch, after %s)" % version
+elif _branch_name.startswith("feat"):
+    doc_version = "feature branch %s (based on %s)" % (
+        "feat/gravity-carbonates-karst" if _branch_name.startswith("feat-") else _branch_name, version)
+else:
+    doc_version = version
+rst_epilog = globals().get("rst_epilog", "") + ".. |docversion| replace:: %s\n" % doc_version
+
 if 'versionwarning' in tags:  # noqa: F821
     # Specific to docs.scipy.org deployment.
     # See https://github.com/scipy/docs.scipy.org/blob/main/_static/versionwarning.js_t
@@ -254,7 +275,7 @@ if 'versionwarning' in tags:  # noqa: F821
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_title = f"{project} v{version} Manual"
+html_title = f"{project} {doc_version if doc_version != version else 'v' + version} Manual"
 html_static_path = ['_static']
 html_last_updated_fmt = '%b %d, %Y'
 
