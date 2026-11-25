@@ -141,3 +141,24 @@ def test_orography_runoff_gets_baseflow_adjustment(oro_hill_model):
         model.baseflowL = None
         rech.destroy()
         base.destroy()
+
+
+def test_orography_refused_on_a_sphere(tmp_path, monkeypatch):
+    """
+    Protects: the orographic rain model is flat-only (one wind vector in the
+    plane of the mesh). On a sphere it ran without complaint and produced
+    meaningless rain; it now stops at start-up with a message.
+    """
+    import shutil
+
+    from gospl.model import Model
+    from _helpers import FIXTURES_DIR
+
+    shutil.copy(FIXTURES_DIR / "mesh.npz", tmp_path / "mesh.npz")    # a sphere
+    base = (FIXTURES_DIR / "minimal.yml").read_text()
+    oro = ("\norography:\n    wind_speed: 15.\n    wind_dir: 270.\n    conv_time: 200.\n"
+           "    fall_time: 200.\n    precip_base: 0.5\n")
+    (tmp_path / "oro.yml").write_text(base + oro)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="flat meshes only"):
+        Model("oro.yml", verbose=False, showlog=False)

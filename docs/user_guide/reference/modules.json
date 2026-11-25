@@ -12,7 +12,7 @@
     [
      {
       "id": "climate",
-      "why": "Rain comes from the climate events or, instead, from the orographic model (unstructuredmesh.py:899-902). With neither, _updateRain calls len(self.raindata) on None (unstructuredmesh.py:1112): no parser check, the run stops with a TypeError."
+      "why": "Rain comes from the climate events or, instead, from the orographic model; with neither, goSPL stops at start-up with a message."
      },
      {
       "id": "orography",
@@ -97,7 +97,7 @@
     }
    ],
    "recommends": [],
-   "mesh": "flat only (uniform wind in the x, y plane, inflow edges from advectBorders, addprocess.py:764-890; docs optfile1.rst:161 say it does not work on global models; not checked by the code)"
+   "mesh": "flat meshes only (refused on a sphere with a message)"
   },
   {
    "id": "sedfactor",
@@ -770,7 +770,7 @@
     }
    ],
    "recommends": [],
-   "mesh": "flat only: on a sphere the edge point sets are never defined and _buildFlexFEM fails with an AttributeError (addprocess.py:571-575, no explicit check)"
+   "mesh": "flat meshes only: without `method`, flexure uses this solver on a flat mesh (method: fem); set on a sphere it stops with a message"
   },
   {
    "id": "flexure_global",
@@ -789,7 +789,7 @@
     }
    ],
    "recommends": [],
-   "mesh": "sphere only (the DH grid treats the mesh coordinates as a sphere, addprocess.py:122-190; not checked on a flat mesh)"
+   "mesh": "spheres only: without `method`, flexure uses this solver on a sphere (method: global); set on a flat mesh it stops with a message"
   },
   {
    "id": "temap",

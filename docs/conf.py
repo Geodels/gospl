@@ -204,7 +204,7 @@ html_theme_options = {
     },
     "navbar_start": ["navbar-logo"],
     "navbar_end": ["version-switcher", "theme-switcher", "navbar-icon-links"],
-    "navbar_persistent": [],
+    "navbar_persistent": ["search-button"],
     "switcher": {
         # The list of the development docs, like SciPy's devdocs: one list
         # for every version, updated without a release.

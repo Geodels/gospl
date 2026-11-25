@@ -72,6 +72,7 @@ class ReadYaml(object):
         self._readIce()
         self._readGroundwater()
         self._readOrography()
+        self._checkRain()
         self._readFlex()
         self._readTeMap()
         self._readOut()
@@ -675,8 +676,15 @@ class ReadYaml(object):
                 )
             # soil production maximum rate (50 m/Myr)
             self.P0 = soilDict.get("maxProd", 50.e-6)
-            # soil production decay depth
-            self.Hs = soilDict.get("depthProd", 0.0)
+            # soil production decay depth (m): required, the production law
+            # exp(-h/Hs) and the maximum soil thickness -ln(bedrockConv)*Hs
+            # are meaningless without it (the former default 0 produced no soil)
+            self.Hs = float(soilDict.get("depthProd", 0.0))
+            if self.Hs <= 0.0:
+                raise ValueError(
+                    "soil: depthProd (soil production decay depth, m) is required "
+                    "and must be positive (typically 0.3 to 0.7 m)."
+                )
             # roughness length_scale
             self.h_star = float(soilDict.get("roughnessL", 1.0))
             # soil transport decay depth for diffusion
@@ -1260,8 +1268,12 @@ class ReadYaml(object):
 
             if tedata["start"][0] > self.tStart:
                 tmpT = []
+                # Before the first event the plate keeps the flexure block's
+                # `thick` (this row was Te = 0 with no map, which _updateTe
+                # then tried to load as a map).
                 tmpT.insert(
-                    0, {"start": self.tStart, "tUni": 0.0, "tMap": None, "tKey": None}
+                    0, {"start": self.tStart, "tUni": float(getattr(self, "flex_eet", 10000.0)),
+                        "tMap": None, "tKey": None}
                 )
                 tedata = self._concatRows(tedata, tmpT, ["start", "tUni", "tMap", "tKey"], prepend=True)
             self.tedata = tedata.copy()
@@ -1526,6 +1538,20 @@ class ReadYaml(object):
 
         return
 
+    def _checkRain(self):
+        """
+        Stops with a clear message when the input sets no rainfall: neither a
+        ``climate`` block nor an ``orography`` block. The rain drives every
+        river process; without it ``_updateRain`` stopped with a TypeError on
+        the first step.
+        """
+        if self.raindata is None and not self.oroOn:
+            raise ValueError(
+                "No rainfall: the input needs a `climate` block (e.g. "
+                "`climate: [{start: 0., uniform: 1.}]`, use `uniform: 0.` for "
+                "a run without rivers) or an `orography` block."
+            )
+
     def _readCompaction(self):
         """
         Read compaction parameters.
@@ -1580,7 +1606,6 @@ class ReadYaml(object):
         # 1.0 (default) = no lithology contrast in the SPL erodibility blend.
         self.fine_k_factor = 1.0
         self.bedrock_coarse_frac = 0.5
-        self.fine_efficiency = 0.5
         # Insert a dedicated infinite-bedrock sentinel layer BENEATH the
         # file-provided initial layers (only consulted when an `npstrata` file
         # is given; the no-file path always builds a sentinel). Default False
@@ -1611,7 +1636,11 @@ class ReadYaml(object):
             self.bedrock_coarse_frac = strataDict.get(
                 "bedrock_coarse_frac", self.bedrock_coarse_frac
             )
-            self.fine_efficiency = strataDict.get("fine_efficiency", self.fine_efficiency)
+            if "fine_efficiency" in strataDict and MPIrank == 0:
+                # Planned per-fraction marine deposition efficiency (see
+                # DESIGN_DUAL_LITHOLOGY.md); never implemented, so the key was
+                # read and then ignored. Say so instead of ignoring it silently.
+                print("[strata] fine_efficiency is not implemented and is ignored.", flush=True)
             self.bedrock_sentinel = bool(
                 strataDict.get("bedrock_sentinel", self.bedrock_sentinel)
             )
@@ -2519,6 +2548,9 @@ class ReadYaml(object):
             # 'fem'  -> parallel FV biharmonic on the flat DMPlex (default)
             # 'global' -> spherical-harmonic solve (global models)
             self.flex_method = flexDict.get("method", 'fem')
+            # Unset: GridProcess picks the method from the mesh ('fem' on a
+            # flat mesh, 'global' on a sphere) once the mesh is known.
+            self.flexMethodSet = "method" in flexDict
 
             if self.flex_method not in ('global', 'fem'):
                 print(
@@ -2539,6 +2571,7 @@ class ReadYaml(object):
         except KeyError:
             self.flexOn = False
             self.flex_method = 'fem'
+            self.flexMethodSet = False
 
         self._extraFlex()
 

@@ -454,7 +454,7 @@ Soil production, erosion, transport and deposition
 
         a. ``soilK`` is the erodibility coefficient for soil,
         b. ``maxProd`` is the soil production maximum rate (m/yr),
-        c. ``depthProd`` is the soil production decay depth (m),
+        c. ``depthProd`` is the soil production decay depth (m, required, typically 0.3 to 0.7),
         d. ``roughnessL`` is the roughness length scale,
         e. ``decayDepth`` is the soil transport decay depth for non-linear diffusion where the coefficient of diffusion is set to the values of ``hillslopeKa`` and ``hillslopeKm``,
         f. ``bedrockConv`` is the soil to bedrock conversion fraction, bedrock begins where soil production is a very small fraction of the maximum soil production (optional, default ``0.0001``). It also sets the **maximum soil thickness** to ``-ln(bedrockConv) * depthProd`` (the depth at which production has decayed to that fraction; e.g. ~4.6 m for the default with ``depthProd = 0.5``). Setting ``bedrockConv: 0`` means *no* bedrock-conversion depth and therefore **no maximum-soil cap** (soil thickness is unbounded).
@@ -488,7 +488,7 @@ Soil production, erosion, transport and deposition
         Arrhenius scaling of ``maxProd`` (warmer ⇒ faster weathering). This is
         activated by supplying an annual-mean surface-temperature map:
 
-        j. ``tempMap`` a temperature map given as ``[file, key]`` — an **npz** file whose ``key`` holds the annual-mean surface temperature (in **degrees Celsius**) at every mesh vertex. When present, the production rate becomes ``maxProd * exp( Ea/Rg * (1/T_ref - 1/T) )`` (temperatures internally converted to Kelvin; ``Rg = 8.314`` J/mol/K). When omitted, production uses the constant ``maxProd`` everywhere.
+        j. ``tempMap`` a temperature map given as ``[file, key]`` — an **npz** file whose ``key`` holds the annual-mean surface temperature (in **degrees Celsius**) at every mesh vertex. When present, the production rate becomes ``maxProd * P * exp( Ea/Rg * (1/T_ref - 1/T) )``, with ``P`` the local rainfall (m/yr), after Norton et al. (2013, Eq. 8): ``maxProd`` is then a production per metre of rain (m of soil per m of rain, about ``P0 / P`` for a reference site), not a rate in m/yr (temperatures internally converted to Kelvin; ``Rg = 8.314`` J/mol/K). When omitted, production uses the constant ``maxProd`` everywhere.
         k. ``activation`` the Arrhenius activation energy ``Ea`` (J/mol, optional, default ``40.e3``); only used when ``tempMap`` is set.
         l. ``tempRef`` the reference temperature (degrees Celsius, optional, default ``15.0``) at which the production rate equals ``maxProd``; only used when ``tempMap`` is set.
 
