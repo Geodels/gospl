@@ -8,6 +8,7 @@ a base run, as a percentage of the base.
     python scripts/option_cost.py --report DIR     # table from a finished run
     python scripts/option_cost.py --plot DIR1 [DIR2] --out fig.png   # bar chart
     python scripts/option_cost.py --table DIR1 DIR4 --out table.rst   # docs table
+    python scripts/option_cost.py --plot-memory DIR1 DIR4 --out mem.png   # memory chart
 
 The base input should be a regional run with land, rivers and a sea (the
 numbers in docs/user_guide/cost.rst come from the mixed_carbonate_clastic
@@ -18,9 +19,10 @@ and records:
 * the median wall time of a step, from the ``--summary`` record of every step
   after the first (the first one sets up solvers and caches; the median keeps
   one slow step, a solver rescue or a busy machine, from dominating);
-* the time of the option's own phases (``--summary`` phases: ``flexure``,
-  ``groundwater``, ``carbonate``, ...), which does not depend on how the
-  option changes the landscape the other processes work on;
+* the option's added time: the increase of the phases it acts in
+  (``--summary`` phases: its own, ``flexure``, ``groundwater``, ``carbonate``,
+  ..., and those it makes heavier, ``sed``, ``sea``) over the run it is added
+  to (``ADDED_TO``);
 * the set-up time (``Model`` construction);
 * the peak resident memory, on rank 0 and the largest on the other ranks
   (``ru_maxrss``).
@@ -43,25 +45,46 @@ import tempfile
 import yaml
 
 _CHILD = r'''
-import json, resource, sys, time
+import json, resource, sys, threading, time
 from mpi4py import MPI
 from gospl.model import Model
 yml, summ, out = sys.argv[1:4]
 comm = MPI.COMM_WORLD
+try:
+    import psutil
+    _proc = psutil.Process()
+    rss = lambda: _proc.memory_info().rss
+except ImportError:
+    rss = None
+samples, running = [], [False]
+def sampler():
+    while True:
+        if running[0] and rss is not None:
+            samples.append(rss())
+        time.sleep(0.02)
+threading.Thread(target=sampler, daemon=True).start()
 t0 = time.time()
 m = Model(yml, verbose=False, showlog=False, summary=summ)
 t1 = time.time()
+init_rss = rss() if rss is not None else 0
 try:
+    running[0] = True
     m.runProcesses()
+    running[0] = False
     npts = m.mpoints
 finally:
     m.destroy()
 scale = 1 if sys.platform == "darwin" else 1024
-rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * scale
-allr = comm.gather(rss, root=0)
+peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * scale
+med = sorted(samples)[len(samples) // 2] if samples else peak
+mine = [peak, med, init_rss]
+allr = comm.gather(mine, root=0)
 if comm.rank == 0:
-    json.dump({"init_s": t1 - t0, "rss0": allr[0],
-               "rss_other": max(allr[1:]) if len(allr) > 1 else allr[0],
+    oth = allr[1:] if len(allr) > 1 else allr
+    json.dump({"init_s": t1 - t0, "rss0": allr[0][0],
+               "rss_other": max(a[0] for a in oth),
+               "rss_med0": allr[0][1], "rss_med_other": max(a[1] for a in oth),
+               "rss_init0": allr[0][2], "rss_init_other": max(a[2] for a in oth),
                "mpoints": int(npts), "ranks": comm.size}, open(out, "w"))
 '''
 
@@ -178,17 +201,25 @@ VARIANTS = [
 ]
 
 
-# Phases (``--summary``) that belong to an option: their time is the option's
-# own cost. Options without one (erosion laws, lithologies, gravity currents
-# inside the marine step) are read from the change of the whole step.
-OWN = {"nlspl": ["erosion"], "spl_G": ["erosion"], "hill_nl": ["hillslope"],
-       "soil": ["erosion", "hillslope"], "flexure": ["flexure"], "orography": ["forcing"],
-       "ice": ["ice", "till"], "strata": ["strat"], "gw": ["groundwater"],
-       "gw_duri": ["groundwater"], "gw_geochem": ["groundwater"],
-       "carbonate": ["carbonate"], "carb_exposure": ["carbonate"],
-       "carb_turbidity": ["carbonate"], "pelagic": ["pelagic"],
-       "waves": ["carbonate"], "coastal": ["carbonate", "coastal erosion"],
-       "karst": ["karst"]}
+# Phases (``--summary``) an option acts in. Its added time is the increase of
+# these phases over the run it is added to (the base, or its prerequisite in
+# ADDED_TO): its own phases (flexure, groundwater, carbonate, ...) and the
+# phases it makes heavier (more routed columns in sed and sea for the
+# lithologies and provenance, the marine step for the gravity currents).
+ACTS = {"nlspl": ["erosion"], "spl_G": ["erosion"], "hill_nl": ["hillslope"],
+        "soil": ["erosion", "hillslope"], "flexure": ["flexure"], "orography": ["forcing"],
+        "ice": ["ice", "till"], "strata": ["strat", "sed", "sea"], "dual": ["sed", "sea"],
+        "prov": ["sed", "sea"], "gw": ["groundwater"], "gw_duri": ["groundwater"],
+        "gw_geochem": ["groundwater"], "gravity": ["sea"],
+        "carbonate": ["carbonate", "sed", "sea"], "carb_exposure": ["carbonate"],
+        "carb_turbidity": ["carbonate", "sea"], "pelagic": ["pelagic", "sed", "sea"],
+        "waves": ["carbonate"], "coastal": ["carbonate", "coastal erosion", "sea"],
+        "karst": ["karst"]}
+# Run each option is added to (default: the base).
+ADDED_TO = {"dual": "strata", "prov": "dual", "gw_duri": "gw", "gw_geochem": "gw_duri",
+            "gravity": "dual", "pelagic": "dual", "carbonate": "dual",
+            "carb_exposure": "carbonate", "carb_turbidity": "carbonate",
+            "waves": "carbonate", "coastal": "carbonate", "karst": "carbonate"}
 
 
 def _stats(summ):
@@ -216,12 +247,13 @@ def report(work, out=None):
         d.update(name=name, label=label)
         res.append(d)
     b = res[0]
-    print("%-15s %8s %6s %8s %7s %9s %9s" % ("option", "step s", "step%", "own s",
-                                             "own%", "mem0%", "memOth%"))
+    print("%-15s %8s %6s %8s %7s %9s %9s" % ("option", "step s", "step%", "added s",
+                                             "added%", "mem0%", "memOth%"))
+    byname = {d["name"]: d for d in res}
     for d in res:
-        own = sum(d["phases"].get(k, 0.0) for k in OWN.get(d["name"], []))
-        if d["name"] in ("hill_nl", "soil", "nlspl", "spl_G"):
-            own -= sum(b["phases"].get(k, 0.0) for k in OWN[d["name"]])
+        ref = byname.get(ADDED_TO.get(d["name"], "base"), b)
+        own = sum(d["phases"].get(k, 0.0) - ref["phases"].get(k, 0.0)
+                  for k in ACTS.get(d["name"], []))
         d["own_s"] = max(own, 0.0)
         print("%-15s %8.3f %6.0f %8.3f %7.0f %+9.0f %+9.0f" % (
             d["name"], d["step_s"], 100 * d["step_s"] / b["step_s"], d["own_s"],
@@ -244,11 +276,7 @@ SHORT = {"base": "base", "nlspl": "non-linear SPL", "spl_G": "transport-limited 
 
 
 # What each option is added to, and a note for the documentation table.
-ADDED = {"dual": "stratigraphy", "prov": "dual", "gw_duri": "groundwater",
-         "gw_geochem": "duricrust", "gravity": "dual", "pelagic": "dual",
-         "carbonate": "dual", "carb_exposure": "carbonates",
-         "carb_turbidity": "carbonates", "waves": "carbonates",
-         "coastal": "carbonates", "karst": "carbonates"}
+ADDED = {k: SHORT[v].lstrip("+ ") for k, v in ADDED_TO.items()}
 NOTES = {"nlspl": "changes the relief: the marine step does less work here",
          "soil": "soil-aware SPL and soil diffusion (SNES, TS)",
          "flexure": "operator factorised once",
@@ -287,7 +315,7 @@ def table(dirs, out):
         if n in r else ""
     L = [".. list-table::", "   :header-rows: 1", "   :widths: 28 13 9 9 9 32", "",
          "   * - Option", "     - added to", "     - %d rank" % r1["base"]["ranks"],
-         "     - %d ranks" % rn["base"]["ranks"], "     - own phases", "     - notes",
+         "     - %d ranks" % rn["base"]["ranks"], "     - added time", "     - notes",
          "   * - base", "     -", "     - 100 (%.2f s)" % r1["base"]["step_s"],
          "     - 100 (%.2f s)" % rn["base"]["step_s"], "     -",
          "     - mostly the marine deposition and the flow accumulation"]
@@ -302,48 +330,156 @@ def table(dirs, out):
     open(out, "w").write("\n".join(L) + "\n")
 
 
-def plot(dirs, out):
-    """Bar chart of the step time of every option (% of the base), whole
-    step and the option's own phases, one bar per finished run directory."""
-    import io
-    import contextlib
+# Figure style for the documentation: the reference palette of the data-
+# visualisation guidelines (categorical slots 1-2, ink, hairline grid).
+SERIES = ["#2a78d6", "#eb6834"]
+INK, INK2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 
+
+def _style():
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import numpy as np
+    from matplotlib import font_manager
+
+    have = {f.name for f in font_manager.fontManager.ttflist}
+    fam = next((f for f in ("Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans")
+                if f in have), "sans-serif")
+    plt.rcParams.update({
+        "font.family": fam, "font.size": 9.5, "axes.titlesize": 11,
+        "axes.titleweight": "bold", "axes.titlelocation": "left",
+        "axes.labelsize": 9.5, "axes.labelcolor": INK2, "text.color": INK,
+        "xtick.color": MUTED, "ytick.color": INK2, "xtick.labelsize": 8.5,
+        "ytick.labelsize": 9, "axes.edgecolor": AXIS, "axes.linewidth": 0.8,
+        "axes.spines.top": False, "axes.spines.right": False,
+        "axes.spines.left": False, "axes.grid": True, "axes.grid.axis": "x",
+        "grid.color": GRID, "grid.linewidth": 0.6, "axes.axisbelow": True,
+        "legend.frameon": False, "legend.fontsize": 8.5, "ytick.major.size": 0,
+        "xtick.major.size": 3, "figure.facecolor": "white", "savefig.dpi": 200,
+        "svg.fonttype": "none"})
+    return plt
+
+
+def _runs(dirs):
+    import io
+    import contextlib
 
     runs = []
     for d in dirs:
         with contextlib.redirect_stdout(io.StringIO()):
             r = report(d)
-        runs.append(({x["name"]: x for x in r}, "%d rank%s" % (r[0]["ranks"],
-                                                             "s" if r[0]["ranks"] > 1 else "")))
+        nr = r[0]["ranks"]
+        runs.append(({x["name"]: x for x in r}, "%d rank%s" % (nr, "s" if nr > 1 else "")))
+    return runs
+
+
+def _bars(ax, y, h, k, nruns, whole, part, lab_whole, lab_part):
+    """Grouped horizontal bars with a 2-point gap between the runs: the light
+    tint is the whole value, the solid part on top of it."""
+    off = (0.5 * (nruns - 1) - k) * (h + 0.04)
+    ax.barh(y + off, whole, h, color=SERIES[k], alpha=0.28, linewidth=0, label=lab_whole)
+    ax.barh(y + off, part, h, color=SERIES[k], linewidth=0, label=lab_part)
+
+
+def plot(dirs, out):
+    """Time per step of every option, one bar per finished run directory (one
+    rank, several ranks). Left: % of the base step at the same rank count
+    (tint: whole step; solid: the option's added time). Right: the absolute
+    time per step (s)."""
+    import numpy as np
+
+    plt = _style()
+    runs = _runs(dirs)
     names = [n for n, _, _ in VARIANTS if n in runs[0][0]]
-    fig, ax = plt.subplots(figsize=(10, 0.32 * len(names) + 1.6), constrained_layout=True)
-    y = np.arange(len(names))[::-1]
-    h = 0.8 / len(runs)
-    cols = ["#457b9d", "#e76f51", "#2a9d8f", "#8d99ae"]
-    vmax = 0.0
+    fig, ax = plt.subplots(1, 2, figsize=(11, 0.27 * len(names) + 1.6),
+                           sharey=True, gridspec_kw={"width_ratios": [1.35, 1]})
+    y = np.arange(len(names))[::-1].astype(float)
+    h = 0.38
+    vmax = smax = 0.0
     for k, (d, lab) in enumerate(runs):
         b = d["base"]["step_s"]
         tot = [100 * d[n]["step_s"] / b if n in d else 0 for n in names]
         own = [100 * d[n].get("own_s", 0.0) / b if n in d else 0 for n in names]
-        off = (0.5 * (len(runs) - 1) - k) * h
-        ax.barh(y + off, tot, h, color=cols[k], alpha=0.4, label="whole step, %s" % lab)
-        ax.barh(y + off, own, h, color=cols[k], label="option's own phases, %s" % lab)
-        vmax = max(vmax, max(tot))
-    ax.axvline(100, color="k", lw=0.8)
-    ax.set_yticks(y)
-    ax.set_yticklabels([SHORT.get(n, n) for n in names])
-    ax.set_xlabel("%% of the base step (%d nodes)" % runs[0][0]["base"]["mpoints"])
-    ax.set_title("Time per step: each option added to the base, (+) to the option above",
-                 fontsize=10)
-    ax.set_xlim(0, 1.05 * vmax)
-    ax.grid(axis="x", alpha=0.25, lw=0.5)
-    ax.legend(fontsize=8, frameon=False, loc="lower right")
-    fig.savefig(out, dpi=150)
+        sec = [d[n]["step_s"] if n in d else 0 for n in names]
+        _bars(ax[0], y, h, k, len(runs), tot, own, "whole step, %s" % lab, "added time, %s" % lab)
+        off = (0.5 * (len(runs) - 1) - k) * (h + 0.04)
+        ax[1].barh(y + off, sec, h, color=SERIES[k], linewidth=0, label=lab)
+        vmax, smax = max(vmax, max(tot)), max(smax, max(sec))
+    ax[0].axvline(100, color=INK2, lw=0.8, zorder=3)
+    ax[0].text(100, y[0] + 0.75, " base", color=INK2, fontsize=8, va="bottom")
+    ax[0].set_yticks(y)
+    ax[0].set_yticklabels([SHORT.get(n, n) for n in names])
+    ax[0].set_xlabel("% of the base step at the same rank count")
+    ax[0].set_title("Relative cost per step")
+    ax[0].set_xlim(0, 1.05 * vmax)
+    ax[1].set_xlabel("wall time per step (s)")
+    ax[1].set_title("Absolute time per step")
+    ax[1].set_xlim(0, 1.08 * smax)
+    ax[0].set_ylim(y[-1] - 0.8, y[0] + 1.2)
+    hd, lb = ax[0].get_legend_handles_labels()
+    fig.legend(hd, lb, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.0))
+    fig.text(0.01, 0.005, "{:,}-node regional margin; options marked + are added to the "
+             "option above them, the others to the base run.".format(
+                 runs[0][0]["base"]["mpoints"]), color=MUTED, fontsize=8)
+    fig.tight_layout(rect=(0, 0.02, 1, 0.95))
+    fig.savefig(out)
+
+
+def plot_memory(dirs, out, lib_mb=None):
+    """Memory per rank of every option, one bar per finished run directory.
+    Left: % of the base run's memory at the same rank count. Right: memory
+    per rank (MB). Solid: the median during the steps; tint: the peak. The
+    largest rank is shown (rank 0 holds the serial mesh tables)."""
+    import numpy as np
+
+    plt = _style()
+    runs = _runs(dirs)
+    names = [n for n, _, _ in VARIANTS if n in runs[0][0]]
+    MB = 2.0 ** 20
+
+    def med(r):
+        return max(r.get("rss_med0", r["rss0"]), r.get("rss_med_other", r["rss_other"])) / MB
+
+    def peak(r):
+        return max(r["rss0"], r["rss_other"]) / MB
+
+    fig, ax = plt.subplots(1, 2, figsize=(11, 0.27 * len(names) + 1.6),
+                           sharey=True, gridspec_kw={"width_ratios": [1.35, 1]})
+    y = np.arange(len(names))[::-1].astype(float)
+    h = 0.38
+    vmax = smax = 0.0
+    for k, (d, lab) in enumerate(runs):
+        bm, bp = med(d["base"]), peak(d["base"])
+        rel_med = [100 * med(d[n]) / bm if n in d else 0 for n in names]
+        rel_pk = [100 * peak(d[n]) / bp if n in d else 0 for n in names]
+        _bars(ax[0], y, h, k, len(runs), rel_pk, rel_med, "peak, %s" % lab,
+              "during the steps, %s" % lab)
+        _bars(ax[1], y, h, k, len(runs), [peak(d[n]) for n in names],
+              [med(d[n]) for n in names], "peak, %s" % lab, "during the steps, %s" % lab)
+        vmax = max(vmax, max(rel_pk), max(rel_med))
+        smax = max(smax, max(peak(d[n]) for n in names))
+    ax[0].axvline(100, color=INK2, lw=0.8, zorder=3)
+    ax[0].text(100, y[0] + 0.75, " base", color=INK2, fontsize=8, va="bottom")
+    if lib_mb:
+        ax[1].axvline(lib_mb, color=INK2, lw=0.8, ls=(0, (3, 2)), zorder=3)
+        ax[1].text(lib_mb, y[0] + 0.75, " libraries", color=INK2, fontsize=8, va="bottom")
+    ax[0].set_yticks(y)
+    ax[0].set_yticklabels([SHORT.get(n, n) for n in names])
+    ax[0].set_xlabel("% of the base run's memory at the same rank count")
+    ax[0].set_title("Relative memory per rank")
+    ax[0].set_xlim(0, 1.05 * vmax)
+    ax[1].set_xlabel("memory of the largest rank (MB)")
+    ax[1].set_title("Memory per rank")
+    ax[1].set_xlim(0, 1.08 * smax)
+    ax[0].set_ylim(y[-1] - 0.8, y[0] + 1.2)
+    hd, lb = ax[0].get_legend_handles_labels()
+    fig.legend(hd, lb, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.0))
+    fig.text(0.01, 0.005, "{:,}-node regional margin; options marked + are added to the "
+             "option above them, the others to the base run.".format(
+                 runs[0][0]["base"]["mpoints"]), color=MUTED, fontsize=8)
+    fig.tight_layout(rect=(0, 0.02, 1, 0.95))
+    fig.savefig(out)
 
 
 def base_config(path, steps):
@@ -367,6 +503,10 @@ def main(argv=None):
                     help="print the table of a finished run (its --workdir)")
     ap.add_argument("--plot", nargs="+", default=None, metavar="DIR",
                     help="bar chart of finished runs (one bar per DIR)")
+    ap.add_argument("--plot-memory", nargs="+", default=None, metavar="DIR",
+                    help="memory chart of finished runs (one bar per DIR)")
+    ap.add_argument("--lib-mb", type=float, default=None,
+                    help="library baseline per rank (MB) marked on --plot-memory")
     ap.add_argument("--table", nargs="+", default=None, metavar="DIR",
                     help="RST table of finished runs (one rank, then several)")
     ap.add_argument("--out", default="option_cost.png", help="output of --plot/--table")
@@ -384,6 +524,9 @@ def main(argv=None):
         return 0
     if a.table:
         table(a.table, a.out)
+        return 0
+    if a.plot_memory:
+        plot_memory(a.plot_memory, a.out, a.lib_mb)
         return 0
 
     base = os.path.abspath(a.input)

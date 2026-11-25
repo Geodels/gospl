@@ -6,12 +6,12 @@
      - added to
      - 1 rank
      - 4 ranks
-     - own phases
+     - added time
      - notes
    * - base
      -
-     - 100 (2.47 s)
-     - 100 (0.71 s)
+     - 100 (1.67 s)
+     - 100 (0.53 s)
      -
      - mostly the marine deposition and the flow accumulation
    * - **Erosion and hillslope laws**
@@ -22,27 +22,27 @@
      -
    * - non-linear SPL
      - base
-     - 53
-     - 58
+     - 78
+     - 82
      - 0
      - changes the relief: the marine step does less work here
    * - transport-limited SPL
      - base
-     - 112
-     - 124
-     - 25
+     - 137
+     - 137
+     - 33
      - 
    * - non-linear hillslope
      - base
-     - 98
-     - 111
+     - 109
+     - 96
      - 0
      - 
    * - soil
      - base
-     - 200
-     - 173
-     - 78
+     - 127
+     - 120
+     - 25
      - soil-aware SPL and soil diffusion (SNES, TS)
    * - **Climate, ice and the lithosphere**
      -
@@ -52,21 +52,21 @@
      -
    * - flexure
      - base
-     - 93
+     - 110
      - 100
      - 1
      - operator factorised once
    * - orography
      - base
-     - 49
-     - 53
+     - 84
+     - 87
      - 2
      - lowers the rain here: less flow and marine work
    * - ice
      - base
-     - 100
-     - 105
-     - 8
+     - 107
+     - 104
+     - 11
      - 
    * - **Stratigraphy**
      -
@@ -83,14 +83,14 @@
    * - dual lithology
      - stratigraphy
      - 111
-     - 115
-     - 0
+     - 110
+     - 5
      - a second (mud) routing in the cascades
    * - provenance (3 classes)
-     - dual
-     - 150
-     - 159
-     - 0
+     - dual lithology
+     - 143
+     - 144
+     - 23
      - one routed column per class
    * - **Groundwater and geochemistry**
      -
@@ -100,21 +100,21 @@
      -
    * - groundwater
      - base
-     - 114
-     - 129
-     - 29
+     - 124
+     - 140
+     - 37
      - AMG head solve
    * - + duricrust
      - groundwater
-     - 112
-     - 130
-     - 28
+     - 124
+     - 135
+     - 0
      - 
    * - + geochemistry
      - duricrust
-     - 112
-     - 170
-     - 95
+     - 140
+     - 154
+     - 26
      - one direct (MUMPS) solve per species
    * - **Marine processes**
      -
@@ -123,50 +123,50 @@
      -
      -
    * - gravity currents
-     - dual
-     - 127
-     - 127
-     - 0
+     - dual lithology
+     - 137
+     - 131
+     - 21
      - its own network and solve, inside the marine step
    * - pelagic rain
-     - dual
-     - 151
-     - 158
-     - 9
+     - dual lithology
+     - 159
+     - 153
+     - 40
      - clay decay solve, and carb_mud added to the marine routing
    * - carbonates
-     - dual
-     - 195
-     - 182
-     - 2
+     - dual lithology
+     - 187
+     - 173
+     - 56
      - three more lithologies in the marine routing
    * - + exposure
      - carbonates
-     - 202
-     - 192
-     - 4
+     - 177
+     - 175
+     - 3
      - one screened-Poisson solve
    * - + turbidity
      - carbonates
-     - 191
-     - 188
-     - 11
+     - 185
+     - 186
+     - 9
      - 
    * - + waves
      - carbonates
-     - 186
-     - 187
-     - 8
+     - 198
+     - 177
+     - 7
      - one upwind solve per wave direction
    * - + coastal erosion
      - carbonates
-     - 189
+     - 203
      - 188
-     - 2
+     - 0
      - 
    * - + karst
      - carbonates
-     - 185
-     - 182
+     - 199
+     - 187
      - 1
      - 

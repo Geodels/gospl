@@ -1,6 +1,14 @@
 /* goSPL specifics */
 
-/* Version switcher colors from PyData Sphinx Theme */
+/* Version switcher colours (as SciPy's docs): green for the stable release,
+   orange for the development docs, blue for a feature branch, red for an
+   older release. The button shows the name of the version being read. */
+
+.version-switcher__button[data-active-version-name*="stable"] {
+  background-color: var(--pst-color-success);
+  border-color: var(--pst-color-success);
+  opacity: 0.9;
+}
 
 .version-switcher__button[data-active-version-name*="dev"] {
   background-color: var(--pst-color-warning);
@@ -8,7 +16,13 @@
   opacity: 0.9;
 }
 
-.version-switcher__button:not([data-active-version-name*="stable"]):not([data-active-version-name*="dev"]):not([data-active-version-name*="pull"]) {
+.version-switcher__button[data-active-version-name*="feature"] {
+  background-color: var(--pst-color-info);
+  border-color: var(--pst-color-info);
+  opacity: 0.9;
+}
+
+.version-switcher__button:not([data-active-version-name*="stable"]):not([data-active-version-name*="dev"]):not([data-active-version-name*="feature"]):not([data-active-version-name*="pull"]) {
   background-color: var(--pst-color-danger);
   border-color: var(--pst-color-danger);
   opacity: 0.9;
@@ -97,3 +111,20 @@ div.empty + section>h1 {
 .sig-prename {
   display: none;
 }
+
+/* Examples gallery: thumbnails of the results notebooks, same height */
+.gospl-example-card .sd-card-img-top {
+  height: 170px !important;
+  width: 100% !important;
+  object-fit: cover;
+  object-position: top;
+  background: var(--pst-color-surface);
+  border-bottom: 1px solid var(--pst-color-border);
+}
+.gospl-example-card .sd-card-title {
+  font-size: 1rem;
+}
+.gospl-example-card .sd-card-body {
+  font-size: 0.9rem;
+}
+
