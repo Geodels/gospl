@@ -1,0 +1,12 @@
+{# goSPL footer copyright: the year is the build year, updated to the reader's
+   current year in the browser, so it follows the calendar without a rebuild. #}
+<p class="copyright">
+  © Copyright <span class="gospl-year">{{ copyright.split(",")[0] }}</span>, goSPL @
+  <a href="https://www.questlab.au">QuESt-lab</a>.
+  <br/>
+</p>
+<script>
+  document.querySelectorAll(".gospl-year").forEach(function (e) {
+    e.textContent = new Date().getFullYear();
+  });
+</script>

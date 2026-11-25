@@ -55,8 +55,7 @@ SingleFileHTMLBuilder.supported_image_types = html_img_types
 # -- Project information -----------------------------------------------------
 
 project = "gospl"
-copyright = '2020-%s, The goSPL community' % date.today().year
-# copyright = "2020-2024, EarthCodeLab Group"
+copyright = '%s, goSPL @ QuESt-lab' % date.today().year
 author = "Tristan Salles"
 
 # version = '%s r%s' % (pandas.__version__, svn_version())
