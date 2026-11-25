@@ -76,6 +76,10 @@ cd goSPL-examples
 git checkout main && git merge --no-ff dev
 git show <previous tag>:environment.yml > environment.yml   # back to the conda pin
 # set `- gospl=<v>` and carry over any NEW non-goSPL dependency added on dev
+# docs links: /en/dev/ -> /en/v<v>/ (badge and links in every README; AGENTS.md >
+# "Links to the docs follow the version")
+grep -rl "gospl.readthedocs.io/en/dev/\|badge/?version=dev" --include=README.md . \
+  | xargs sed -i '' 's|gospl.readthedocs.io/en/dev/|gospl.readthedocs.io/en/v<v>/|g; s|badge/?version=dev)|badge/?version=v<v>)|g'
 git commit -am "Target goSPL v<v> release"
 # fresh env from this file + scripts/examples_smoke.py <examples> before tagging
 git push origin main                          # ask before pushing

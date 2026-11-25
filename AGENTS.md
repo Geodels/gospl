@@ -361,6 +361,24 @@ The paper's scripts and review tests live outside the repository (paper folder, 
 - Matrix: `ubuntu-latest + macos-15 × Python 3.11 + 3.12`. macOS is pinned (not `macos-latest`) because the osx-arm64 OpenMPI 4.x / petsc4py 3.21 stack is validated per image.
 - `environment.yml` conventions, cache-path pitfalls, MPI pins: `.github/AGENTS.md`.
 
+## Links to the docs follow the version (goSPL-examples too)
+Every link to the goSPL documentation points to the Read the Docs version that matches
+the branch it is on, never to `latest`:
+- **goSPL docs pages**: links between pages are relative (`:ref:`, `:doc:` or a relative
+  path), so they stay in the version being read; goSPL-examples links use the
+  `:examples:`/`:examples_raw:` roles and `|examples_ref|` (`docs/conf.py`, branch or
+  tag from `build_gallery._branch`), the source repository the `:gospl:` role.
+- **goSPL-examples READMEs and notebooks** (badge and links): branch `feat/...` ->
+  `https://gospl.readthedocs.io/en/feat-<branch-name-with-dashes>/`, `dev` -> `/en/dev/`,
+  `main` (latest release) -> `/en/v<version>/` of that release (so the release tag keeps
+  pointing to its own docs). When a page moves, update the links on each branch to the
+  page of that version. At a release, the dev -> main merge of goSPL-examples rewrites
+  `/en/dev/` to `/en/v<version>/` (release skill, step 7); a new feature branch rewrites
+  them to its own version.
+- The example pages of the docs gallery turn absolute links to the docs into relative ones
+  at build time (`build_gallery._local_links`), so the gallery is right even when a README
+  is not.
+
 ## Docs / Read the Docs (autodoc)
 The API reference (`docs/api_ref/*.rst`) is Sphinx **autodoc** — it imports each module to extract docstrings, so the modules MUST import under the docs build. Two invariants keep the API pages from rendering empty (both regressed once and produced blank pages for *most* classes):
 - **`gospl` must be importable.** It is NOT pip-installed on Read the Docs, so `docs/conf.py` puts BOTH the repo root (`..`, so `from gospl.tools.constants import …` and other `from gospl.X import` resolve) AND `../gospl/` (so the legacy top-level `.. autoclass:: sed.hillslope.hillSLP` paths resolve) on `sys.path`. Don't remove either.
