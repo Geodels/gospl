@@ -132,7 +132,7 @@ per-node exchange :math:`\nabla\!\cdot\!(T\nabla h)\,A = -(L h)\,A` is formed
 (positive = the aquifer discharges *into* the lake, negative = the lake *leaks* into
 the aquifer), aggregated per lake, and fed into the lake's inflow — gains added,
 leakage debited and clamped at the available water (mirroring the lake-surface
-evaporation). Off by default (the conventional fixed-head treatment).
+evaporation). Off by default (the conventional fixed-head treatment). With evaporation the exchange is part of the lake's balance, for the spill test and the level of a closed lake (:ref:`flow_evaporation`).
 
 Duricrust formation and armoring
 --------------------------------

@@ -42,8 +42,8 @@
    {
     "name": "fillFA",
     "unit": "m3/yr",
-    "meaning": "Water discharge routed on the depression-filled surface (water crossing lakes and closed pits to their spill points). Same floor and marine value (1.0) as FA. float64, restart field.",
-    "range": "As FA, but continuous through lakes: up to ~1e12-1e13 m3/yr on global meshes; 1 in the sea.",
+    "meaning": "Flow accumulation through the lakes: FA on rivers, and on lake cells the water flowing into the lake (through-flow for a lake that spills, evaporated for a closed one). Not used by the erosion (FA is zero on lakes). float64, restart field.",
+    "range": "As FA on rivers; on lakes, their inflow (up to the discharge of the largest rivers for lakes on them). Before Nov 2026 lake cells held 10 % of the maximum discharge.",
     "resolution": "Same as FA.",
     "sign": "always >= 0",
     "file": "surface"
@@ -93,7 +93,7 @@
    {
     "name": "waterFill",
     "unit": "m",
-    "meaning": "Water depth of lakes in closed depressions: the filled water level minus the bed elevation (0 outside lakes and in the sea). The code subtracts the bed (waterFilled -= hl), so it is a depth, not a water-surface elevation as the outputs page says. float32, not used on restart.",
+    "meaning": "Water depth of lakes in closed depressions: the filled water level minus the bed elevation (0 outside lakes and in the sea). The code subtracts the bed (waterFilled -= hl), so it is a depth, not a water-surface elevation as the outputs page says. float32, not used on restart. With evaporation, a closed lake stands at the level where its evaporation balances its inflow.",
     "range": "0 almost everywhere; centimetres to tens of metres in lakes, up to 1e3-4e3 m in deep closed basins of global runs (examples: median 5-20 m among lake cells, maximum 3900 m).",
     "resolution": "Depends on the depression volumes and the inflow of the last step; a larger dt fills pits faster. Finer meshes resolve more small pits.",
     "sign": "",

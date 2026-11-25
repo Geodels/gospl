@@ -65,6 +65,7 @@ Class ReadYaml
       ~ReadYaml._readPelagic
       ~ReadYaml._concatRows
       ~ReadYaml._readKarst
+      ~ReadYaml._checkRain
 
 
 Private functions
@@ -118,3 +119,4 @@ Private functions
 .. automethod:: tools.inputparser.ReadYaml._readCoastalErosion
 .. automethod:: tools.inputparser.ReadYaml._concatRows
 .. automethod:: tools.inputparser.ReadYaml._readKarst
+.. automethod:: tools.inputparser.ReadYaml._checkRain

@@ -1038,7 +1038,7 @@ _VAR_META = {
     "erodep": ("m", "cumulative erosion (negative) / deposition (positive)"),
     "EDrate": ("m/yr", "erosion (negative) / deposition (positive) rate"),
     "FA": ("m3/yr", "flow accumulation (water discharge)"),
-    "fillFA": ("m3/yr", "flow accumulation over the depression-filled surface"),
+    "fillFA": ("m3/yr", "flow accumulation through the lakes (on lake cells: the lake inflow)"),
     "waterFill": ("m", "filled water-surface elevation (lake / depression level)"),
     "sedLoad": ("m3/yr", "river sediment load (total)"),
     "sedLoadF": ("m3/yr", "river sediment load (fine fraction)"),

@@ -31,6 +31,8 @@ Class FAMesh
       ~FAMesh._solve_KSP
       ~FAMesh._buildFlowDirection
       ~FAMesh._potentialLakeEvap
+      ~FAMesh._lakeEvapCurve
+      ~FAMesh._equilibriumLakeLevel
       ~FAMesh._distributeDownstream
       ~FAMesh._cascadeResetProgress
       ~FAMesh._cascadeStopReason
@@ -62,6 +64,8 @@ Private functions
 .. automethod:: flow.flowplex.FAMesh._solve_KSP
 .. automethod:: flow.flowplex.FAMesh._buildFlowDirection
 .. automethod:: flow.flowplex.FAMesh._potentialLakeEvap
+.. automethod:: flow.flowplex.FAMesh._lakeEvapCurve
+.. automethod:: flow.flowplex.FAMesh._equilibriumLakeLevel
 .. automethod:: flow.flowplex.FAMesh._distributeDownstream
 .. automethod:: flow.flowplex.FAMesh._cascadeResetProgress
 .. automethod:: flow.flowplex.FAMesh._cascadeStopReason
