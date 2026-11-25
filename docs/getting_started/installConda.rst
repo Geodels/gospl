@@ -4,6 +4,11 @@
 Installation via Conda
 =========================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
+
 .. _install.anaconda:
 
 

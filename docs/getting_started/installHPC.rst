@@ -22,6 +22,10 @@ The examples below target two Australian HPC systems:
 
 The commands will need to be adapted for other HPC systems.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 
 .. _installHPC.native:
 
