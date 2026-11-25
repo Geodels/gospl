@@ -1,0 +1,3064 @@
+[
+ {
+  "block": "name",
+  "path": "name",
+  "summary": "Optional top-level label of the run, printed at start-up with -v.",
+  "keys": [
+   {
+    "key": "name",
+    "unit": "text",
+    "default": "none",
+    "meaning": "Free-text description of the simulation.",
+    "range": "any string",
+    "resolution": "none",
+    "notes": "Top-level key, not inside a block."
+   }
+  ]
+ },
+ {
+  "block": "domain",
+  "path": "domain",
+  "summary": "Required block: input mesh, flow routing, boundary conditions, initial fields and advection scheme.",
+  "keys": [
+   {
+    "key": "npdata",
+    "unit": "file ([file, v, c, z]; npz without extension)",
+    "default": "required",
+    "meaning": "Input mesh: npz file name (without .npz) followed by the keys of the vertex coordinates (m, (n,3)), the triangle cells ((m,3) int) and the elevation (m) at each vertex.",
+    "range": "n/a",
+    "resolution": "The mesh spacing sets the resolution of every process; no vertex may have more than 12 neighbours.",
+    "notes": "Raises if the key or the file is missing. Coordinates in m (Cartesian x, y, z; z = 0 on a flat mesh, on the sphere of radius `radius` for a global mesh)."
+   },
+   {
+    "key": "flowdir",
+    "unit": "- (number of receivers)",
+    "default": "8",
+    "meaning": "Maximum number of downslope receivers of the multiple-flow-direction routing (1 = single flow direction).",
+    "range": "1 (SFD) to 6 (MFD) per the docs; examples use 1, 2, 3, 5, 6. Higher values spread flow on hillslopes and flats.",
+    "resolution": "With MFD the hillslope flow accumulation scales with the cell size (spread over neighbours), so the erosion of non-channel cells changes slightly with resolution.",
+    "notes": "Code default is 8 while the user guide says 1 to 6; the Fortran neighbour tables allow up to 12. Doc/code mismatch worth fixing. The partition exponent is fixed at 1.1 (a `flowexp` key is commented out in the parser and not read)."
+   },
+   {
+    "key": "bc",
+    "unit": "- (4 characters, N E S W)",
+    "default": "oooo",
+    "meaning": "Boundary condition of each edge of a flat mesh: o open (deep outlet), f fixed (outlet at edge elevation), w wall (no flux), c cyclic (needs a cylinder mesh, paired, serial only). Legacy 0/1 read as o/f.",
+    "range": "n/a (choose from the geometry)",
+    "resolution": "none",
+    "notes": "Ignored on global meshes. Cyclic edges must come as an opposite pair, at most one pair, and only on one MPI rank. A fully walled domain does not conserve sediment over many steps."
+   },
+   {
+    "key": "fast",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Run without surface processes (checks the inputs and forcing only).",
+    "range": "False for real runs",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "seadepo",
+    "unit": "bool",
+    "default": "True",
+    "meaning": "Perform marine deposition of the sediment reaching the sea.",
+    "range": "True for most runs",
+    "resolution": "none",
+    "notes": "Must be True for carbonate: and coastal_erosion: (the loose carbonate and the eroded material go through the marine transport)."
+   },
+   {
+    "key": "nodep",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Skip all sediment routing and deposition (continental and marine): eroded material leaves the model.",
+    "range": "False for most runs",
+    "resolution": "none",
+    "notes": "Undocumented in the user guide (only mentioned in carbonates.rst). Must be False with carbonate:."
+   },
+   {
+    "key": "overlap",
+    "unit": "- (cells)",
+    "default": "1",
+    "meaning": "Number of ghost-cell layers of the DMPlex partition (PETSc distribute overlap).",
+    "range": "1 (do not change)",
+    "resolution": "none",
+    "notes": "Undocumented expert key; the kernels assume one layer."
+   },
+   {
+    "key": "nperodep",
+    "unit": "file (npz without extension, key `ed`)",
+    "default": "none",
+    "meaning": "Initial cumulative erosion/deposition field (m, positive = deposition) for every mesh vertex.",
+    "range": "n/a",
+    "resolution": "Must be on the same mesh as npdata.",
+    "notes": "The key inside the file is fixed: `ed`."
+   },
+   {
+    "key": "npstrata",
+    "unit": "file (npz without extension)",
+    "default": "none",
+    "meaning": "Initial stratigraphic layers: strataH (m), strataZ (m), phiS (-), each (mesh points, layers); optional stratK (-, erodibility multiplier), strataHf (m, fine thickness) and phiF (-) under dual lithology.",
+    "range": "n/a",
+    "resolution": "Must be on the same mesh as npdata.",
+    "notes": "Needs a positive time: strat to be used; layers deepest first."
+   },
+   {
+    "key": "advect",
+    "unit": "- (upwind | iioe1 | iioe2 | interp)",
+    "default": "upwind",
+    "meaning": "Scheme for the horizontal advection of the surface and the stratigraphy by tectonics: hdisp.",
+    "range": "iioe2 for regional Eulerian runs; interp for plate motion on global meshes",
+    "resolution": "Eulerian schemes (upwind, iioe1, iioe2) diffuse fields over a few cells per event and do not carry the drainage across a lateral motion; interp is exact up to the interpolation.",
+    "notes": "Raises on any other value."
+   },
+   {
+    "key": "interp_remap",
+    "unit": "mesh spacings",
+    "default": "none (one remap at the end of each event)",
+    "meaning": "With advect: interp, apply each tectonic event in remaps of about this many mesh spacings (barycentric weights).",
+    "range": "0.5 to 2 (1 recommended when the motion should carry the drainage); 0.1-cell remaps smooth the valleys away",
+    "resolution": "Expressed in mesh spacings, so the remap distance scales with the cell size; the interval is a whole number of steps set by the fastest node, so with fast plates and long dt each remap can move more than requested.",
+    "notes": "Must be > 0 and only with advect: interp."
+   },
+   {
+    "key": "radius",
+    "unit": "m",
+    "default": "6378137.0",
+    "meaning": "Planet radius used for the spherical mesh geometry.",
+    "range": "6.378e6 for Earth; 3.3895e6 for Mars",
+    "resolution": "none",
+    "notes": "Global meshes only."
+   },
+   {
+    "key": "gravity",
+    "unit": "m/s2",
+    "default": "9.81",
+    "meaning": "Surface gravity used by the flexural isostasy.",
+    "range": "9.81 for Earth; 3.71 for Mars",
+    "resolution": "none",
+    "notes": "Not to be confused with the top-level gravity: block (marine gravity currents)."
+   }
+  ]
+ },
+ {
+  "block": "time",
+  "path": "time",
+  "summary": "Required block: simulation period, time step, output and stratigraphic intervals, restart.",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Model start time.",
+    "range": "any (often negative for the past, e.g. -2e7)",
+    "resolution": "none",
+    "notes": "end must be > start."
+   },
+   {
+    "key": "end",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Model end time.",
+    "range": "any > start",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "dt",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Internal time step of the outer (explicit-in-time) process loop; inner solves are implicit.",
+    "range": "1e2 to 1e5 yr in practice: 0.1 to 1 kyr for local carbonate or glacial runs, 1 to 10 kyr regional, 1e4 to 2.5e5 yr global (examples 500 yr to 100 kyr); longer steps smooth transients and lag the coupling between processes",
+    "resolution": "Implicit solves stay stable at any dt, but accuracy is not: the marine picardSub should grow as dt/dx^2 grows, glacial abrasion needs Kg*|u_b|^l*dt well below the relief (see ice), and the remap interval of interp_remap is a whole number of steps.",
+    "notes": "Reset to tout if larger than tout."
+   },
+   {
+    "key": "tout",
+    "unit": "yr",
+    "default": "end - start",
+    "meaning": "Output interval.",
+    "range": "a multiple of dt; 10 to 200 outputs per run is typical",
+    "resolution": "none",
+    "notes": "Reduced to end - start if longer; increased to dt if shorter."
+   },
+   {
+    "key": "rstep",
+    "unit": "- (output index)",
+    "default": "0",
+    "meaning": "Restart from this output step of a previous run in the same output dir.",
+    "range": "0 (no restart) or an existing step",
+    "resolution": "none",
+    "notes": "Forces output: makedir to False."
+   },
+   {
+    "key": "strat",
+    "unit": "yr",
+    "default": "0 (no stratigraphy)",
+    "meaning": "Interval at which a new stratigraphic layer is recorded.",
+    "range": "1 to 10 dt; tout must be a multiple of it",
+    "resolution": "Layer thickness resolution is set by strat and the deposition rate, not by the mesh.",
+    "notes": "Required (> 0) for strata: dual, provenance, carbonate, pelagic, karst and soil mode: regolith. Raises if tout is not divisible by strat."
+   }
+  ]
+ },
+ {
+  "block": "output",
+  "path": "output",
+  "summary": "Output folder and options.",
+  "keys": [
+   {
+    "key": "dir",
+    "unit": "path",
+    "default": "output",
+    "meaning": "Output directory name.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "makedir",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "False: overwrite an existing folder of that name; True: create dir_N with a new number instead.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Set to False on restart."
+   },
+   {
+    "key": "profile",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Enable the wall-clock phase profiler (also -p on the command line).",
+    "range": "False",
+    "resolution": "none",
+    "notes": "Undocumented in the user guide."
+   },
+   {
+    "key": "compression",
+    "unit": "gzip | int 0-9 | none/False",
+    "default": "gzip",
+    "meaning": "HDF5 output compression: gzip (default level), a gzip level, or none for uncompressed (faster I/O, larger files).",
+    "range": "gzip; none on fast parallel file systems when I/O dominates",
+    "resolution": "none",
+    "notes": "Undocumented in the user guide."
+   }
+  ]
+ },
+ {
+  "block": "spl",
+  "path": "spl",
+  "summary": "Stream power law river incision and continental deposition (E = K P^d (P A)^m S^n).",
+  "keys": [
+   {
+    "key": "K",
+    "unit": "m^(1-3m-d) yr^(m+d-1) (with n = 1; S dimensionless)",
+    "default": "required (1e-12 when the block is absent)",
+    "meaning": "Erodibility coefficient of the stream power law E = K P^d (P A)^m S^n, with P A the discharge (m3/yr).",
+    "range": "With m = 0.5, n = 1 and d = 0: about 1e-7 to 1e-5 (examples 1e-6 to 5.5e-6 regional/global, 4e-5 on the uplifted-block test); strongly lithology and climate dependent, calibrate",
+    "resolution": "Keep K when changing the mesh: channel erosion at given area and slope is mesh independent, but MFD hillslope cells collect flow in proportion to their size, so the same K erodes them less on finer meshes (about 0.5^m per halving) and total yields can change; match first-step marine supply between meshes if needed.",
+    "notes": "Required inside spl."
+   },
+   {
+    "key": "d",
+    "unit": "-",
+    "default": "0.0",
+    "meaning": "Exponent of the local precipitation in the erodibility, K P^d (Murphy et al. 2016).",
+    "range": "0 or about 0.42 (field estimate)",
+    "resolution": "none",
+    "notes": "Changes the units of K."
+   },
+   {
+    "key": "m",
+    "unit": "-",
+    "default": "0.5",
+    "meaning": "Discharge exponent.",
+    "range": "0.3 to 0.6; m/n about 0.35 to 0.6 (concavity)",
+    "resolution": "none (but sets how K units and hillslope sensitivity scale)",
+    "notes": ""
+   },
+   {
+    "key": "n",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Slope exponent; n != 1 uses the non-linear SNES solver.",
+    "range": "0.7 to 2; 1 is standard and cheapest",
+    "resolution": "none",
+    "notes": "Non-linear runs (n != 1) are much more expensive."
+   },
+   {
+    "key": "G",
+    "unit": "m/yr",
+    "default": "0.0",
+    "meaning": "Continental deposition coefficient (Yuan et al. 2019): the fraction of the incoming load deposited in a cell is G * area / discharge = G / P (capped at 0.99). 0 = detachment limited.",
+    "range": "0 to about rain/2 (in m/yr); examples 0 to 3",
+    "resolution": "Independent of the mesh spacing (the deposited thickness G Q dt / (P A) has no area left).",
+    "notes": "Keep G <= about half the rainfall rate: at the 0.99 cap the coupled solve becomes near singular (slow, spikes)."
+   },
+   {
+    "key": "maxIter",
+    "unit": "- (iterations)",
+    "default": "500",
+    "meaning": "Maximum non-linear iterations of the SPL SNES (n != 1 only).",
+    "range": "100 to 1000",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "rtol",
+    "unit": "-",
+    "default": "1e-6",
+    "meaning": "Relative tolerance of the non-linear SPL solve (n != 1).",
+    "range": "1e-6 to 1e-5; do not loosen to 1e-4",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "atol",
+    "unit": "m",
+    "default": "1e-6",
+    "meaning": "Absolute tolerance of the non-linear SPL solve (n != 1), on the elevation residual.",
+    "range": "1e-6 to 1e-5",
+    "resolution": "none",
+    "notes": "Unit inferred from the residual (elevation)."
+   },
+   {
+    "key": "solver",
+    "unit": "- (qn | ngmres)",
+    "default": "qn",
+    "meaning": "Primary non-linear solver (n != 1); the other is the automatic fallback.",
+    "range": "qn",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "pcType",
+    "unit": "- (PETSc PC name)",
+    "default": "hypre",
+    "meaning": "Preconditioner of the non-linear SPL Krylov solve (n != 1).",
+    "range": "hypre; gamg, bjacobi or asm as alternatives",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "diffusion",
+  "path": "diffusion",
+  "summary": "Hillslope creep (land and sea), marine and lake non-linear diffusion of fresh deposits, clinoform geometry and channel masking.",
+  "keys": [
+   {
+    "key": "hillslopeKa",
+    "unit": "m2/yr",
+    "default": "required inside the block (0 when absent)",
+    "meaning": "Linear (or non-linear base) hillslope diffusivity on land.",
+    "range": "1e-3 to 1e-2 m2/yr measured at the hillslope scale; effective values of 0.01 to 1 used on km meshes (examples 0 to 1)",
+    "resolution": "Diffusion also acts on one-cell-wide channels, so without channelQ the steady channel steepness grows on finer meshes (30.5, 41.6, 66.4 at 200, 100, 50 m with 0.2 m2/yr instead of 25); smoothing per step scales as D dt/dx^2. Set channelQ or choose the value for the mesh.",
+    "notes": ""
+   },
+   {
+    "key": "hillslopeKm",
+    "unit": "m2/yr",
+    "default": "required inside the block (0 when absent)",
+    "meaning": "Linear diffusivity of the seafloor (and lake floor) creep.",
+    "range": "0 to a few m2/yr (examples 0 to 2); calibrate",
+    "resolution": "Smoothing per step scales as D dt/dx^2.",
+    "notes": ""
+   },
+   {
+    "key": "hillslopenl",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Slope exponent of the non-critical non-linear creep law (Wang et al. 2024); 1 = linear.",
+    "range": "1 to 3 (example 2.5)",
+    "resolution": "Gradients are lower on coarse meshes, so the non-linear term weakens with cell size.",
+    "notes": "Uses hillslopeKa/Km as coefficients. Results changed in Nov 2026 (flux, not its derivative)."
+   },
+   {
+    "key": "hillslopeSc",
+    "unit": "- (m/m)",
+    "default": "0.0 (off)",
+    "meaning": "Critical slope of the Roering et al. (1999) non-linear creep law.",
+    "range": "0.6 to 1.25 (example 0.8)",
+    "resolution": "Resolved slopes fall on coarser meshes, so fewer cells approach Sc there.",
+    "notes": "S/Sc capped at 0.8 internally."
+   },
+   {
+    "key": "hillslopeNb",
+    "unit": "- (terms)",
+    "default": "0",
+    "meaning": "Number of terms of the truncated Taylor series of the critical-slope law (Barnhart et al. 2019); 0 = full Roering law.",
+    "range": "0 or 2 to 5 (example 4)",
+    "resolution": "none",
+    "notes": "Only with hillslopeSc > 0."
+   },
+   {
+    "key": "oFill",
+    "unit": "m (relative to sea level, negative)",
+    "default": "-6000.0",
+    "meaning": "Depth below sea level under which the marine depression filling and flow-direction smoothing are not applied.",
+    "range": "well below sea level, e.g. -1000 to -6000 m on flat models; leave the default on global models",
+    "resolution": "none",
+    "notes": "Cut-off elevation is sea level + oFill; a value above sea level traps sediment at the coast."
+   },
+   {
+    "key": "nonlinKm",
+    "unit": "m2/yr",
+    "default": "10.0",
+    "meaning": "Transport coefficient of the non-linear (deposit-thickness dependent) marine and lake diffusion of fresh river deposits.",
+    "range": "1e2 to 1e4 m2/yr typical (examples 50 to 5e4)",
+    "resolution": "A physical diffusivity: keep it when changing the mesh, but raise picardSub as about (dx_old/dx_new)^2.",
+    "notes": "fine_diff_factor of the strata block multiplies it for fine sediment."
+   },
+   {
+    "key": "clinSlp",
+    "unit": "- (m/m)",
+    "default": "1e-6 (minimum enforced)",
+    "meaning": "Slope of the clinoform top surface below sea level that caps the marine deposition height with distance from the coast.",
+    "range": "1e-5 to 5e-4 (examples)",
+    "resolution": "A gradient: on coarse meshes the coastal distance is coarser, but the cap is resolution independent.",
+    "notes": "Clamped to >= 1e-6."
+   },
+   {
+    "key": "tsSteps",
+    "unit": "- (internal steps)",
+    "default": "2000",
+    "meaning": "Maximum number of internal time steps of the adaptive marine TS solver per goSPL step.",
+    "range": "500 to 5000",
+    "resolution": "none",
+    "notes": "Only with marineSolver: ts."
+   },
+   {
+    "key": "Gmar",
+    "unit": "-",
+    "default": "0.0",
+    "meaning": "Marine deposition coefficient (fraction of the incoming marine flux deposited per cell, capped at 0.99) of the coupled marine deposition solve.",
+    "range": "0 to 1 (examples 0.5, 1)",
+    "resolution": "none",
+    "notes": "Only active on global (spherical) models; ignored on flat meshes. The user guide does not say this."
+   },
+   {
+    "key": "offshore",
+    "unit": "m",
+    "default": "1e7",
+    "meaning": "Distance from the coast beyond which the clinoform-distance cap and the marine fill are not applied (global models).",
+    "range": "default; 1e5 to 1e7 m",
+    "resolution": "none",
+    "notes": "Used only on global meshes (coastDist)."
+   },
+   {
+    "key": "nlPitVolume",
+    "unit": "m3",
+    "default": "1e9",
+    "meaning": "Volume above which a partially filled depression uses the bathymetric pile plus inlet bias geometry (together with nlPitDepth).",
+    "range": "1e8 to 1e10",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "nlPitDepth",
+    "unit": "m",
+    "default": "100.0",
+    "meaning": "Depth above which a partially filled depression uses the diffusion path (both thresholds must be exceeded).",
+    "range": "10 to 500 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "nlPitK",
+    "unit": "m2/yr",
+    "default": "nonlinKm",
+    "meaning": "Non-linear diffusion coefficient used inside selected lakes/pits.",
+    "range": "same order as nonlinKm (example 5000)",
+    "resolution": "As nonlinKm.",
+    "notes": ""
+   },
+   {
+    "key": "pitInletBias",
+    "unit": "- (0 to 1)",
+    "default": "0.10 (0.50 when the diffusion block is absent)",
+    "meaning": "Fraction of each pit deposit concentrated at its inlets (delta seed); the rest fills from the bottom.",
+    "range": "0 to 0.5 (example 0.4)",
+    "resolution": "none",
+    "notes": "Clamped to [0, 1]. Code default differs with and without the block (0.10 vs 0.50). Different from strata: pitInletBias (per fraction, dual lithology)."
+   },
+   {
+    "key": "marineSolver",
+    "unit": "- (picard | ts)",
+    "default": "picard",
+    "meaning": "Marine and lake non-linear diffusion solver: lagged-diffusivity backward Euler (picard) or adaptive PETSc TS rosw (ts).",
+    "range": "picard (required on fine global meshes)",
+    "resolution": "none",
+    "notes": "Unknown values fall back to picard. ts falls back to picard if it fails."
+   },
+   {
+    "key": "picardSub",
+    "unit": "- (sub-steps)",
+    "default": "20",
+    "meaning": "Number of sub-steps of the picard marine solver per goSPL step.",
+    "range": "10 to 100 (20 gave 1.4 % rms of ts on a 190k-node margin)",
+    "resolution": "Scale by about (dx_old/dx_new)^2 when refining (4x per halving) and with longer dt, since the sub-step diffusion number grows as dt/dx^2.",
+    "notes": "Minimum 1."
+   },
+   {
+    "key": "picardIts",
+    "unit": "- (iterations)",
+    "default": "2",
+    "meaning": "Picard (lagged diffusivity) updates per sub-step.",
+    "range": "2 to 3",
+    "resolution": "none",
+    "notes": "Minimum 1."
+   },
+   {
+    "key": "channelQ",
+    "unit": "m3/yr",
+    "default": "none (off)",
+    "meaning": "Discharge above which a land cell is a channel: held fixed by the hillslope diffusion, with the hillslope supply added to the same step's river load.",
+    "range": "channel-head area times rainfall: 1e4 to 1e6 m2 times P (e.g. 1e6 for 1 km2 at 1 m/yr); example 1e6",
+    "resolution": "Keep the channel-head area at least about 10 cell areas on the coarsest mesh used (A_c >= 10 dx^2); then the same value gives the same channels on every mesh. Avoid exact multiples of cell area times rain on regular meshes (ties).",
+    "notes": "Must be > 0. Recommended whenever hillslopeKa is not negligible."
+   }
+  ]
+ },
+ {
+  "block": "ice",
+  "path": "ice",
+  "summary": "Diagnostic glacial model: ELA mass balance routed into an ice discharge, Bahr thickness, Glen sliding, abrasion, till and meltwater.",
+  "keys": [
+   {
+    "key": "hterm",
+    "unit": "m (elevation) or [file, key]",
+    "default": "sea level (unset)",
+    "meaning": "Glacier terminus elevation; no ice below max(hterm, sea level).",
+    "range": "site specific (example 1200 m)",
+    "resolution": "none",
+    "notes": "Scalar or per-vertex map; also in glaciers[] events and the evol file (column 2)."
+   },
+   {
+    "key": "hela",
+    "unit": "m (elevation) or [file, key]",
+    "default": "2000.0",
+    "meaning": "Equilibrium-line altitude: ablation below, accumulation above.",
+    "range": "near sea level (polar) to 5000-6000 m (tropics); example 1500 m",
+    "resolution": "none",
+    "notes": "Per-vertex map recommended on global meshes."
+   },
+   {
+    "key": "hice",
+    "unit": "m (elevation) or [file, key]",
+    "default": "2400.0",
+    "meaning": "Ice-cap altitude: full precipitation captured as ice above it.",
+    "range": "a few hundred m above hela (example 1800 with hela 1500)",
+    "resolution": "none",
+    "notes": "Must stay above hela everywhere."
+   },
+   {
+    "key": "evol",
+    "unit": "file (csv: time yr, hterm m, hela m, hice m)",
+    "default": "none",
+    "meaning": "Time series of the glacier geometry, interpolated linearly in time.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Takes precedence over maps and glaciers (the maps are then ignored)."
+   },
+   {
+    "key": "icedir",
+    "unit": "- (receivers)",
+    "default": "1",
+    "meaning": "Number of MFD directions used to route the ice accumulation.",
+    "range": "1 to 6 (example 5)",
+    "resolution": "More directions spread the ice over wider troughs on fine meshes.",
+    "notes": ""
+   },
+   {
+    "key": "melt",
+    "unit": "-",
+    "default": "0.0",
+    "meaning": "Weight of the below-ELA ablation in the net balance routed into the discharge (0 accumulation only, 1 true net, > 1 shorter tongues).",
+    "range": "0 to 5 (example 5)",
+    "resolution": "none",
+    "notes": "Only controls ice extent; till melt-out and meltwater use the raw ablation."
+   },
+   {
+    "key": "fwidth",
+    "unit": "- (see eheight)",
+    "default": "1.5",
+    "meaning": "Bahr width factor in H = eheight * fwidth * Q^0.3.",
+    "range": "tune the product eheight*fwidth (example 1.5)",
+    "resolution": "none",
+    "notes": "Only the product with eheight matters."
+   },
+   {
+    "key": "eheight",
+    "unit": "m (m3/yr)^-0.3 (as a product with fwidth)",
+    "default": "0.25",
+    "meaning": "Bahr thickness factor in H = eheight * fwidth * Q^0.3 (Q ice discharge, m3/yr).",
+    "range": "product eheight*fwidth chosen so that iceH is 1e1 to 1e3 m (example 0.5)",
+    "resolution": "none",
+    "notes": "Unit of the product inferred from the formula; not stated in the docs."
+   },
+   {
+    "key": "slide",
+    "unit": "m^(2-n)/yr (n = glen; 1/(m yr) for n = 3)",
+    "default": "1e-3",
+    "meaning": "Basal sliding coefficient of the Glen/Budd sliding law u_b = A_s H^(n-1) |grad s|^(n-1) grad s.",
+    "range": "tune so that iceUb is tens of m/yr in temperate valley glaciers (example 0.3)",
+    "resolution": "none",
+    "notes": "Unit inferred from the law (absorbs (rho_i g)^(n-1))."
+   },
+   {
+    "key": "glen",
+    "unit": "-",
+    "default": "3.0",
+    "meaning": "Glen sliding exponent n.",
+    "range": "3",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "melt_conserve",
+    "unit": "bool",
+    "default": "True",
+    "meaning": "Discharge-conserving meltwater: the accumulated ice water is released where the ice melts out.",
+    "range": "True",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "accum_factor",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Fraction of precipitation converted to ice above the ELA.",
+    "range": "0.3 to 1 (keep <= 1; example 0.9)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "accum_max",
+    "unit": "m ice/yr",
+    "default": "none (no cap)",
+    "meaning": "Cap on the accumulation rate.",
+    "range": "0.1 to 2 m/yr (example 2)",
+    "resolution": "none",
+    "notes": "Set it for high-precipitation runs."
+   },
+   {
+    "key": "glaciers",
+    "unit": "list of events",
+    "default": "none",
+    "meaning": "Time series of {start, hela, hice, hterm} events (each uniform or [file, key]).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "See ice.glaciers[]."
+   }
+  ]
+ },
+ {
+  "block": "ice.glaciers[]",
+  "path": "ice.glaciers[]",
+  "summary": "Time-stepped glacier geometry events (like climate events).",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Start time of the event (holds until the next).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "hela",
+    "unit": "m or [file, key]",
+    "default": "2000.0",
+    "meaning": "ELA for this interval.",
+    "range": "as ice.hela",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "hice",
+    "unit": "m or [file, key]",
+    "default": "2400.0",
+    "meaning": "Ice-cap altitude for this interval.",
+    "range": "as ice.hice",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "hterm",
+    "unit": "m or [file, key]",
+    "default": "sea level",
+    "meaning": "Terminus elevation for this interval.",
+    "range": "as ice.hterm",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "ice.abrasion",
+  "path": "ice.abrasion",
+  "summary": "Velocity-based glacial erosion E_g = Kg |u_b|^l and lateral wall erosion.",
+  "keys": [
+   {
+    "key": "Kg",
+    "unit": "m^(1-l) yr^(l-1) (dimensionless for l = 1)",
+    "default": "0.0 (off)",
+    "meaning": "Vertical abrasion coefficient.",
+    "range": "1e-5 to 1e-4 with l = 1 (Humphrey and Raymond 1994 about 1e-4; example 3e-5)",
+    "resolution": "Stability: the abrasion per step Kg |u_b|^l dt must stay small against the relief (Kg = 3e-5 stable, 1e-4 unstable with dt = 5 kyr in the example); reduce Kg with longer dt.",
+    "notes": "Unit inferred (E in m/yr, u_b in m/yr): dimensionless for l = 1."
+   },
+   {
+    "key": "l",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Sliding-velocity exponent of the abrasion.",
+    "range": "1 to 2",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "Kl",
+    "unit": "same as Kg",
+    "default": "0.0 (off)",
+    "meaning": "Lateral (valley-wall) erosion coefficient; widens troughs towards a U shape.",
+    "range": "same order as Kg (example 3e-5)",
+    "resolution": "As Kg.",
+    "notes": "Kl >> Kg gives runaway widening."
+   },
+   {
+    "key": "lat_l",
+    "unit": "-",
+    "default": "l",
+    "meaning": "Velocity exponent of the lateral erosion.",
+    "range": "1 to 2",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "ice.till",
+  "path": "ice.till",
+  "summary": "Glacial till transport and moraine deposition.",
+  "keys": [
+   {
+    "key": "on",
+    "unit": "bool",
+    "default": "True",
+    "meaning": "Carry abraded rock as till and deposit it as moraine (False: send it to the rivers).",
+    "range": "True",
+    "resolution": "none",
+    "notes": "Inert while Kg = 0."
+   },
+   {
+    "key": "route",
+    "unit": "bool",
+    "default": "True",
+    "meaning": "Route the till down the ice-surface network to each terminus (False: spread the global volume over the ablation zone).",
+    "range": "True (multi-glacier domains)",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "soil",
+  "path": "soil",
+  "summary": "Soil production, soil-aware SPL (SPACE-like) and soil transport.",
+  "keys": [
+   {
+    "key": "soilK",
+    "unit": "same as spl K",
+    "default": "required inside the block",
+    "meaning": "Erodibility of the soil (kappa_s); bedrock uses spl: K.",
+    "range": "a few times spl K (examples 1.6e-6 to 8e-6)",
+    "resolution": "As spl K.",
+    "notes": ""
+   },
+   {
+    "key": "maxProd",
+    "unit": "m/yr (without tempMap); m of soil per m of rain, - (with tempMap)",
+    "default": "5e-5",
+    "meaning": "Maximum soil production rate P0 in the exponential law P0 exp(-H/Hs).",
+    "range": "1e-5 to 3e-4 m/yr (10 to 300 m/Myr; examples 3e-5 to 5e-5)",
+    "resolution": "none",
+    "notes": "With tempMap the code multiplies maxProd by the rainfall (Norton et al. 2013 precipitation factor), so it becomes a factor per m of rain: the user guide does not say this."
+   },
+   {
+    "key": "depthProd",
+    "unit": "m",
+    "default": "0.0",
+    "meaning": "Soil production decay depth Hs.",
+    "range": "0.3 to 1 m (examples 0.5 to 1)",
+    "resolution": "none",
+    "notes": "Code default 0 makes exp(-H/0) degenerate: always set it."
+   },
+   {
+    "key": "roughnessL",
+    "unit": "m",
+    "default": "1.0",
+    "meaning": "Roughness length H* weighting soil versus bedrock erosion (exp(-H/H*)).",
+    "range": "0.1 to 1 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "decayDepth",
+    "unit": "m",
+    "default": "0.7",
+    "meaning": "Soil transport decay depth H0 of the soil diffusion (1 - exp(-H/H0)).",
+    "range": "0.3 to 1 m",
+    "resolution": "none",
+    "notes": "Diffusivities are hillslopeKa/Km."
+   },
+   {
+    "key": "bedrockConv",
+    "unit": "-",
+    "default": "1e-4",
+    "meaning": "Fraction of P0 at which soil turns to bedrock; maximum soil thickness -ln(bedrockConv)*depthProd (0 = no cap).",
+    "range": "1e-8 to 1e-3",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "uniform",
+    "unit": "m",
+    "default": "1.0",
+    "meaning": "Initial uniform soil thickness.",
+    "range": "0 to 2 m (example 0.5)",
+    "resolution": "none",
+    "notes": "Ignored if soilMap is given."
+   },
+   {
+    "key": "soilMap",
+    "unit": "[file, key] (m)",
+    "default": "none",
+    "meaning": "Initial soil thickness map (npz, one value per vertex).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "tempMap",
+    "unit": "[file, key] (deg C)",
+    "default": "none",
+    "meaning": "Annual-mean surface temperature map enabling Arrhenius scaling of production.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Changes the meaning of maxProd (see above); also used by duricrust weather_Ea."
+   },
+   {
+    "key": "activation",
+    "unit": "J/mol",
+    "default": "40e3",
+    "meaning": "Arrhenius activation energy of soil production.",
+    "range": "4e4 to 8e4 J/mol (silicate weathering)",
+    "resolution": "none",
+    "notes": "Only with tempMap."
+   },
+   {
+    "key": "tempRef",
+    "unit": "deg C",
+    "default": "15.0",
+    "meaning": "Reference temperature at which production equals maxProd.",
+    "range": "10 to 25",
+    "resolution": "none",
+    "notes": "Only with tempMap."
+   },
+   {
+    "key": "mode",
+    "unit": "- (lumped | regolith)",
+    "default": "lumped",
+    "meaning": "lumped: soil also absorbs deposits; regolith: soil is weathering regolith only, deposits go to the stratigraphy.",
+    "range": "regolith for stratigraphic studies",
+    "resolution": "none",
+    "notes": "regolith needs time: strat > 0."
+   },
+   {
+    "key": "maxIter",
+    "unit": "- (iterations)",
+    "default": "500",
+    "meaning": "Maximum iterations of the soil SNES.",
+    "range": "100 to 1000",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "rtol",
+    "unit": "-",
+    "default": "1e-6",
+    "meaning": "Relative tolerance of the soil SNES.",
+    "range": "1e-6 to 1e-5; never 1e-4 (needles)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "atol",
+    "unit": "m",
+    "default": "1e-6",
+    "meaning": "Absolute tolerance of the soil SNES.",
+    "range": "1e-6 to 1e-5",
+    "resolution": "none",
+    "notes": "Unit inferred."
+   },
+   {
+    "key": "pcType",
+    "unit": "- (PETSc PC)",
+    "default": "hypre",
+    "meaning": "Preconditioner of the soil SNES Krylov solve.",
+    "range": "hypre; gamg, bjacobi, asm",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "solver",
+    "unit": "- (ngmres | qn)",
+    "default": "ngmres",
+    "meaning": "Primary soil non-linear solver; the other is the fallback.",
+    "range": "ngmres",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "sedfactor[]",
+  "path": "sedfactor[]",
+  "summary": "Time series of spatial multipliers of the erodibility K (surface lithology).",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Start time of the event (holds until the next).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Before the first event the factor is 1."
+   },
+   {
+    "key": "uniform",
+    "unit": "-",
+    "default": "none",
+    "meaning": "Uniform erodibility factor.",
+    "range": "0.1 to 10",
+    "resolution": "none",
+    "notes": "One of uniform or map is required."
+   },
+   {
+    "key": "map",
+    "unit": "[file, key] (-)",
+    "default": "none",
+    "meaning": "Per-vertex erodibility factor map.",
+    "range": "0.1 to 10",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "compaction",
+  "path": "compaction",
+  "summary": "Porosity-depth curve phi = phis exp(-z/z0s) of the (single-fraction or coarse) sediment.",
+  "keys": [
+   {
+    "key": "phis",
+    "unit": "-",
+    "default": "0.49",
+    "meaning": "Surface porosity.",
+    "range": "0.4 to 0.6 (0.49 sandstone, Sclater and Christie 1980)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "z0s",
+    "unit": "m",
+    "default": "3700.0",
+    "meaning": "e-folding depth of the porosity.",
+    "range": "2000 to 4000 m (3700 sandstone; examples 2000 and 3700)",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "strata",
+  "path": "strata",
+  "summary": "Dual lithology (coarse/fine) and additional lithologies of the stratigraphy.",
+  "keys": [
+   {
+    "key": "dual",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Track coarse and fine sediment separately.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Needs time: strat > 0 (else forced off with a warning). Required by carbonate, pelagic, karst."
+   },
+   {
+    "key": "bedrock_coarse_frac",
+    "unit": "-",
+    "default": "0.5",
+    "meaning": "Coarse fraction of the bedrock (composition of eroded bedrock).",
+    "range": "0.3 to 0.8 (example 0.6)",
+    "resolution": "none",
+    "notes": "Bedrock shares of all lithologies must sum to <= 1."
+   },
+   {
+    "key": "fine_efficiency",
+    "unit": "-",
+    "default": "0.5",
+    "meaning": "Planned marine per-fraction deposition efficiency of fines.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Parsed but not used anywhere in the code (inert); not in the user guide."
+   },
+   {
+    "key": "bedrock_sentinel",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Insert an infinite bedrock layer (bedrock_coarse_frac composition) beneath npstrata layers.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Only relevant with domain: npstrata."
+   },
+   {
+    "key": "fine_diff_factor",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Multiplier of hillslopeKa/Km/nonlinKm for fine sediment (Cd = Cd*(fc + ff*factor)).",
+    "range": "1 to 5 (example 2)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "coarse",
+    "unit": "mapping {phi0, z0}",
+    "default": "compaction values",
+    "meaning": "Porosity curve of the coarse fraction.",
+    "range": "see strata.coarse",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "fine",
+    "unit": "mapping {phi0, z0, k_factor}",
+    "default": "0.63, 1960, 1.0",
+    "meaning": "Porosity curve and erodibility factor of the fine fraction.",
+    "range": "see strata.fine",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "pitInletBias",
+    "unit": "mapping {coarse, fine}",
+    "default": "{coarse: 0.5, fine: 0.0}",
+    "meaning": "Per-fraction lake inlet bias; the contrast coarse - fine sets depth segregation.",
+    "range": "see strata.pitInletBias",
+    "resolution": "none",
+    "notes": "Ignored if not a mapping."
+   },
+   {
+    "key": "lithologies",
+    "unit": "list",
+    "default": "none",
+    "meaning": "Extra lithologies (expert).",
+    "range": "see strata.lithologies[]",
+    "resolution": "none",
+    "notes": "Needs dual: True."
+   }
+  ]
+ },
+ {
+  "block": "strata.coarse",
+  "path": "strata.coarse",
+  "summary": "Coarse (sand) porosity curve.",
+  "keys": [
+   {
+    "key": "phi0",
+    "unit": "-",
+    "default": "compaction: phis (0.49)",
+    "meaning": "Surface porosity of coarse sediment.",
+    "range": "0.4 to 0.5",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "z0",
+    "unit": "m",
+    "default": "compaction: z0s (3700)",
+    "meaning": "Porosity e-folding depth of coarse sediment.",
+    "range": "2500 to 4000 m",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "strata.fine",
+  "path": "strata.fine",
+  "summary": "Fine (silt/clay) porosity curve and erodibility.",
+  "keys": [
+   {
+    "key": "phi0",
+    "unit": "-",
+    "default": "0.63",
+    "meaning": "Surface porosity of fine sediment.",
+    "range": "0.55 to 0.7 (0.63 shale, Sclater and Christie)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "z0",
+    "unit": "m",
+    "default": "1960.0",
+    "meaning": "Porosity e-folding depth of fine sediment.",
+    "range": "1500 to 2500 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "k_factor",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Fine erodibility relative to coarse (K_fine = K * k_factor).",
+    "range": "0.5 to 3 (example 1.5)",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "strata.pitInletBias",
+  "path": "strata.pitInletBias",
+  "summary": "Per-fraction lake/pit deposition bias (dual lithology).",
+  "keys": [
+   {
+    "key": "coarse",
+    "unit": "- (0 to 1)",
+    "default": "0.5",
+    "meaning": "Inlet bias of the coarse fraction.",
+    "range": "0.3 to 1",
+    "resolution": "none",
+    "notes": "Clamped to [0, 1]."
+   },
+   {
+    "key": "fine",
+    "unit": "- (0 to 1)",
+    "default": "0.0",
+    "meaning": "Inlet bias of the fine fraction.",
+    "range": "0 to 0.2",
+    "resolution": "none",
+    "notes": "Clamped to [0, 1]."
+   }
+  ]
+ },
+ {
+  "block": "strata.lithologies[]",
+  "path": "strata.lithologies[]",
+  "summary": "Additional lithologies appended after the fine fraction (expert).",
+  "keys": [
+   {
+    "key": "name",
+    "unit": "text",
+    "default": "required",
+    "meaning": "Unique lithology name (not coarse, fine, nor the carbonate names when carbonate: is on).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "size",
+    "unit": "- (fine | coarse)",
+    "default": "fine",
+    "meaning": "Grain-size group: decides how pits, marine spreading and gravity currents treat it.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "phi0",
+    "unit": "-",
+    "default": "strata.fine phi0",
+    "meaning": "Surface porosity.",
+    "range": "0.1 to 0.7",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "z0",
+    "unit": "m",
+    "default": "strata.fine z0",
+    "meaning": "Porosity e-folding depth.",
+    "range": "1000 to 5000 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "k_factor",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Erodibility multiplier of exposed layers.",
+    "range": "0.05 to 3",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "diff_factor",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Hillslope diffusivity multiplier.",
+    "range": "0.1 to 3",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "bedrock_frac",
+    "unit": "-",
+    "default": "0.0",
+    "meaning": "Share of this lithology in the infinite bedrock (e.g. a carbonate bedrock for karst).",
+    "range": "0 to 1",
+    "resolution": "none",
+    "notes": "All bedrock shares must sum to <= 1."
+   }
+  ]
+ },
+ {
+  "block": "provenance",
+  "path": "provenance",
+  "summary": "Passive source-rock class tracers carried through erosion, transport, deposition and stratigraphy.",
+  "keys": [
+   {
+    "key": "classes",
+    "unit": "- (count)",
+    "default": "0 (off)",
+    "meaning": "Number of source classes.",
+    "range": "2 to 10",
+    "resolution": "none",
+    "notes": "Needs time: strat > 0. One marine class is added when carbonate/pelagic is on."
+   },
+   {
+    "key": "source",
+    "unit": "[file, key] (integer class per vertex)",
+    "default": "none",
+    "meaning": "Per-vertex source class map (values 0 to classes-1).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "uniform",
+    "unit": "- (class index)",
+    "default": "0 if neither given",
+    "meaning": "Single source class everywhere.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "cu_weight",
+    "unit": "-",
+    "default": "not read",
+    "meaning": "Copper-fertility weights; used by examples but NOT a model input (post-processing argument of gospl.analyse.provenance).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Silently ignored by the parser."
+   }
+  ]
+ },
+ {
+  "block": "gravity",
+  "path": "gravity",
+  "summary": "Marine gravity currents (hyperpycnal/turbidity flows) routing part of the river load down the slope with a run-out length, plus slope failure and erosion.",
+  "keys": [
+   {
+    "key": "fraction",
+    "unit": "- (0 to 1)",
+    "default": "none (flood trigger used)",
+    "meaning": "Fixed fraction of the river load reaching the sea that becomes a gravity current.",
+    "range": "0.1 to 0.3 to start",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "runout",
+    "unit": "m",
+    "default": "5e4",
+    "meaning": "e-folding run-out length of the coarse (or single) deposit.",
+    "range": "1e4 regional to 1e5+ global (examples 1e4, 1e5)",
+    "resolution": "A length, independent of the cell size, but must exceed the cell size (several cells on global meshes).",
+    "notes": "> 0."
+   },
+   {
+    "key": "runout_fine",
+    "unit": "m",
+    "default": "4 * runout",
+    "meaning": "Run-out length of the fine fraction (dual lithology).",
+    "range": "2 to 4 times runout",
+    "resolution": "As runout.",
+    "notes": ""
+   },
+   {
+    "key": "bypass_depth",
+    "unit": "m below sea level",
+    "default": "50.0",
+    "meaning": "No deposition or erosion shallower than this (full rate at twice it); also an accommodation limit.",
+    "range": "about 50 m (storm wave base)",
+    "resolution": "none",
+    "notes": "0 turns it off."
+   },
+   {
+    "key": "bypass_slope",
+    "unit": "- (gradient)",
+    "default": "none (off)",
+    "meaning": "Deposition decreases on steeper seafloor (half at this slope).",
+    "range": "between the shelf and foreset gradients of the mesh (example 0.01)",
+    "resolution": "Gradients depend on the mesh (coarse meshes smear slopes): choose per mesh.",
+    "notes": "Leave off on global meshes."
+   },
+   {
+    "key": "network",
+    "unit": "- (raw | smoothed)",
+    "default": "raw",
+    "meaning": "Surface the currents follow: eps-filled raw seafloor or the clinoform network.",
+    "range": "raw regional; smoothed global",
+    "resolution": "none",
+    "notes": "smoothed ignores receivers, flow_exp, *_fine and network_smooth."
+   },
+   {
+    "key": "receivers",
+    "unit": "- (1 to 12)",
+    "default": "6",
+    "meaning": "Downslope receivers of the coarse network.",
+    "range": "2 (belts) to 6",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "flow_exp",
+    "unit": "-",
+    "default": "2.0",
+    "meaning": "Slope exponent of the flux partition (higher concentrates).",
+    "range": "1 to 4",
+    "resolution": "none",
+    "notes": ">= 0."
+   },
+   {
+    "key": "receivers_fine",
+    "unit": "- (1 to 12)",
+    "default": "receivers",
+    "meaning": "Receivers of the fine network.",
+    "range": "6 (lobes)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "flow_exp_fine",
+    "unit": "-",
+    "default": "flow_exp",
+    "meaning": "Slope exponent of the fine network.",
+    "range": "1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "network_smooth",
+    "unit": "passes",
+    "default": "0",
+    "meaning": "Neighbour-averaging passes of the routing surface.",
+    "range": "0 to 3",
+    "resolution": "In passes, so the smoothing width scales with the cell size.",
+    "notes": ""
+   },
+   {
+    "key": "slope_smooth",
+    "unit": "passes",
+    "default": "0",
+    "meaning": "Smoothing passes of the gradient used by bypass_slope, erosion and failure.",
+    "range": "0 to 3",
+    "resolution": "As network_smooth.",
+    "notes": ""
+   },
+   {
+    "key": "deposit_spread",
+    "unit": "m",
+    "default": "2 mean cell sizes",
+    "meaning": "Lateral spreading length of each step's deposit (volume conserving).",
+    "range": "1 to 3 cell sizes (example 1500 m on 615 m cells)",
+    "resolution": "Default scales with the cell size; an explicit value is a length.",
+    "notes": "0 turns it off."
+   },
+   {
+    "key": "coarse_factor",
+    "unit": "- (0 to 1)",
+    "default": "0.3",
+    "meaning": "Share of the diverted fraction applied to the coarse load (dual lithology).",
+    "range": "0.3 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "erosion_length",
+    "unit": "m",
+    "default": "none (off)",
+    "meaning": "Slope erosion pick-up length (expert).",
+    "range": "tens of cell sizes",
+    "resolution": "Only meaningful on meshes of 200 m or finer (warning above); must be many cells long or the solve fails.",
+    "notes": "> 0."
+   },
+   {
+    "key": "erosion_slope",
+    "unit": "- (gradient)",
+    "default": "0.02",
+    "meaning": "Gradient S_e at which erosion reaches half its rate.",
+    "range": "0.01 to 0.05",
+    "resolution": "Mesh-dependent gradient.",
+    "notes": ""
+   },
+   {
+    "key": "max_erosion",
+    "unit": "m per step",
+    "default": "10.0",
+    "meaning": "Cap of gravity erosion per cell and step.",
+    "range": "small, 1 to 10 m",
+    "resolution": "Per step, so it depends on dt.",
+    "notes": ""
+   },
+   {
+    "key": "erosion_exp",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Exponent a of the non-linear pick-up (Q/erosion_flux)^(a-1).",
+    "range": "1 to 2 (tested to 2)",
+    "resolution": "none",
+    "notes": ">= 1."
+   },
+   {
+    "key": "erosion_flux",
+    "unit": "m3/yr",
+    "default": "1e4",
+    "meaning": "Reference flux Q_e of the non-linear pick-up.",
+    "range": "calibrate",
+    "resolution": "none",
+    "notes": "> 0."
+   },
+   {
+    "key": "failure_slope",
+    "unit": "- (gradient)",
+    "default": "none (off)",
+    "meaning": "Sediment deposited during the run fails where the seafloor is steeper than this.",
+    "range": "0.02 to 0.08 (examples)",
+    "resolution": "Mesh-dependent gradient: choose from the mesh slopes.",
+    "notes": ""
+   },
+   {
+    "key": "max_failure",
+    "unit": "m per step",
+    "default": "10.0",
+    "meaning": "Cap of the failed thickness per cell and step.",
+    "range": "10 to 20 m",
+    "resolution": "Per step, so it depends on dt.",
+    "notes": ""
+   },
+   {
+    "key": "flood",
+    "unit": "mapping",
+    "default": "see gravity.flood",
+    "meaning": "Process-based trigger used when fraction is absent.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "gravity.flood",
+  "path": "gravity.flood",
+  "summary": "Hyperpycnal flood-fraction trigger (Mulder and Syvitski 1995), used when gravity: fraction is absent.",
+  "keys": [
+   {
+    "key": "c_crit",
+    "unit": "kg/m3",
+    "default": "40.0",
+    "meaning": "Hyperpycnal threshold concentration.",
+    "range": "35 to 45 kg/m3",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "rating_exp",
+    "unit": "-",
+    "default": "1.8",
+    "meaning": "Exponent b of the rating curve Qs ~ Q^b.",
+    "range": "1.5 to 2.5",
+    "resolution": "none",
+    "notes": "> 1."
+   },
+   {
+    "key": "sigma",
+    "unit": "-",
+    "default": "1.2",
+    "meaning": "Log-standard deviation of daily discharge.",
+    "range": "1 to 2 (about 2 for small flashy catchments)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "rho_s",
+    "unit": "kg/m3",
+    "default": "2650.0",
+    "meaning": "Sediment grain density.",
+    "range": "2650",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "carbonate",
+  "path": "carbonate",
+  "summary": "Benthic carbonate production by Bosscher and Schlager factories (framework built in place as reef, loose carb_sand/carb_mud to the marine transport).",
+  "keys": [
+   {
+    "key": "insolation",
+    "unit": "W/m2",
+    "default": "400.0",
+    "meaning": "Surface light I0 shared by all factories.",
+    "range": "400 (CarboKitten); same units as saturation",
+    "resolution": "none",
+    "notes": "> 0. Needs strata: dual, time: strat, seadepo True, nodep False."
+   },
+   {
+    "key": "min_depth",
+    "unit": "m",
+    "default": "0.0",
+    "meaning": "Production stops this far below sea level (reef-flat top).",
+    "range": "0 to 1 m (example 0.5)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "exposure_length",
+    "unit": "m",
+    "default": "none",
+    "meaning": "Length of the open-water index (elevation minus its smoothing over this length).",
+    "range": "3 to 10 cells regional; a lagoon width locally (hundreds of m to a few km; example 300 m)",
+    "resolution": "A length, but shorter than 2 to 3 cells gives a noisy index: set from the mesh spacing.",
+    "notes": "Required when a response uses exposure."
+   },
+   {
+    "key": "factories",
+    "unit": "list",
+    "default": "euphotic, oligophotic, aphotic (CarboKitten)",
+    "meaning": "Carbonate factories; giving the list replaces the defaults.",
+    "range": "see carbonate.factories[]",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "lithologies",
+    "unit": "mapping by name",
+    "default": "carb_sand, carb_mud, reef defaults",
+    "meaning": "Overrides of the carbonate lithology properties.",
+    "range": "see carbonate.lithologies.<name>",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "carbonate.factories[]",
+  "path": "carbonate.factories[]",
+  "summary": "One carbonate factory: rate = growth * tanh(insolation exp(-extinction depth)/saturation) times habitat and responses.",
+  "keys": [
+   {
+    "key": "name",
+    "unit": "text",
+    "default": "factory<k>",
+    "meaning": "Unique label.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "growth",
+    "unit": "m/Myr",
+    "default": "0.0",
+    "meaning": "Maximum production rate g.",
+    "range": "100 to 1000 m/Myr platform-averaged (CarboKitten 100 to 500); reef builders up to a few thousand (examples 150 to 6000)",
+    "resolution": "Production integrated within the step, so dt independent.",
+    "notes": "Read in m/Myr, stored in m/yr."
+   },
+   {
+    "key": "extinction",
+    "unit": "1/m",
+    "default": "0.1",
+    "meaning": "Light extinction coefficient k.",
+    "range": "0.005 (aphotic) to 0.8 (euphotic)",
+    "resolution": "none",
+    "notes": ">= 0."
+   },
+   {
+    "key": "saturation",
+    "unit": "W/m2",
+    "default": "60.0",
+    "meaning": "Light I_k at which production saturates.",
+    "range": "50 to 450 (60 CarboKitten)",
+    "resolution": "none",
+    "notes": "> 0."
+   },
+   {
+    "key": "framework",
+    "unit": "- (0 to 1)",
+    "default": "0.0",
+    "meaning": "Fraction built in place as reef.",
+    "range": "0 to 0.3 global, 0.3 to 0.6 regional, up to 0.8 local reef builders",
+    "resolution": "Resolution dependent choice: on coarse meshes reef is a sub-cell margin facies.",
+    "notes": ""
+   },
+   {
+    "key": "sand",
+    "unit": "- (0 to 1)",
+    "default": "0.5",
+    "meaning": "Fraction of the loose part that is carb_sand (rest carb_mud).",
+    "range": "0.3 to 0.8",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "habitat",
+    "unit": "[file, key] (-)",
+    "default": "none",
+    "meaning": "Per-vertex production multiplier map (clipped at 0).",
+    "range": "0 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "response",
+    "unit": "list of tables",
+    "default": "none",
+    "meaning": "Response tables {control, x, f} multiplied together.",
+    "range": "see carbonate.factories[].response[]",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "carbonate.factories[].response[]",
+  "path": "carbonate.factories[].response[]",
+  "summary": "Response table: production times f interpolated at the control value (constant beyond the ends).",
+  "keys": [
+   {
+    "key": "control",
+    "unit": "- (depth | slope | sedrate | exposure | temperature | wave | solute | turbidity)",
+    "default": "required",
+    "meaning": "Controlling variable. Units of x: depth m, slope m/m, sedrate m/yr (previous step clastic marine deposition), exposure m, temperature deg C (needs sst:), wave 0 to 1 (needs waves:), solute solute/m2/yr (needs geochem river_load), turbidity m/yr of mud.",
+    "range": "n/a",
+    "resolution": "slope and exposure are mesh dependent.",
+    "notes": ""
+   },
+   {
+    "key": "x",
+    "unit": "unit of the control",
+    "default": "required",
+    "meaning": "Increasing control values (>= 2).",
+    "range": "e.g. sedrate [0, 1e-3]; temperature [16, 18, 28, 32]; depth [0, 10, 30]",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "f",
+    "unit": "-",
+    "default": "required",
+    "meaning": "Multipliers (>= 0) at x.",
+    "range": "0 to 1",
+    "resolution": "none",
+    "notes": "Same length as x."
+   },
+   {
+    "key": "species",
+    "unit": "text",
+    "default": "required for solute",
+    "meaning": "Geochemistry species of the solute plume.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Only control: solute."
+   },
+   {
+    "key": "length",
+    "unit": "m",
+    "default": "required for solute and turbidity",
+    "meaning": "Plume decay length offshore (solute) or exp(-d/length) of the turbid mud plume.",
+    "range": "1e4 to 2e5 m (examples)",
+    "resolution": "Should span several cells.",
+    "notes": "> 0."
+   },
+   {
+    "key": "source",
+    "unit": "- (transport | mouths)",
+    "default": "transport",
+    "meaning": "Turbidity source: mud carried through each cell by the previous marine routing, or river mouths only.",
+    "range": "transport",
+    "resolution": "none",
+    "notes": "Only control: turbidity."
+   }
+  ]
+ },
+ {
+  "block": "carbonate.lithologies.<name>",
+  "path": "carbonate.lithologies.<name>",
+  "summary": "Overrides of carb_sand (coarse, 0.45, 2500 m, 1, 1), carb_mud (fine, 0.65, 1500 m, 1, 1), reef (coarse, 0.2, 5000 m, 0.1, 0.1).",
+  "keys": [
+   {
+    "key": "phi0",
+    "unit": "-",
+    "default": "0.45 / 0.65 / 0.2",
+    "meaning": "Surface porosity.",
+    "range": "0.1 to 0.7",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "z0",
+    "unit": "m",
+    "default": "2500 / 1500 / 5000",
+    "meaning": "Porosity e-folding depth.",
+    "range": "1000 to 5000 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "k_factor",
+    "unit": "-",
+    "default": "1 / 1 / 0.1",
+    "meaning": "Erodibility multiplier.",
+    "range": "0.05 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "diff_factor",
+    "unit": "-",
+    "default": "1 / 1 / 0.1",
+    "meaning": "Diffusivity multiplier.",
+    "range": "0.1 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "size",
+    "unit": "- (fine | coarse)",
+    "default": "coarse / fine / coarse",
+    "meaning": "Grain-size group.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Accepted by the code (dict update) but not documented."
+   }
+  ]
+ },
+ {
+  "block": "sst",
+  "path": "sst",
+  "summary": "Sea-surface temperature through time for the temperature responses (carbonate factories, pelagic rain, karst).",
+  "keys": [
+   {
+    "key": "events",
+    "unit": "list",
+    "default": "none",
+    "meaning": "Step-function events {start, uniform or map}.",
+    "range": "see sst.events[]",
+    "resolution": "none",
+    "notes": "Give events, curve or both."
+   },
+   {
+    "key": "curve",
+    "unit": "file (2 columns: time yr, SST deg C; comma-separated if .csv, else whitespace)",
+    "default": "none",
+    "meaning": "SST curve interpolated in time; anomaly added to the events if both are given.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Times must increase."
+   }
+  ]
+ },
+ {
+  "block": "sst.events[]",
+  "path": "sst.events[]",
+  "summary": "One SST event (holds until the next).",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Start time.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "uniform",
+    "unit": "deg C",
+    "default": "none",
+    "meaning": "Uniform SST.",
+    "range": "0 to 32",
+    "resolution": "none",
+    "notes": "uniform or map required."
+   },
+   {
+    "key": "map",
+    "unit": "[file, key] (deg C)",
+    "default": "none",
+    "meaning": "Per-vertex SST map.",
+    "range": "-2 to 32",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "waves",
+  "path": "waves",
+  "summary": "Relative wave energy (0 to 1) with shadows from (d.grad + 1/fetch + kappa(depth)) E = 1/fetch per direction.",
+  "keys": [
+   {
+    "key": "climate",
+    "unit": "list",
+    "default": "required",
+    "meaning": "Wave directions and weights.",
+    "range": "see waves.climate[]",
+    "resolution": "none",
+    "notes": "Non-empty."
+   },
+   {
+    "key": "fetch",
+    "unit": "m",
+    "default": "none",
+    "meaning": "Growth length to full energy over open water.",
+    "range": "a few hundred km (example 5e5)",
+    "resolution": "Length, resolution independent.",
+    "notes": "Required on a global mesh."
+   },
+   {
+    "key": "refraction",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Turn waves towards the shore in water shallower than shoal_depth (Snell).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "refraction_length",
+    "unit": "m",
+    "default": "none",
+    "meaning": "Smoothing length of the bathymetry used for refraction.",
+    "range": "a few cells (example 300 m)",
+    "resolution": "Set from the mesh spacing.",
+    "notes": "> 0."
+   },
+   {
+    "key": "decay",
+    "unit": "m",
+    "default": "1e5",
+    "meaning": "Attenuation length in deep water.",
+    "range": "much longer than the domain (examples 1e6, 1e7)",
+    "resolution": "none",
+    "notes": "> 0."
+   },
+   {
+    "key": "shoal_depth",
+    "unit": "m",
+    "default": "20.0",
+    "meaning": "Depth below which waves feel the bottom.",
+    "range": "10 to 30 m (wave base)",
+    "resolution": "none",
+    "notes": "> 0."
+   },
+   {
+    "key": "shoal_length",
+    "unit": "m",
+    "default": "2e3",
+    "meaning": "Attenuation length at the shoreline.",
+    "range": "width of the surf zone to reef flat, 300 m to 50 km (examples)",
+    "resolution": "Should span at least a cell.",
+    "notes": "> 0."
+   }
+  ]
+ },
+ {
+  "block": "waves.climate[]",
+  "path": "waves.climate[]",
+  "summary": "One wave direction.",
+  "keys": [
+   {
+    "key": "from",
+    "unit": "degrees (0 N, 90 E) or zonal",
+    "default": "required (or from_map)",
+    "meaning": "Bearing the waves come from; zonal gives trade winds/westerlies/polar easterlies (global meshes).",
+    "range": "0 to 360",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "from_map",
+    "unit": "[file, key] (degrees)",
+    "default": "none",
+    "meaning": "Per-vertex bearing map.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weight",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Weight of this direction (normalised to sum 1).",
+    "range": ">= 0",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "coastal_erosion",
+  "path": "coastal_erosion",
+  "summary": "Wave erosion of the shallow seafloor (rate*E*exp(-depth/depth_scale)*K) and cliffs (rate*E_sea*K down to sea level).",
+  "keys": [
+   {
+    "key": "rate",
+    "unit": "m/yr",
+    "default": "1e-3",
+    "meaning": "Erosion rate at full wave energy, sea level and erodibility 1.",
+    "range": "1e-4 to 1e-2 m/yr (examples)",
+    "resolution": "A cliff cell is lowered vertically, so the horizontal cliff retreat implied by a given rate grows with the cell width: recalibrate when changing the mesh.",
+    "notes": "> 0. Needs waves: and seadepo."
+   },
+   {
+    "key": "depth_scale",
+    "unit": "m",
+    "default": "5.0",
+    "meaning": "Seafloor erosion decays as exp(-depth/depth_scale).",
+    "range": "3 to 20 m",
+    "resolution": "none",
+    "notes": "> 0."
+   },
+   {
+    "key": "cliff_height",
+    "unit": "m",
+    "default": "10.0",
+    "meaning": "Land next to the sea up to this height above sea level is a cliff.",
+    "range": "5 to 50 m",
+    "resolution": "none",
+    "notes": ">= 0."
+   },
+   {
+    "key": "max_erosion",
+    "unit": "m per step",
+    "default": "5.0",
+    "meaning": "Cap per cell and step.",
+    "range": "1 to 5 m (example 2)",
+    "resolution": "Per step, depends on dt.",
+    "notes": "> 0."
+   },
+   {
+    "key": "rubble",
+    "unit": "lithology name",
+    "default": "none",
+    "meaning": "Eroded reef framework is routed as this lithology (e.g. carb_sand).",
+    "range": "carb_sand",
+    "resolution": "none",
+    "notes": "Needs a reef lithology."
+   }
+  ]
+ },
+ {
+  "block": "pelagic[]",
+  "path": "pelagic[]",
+  "summary": "Events of pelagic carbonate rain (preserved linearly between lysocline and CCD, as carb_mud) and hemipelagic clay (as fine).",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Event start (holds until the next).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "carbonate",
+    "unit": "m/Myr or [file, key] (m/Myr)",
+    "default": "0",
+    "meaning": "Pelagic carbonate rain.",
+    "range": "1 to 30 m/Myr (calcareous ooze 1 to 3 cm/kyr)",
+    "resolution": "none",
+    "notes": "Needs strata: dual and time: strat (the user guide says only stratigraphy, the code also requires dual)."
+   },
+   {
+    "key": "lysocline",
+    "unit": "m (depth)",
+    "default": "required with carbonate",
+    "meaning": "Depth where dissolution starts.",
+    "range": "2500 to 4000 m (modern about 3500 to 4000)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "ccd",
+    "unit": "m (depth)",
+    "default": "lysocline",
+    "meaning": "Carbonate compensation depth.",
+    "range": "3500 to 5000 m (modern about 4500)",
+    "resolution": "none",
+    "notes": ">= lysocline."
+   },
+   {
+    "key": "clay",
+    "unit": "m/Myr or [file, key] (m/Myr)",
+    "default": "0",
+    "meaning": "Hemipelagic clay rain.",
+    "range": "0.1 to 2 m/Myr",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "clay_decay",
+    "unit": "m",
+    "default": "none",
+    "meaning": "Clay rate times exp(-d/L) with distance from land through the sea.",
+    "range": "tens to hundreds of km (example 3e5)",
+    "resolution": "A length; should span many cells.",
+    "notes": "> 0."
+   },
+   {
+    "key": "resuspend",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Hand the rain to the same step's marine diffusion instead of settling in place.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "temperature",
+    "unit": "{x: deg C, f: -}",
+    "default": "none",
+    "meaning": "Carbonate rain multiplied by f interpolated at the SST.",
+    "range": "e.g. x [5, 25], f [0.3, 1]",
+    "resolution": "none",
+    "notes": "Needs sst:."
+   }
+  ]
+ },
+ {
+  "block": "carbonate_supply",
+  "path": "carbonate_supply",
+  "summary": "Supply-limited carbonate burial from the marine reservoir of a geochemistry species.",
+  "keys": [
+   {
+    "key": "species",
+    "unit": "text",
+    "default": "required",
+    "meaning": "Geochemistry species feeding the burial.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Needs groundwater geochem with river_load and marine_coupling, and carbonate: or pelagic:."
+   },
+   {
+    "key": "yield",
+    "unit": "m3 of carbonate per unit of solute",
+    "default": "required (> 0)",
+    "meaning": "Rock volume made per unit of solute (as duricrust solid_volume).",
+    "range": "calibrate with the --summary carbonate_supply record (examples 1e-3 to 20)",
+    "resolution": "none",
+    "notes": "> 0."
+   },
+   {
+    "key": "pelagic",
+    "unit": "bool",
+    "default": "True",
+    "meaning": "Pelagic rain shares the supply.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "karst",
+  "path": "karst",
+  "summary": "Dissolution of exposed carbonate lithologies by runoff, D = rate * R * max(Q/(R A0), 1)^focus * f_T.",
+  "keys": [
+   {
+    "key": "rate",
+    "unit": "m of rock per m of runoff (-)",
+    "default": "5e-5",
+    "meaning": "Volume of rock dissolved per volume of runoff (C_eq/rho).",
+    "range": "2e-5 to 1e-4 (50 m/Myr with 1 m/yr runoff)",
+    "resolution": "none",
+    "notes": "> 0. Needs strata: dual and lithologies to dissolve."
+   },
+   {
+    "key": "lithologies",
+    "unit": "list of names",
+    "default": "reef, carb_sand, carb_mud where defined",
+    "meaning": "Lithologies that dissolve.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "focus",
+    "unit": "-",
+    "default": "0.0",
+    "meaning": "Exponent on the contributing area (focus along drainage).",
+    "range": "0 to 0.5 (example 0.3)",
+    "resolution": "none",
+    "notes": ">= 0."
+   },
+   {
+    "key": "focus_area",
+    "unit": "m2",
+    "default": "mean cell area",
+    "meaning": "Reference area A0.",
+    "range": "1e5 to 1e7 m2",
+    "resolution": "With the default (mean cell area) and focus > 0 the dissolution changes with the mesh; set an explicit value for resolution-independent results.",
+    "notes": "> 0."
+   },
+   {
+    "key": "cover",
+    "unit": "m",
+    "default": "0.5",
+    "meaning": "Insoluble residue thickness that stops dissolution below.",
+    "range": "0.1 to 2 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "max_dissolution",
+    "unit": "m per step",
+    "default": "5.0",
+    "meaning": "Cap per cell and step.",
+    "range": "1 to 10 m",
+    "resolution": "Per step, depends on dt.",
+    "notes": ""
+   },
+   {
+    "key": "temperature",
+    "unit": "{x: deg C, f: -}",
+    "default": "none",
+    "meaning": "Dissolution multiplier vs SST.",
+    "range": "e.g. x [0, 25], f [0.3, 1]",
+    "resolution": "none",
+    "notes": "Needs sst:."
+   },
+   {
+    "key": "species",
+    "unit": "text",
+    "default": "none",
+    "meaning": "Geochemistry species receiving the dissolved carbonate in its river load.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Needs geochem river_load."
+   },
+   {
+    "key": "solute_per_m3",
+    "unit": "solute units per m3 of rock",
+    "default": "1.0",
+    "meaning": "Conversion of dissolved rock to solute.",
+    "range": "calibrate",
+    "resolution": "none",
+    "notes": "> 0."
+   }
+  ]
+ },
+ {
+  "block": "groundwater",
+  "path": "groundwater",
+  "summary": "Implicit Dupuit-Boussinesq water table, with optional duricrust and Level-B solute geochemistry.",
+  "keys": [
+   {
+    "key": "Ksat",
+    "unit": "m/yr",
+    "default": "1.0",
+    "meaning": "Saturated hydraulic conductivity K_h.",
+    "range": "1e1 to 1e5 m/yr (3e-7 to 3e-3 m/s; examples 3.65e4, 1e6)",
+    "resolution": "none",
+    "notes": "Scalar only in the code (float); the user guide claims a map or per-lithology value is possible, which is not the case."
+   },
+   {
+    "key": "specific_yield",
+    "unit": "-",
+    "default": "0.1",
+    "meaning": "Drainable porosity S.",
+    "range": "0.01 to 0.3",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "aquifer_base",
+    "unit": "m (depth below surface), [file, key], or from_soil",
+    "default": "50.0",
+    "meaning": "Depth of the impermeable base z_bed.",
+    "range": "10 to 100 m (examples 30 to 100)",
+    "resolution": "none",
+    "notes": "from_soil needs soil:."
+   },
+   {
+    "key": "bedrock_depth",
+    "unit": "m",
+    "default": "0.0",
+    "meaning": "Permeable rock below the soil bedrock, only with aquifer_base: from_soil.",
+    "range": "0 to 10 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "min_sat_thickness",
+    "unit": "m",
+    "default": "1.0",
+    "meaning": "Floor of the saturated thickness.",
+    "range": "0.1 to 1 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "infiltration",
+    "unit": "- or [file, key]",
+    "default": "0.3",
+    "meaning": "Fraction of max(0, rain - evap) recharging the aquifer.",
+    "range": "0.05 to 0.5 (examples 0.005 to 0.3)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "conserve_baseflow",
+    "unit": "bool",
+    "default": "True",
+    "meaning": "Return seepage to the rivers as baseflow.",
+    "range": "True",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "lake_exchange",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Lake-aquifer volume coupling.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "subglacial_recharge",
+    "unit": "-",
+    "default": "0.0",
+    "meaning": "Fraction of glacial meltwater infiltrating under ice.",
+    "range": "0 to 0.3",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "fine_infil_factor",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Infiltration multiplier for fine sediment (dual lithology).",
+    "range": "0.1 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "infil_slope_ref",
+    "unit": "- (gradient)",
+    "default": "0.0 (off)",
+    "meaning": "Reference slope of the f/(1 + slope/ref) reduction.",
+    "range": "0.1 to 0.5",
+    "resolution": "Slopes depend on the mesh.",
+    "notes": ""
+   },
+   {
+    "key": "picard_its",
+    "unit": "- (iterations)",
+    "default": "3",
+    "meaning": "Inner iterations of the unconfined non-linearity T(h).",
+    "range": "3 to 5",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "seepage_passes",
+    "unit": "- (passes)",
+    "default": "4",
+    "meaning": "Seepage free-boundary passes.",
+    "range": "4 to 8",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "duricrust",
+    "unit": "mapping",
+    "default": "none (no crust)",
+    "meaning": "Generic duricrust.",
+    "range": "see groundwater.duricrust",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "geochem",
+    "unit": "mapping",
+    "default": "none",
+    "meaning": "Conservative solute geochemistry.",
+    "range": "see groundwater.geochem",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "groundwater.duricrust",
+  "path": "groundwater.duricrust",
+  "summary": "Capillary-fringe induration that armors the erodibility.",
+  "keys": [
+   {
+    "key": "form_rate",
+    "unit": "m/yr",
+    "default": "1e-4",
+    "meaning": "Formation rate k_form at full favourability and supply.",
+    "range": "1e-5 to 1e-4 m/yr (examples 5e-5, 1e-4)",
+    "resolution": "none",
+    "notes": "Not used when geochem: is on (precip_rate governs)."
+   },
+   {
+    "key": "max_thickness",
+    "unit": "m",
+    "default": "5.0",
+    "meaning": "Maximum crust thickness.",
+    "range": "2 to 20 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "fringe_depth",
+    "unit": "m",
+    "default": "3.0",
+    "meaning": "Centre of the capillary-fringe band on water-table depth.",
+    "range": "0.5 to 5 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "fringe_width",
+    "unit": "m",
+    "default": "2.0",
+    "meaning": "Gaussian half-width of the band.",
+    "range": "0.5 to 3 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "discharge_gate",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Restrict crust to groundwater discharge zones.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "supply_exp",
+    "unit": "-",
+    "default": "1.0",
+    "meaning": "Exponent p on (rain - evap) in the proxy supply.",
+    "range": "0.5 to 2",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weather_Ea",
+    "unit": "J/mol",
+    "default": "0.0 (off)",
+    "meaning": "Arrhenius activation energy of the supply (uses soil tempMap).",
+    "range": "4e4 to 8e4",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "armor_max",
+    "unit": "- (0 to 1)",
+    "default": "0.9",
+    "meaning": "Maximum fractional K reduction.",
+    "range": "0.5 to 0.98",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "armor_diffusion",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Also armor the hillslope diffusivity.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "break_rate",
+    "unit": "- (m crust per m incision)",
+    "default": "1.0",
+    "meaning": "Crust removed per unit surface incision.",
+    "range": "0.5 to 2",
+    "resolution": "none",
+    "notes": "Unit inferred from the code."
+   },
+   {
+    "key": "decay_rate",
+    "unit": "1/yr",
+    "default": "1e-6",
+    "meaning": "Slow disequilibrium decay away from the fringe.",
+    "range": "1e-9 to 1e-6 (example 1e-9)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weathering",
+    "unit": "mapping",
+    "default": "proxy",
+    "meaning": "Solute supply mode.",
+    "range": "see groundwater.duricrust.weathering",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "groundwater.duricrust.weathering",
+  "path": "groundwater.duricrust.weathering",
+  "summary": "Weathering supply Psi feeding crust formation.",
+  "keys": [
+   {
+    "key": "mode",
+    "unit": "- (proxy | rate | prodsoil)",
+    "default": "proxy",
+    "meaning": "Climate proxy, explicit Maher-Chamberlain rate, or soil production.",
+    "range": "proxy",
+    "resolution": "none",
+    "notes": "rate/prodsoil fall back to proxy without soil."
+   },
+   {
+    "key": "C_eq",
+    "unit": "solute concentration (relative)",
+    "default": "1.0",
+    "meaning": "Equilibrium concentration (mode rate).",
+    "range": "calibrate",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "Dw",
+    "unit": "m2/yr (inferred: Dw/(R L) dimensionless)",
+    "default": "1.0",
+    "meaning": "Damkohler-type weathering coefficient (mode rate).",
+    "range": "calibrate",
+    "resolution": "none",
+    "notes": "Unit inferred from frac = 1 - exp(-Dw/(R L))."
+   },
+   {
+    "key": "path_length",
+    "unit": "m",
+    "default": "20.0",
+    "meaning": "Flow path length L when soil is off (mode rate).",
+    "range": "10 to 100 m",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weatherability",
+    "unit": "- or [file, key]",
+    "default": "1.0",
+    "meaning": "Relative weatherability (mode rate).",
+    "range": "0 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weather_Ea",
+    "unit": "J/mol",
+    "default": "not read",
+    "meaning": "Listed in the user guide example but ignored by the parser here (only duricrust.weather_Ea is read).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Doc/code mismatch."
+   }
+  ]
+ },
+ {
+  "block": "groundwater.geochem",
+  "path": "groundwater.geochem",
+  "summary": "Level-B conservative multi-tracer solute geochemistry.",
+  "keys": [
+   {
+    "key": "species",
+    "unit": "list",
+    "default": "one default tracer",
+    "meaning": "Tracers.",
+    "range": "see groundwater.geochem.species[]",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "conserve",
+    "unit": "bool",
+    "default": "True",
+    "meaning": "Keep and report the closed solute budget.",
+    "range": "True",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weatherability_from",
+    "unit": "- (source_class | surface_class)",
+    "default": "none",
+    "meaning": "Label for weatherability_by_class tables.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Needs provenance:."
+   },
+   {
+    "key": "lithology",
+    "unit": "[file, key] (integer per vertex)",
+    "default": "none",
+    "meaning": "Standalone lithology label map.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "river_load",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Route the exported solute down the rivers.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Needed by carbonate solute response, carbonate_supply, karst species."
+   },
+   {
+    "key": "marine_coupling",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Accumulate coastal delivery in a marine reservoir.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Needs river_load."
+   }
+  ]
+ },
+ {
+  "block": "groundwater.geochem.species[]",
+  "path": "groundwater.geochem.species[]",
+  "summary": "One solute tracer.",
+  "keys": [
+   {
+    "key": "name",
+    "unit": "text",
+    "default": "solute<i>",
+    "meaning": "Tracer label.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weatherability",
+    "unit": "- or [file, key]",
+    "default": "1.0",
+    "meaning": "Relative dissolution rate.",
+    "range": "0 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "weatherability_by_class",
+    "unit": "list (-)",
+    "default": "none",
+    "meaning": "Per-class weatherability.",
+    "range": "0 to 1",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "precip_rate",
+    "unit": "1/yr",
+    "default": "1.0",
+    "meaning": "Fringe precipitation rate k_p.",
+    "range": "1e-6 to 1 1/yr (examples 2e-4 to 1)",
+    "resolution": "A rate: scale down with longer dt (near 1 saturates in one step at My dt).",
+    "notes": ""
+   },
+   {
+    "key": "solid_volume",
+    "unit": "m3 per unit solute",
+    "default": "1.0",
+    "meaning": "Crust volume per unit precipitated solute.",
+    "range": "calibrate",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "source_pool",
+    "unit": "solute per m2 of cell area",
+    "default": "1e6",
+    "meaning": "Dissolvable source-rock reservoir per unit cell area.",
+    "range": "large (1e6 to 1e9) for rate-limited weathering",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "c_sat",
+    "unit": "solute concentration",
+    "default": "1.0",
+    "meaning": "Saturation threshold (reserved, unused in the physics).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "river_decay",
+    "unit": "- per drainage step",
+    "default": "0.0",
+    "meaning": "First-order in-transit loss along the river.",
+    "range": "0 to 0.5",
+    "resolution": "Per receiver hop, so the loss per km grows on finer meshes.",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "sea",
+  "path": "sea",
+  "summary": "Eustatic sea level: a constant position and/or a curve through time.",
+  "keys": [
+   {
+    "key": "position",
+    "unit": "m",
+    "default": "0.0",
+    "meaning": "Sea-level elevation; when a curve is also given, it is added to every value of the curve (datum offset).",
+    "range": "0 for present-day datum; examples -1000 to 0 m on meshes with a shifted datum",
+    "resolution": "none",
+    "notes": "Shifts every sea-level dependent threshold (oFill is relative to it)."
+   },
+   {
+    "key": "curve",
+    "unit": "file (2 columns: time yr, sea level m; comma or whitespace separated, no header)",
+    "default": "none",
+    "meaning": "Sea-level curve, interpolated linearly in time and held constant beyond its ends.",
+    "range": "eustatic amplitudes of tens of m (Milankovitch, up to about 120 m) to about 250 m (long-term Haq-type curves)",
+    "resolution": "Sea-level changes faster than dt are aliased: sample the curve at least at dt.",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "climate[]",
+  "path": "climate[]",
+  "summary": "List of rainfall (and optional evaporation) events, each holding from its start time until the next.",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Start time of the event.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Rain is 0 before the first event if it starts after time: start."
+   },
+   {
+    "key": "uniform",
+    "unit": "m/yr",
+    "default": "none",
+    "meaning": "Uniform rainfall rate.",
+    "range": "0.1 to 3 m/yr (examples 0.1 to 2.5)",
+    "resolution": "none",
+    "notes": "Each event needs one of uniform, map or zscale."
+   },
+   {
+    "key": "map",
+    "unit": "[file, key] (m/yr; npz, one value per mesh vertex)",
+    "default": "none",
+    "meaning": "Per-vertex rainfall map.",
+    "range": "0 to about 5 m/yr",
+    "resolution": "none",
+    "notes": "May point at the npdata file."
+   },
+   {
+    "key": "zscale",
+    "unit": "[A (1/yr, i.e. m/yr per m), B (m/yr)]",
+    "default": "none",
+    "meaning": "Rainfall linear in the current elevation, P = A z + B, clamped at 0, re-evaluated every step.",
+    "range": "A of order 1e-4 to 1e-3 per yr (example 8e-4), B 0.1 to 1 m/yr",
+    "resolution": "none",
+    "notes": "Cheap proxy without wind or rain shadow."
+   },
+   {
+    "key": "evap_uniform",
+    "unit": "m/yr",
+    "default": "none (no evaporation)",
+    "meaning": "Uniform evaporation rate subtracted from runoff and lake inflow.",
+    "range": "0 to 2 m/yr (potential evaporation of arid regions up to about 2 to 3 m/yr)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "evap_map",
+    "unit": "[file, key] (m/yr)",
+    "default": "none",
+    "meaning": "Per-vertex evaporation map.",
+    "range": "0 to 2 m/yr",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "evap_stream",
+    "unit": "bool",
+    "default": "False",
+    "meaning": "Losing-stream mode: evaporation is debited from the accumulated discharge (global switch if any event sets it).",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "A few extra flow solves per step."
+   }
+  ]
+ },
+ {
+  "block": "orography",
+  "path": "orography",
+  "summary": "Linear orographic precipitation (Smith and Barstad 2004) solved on the unstructured mesh; flat (2D) meshes only.",
+  "keys": [
+   {
+    "key": "wind_speed",
+    "unit": "m/s",
+    "default": "10.0",
+    "meaning": "Uniform wind speed.",
+    "range": "5 to 20 m/s",
+    "resolution": "The advection length wind_speed x conv_time (or fall_time), 10 km with the defaults, should span several cells for the rain shadow to be resolved.",
+    "notes": ""
+   },
+   {
+    "key": "wind_dir",
+    "unit": "degrees (direction the wind comes from; 0 N, 90 E)",
+    "default": "0.0",
+    "meaning": "Wind direction (meteorological convention).",
+    "range": "0 to 360",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "env_lapse_rate",
+    "unit": "degC/km",
+    "default": "-4.0",
+    "meaning": "Environmental lapse rate (with the two keys below sets Cw = ref_density * moist / env).",
+    "range": "-4 to -6.5 degC/km",
+    "resolution": "none",
+    "notes": "Must be non-zero."
+   },
+   {
+    "key": "moist_lapse_rate",
+    "unit": "degC/km",
+    "default": "-7.0",
+    "meaning": "Moist adiabatic lapse rate.",
+    "range": "-4 to -7 degC/km",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "ref_density",
+    "unit": "kg/m3",
+    "default": "7.4e-3",
+    "meaning": "Reference saturation water-vapour density.",
+    "range": "1e-3 to 2e-2 kg/m3 (Cw bounds of the code docstring)",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "conv_time",
+    "unit": "s",
+    "default": "1000.0",
+    "meaning": "Cloud water to hydrometeor conversion time tau_c.",
+    "range": "200 to 2000 s",
+    "resolution": "See wind_speed.",
+    "notes": ""
+   },
+   {
+    "key": "fall_time",
+    "unit": "s",
+    "default": "1000.0",
+    "meaning": "Hydrometeor fallout time tau_f.",
+    "range": "200 to 2000 s",
+    "resolution": "See wind_speed.",
+    "notes": ""
+   },
+   {
+    "key": "precip_base",
+    "unit": "mm/h",
+    "default": "7.0",
+    "meaning": "Uniform background (non-orographic) precipitation added everywhere.",
+    "range": "0 to 10 mm/h (example 2)",
+    "resolution": "none",
+    "notes": "Converted to m/yr with rainfall_frequency."
+   },
+   {
+    "key": "precip_min",
+    "unit": "mm/h",
+    "default": "0.01",
+    "meaning": "Minimum precipitation floor (lee shadow).",
+    "range": "0.001 to 1 mm/h",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "rainfall_frequency",
+    "unit": "storms of 1 h per day",
+    "default": "1",
+    "meaning": "Number of 1-hour storms per day used to convert mm/h into m/yr.",
+    "range": "0.1 to 24",
+    "resolution": "none",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "block": "tectonics[]",
+  "path": "tectonics[]",
+  "summary": "List of tectonic events with vertical and/or horizontal displacement rates.",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Event start time.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "end",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Event end time.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "An event with only start and end stops all motion for its duration."
+   },
+   {
+    "key": "upsub",
+    "unit": "[file, key] (m/yr; npz, one value per vertex)",
+    "default": "none",
+    "meaning": "Vertical uplift (+) or subsidence (-) rate.",
+    "range": "1e-5 to 1e-2 m/yr (0.01 to 10 mm/yr)",
+    "resolution": "none",
+    "notes": "Applied at the start of each step."
+   },
+   {
+    "key": "hdisp",
+    "unit": "[file, key] (m/yr; npz (n, 3) array vx, vy, vz)",
+    "default": "none",
+    "meaning": "Horizontal (3D) displacement rates; z component 0 on flat meshes.",
+    "range": "1e-3 to 1e-1 m/yr (1 to 100 mm/yr plate speeds)",
+    "resolution": "With Eulerian schemes the Courant number v dt/dx should stay below about 1; with interp see domain: interp_remap.",
+    "notes": "Needs domain: advect."
+   },
+   {
+    "key": "zfit",
+    "unit": "[file, key, flag] (m)",
+    "default": "none",
+    "meaning": "Paleo-elevation map: cells at or below sea level are reset to it at each step of the event.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Undocumented in the user guide. Only used when the list has three elements (the third is not otherwise read)."
+   }
+  ]
+ },
+ {
+  "block": "flexure",
+  "path": "flexure",
+  "summary": "Flexural isostasy, D grad^4 w + drho g w = q with D = E Te^3 / (12 (1 - nu^2)).",
+  "keys": [
+   {
+    "key": "method",
+    "unit": "- (fem | global)",
+    "default": "fem",
+    "meaning": "fem: parallel finite-volume biharmonic on flat meshes; global: spherical-harmonic solve (rank 0) on global meshes.",
+    "range": "fem (flat), global (sphere)",
+    "resolution": "none",
+    "notes": "FD/FFT no longer accepted."
+   },
+   {
+    "key": "thick",
+    "unit": "m",
+    "default": "10000.0",
+    "meaning": "Uniform effective elastic thickness Te (temap overrides it).",
+    "range": "5e3 to 1e5 m (examples 5e3 to 3e4; oceanic and young lithosphere low, cratons high)",
+    "resolution": "The flexural parameter alpha = (4D/(drho g))^(1/4) is about 30 to 40 km for Te = 10 km and grows as Te^(3/4); the mesh spacing should be several times smaller than alpha.",
+    "notes": ""
+   },
+   {
+    "key": "rhoc",
+    "unit": "kg/m3",
+    "default": "2300.0",
+    "meaning": "Density of the load (sediment/crust).",
+    "range": "2200 to 2800",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "rhoa",
+    "unit": "kg/m3",
+    "default": "3300.0",
+    "meaning": "Asthenosphere (mantle) density.",
+    "range": "3200 to 3400",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "young",
+    "unit": "Pa",
+    "default": "65e9",
+    "meaning": "Young's modulus E.",
+    "range": "6.5e10 to 1e11 Pa",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "nu",
+    "unit": "-",
+    "default": "0.25",
+    "meaning": "Poisson ratio.",
+    "range": "0.25",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "bcN",
+    "unit": "- (0Slope0Shear | Mirror | 0Displacement0Slope)",
+    "default": "0Slope0Shear",
+    "meaning": "North boundary condition (fem only).",
+    "range": "0Slope0Shear or Mirror when loads are far from the edge",
+    "resolution": "Matters only when the flexural wavelength reaches the domain size.",
+    "notes": ""
+   },
+   {
+    "key": "bcE",
+    "unit": "- (as bcN)",
+    "default": "0Slope0Shear",
+    "meaning": "East boundary condition (fem only).",
+    "range": "as bcN",
+    "resolution": "As bcN.",
+    "notes": ""
+   },
+   {
+    "key": "bcS",
+    "unit": "- (as bcN)",
+    "default": "0Slope0Shear",
+    "meaning": "South boundary condition (fem only).",
+    "range": "as bcN",
+    "resolution": "As bcN.",
+    "notes": ""
+   },
+   {
+    "key": "bcW",
+    "unit": "- (as bcN)",
+    "default": "0Slope0Shear",
+    "meaning": "West boundary condition (fem only).",
+    "range": "as bcN",
+    "resolution": "As bcN.",
+    "notes": ""
+   },
+   {
+    "key": "interval",
+    "unit": "- (steps)",
+    "default": "1",
+    "meaning": "Apply flexure every interval steps, accumulating the load in between.",
+    "range": "1 to 10",
+    "resolution": "Coarsens the loading history to interval x dt.",
+    "notes": "Minimum 1."
+   },
+   {
+    "key": "ninterp",
+    "unit": "- (points)",
+    "default": "4",
+    "meaning": "Source points of the mesh to Driscoll-Healy grid interpolation (global only).",
+    "range": "4",
+    "resolution": "none",
+    "notes": ""
+   },
+   {
+    "key": "res_deg",
+    "unit": "degrees",
+    "default": "0.25",
+    "meaning": "Resolution of the Driscoll-Healy grid (global only).",
+    "range": "0.25 to 1 (coarser is cheaper with little change)",
+    "resolution": "Should be no coarser than the flexural wavelength (hundreds of km); finer than the mesh is wasted.",
+    "notes": ""
+   },
+   {
+    "key": "maxIter",
+    "unit": "- (iterations)",
+    "default": "50",
+    "meaning": "Maximum Anderson/Picard iterations of the varying-Te global solve.",
+    "range": "20 to 100",
+    "resolution": "none",
+    "notes": "Unused without temap or with fem. Not the same key as spl: maxIter."
+   },
+   {
+    "key": "tol",
+    "unit": "-",
+    "default": "5e-4",
+    "meaning": "Relative tolerance |dw|/|w| of the varying-Te iteration (global).",
+    "range": "1e-4 to 1e-3",
+    "resolution": "none",
+    "notes": "Minimum 1e-12."
+   },
+   {
+    "key": "relax",
+    "unit": "- (0 to 1)",
+    "default": "1.0",
+    "meaning": "Under-relaxation of the varying-Te update (global).",
+    "range": "0.3 to 1 (lower for strong Te contrasts)",
+    "resolution": "none",
+    "notes": "Clamped to [1e-3, 1]."
+   }
+  ]
+ },
+ {
+  "block": "temap[]",
+  "path": "temap[]",
+  "summary": "Spatially and temporally variable elastic thickness events (fem and global).",
+  "keys": [
+   {
+    "key": "start",
+    "unit": "yr",
+    "default": "required",
+    "meaning": "Event start time.",
+    "range": "n/a",
+    "resolution": "none",
+    "notes": "Start the first event at time: start: otherwise the parser inserts a row with Te 0 and no map, which _updateTe then tries to load as a map (looks like a crash path, unverified by a run)."
+   },
+   {
+    "key": "uniform",
+    "unit": "m",
+    "default": "none",
+    "meaning": "Uniform Te for this event.",
+    "range": "5e3 to 1e5 m",
+    "resolution": "As flexure: thick.",
+    "notes": "One of uniform or map is required. Only honoured by method: fem; the global method always reads the map. uniform: 0 is treated as a map event."
+   },
+   {
+    "key": "map",
+    "unit": "[file, key] (m; npz, one value per vertex)",
+    "default": "none",
+    "meaning": "Per-vertex Te map.",
+    "range": "5e3 to 1e5 m",
+    "resolution": "As flexure: thick.",
+    "notes": ""
+   }
+  ]
+ }
+]

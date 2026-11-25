@@ -117,6 +117,12 @@ import build_gallery  # noqa: E402
 build_gallery.RELEASE = release
 build_gallery.build()
 
+# The reference pages of the user guide (units and ranges of the inputs and
+# outputs, the module chooser), built from docs/user_guide/reference/*.json.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_guide"))
+import build_reference  # noqa: E402
+build_reference.build()
+
 # Links to goSPL-examples follow the docs version (the same branch or tag as
 # the gallery): :examples:`path` and :examples_raw:`path` in the pages,
 # |examples_ref| in parsed-literal blocks.
@@ -150,7 +156,7 @@ language = 'en'
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_examples_src",
-                    "*.md", "dev", "examples/build_gallery.py",
+                    "*.md", "dev", "examples/build_gallery.py", "user_guide/build_reference.py",
                     "examples/generated/gallery.rst"]
 # the example notebooks start at H2 or skip levels: not worth a warning each
 suppress_warnings = ["myst.header"]

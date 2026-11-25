@@ -1,0 +1,902 @@
+{
+ "modules": [
+  {
+   "id": "core",
+   "label": "Mesh, flow routing and river incision (always on)",
+   "block": "domain:, time:, spl:, output:",
+   "page": "user_guide/inputfile",
+   "summary": "Unstructured mesh, multiple-flow-direction routing with depression filling and the detachment-limited stream power law (spl: K, m, n=1); always run.",
+   "group": "Core",
+   "requires": [],
+   "requires_any": [
+    [
+     {
+      "id": "climate",
+      "why": "Rain comes from the climate events or, instead, from the orographic model (unstructuredmesh.py:899-902). With neither, _updateRain calls len(self.raindata) on None (unstructuredmesh.py:1112): no parser check, the run stops with a TypeError."
+     },
+     {
+      "id": "orography",
+      "why": "Replaces the climate rain (unstructuredmesh.py:899)."
+     }
+    ]
+   ],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both (flat plane or sphere, detected from the mesh: a mesh with domain edges is flat; vertex degree at most 12, unstructuredmesh.py:342)"
+  },
+  {
+   "id": "sea",
+   "label": "Sea level",
+   "block": "sea:",
+   "page": "user_guide/optfile1",
+   "summary": "Constant sea level (position, default 0 m) or a sea-level curve; sets the shoreline used by every marine process.",
+   "group": "Core",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "climate",
+   "label": "Rainfall (climate events)",
+   "block": "climate:",
+   "page": "user_guide/optfile1",
+   "summary": "Time series of uniform, map or elevation-scaled rainfall driving runoff and discharge.",
+   "group": "Climate",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "orography",
+     "why": "With an orography block the rain is computed by cptOrography and the climate rain is never read (unstructuredmesh.py:899-902); evaporation rows of the climate block are still applied.",
+     "enforced": "silently off"
+    }
+   ],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "evaporation",
+   "label": "Evaporation",
+   "block": "climate: evap_uniform / evap_map",
+   "page": "user_guide/optfile1",
+   "summary": "Evaporation per climate event, removed from the runoff source of the flow solve and from the groundwater recharge.",
+   "group": "Climate",
+   "requires": [
+    {
+     "id": "climate",
+     "why": "Evaporation is read from the rows of the climate block (inputparser.py:1333, _defineEvap called from _readRain).",
+     "enforced": "needed to be useful"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "groundwater",
+     "why": "The recharge is infiltration times max(0, rain - evap) (gwplex.py:270-285)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "orography",
+   "label": "Orographic precipitation",
+   "block": "orography:",
+   "page": "user_guide/optfile1",
+   "summary": "Smith and Barstad linear orographic rain solved on the mesh with a uniform wind; replaces the climate rain.",
+   "group": "Climate",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "climate",
+     "why": "The climate rain is ignored when orography is on (unstructuredmesh.py:899-902).",
+     "enforced": "silently off"
+    }
+   ],
+   "recommends": [],
+   "mesh": "flat only (uniform wind in the x, y plane, inflow edges from advectBorders, addprocess.py:764-890; docs optfile1.rst:161 say it does not work on global models; not checked by the code)"
+  },
+  {
+   "id": "sedfactor",
+   "label": "Erodibility factor maps",
+   "block": "sedfactor:",
+   "page": "user_guide/surfproc",
+   "summary": "Time series of uniform or mapped multipliers of the river erodibility K.",
+   "group": "Rivers and hillslopes",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "spl_transport",
+   "label": "Transport-limited deposition in rivers (G > 0)",
+   "block": "spl: G",
+   "page": "user_guide/surfproc",
+   "summary": "Yuan et al. (2019) in-river deposition term; works with the linear, non-linear and soil-aware SPL (SPL.py:311, nlSPL.py:439, soilSPL.py:163).",
+   "group": "Rivers and hillslopes",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "nlspl",
+   "label": "Non-linear stream power law (n != 1)",
+   "block": "spl: n",
+   "page": "user_guide/surfproc",
+   "summary": "SNES solve of the SPL with a slope exponent n other than 1.",
+   "group": "Rivers and hillslopes",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "soil",
+     "why": "With a soil block the soil-aware SPL is used whatever n is (model.py:471-478: cptSoil is tested first); n then enters the soil residual (soilSPL.py:194).",
+     "enforced": "silently off"
+    }
+   ],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "soil",
+   "label": "Soil production and soil-aware SPL",
+   "block": "soil:",
+   "page": "user_guide/surfproc",
+   "summary": "Soil production, soil versus bedrock erodibility and soil transport; replaces the plain SPL solve (model.py:471).",
+   "group": "Soil and groundwater",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "nlspl",
+     "why": "The soil-aware SPL replaces the non-linear SPL solver (model.py:471-478).",
+     "enforced": "silently off"
+    }
+   ],
+   "recommends": [
+    {
+     "id": "strata",
+     "why": "mode: regolith without a strat interval prints a warning: deposits then erode as bedrock (soilSPL.py:46-58)."
+    },
+    {
+     "id": "ice",
+     "why": "Under ice the regolith is held frozen and production stops (soilSPL._iceFrozenMask, soilSPL.py:596-601)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "deposition",
+   "label": "Continental sediment routing and deposition",
+   "block": "domain: nodep (False by default)",
+   "page": "user_guide/inputfile",
+   "summary": "Routes the eroded sediment downstream and deposits it in depressions and on land; on by default, off with nodep: True.",
+   "group": "Rivers and hillslopes",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "hillslope",
+   "label": "Hillslope and marine diffusion",
+   "block": "diffusion:",
+   "page": "user_guide/surfproc",
+   "summary": "Linear or non-linear hillslope creep on land (hillslopeKa) and diffusion of marine deposits (hillslopeKm).",
+   "group": "Rivers and hillslopes",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "channelQ",
+     "why": "Without channelQ the diffusion acts on channel cells, so the channel steepness depends on resolution (AGENTS.md, Known limitations)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "channelQ",
+   "label": "Channel cells out of the hillslope diffusion",
+   "block": "diffusion: channelQ",
+   "page": "user_guide/surfproc",
+   "summary": "Cells with discharge above channelQ are not diffused and the hillslope supply joins the same step's river load.",
+   "group": "Rivers and hillslopes",
+   "requires": [
+    {
+     "id": "hillslope",
+     "why": "channelQ is a key of the diffusion block (inputparser.py:627); with hillslopeKa = hillslopeKm = 0 the diffusion returns at once (hillslope.py:204-206), so there is nothing to keep out of the channels.",
+     "enforced": "needed to be useful"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "deposition",
+     "why": "With deposition on, the hillslope step moves before the sediment routing (hillFirst, model.py:494) so the supply is routed in the same step; with nodep: True it stays after the river step."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "marine_deposition",
+   "label": "Marine deposition of river sediment",
+   "block": "domain: seadepo (True by default)",
+   "page": "user_guide/surfproc",
+   "summary": "Clinoform cascade and marine diffusion of the river load reaching the sea.",
+   "group": "Marine",
+   "requires": [
+    {
+     "id": "deposition",
+     "why": "The marine step runs inside the continental deposition block (model.py:500-507): nodep: True skips it.",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "gravity",
+   "label": "Marine gravity currents",
+   "block": "gravity:",
+   "page": "user_guide/gravity",
+   "summary": "Part of the river load reaching the sea is routed down the slope with a run-out length (hyperpycnal and turbidity currents), with optional slope erosion and failure.",
+   "group": "Marine",
+   "requires": [
+    {
+     "id": "marine_deposition",
+     "why": "The gravity split and routing happen only inside SEAMesh.seaChange (seaplex.py:1713), called under 'if not self.nodep' and 'if self.seaDepo' (model.py:500, 507, 528); no parser check.",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "dual",
+     "why": "Coarse and fine fractions get their own run-out and network under dual lithology (seaplex.py:157, runout_fine)."
+    },
+    {
+     "id": "provenance",
+     "why": "Provenance classes ride the same gravity solve (phase G2)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "waves",
+   "label": "Wave energy and shadows",
+   "block": "waves:",
+   "page": "user_guide/carbonates",
+   "summary": "Relative wave energy per wave direction with shadowing, fetch growth and optional refraction.",
+   "group": "Marine",
+   "requires": [],
+   "requires_any": [
+    [
+     {
+      "id": "coastal_erosion",
+      "why": "waveEnergy() is called only by the coastal erosion (waveplex.py:393) ..."
+     },
+     {
+      "id": "carbonate",
+      "why": "... and by a carbonate factory with a `wave` response control (carbplex.py:616); otherwise the output waveE stays zero."
+     }
+    ]
+   ],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both; a sphere needs `fetch` (raises, waveplex.py:69); `zonal` directions need a sphere (raises on a flat mesh, waveplex.py:75)"
+  },
+  {
+   "id": "coastal_erosion",
+   "label": "Coastal erosion",
+   "block": "coastal_erosion:",
+   "page": "user_guide/carbonates",
+   "summary": "Wave erosion of cliffs and the shallow seafloor; the eroded material joins the same step's marine routing.",
+   "group": "Marine",
+   "requires": [
+    {
+     "id": "waves",
+     "why": "coastal_erosion: needs a `waves:` block (inputparser.py:1990).",
+     "enforced": "raises"
+    },
+    {
+     "id": "marine_deposition",
+     "why": "Needs seadepo: True and nodep: False, the eroded material is spread by the marine routing (waveplex.py:81).",
+     "enforced": "raises"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "strata",
+     "why": "With stratigraphy the erodibility is the surface lithology K and the eroded column keeps its composition (erodeStrat); without, K = 1."
+    },
+    {
+     "id": "carbonate",
+     "why": "`rubble` (reef framework re-routed as another lithology) needs a reef lithology, i.e. a carbonate factory with framework (raises, inputparser.py:2007)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "strata",
+   "label": "Stratigraphic record",
+   "block": "time: strat (and optional domain: npstrata, compaction:)",
+   "page": "user_guide/inputfile",
+   "summary": "Records layers every strat years (thickness, elevation, porosity, erodibility) with compaction; a positive `strat` interval turns it on (inputparser.py:484-490).",
+   "group": "Stratigraphy",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "dual",
+   "label": "Dual lithology (coarse / fine)",
+   "block": "strata: dual: True",
+   "page": "user_guide/surfproc",
+   "summary": "Coarse and fine sediment with their own compaction, erodibility, diffusivity and marine transport.",
+   "group": "Stratigraphy",
+   "requires": [
+    {
+     "id": "strata",
+     "why": "Without a positive strat interval the flag is reset to False with a printed warning (inputparser.py:1634-1643).",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "lithologies",
+   "label": "Additional lithologies",
+   "block": "strata: lithologies:",
+   "page": "user_guide/carbonates",
+   "summary": "Extra lithologies (fine-like or coarse-like, own compaction, K and diffusivity) sharing their size group at every deposit.",
+   "group": "Stratigraphy",
+   "requires": [
+    {
+     "id": "dual",
+     "why": "The list is read only after the dual-lithology test in _readLithologies (inputparser.py:1683-1710); without dual lithology it is ignored.",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "provenance",
+   "label": "Provenance tracers",
+   "block": "provenance:",
+   "page": "user_guide/surfproc",
+   "summary": "Passive source-class labels carried through erosion, transport, deposition and the stratigraphy.",
+   "group": "Stratigraphy",
+   "requires": [
+    {
+     "id": "strata",
+     "why": "Without a positive strat interval provenance is switched off with a printed warning (inputparser.py:2363-2371).",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "dual",
+     "why": "Per-class deposits are also split by fraction under dual lithology."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "sst",
+   "label": "Sea-surface temperature",
+   "block": "sst:",
+   "page": "user_guide/carbonates",
+   "summary": "Sea-surface temperature maps and/or curve through time, used by the temperature responses.",
+   "group": "Carbonates",
+   "requires": [
+    {
+     "id": "dual",
+     "why": "_readSST is called from _readLithologies after the dual-lithology test (inputparser.py:1683, 1729): without dual lithology the block is ignored.",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [
+    [
+     {
+      "id": "carbonate",
+      "why": "Read only by a factory `temperature` response (inputparser.py:2208) ..."
+     },
+     {
+      "id": "pelagic",
+      "why": "... a pelagic event `temperature` table (inputparser.py:2304) ..."
+     },
+     {
+      "id": "karst",
+      "why": "... or the karst `temperature` response (inputparser.py:1944)."
+     }
+    ]
+   ],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "carbonate",
+   "label": "Carbonate production",
+   "block": "carbonate:",
+   "page": "user_guide/carbonates",
+   "summary": "Bosscher and Schlager carbonate factories: reef framework built in place, loose carbonate sand and mud into the marine routing.",
+   "group": "Carbonates",
+   "requires": [
+    {
+     "id": "dual",
+     "why": "carbonate: needs dual lithology and stratigraphy (inputparser.py:1690).",
+     "enforced": "raises"
+    },
+    {
+     "id": "strata",
+     "why": "Same check: dual lithology is reset without a strat interval (inputparser.py:1634), then carbonate raises (inputparser.py:1690).",
+     "enforced": "raises"
+    },
+    {
+     "id": "marine_deposition",
+     "why": "carbonate: needs seadepo: True and nodep: False (carbplex.py:76).",
+     "enforced": "raises"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "waves",
+     "why": "A factory `wave` response raises without a waves: block (inputparser.py:2203)."
+    },
+    {
+     "id": "sst",
+     "why": "A factory `temperature` response raises without an sst: block (inputparser.py:2208)."
+    },
+    {
+     "id": "river_load",
+     "why": "A factory `solute` response raises without groundwater geochemistry and river_load: True (carbplex.py:107)."
+    },
+    {
+     "id": "gravity",
+     "why": "Carbonate on the slope can fail and be carried by the gravity currents (docs marine.rst)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "pelagic",
+   "label": "Pelagic carbonate and hemipelagic clay",
+   "block": "pelagic:",
+   "page": "user_guide/carbonates",
+   "summary": "Events of pelagic carbonate rain (preserved between lysocline and CCD) and hemipelagic clay settling on the seafloor.",
+   "group": "Carbonates",
+   "requires": [
+    {
+     "id": "dual",
+     "why": "pelagic: needs dual lithology and stratigraphy (inputparser.py:1684-1689).",
+     "enforced": "raises"
+    },
+    {
+     "id": "strata",
+     "why": "Same check (dual lithology is reset without a strat interval, inputparser.py:1634).",
+     "enforced": "raises"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "marine_deposition",
+     "why": "A `resuspend` event hands the rain to the marine diffusion only when seadepo is on and nodep off; otherwise it settles in place (carbplex.py:381-386)."
+    },
+    {
+     "id": "sst",
+     "why": "An event `temperature` table raises without an sst: block (inputparser.py:2304)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "carbonate_supply",
+   "label": "Supply-limited carbonate burial",
+   "block": "carbonate_supply:",
+   "page": "user_guide/carbonates",
+   "summary": "Caps carbonate burial by the marine reservoir of a geochemistry species delivered by the rivers.",
+   "group": "Carbonates",
+   "requires": [
+    {
+     "id": "river_load",
+     "why": "Needs groundwater geochemistry with river_load: True (carbplex.py:107).",
+     "enforced": "raises"
+    },
+    {
+     "id": "marine_coupling",
+     "why": "carbonate_supply: needs marine_coupling: True (carbplex.py:113).",
+     "enforced": "raises"
+    },
+    {
+     "id": "marine_deposition",
+     "why": "carbSupplyLimit runs only in the seadepo block of the step (model.py:507, 516); with pelagic only and seadepo off it is never applied (carbonate itself already requires it).",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [
+    [
+     {
+      "id": "carbonate",
+      "why": "carbonate_supply: needs a `carbonate` or a `pelagic` block (inputparser.py:1872)."
+     },
+     {
+      "id": "pelagic",
+      "why": "Same check (inputparser.py:1872)."
+     }
+    ]
+   ],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "karst",
+   "label": "Karst dissolution",
+   "block": "karst:",
+   "page": "user_guide/carbonates",
+   "summary": "Runoff dissolves the exposed carbonate lithologies from the top layer down, leaving an insoluble cover.",
+   "group": "Carbonates",
+   "requires": [
+    {
+     "id": "dual",
+     "why": "karst: needs lithologies (dual lithology and a strat interval) (inputparser.py:1908).",
+     "enforced": "raises"
+    },
+    {
+     "id": "strata",
+     "why": "Same check (inputparser.py:1908).",
+     "enforced": "raises"
+    }
+   ],
+   "requires_any": [
+    [
+     {
+      "id": "carbonate",
+      "why": "A carbonate lithology to dissolve is required (reef, carb_sand or carb_mud, or listed ones), else it raises (inputparser.py:1922); the carbonate block defines them ..."
+     },
+     {
+      "id": "pelagic",
+      "why": "... a pelagic event with carbonate rain adds carb_mud (inputparser.py:2321-2327) ..."
+     },
+     {
+      "id": "lithologies",
+      "why": "... or strata: lithologies entries named in karst: lithologies."
+     }
+    ]
+   ],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "river_load",
+     "why": "With `species` the dissolved carbonate joins that species' river load; raises without geochemistry and river_load (carbplex.py:813)."
+    },
+    {
+     "id": "sst",
+     "why": "A `temperature` response raises without an sst: block (inputparser.py:1944)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "groundwater",
+   "label": "Water table",
+   "block": "groundwater:",
+   "page": "user_guide/groundwater",
+   "summary": "Implicit Dupuit water-table head from infiltrated recharge, with seepage and baseflow.",
+   "group": "Soil and groundwater",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "soil",
+     "why": "aquifer_base: from_soil ties the aquifer base to the soil-bedrock interface (gwplex.py:534-546)."
+    },
+    {
+     "id": "dual",
+     "why": "fine_infil_factor modulates infiltration by the exposed fine fraction only under dual lithology, otherwise ignored (gwplex.py:280)."
+    },
+    {
+     "id": "ice",
+     "why": "subglacial_recharge only acts with the ice model (gwplex.py:307)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "duricrust",
+   "label": "Duricrust",
+   "block": "groundwater: duricrust:",
+   "page": "user_guide/groundwater",
+   "summary": "Capillary-fringe crust that forms near the water table and armours the surface erodibility.",
+   "group": "Soil and groundwater",
+   "requires": [
+    {
+     "id": "groundwater",
+     "why": "Nested key of the groundwater block (inputparser.py:2934).",
+     "enforced": "needed to be useful"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "strata",
+     "why": "Without stratigraphy the crust is surface-only, no induration archive (gwplex.py:979)."
+    },
+    {
+     "id": "geochem",
+     "why": "With geochemistry the crust grows from the precipitated solute instead of form_rate (gwplex.py:154-163)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "geochem",
+   "label": "Groundwater geochemistry",
+   "block": "groundwater: geochem:",
+   "page": "user_guide/groundwater",
+   "summary": "Conservative multi-species solutes: weathering, transport, precipitation and export.",
+   "group": "Soil and groundwater",
+   "requires": [
+    {
+     "id": "groundwater",
+     "why": "Nested key of the groundwater block (inputparser.py:2967).",
+     "enforced": "needed to be useful"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "provenance",
+     "why": "weatherability_from: source_class or surface_class needs provenance, otherwise it falls back to the scalar weatherability with a message (gwplex.py:745-763)."
+    },
+    {
+     "id": "duricrust",
+     "why": "The precipitated solute feeds the crust."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "river_load",
+   "label": "River dissolved load",
+   "block": "groundwater: geochem: river_load: True",
+   "page": "user_guide/groundwater",
+   "summary": "Routes the exported solutes down the river network to the coast.",
+   "group": "Soil and groundwater",
+   "requires": [
+    {
+     "id": "geochem",
+     "why": "Key of the geochem sub-block (inputparser.py:3000); setting it makes the geochem block non-empty, so geochemistry is on.",
+     "enforced": "needed to be useful"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "marine_coupling",
+   "label": "Marine solute reservoir",
+   "block": "groundwater: geochem: marine_coupling: True",
+   "page": "user_guide/groundwater",
+   "summary": "Accumulates the solutes delivered at the coast into a marine reservoir per species.",
+   "group": "Soil and groundwater",
+   "requires": [
+    {
+     "id": "river_load",
+     "why": "Allocated and updated only inside the river-load routing (gwplex.py:229-233, 1458, 1503); without river_load nothing happens.",
+     "enforced": "silently off"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "ice",
+   "label": "Diagnostic glacial model",
+   "block": "ice:",
+   "page": "user_guide/surfproc",
+   "summary": "ELA accumulation routed into an ice discharge, Bahr thickness, sliding, abrasion, till and meltwater.",
+   "group": "Ice",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [
+    {
+     "id": "flexure_flat",
+     "why": "The ice load is added to the flexural load when flexure is on (addprocess.py:644-646, iceplex.py:81)."
+    },
+    {
+     "id": "flexure_global",
+     "why": "Same for global flexure (addprocess.py:644-646)."
+    },
+    {
+     "id": "strata",
+     "why": "Till is recorded in the stratigraphy when it is on (iceplex.py:530)."
+    }
+   ],
+   "mesh": "both"
+  },
+  {
+   "id": "flexure_flat",
+   "label": "Flexural isostasy, flat ('fem')",
+   "block": "flexure: method: 'fem' (default)",
+   "page": "user_guide/optfile2",
+   "summary": "Parallel finite-volume biharmonic plate flexure on the flat mesh, with edge boundary conditions.",
+   "group": "Isostasy",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "flexure_global",
+     "why": "One method per run (flexure: method, inputparser.py:2519-2528).",
+     "enforced": "raises"
+    }
+   ],
+   "recommends": [],
+   "mesh": "flat only: on a sphere the edge point sets are never defined and _buildFlexFEM fails with an AttributeError (addprocess.py:571-575, no explicit check)"
+  },
+  {
+   "id": "flexure_global",
+   "label": "Flexural isostasy, global",
+   "block": "flexure: method: 'global'",
+   "page": "user_guide/optfile2",
+   "summary": "Spherical-harmonic flexure on a Driscoll-Healy grid, serial on rank 0.",
+   "group": "Isostasy",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "flexure_flat",
+     "why": "One method per run.",
+     "enforced": "raises"
+    }
+   ],
+   "recommends": [],
+   "mesh": "sphere only (the DH grid treats the mesh coordinates as a sphere, addprocess.py:122-190; not checked on a flat mesh)"
+  },
+  {
+   "id": "temap",
+   "label": "Elastic thickness maps",
+   "block": "temap:",
+   "page": "user_guide/optfile2",
+   "summary": "Spatially and temporally varying elastic thickness.",
+   "group": "Isostasy",
+   "requires": [],
+   "requires_any": [
+    [
+     {
+      "id": "flexure_flat",
+      "why": "Read only by the flexure solve (_updateTe, addprocess.py:88-120) ..."
+     },
+     {
+      "id": "flexure_global",
+      "why": "... in either method."
+     }
+    ]
+   ],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "tectonics_vertical",
+   "label": "Uplift and subsidence",
+   "block": "tectonics: upsub",
+   "page": "user_guide/optfile2",
+   "summary": "Vertical displacement rates per tectonic event, applied at the start of each step.",
+   "group": "Tectonics",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "advection",
+   "label": "Horizontal advection (upwind / iioe1 / iioe2)",
+   "block": "tectonics: hdisp + domain: advect",
+   "page": "user_guide/optfile2",
+   "summary": "Eulerian advection of the surface and stratigraphy by the horizontal velocity of each tectonic event.",
+   "group": "Tectonics",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "plate_interp",
+     "why": "One advect scheme per run (inputparser.py:343-359).",
+     "enforced": "raises"
+    }
+   ],
+   "recommends": [],
+   "mesh": "flat or cyclic (designed for 2D meshes; on a sphere only the stratigraphy transport is tested, docs tech_guide/tecto.rst:44)"
+  },
+  {
+   "id": "plate_interp",
+   "label": "Plate interpolation",
+   "block": "tectonics: hdisp + domain: advect: interp",
+   "page": "user_guide/optfile2",
+   "summary": "Lagrangian move of the mesh nodes by the event displacement, re-interpolated on the mesh (mainly global models).",
+   "group": "Tectonics",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [
+    {
+     "id": "advection",
+     "why": "One advect scheme per run.",
+     "enforced": "raises"
+    }
+   ],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "interp_remap",
+   "label": "Plate interpolation remaps",
+   "block": "domain: interp_remap",
+   "page": "user_guide/inputfile",
+   "summary": "Applies each event's displacement in remaps of about this many mesh spacings, with barycentric weights.",
+   "group": "Tectonics",
+   "requires": [
+    {
+     "id": "plate_interp",
+     "why": "domain: interp_remap only applies to advect: 'interp' (inputparser.py:372).",
+     "enforced": "raises"
+    }
+   ],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "both"
+  },
+  {
+   "id": "cyclic",
+   "label": "Cyclic (periodic) boundaries",
+   "block": "domain: bc with 'c'",
+   "page": "user_guide/inputfile",
+   "summary": "Periodic North/South or East/West edges on a cylinder mesh.",
+   "group": "Tectonics",
+   "requires": [],
+   "requires_any": [],
+   "excludes": [],
+   "recommends": [],
+   "mesh": "flat (cylinder) mesh only; the mesh must be a cylinder (not checked: a planar mesh does not wrap); serial only (raises at np > 1, inputparser.py:267); edges in pairs (inputparser.py:242-257); bc is ignored on a sphere"
+  }
+ ]
+}

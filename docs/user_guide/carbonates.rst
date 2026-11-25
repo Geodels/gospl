@@ -44,8 +44,8 @@ Requirements
   carbonate is recorded as lithologies of the dual-lithology stratigraphy.
 - ``domain: seadepo: True`` (and ``nodep: False``) for the ``carbonate``
   block: the loose carbonate is spread by the marine transport.
-- The ``pelagic`` block needs only the stratigraphy (it settles in place,
-  unless ``resuspend`` is set).
+- The ``pelagic`` block needs dual lithology and the stratigraphy, but not
+  marine deposition (it settles in place, unless ``resuspend`` is set).
 - The ``karst`` block needs only lithologies to dissolve (the carbonate ones,
   or any listed in ``strata: lithologies``).
 

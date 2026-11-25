@@ -62,8 +62,8 @@ Water & drainage
      - Flow accumulation on the **depression-filled** surface — drainage routed through lakes/pits.
      - always
    * - ``waterFill``
-     - Filled water-surface elevation (lake / depression water level).
-     - when depressions are filled
+     - Lake water depth: depth of water in filled depressions (m), 0 outside lakes.
+     - always, except with ``domain: fast``
    * - ``sedLoad``
      - River **sediment load** carried downstream (m³/yr).
      - always
@@ -234,7 +234,7 @@ Written only when the corresponding block is set (see :ref:`gravity` and
      - Meaning
      - When written
    * - ``gravDep``
-     - Deposit (positive) or slope erosion (negative) of the marine gravity currents during the step (m).
+     - Cumulative deposit (positive) or slope erosion (negative) of the marine gravity currents since the start of the run (m).
      - ``gravity:``
    * - ``carbProd``
      - Benthic **carbonate production** rate of the step, all factories (m/yr).
