@@ -170,7 +170,7 @@ html_sidebars = {
 html_theme_options = {
     "github_url": "https://github.com/Geodels/gospl",
     "search_bar_text": "Search goSPL docs ...",
-    "header_links_before_dropdown": 6,
+    "header_links_before_dropdown": 7,
     "icon_links": [],
     "logo": {
         "text": "goSPL",

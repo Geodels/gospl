@@ -195,7 +195,6 @@ Details are available in the :doc:`contributing guide <contributing>`.
     :hidden:
     :titlesonly:
 
-    Home <self>
     getting_started/index
     tech_guide/index
     user_guide/index
