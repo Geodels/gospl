@@ -240,7 +240,7 @@ MOD_INPUTS = {
 # where to get a mesh, shown with the skeleton input file
 MESH_LINKS = {
     "global_download": "https://www.dropbox.com/scl/fo/kior7a0kf9ylqxnnn7vk5/"
-                       "AJfSqKiefxvb4fHik_uRfeQ?rlkey=dqa4mjsxigzcvl5bh4y610trj&st=7jqcqafe&dl=0",
+                       "AJfSqKiefxvb4fHik_uRfeQ?rlkey=mh9hpd1z0i7u8qwlgspdo2zdf&st=5pj3fxke&dl=0",
     "global_build": "examples/generated/continental_flux/build_inputs",
     "global_data": "examples/generated/global_mesh_data/index",
     "regional_build": "examples/generated/generate_2Dmesh/index",
