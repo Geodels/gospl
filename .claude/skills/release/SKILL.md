@@ -35,8 +35,12 @@ wastes a ~45-minute CI cycle.
 | `docs/conf.py` | `version = "<v>"` (`release` mirrors it). The one that gets forgotten |
 | `docs/_static/version_switch.json` | add the new entry, point `stable` at it |
 
-Verify: `grep -n "<v>" meson.build conda/meta.yaml docs/conf.py docs/_static/version_switch.json`
-shows all four. Also add a `docs/dev/CHANGELOG_DEV.md` row for the release and update
+In the same commit point the README docs links (badge and "Full docs" line) to the
+release, `/en/dev/` -> `/en/v<v>/` (AGENTS.md > "Links to the docs follow the version"):
+`sed -i '' 's|gospl.readthedocs.io/en/dev/|gospl.readthedocs.io/en/v<v>/|g; s|badge/?version=dev)|badge/?version=v<v>)|' README.md`
+
+Verify: `grep -n "<v>" meson.build conda/meta.yaml docs/conf.py docs/_static/version_switch.json README.md`
+shows all five. Also add a `docs/dev/CHANGELOG_DEV.md` row for the release and update
 the "Released packages" table in `conda/AGENTS.md`. Commit messages carry no Claude
 co-author trailer (maintainer preference).
 
@@ -46,6 +50,10 @@ git checkout master && git merge --ff-only dev
 git push origin master                  # ask before pushing
 git tag v<v> && git push origin v<v>    # ask before pushing: this starts the publish
 git checkout dev
+# dev documents dev again: README links back to /en/dev/ (one commit after the tag,
+# so master stays an ancestor of dev for the next fast-forward)
+sed -i '' 's|gospl.readthedocs.io/en/v<v>/|gospl.readthedocs.io/en/dev/|g; s|badge/?version=v<v>)|badge/?version=dev)|' README.md
+git commit -am "README: docs links back to the development docs"
 ```
 `master` is normally a strict ancestor of `dev`; if `--ff-only` refuses, stop and
 ask (someone committed to master directly).

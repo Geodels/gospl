@@ -311,3 +311,7 @@ html[data-theme=dark] .modchart-domain, html[data-theme=dark] .modchart-dom + .m
 .gospl-ref-filter { position: sticky; top: calc(var(--pst-header-height) + 0.5rem); z-index: 10;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08); }
 .gospl-ref-count { margin-left: 0.8rem; font-size: 0.85rem; color: var(--pst-color-text-muted); }
+
+/* QuESt-lab logo in the footer (light and dark versions) */
+.gospl-quest-logo { margin: 0.6rem 0 0.2rem; }
+.gospl-quest-logo img { height: 3.2rem; width: auto; }

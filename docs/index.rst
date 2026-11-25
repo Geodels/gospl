@@ -17,7 +17,7 @@ goSPL documentation
 :examples:`goSPL Examples <.>` |
 `Issues & Ideas <https://github.com/Geodels/gospl/issues>`__ 
 
-**goSPL** (short for ``Global Scalable Paleo Landscape Evolution``) is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate landscapes and basins reconstruction at global scale. goSPL is developed by the `QuESt-Lab Group <https://www.questlab.au>`_ at the University of Sydney.
+**goSPL** (short for ``Global Scalable Paleo Landscape Evolution``) is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate the evolution of landscapes and sedimentary basins from catchment to global scale. goSPL is developed by the `QuESt-Lab Group <https://www.questlab.au>`_ at the University of Sydney.
 
 
 .. grid:: 1
@@ -28,9 +28,23 @@ goSPL documentation
         **Statement of need**
         ^^^
 
-        Since the '90s, many software have been designed to estimate long-term catchment dynamic, drainage evolution as well as sedimentary basins formation  in response to various mechanisms such as tectonic or climatic forcing. These models rely on a set of mathematical and physical expressions that simulate sediment erosion, transport and deposition and can reproduce the first order complexity of Earth's surface geomorphological evolution.
+        Since the 1990s, landscape evolution models have been used to estimate long-term
+        catchment dynamics, drainage evolution and the formation of sedimentary basins
+        in response to tectonic and climatic forcing. They rely on a set of mathematical
+        and physical laws for sediment erosion, transport and deposition, and reproduce
+        the first-order complexity of the Earth's surface.
 
-        Yet, we were still missing a tool to evaluate **global scale** evolution of Earth surface and its interaction with the atmosphere, the hydrosphere, the tectonic and mantle dynamics. goSPL is the first model designed to address this gap. It can be used to better characterise many aspects of the Earth system ranging from the role of atmospheric circulation on physical denudation, from the influence of erosion and deposition of sediments on mantle convection, from the location and abundance of natural resources to the evolution of life.
+        goSPL extends this approach from catchment to **global scale** and over
+        geological time, on meshes of tens of millions of nodes. Beyond river incision,
+        hillslope and marine sediment transport, it couples near-surface hydrology
+        (water table and duricrust), weathering geochemistry, soil production, glacial
+        erosion, flexural isostasy, orographic rainfall and stratigraphy, as well as
+        marine gravity currents, carbonate platforms and karst, each optional and solved
+        in parallel. It can be used to study how the Earth's surface interacts with the
+        atmosphere, the hydrosphere and tectonic and mantle dynamics: the role of
+        atmospheric circulation in denudation, the influence of sediment erosion and
+        deposition on mantle convection, the location and abundance of natural
+        resources, or the evolution of life.
 
 .. image:: images/global.png
   :align: center

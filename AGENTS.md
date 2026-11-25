@@ -375,6 +375,12 @@ the branch it is on, never to `latest`:
   page of that version. At a release, the dev -> main merge of goSPL-examples rewrites
   `/en/dev/` to `/en/v<version>/` (release skill, step 7); a new feature branch rewrites
   them to its own version.
+- **goSPL README** (docs badge and "Full docs" link): the same mapping, `feat/...` -> its
+  feature version, `dev` -> `/en/dev/`, `master` -> `/en/v<version>/`. `master` is a
+  fast-forward of `dev`, so the release commit on `dev` points the README to the release and
+  the commit right after the tag points it back to `/en/dev/` (release skill, steps 3-4).
+- **Statement of need**: one text, kept the same on the docs main page (`docs/index.rst`) and
+  the README; a feature branch lists its own processes, `dev`/`master` only the merged ones.
 - The example pages of the docs gallery turn absolute links to the docs into relative ones
   at build time (`build_gallery._local_links`), so the gallery is right even when a README
   is not.
