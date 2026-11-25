@@ -247,12 +247,23 @@ MOD_DOMAIN = {"orography": "flat", "flexure_flat": "flat", "cyclic": "flat",
               "flexure_global": "sphere"}
 
 
+# the same numbers (Nov 2026), for a build without the cost table
+COST_FALLBACK = {"spl_transport": 33, "soil": 25, "orography": 2, "ice": 11, "strata": 2,
+                 "dual": 5, "provenance": 23, "groundwater": 37, "duricrust": 0, "geochem": 26,
+                 "gravity": 21, "pelagic": 40, "carbonate": 56, "waves": 7,
+                 "coastal_erosion": 0, "karst": 1, "flexure_flat": 1, "flexure_global": 1}
+
+
+def _has_cost_page():
+    return os.path.exists(os.path.join(os.path.dirname(HERE), "cost.rst"))
+
+
 def _costs():
     """Added time (% of the base step at 1 rank) per module, from the table."""
     p = os.path.join(os.path.dirname(HERE), "scaling", "option_cost_table.rst")
     out = {}
     if not os.path.exists(p):
-        return out
+        return {k: float(v) for k, v in COST_FALLBACK.items()}
     rows = re.findall(r"   \* - (.*)\n     - (.*)\n     - (.*)\n     - (.*)\n     - (.*)\n", open(p).read())
     for label, _, one, _, added in rows:
         label = label.strip()
@@ -325,8 +336,8 @@ def _modules(data):
         "that come closest to your set-up with their mesh, resolution and time span,\n"
         "the main parameters of each module with their usual values, and an estimate\n"
         "of the time and memory your run will need. The units and ranges of every\n"
-        "key are on :ref:`input_reference`; the measured cost of each option on\n"
-        ":ref:`option_cost`.\n\n",
+        "key are on :ref:`input_reference`%s.\n\n" % (
+            "; the measured cost of each option on :ref:`option_cost`" if _has_cost_page() else ""),
         ".. raw:: html\n\n",
         "   <div class=\"gospl-modchart\"></div>\n",
         "   <script>window.GOSPL_MODULES = %s; window.GOSPL_DOCROOT = \"../../\";</script>\n" % js,
@@ -335,7 +346,8 @@ def _modules(data):
         "   The graph is built from the checks goSPL makes when it reads the input\n",
         "   file: a module is *required* when goSPL stops without it, ignores the\n",
         "   option, or would compute nothing useful. The resource estimate scales the\n",
-        "   costs measured on a 47,672-node margin (:ref:`option_cost`) with the number\n",
+        "   costs measured on a 47,672-node margin%s with the number\n" % (
+            " (:ref:`option_cost`)" if _has_cost_page() else ""),
         "   of nodes and steps: read it as an order of magnitude. When in doubt, the\n",
         "   message goSPL prints at start-up is the reference.\n",
     ])
