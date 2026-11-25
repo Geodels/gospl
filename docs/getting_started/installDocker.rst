@@ -33,7 +33,7 @@ a local conda install.
 
   The ``geodels/gospl-examples`` image ships the runtime environment only
   (no notebooks). You run it against a local clone of the
-  `goSPL-examples <https://github.com/Geodels/goSPL-examples>`_ repository
+  :examples:`goSPL-examples <.>` repository
   mounted at ``/work`` inside the container.
 
 The image is built automatically from ``environment.yml`` (via ``mamba``) by the
@@ -78,9 +78,11 @@ Main command lines
 Pulling the image
 ^^^^^^^^^^^^^^^^^
 
-Clone the examples repository, then pull the image::
+Clone the examples repository at the goSPL version of this documentation, then pull the image:
 
-  git clone https://github.com/Geodels/goSPL-examples.git
+.. parsed-literal::
+
+  git clone --branch |examples_ref| https://github.com/Geodels/goSPL-examples.git
   cd goSPL-examples
   docker pull geodels/gospl-examples:latest
 

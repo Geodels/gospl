@@ -407,7 +407,7 @@ class Tectonics(object):
         appear; what clipping removes is redistributed again (``maxit``
         passes).
 
-        COLLECTIVE: the volume sums are global ``allreduce``s reached on every
+        COLLECTIVE: the volume sums are global ``allreduce`` calls reached on every
         rank (the loop trip count depends only on those global sums).
 
         Scratch Vecs: reads the IIOE2 result from ``self.tmp`` and writes the

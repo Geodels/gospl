@@ -275,27 +275,30 @@ Pre- and post-processing environment (goSPL-examples)
 ------------------------------------------------------
 
 To run goSPL together with its **pre- and post-processing workflows** — the
-notebooks in the `goSPL-examples <https://github.com/Geodels/goSPL-examples>`_
+notebooks in the :examples:`goSPL-examples <.>`
 repository — you need a fuller environment than the runtime stack above.
 
 The next step consists in downloading the conda environment for goSPL. A conda
 environment is like a virtualenv that allows you to install a specific flavour
-of Python and a set of libraries. For the latest version (``master`` branch) of
-goSPL, this is done by downloading the ``environment.yml`` file from the
-``goSPL-examples`` repository. To do this you can use ``curl``::
+of Python and a set of libraries. For the goSPL version of this documentation, this is done by downloading the ``environment.yml`` file from the
+``goSPL-examples`` repository. To do this you can use ``curl``:
 
-    curl https://raw.githubusercontent.com/Geodels/goSPL-examples/master/environment.yml --output environment.yml
+.. parsed-literal::
 
-or the ``wget`` command::
+    curl |examples_env| --output environment.yml
 
-    wget https://raw.githubusercontent.com/Geodels/goSPL-examples/master/environment.yml
+or the ``wget`` command:
+
+.. parsed-literal::
+
+    wget |examples_env|
 
 This will save the file locally under the same name as it was on GitHub:
 ``environment.yml``.
 
 Alternatively, you can get it from your preferred web browser by clicking on the
 following link:
-`environment.yml <https://raw.githubusercontent.com/Geodels/goSPL-examples/master/environment.yml>`_
+:examples_raw:`environment.yml <environment.yml>`
 and saving it under the name ``environment.yml``.
 
 While goSPL itself is available from the ``geodels`` conda channel (see

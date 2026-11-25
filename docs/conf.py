@@ -92,6 +92,7 @@ extensions = [
     'myst_nb',
     'jupyterlite_sphinx',
     'sphinx.ext.viewcode',
+    'sphinx.ext.extlinks',
 ]
 bibtex_bibfiles = ["refs.bib"]
 
@@ -113,7 +114,22 @@ source_suffix = {".rst": "restructuredtext", ".md": "myst-nb", ".ipynb": "myst-n
 # (docs/examples/build_gallery.py; GOSPL_EXAMPLES_DIR uses a local copy).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples"))
 import build_gallery  # noqa: E402
+build_gallery.RELEASE = release
 build_gallery.build()
+
+# Links to goSPL-examples follow the docs version (the same branch or tag as
+# the gallery): :examples:`path` and :examples_raw:`path` in the pages,
+# |examples_ref| in parsed-literal blocks.
+examples_ref = build_gallery._branch(release)
+extlinks = {
+    "examples": ("https://github.com/Geodels/goSPL-examples/tree/%s/%%s" % examples_ref, "%s"),
+    "examples_raw": ("https://raw.githubusercontent.com/Geodels/goSPL-examples/%s/%%s"
+                     % examples_ref, "%s"),
+}
+extlinks["gospl"] = ("https://github.com/Geodels/gospl/tree/%s/%%s" % examples_ref, "%s")
+rst_epilog = (".. |examples_ref| replace:: %s\n"
+              ".. |examples_env| replace:: https://raw.githubusercontent.com/Geodels/"
+              "goSPL-examples/%s/environment.yml\n" % (examples_ref, examples_ref))
 
 # The example notebooks are shown as they were last run, never executed here.
 nb_execution_mode = "off"
