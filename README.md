@@ -2,7 +2,7 @@
 
 **gospl** is an open source, GPL-licensed library providing a scalable parallelised Python-based numerical model to simulate the evolution of landscapes and sedimentary basins from catchment to global scale.
 
-![gospl](https://github.com/Geodels/gospl/blob/master/docs/images/earth.png?raw=true)
+![goSPL: landscapes, rivers and sedimentary basins on an unstructured mesh](docs/images/gospl_illustration.jpg)
 
 
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.02804/status.svg)](https://doi.org/10.21105/joss.02804)
