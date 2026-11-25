@@ -897,6 +897,38 @@ class PITFill(object):
         """
         self.lFill += level
 
+    def _fillLevel(self, minh):
+        """
+        Elevation below which the depression fill is not performed: cells
+        below it are seeds (outlets) of the priority flood. ``sealevel +
+        oFill``, raised to the lowest point ``minh`` so the deepest seafloor
+        drains when nothing lies below the cut-off.
+
+        On a flat model whose lowest point is above sea level (a landlocked
+        model: the sea below the whole mesh), that lowest point is on land,
+        usually the bottom of the deepest closed basin: made a seed, it
+        drained every basin routed to it, was never filled and, with
+        subsidence, became an ever deeper hole (a rift basin, 2026-11-25). The
+        open domain edges are the outlets there, so the level stays below
+        every cell. A fully closed flat domain (walls only) keeps its lowest
+        point as the terminal sink where the closed-basin deposit goes
+        (``test_wall_boundary_conservation``), and global meshes keep the
+        lowest point as their seed (they have no edges). Collective on the
+        first call (the outlet count is reduced once and cached).
+
+        :arg minh: global minimum elevation (with the global-mesh nudge)
+        :return: the fill level
+        """
+        level = self.sealevel + self.oFill
+        if self.flatModel and minh >= self.sealevel:
+            if getattr(self, "_nOutletsGlobal", None) is None:
+                outl = getattr(self, "outletIDs", None)
+                n = 0 if outl is None else len(outl)
+                self._nOutletsGlobal = MPI.COMM_WORLD.allreduce(n, op=MPI.SUM)
+            if self._nOutletsGlobal > 0:
+                return min(level, minh - 1.0)
+        return max(minh, level)
+
     def fillElevation(self, sed=False):
         """
         This function is the main entry point to perform pit filling.
@@ -915,7 +947,7 @@ class PITFill(object):
         minh = self.hGlobal.min()[1]
         if not self.flatModel:
             minh += 1.0e-3  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (minh epsilon nudge for fillElevation); do not replace
-        level = max(minh, self.sealevel + self.oFill)
+        level = self._fillLevel(minh)
 
         self._performFilling(hl - level, level, sed)
         self._unshiftFill(hl, level)
@@ -969,7 +1001,7 @@ class PITFill(object):
         minh = self.hGlobal.min()[1]
         if not self.flatModel:
             minh += 1.0e-3  # TODO-REFACTOR: value 1e-3 (the former DEPOSIT_FLOOR) but distinct role (minh epsilon nudge for fillIceElevation); do not replace
-        level = max(minh, self.sealevel + self.oFill)
+        level = self._fillLevel(minh)
 
         self._performFilling(hl - level, level, False)
         self.lFill += level
