@@ -54,6 +54,7 @@
  "generate_2Dmesh": {
   "image": "fig_ex_flowdir.jpg",
   "caption": "Flow-direction example (`flow_direction`): water discharge Q on land at 10 kyr for three otherwise identical runs (log scale). Top row, the full 100 km radial domain; bottom row, the 20×20 km window outlined in black. Left to right: single-flow routing (`flowdir`=1), two receivers (`flowdir`=2) and multiple-flow routing (`flowdir`=6). Single-flow routing concentrates the flow into thin threads set by the mesh; multiple-flow routing spreads it into a smoother field less dependent on the mesh.",
-  "thumb": "thumb_generate_2Dmesh.png"
+  "thumb": "thumb_generate_2Dmesh.png",
+  "figure": false
  }
 }

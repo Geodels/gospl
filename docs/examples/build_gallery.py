@@ -236,7 +236,7 @@ def build():
             page = readme if readme else "# %s\n\n%s\n" % (
                 title, index.get(name, "This example does not have a description yet."))
             page = _local_links(page, names, url)
-            if name in paper:
+            if name in paper and paper[name].get("figure", True):
                 page = _paper_figure(page, paper[name])
             page += "\n\n---\n\nSource, inputs and scripts: [%s on GitHub](%s).\n" % (name, url)
             done = [n for n in nbs if _executed(os.path.join(out, n))]
