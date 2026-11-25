@@ -222,7 +222,7 @@ def budget(out):
 
 
 def spikes(out, top=1):
-    """Largest |elev change| between consecutive outputs, with location."""
+    """Largest absolute elevation change between consecutive outputs, with location."""
     rows, prev = [], None
     for s in out.steps:
         z = out.field(s, "elev")

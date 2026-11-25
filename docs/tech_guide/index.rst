@@ -240,6 +240,24 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
 
             Learn more about the solvers.
 
+    .. grid-item-card::
+        :text-align: center
+        :class-card: gospl-grey-card
+
+        **Tests and benchmarks**
+        ^^^
+
+        The analytical benchmarks against exact solutions, the regression
+        suite and the parallel scaling.
+
+        +++
+
+        .. button-ref:: benchmarks
+            :color: secondary
+            :click-parent:
+
+            Learn more about the benchmarks.
+
 
 .. toctree::
     :maxdepth: 3
@@ -257,3 +275,4 @@ Further information on any specific methods can be obtained in the :ref:`api_ref
     gravity
     carb
     solvers
+    benchmarks

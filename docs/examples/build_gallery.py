@@ -32,6 +32,7 @@ import shutil
 import subprocess
 
 REPO = "https://github.com/Geodels/goSPL-examples.git"
+RELEASE = None                                     # set by docs/conf.py
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEN = os.path.join(HERE, "generated")
 SRC = os.path.join(os.path.dirname(HERE), "_examples_src")
@@ -52,18 +53,30 @@ def _paper_figure(page, fig):
     return page[:m.end()] + "\n" + block + page[m.end():]
 
 
-def _branch():
-    """goSPL-examples branch matching the docs being built (GOSPL_EXAMPLES_BRANCH
-    overrides): the feature branch for feature docs, dev for the development
-    docs, master for a release."""
+def _branch(release=None):
+    """goSPL-examples branch or tag matching the docs being built
+    (GOSPL_EXAMPLES_BRANCH overrides): the feature branch for the feature
+    docs, dev for the development docs, the release tag (``v<release>``) for
+    the stable docs or a version's docs. Outside Read the Docs, the branch of
+    the goSPL checkout decides (a feature branch, else dev)."""
     if os.environ.get("GOSPL_EXAMPLES_BRANCH"):
         return os.environ["GOSPL_EXAMPLES_BRANCH"]
     rtd = os.environ.get("READTHEDOCS_VERSION", "")
+    if not rtd:
+        try:
+            rtd = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=HERE,
+                                 capture_output=True, text=True, timeout=10).stdout.strip()
+        except Exception:
+            rtd = ""
     if rtd.startswith("feat"):
         return "feat/gravity-carbonates-karst"
-    if rtd in ("dev", "latest"):
-        return "dev"
-    return "master"
+    if rtd == "stable" and release:
+        return "v%s" % release
+    if re.fullmatch(r"v?\d{4}\.\d+\.\d+", rtd):
+        return rtd if rtd.startswith("v") else "v" + rtd
+    if rtd in ("master", "main") and release:
+        return "v%s" % release
+    return "dev"
 
 
 def _source():
@@ -74,7 +87,7 @@ def _source():
     if os.path.isdir(os.path.join(SRC, "Local-examples")):
         return SRC
     try:
-        subprocess.run(["git", "clone", "--depth", "1", "--branch", _branch(), REPO, SRC],
+        subprocess.run(["git", "clone", "--depth", "1", "--branch", _branch(RELEASE), REPO, SRC],
                        check=True, capture_output=True, timeout=600)
         return SRC
     except Exception as exc:                       # offline, or branch missing
@@ -129,6 +142,42 @@ def _executed(nb_path):
     return any(c.get("outputs") for c in nb.get("cells", []) if c.get("cell_type") == "code")
 
 
+SITE = re.compile(r"https?://gospl\.readthedocs\.io/en/[^/\s)\"]+/([^\s)\"#]*)(#[^\s)\"]*)?")
+
+
+def _local_links(text, names, url):
+    """Links of an example page or notebook that stay in this version of the
+    site: the goSPL docs (any version) become relative links, another
+    example's folder or notebook its gallery page, and any other relative
+    path the file on GitHub at the matching branch (``url``)."""
+    def site(m):
+        # [text](https://gospl.readthedocs.io/en/<any>/path.html#anchor): a raw
+        # relative link to the same page of this version (myst would treat
+        # a relative .html path as a document reference)
+        path = m.group(2) or "index.html"
+        if path.endswith("/"):
+            path += "index.html"
+        label = re.sub(r"`([^`]+)`", r"<code>\\1</code>", m.group(1))
+        return '<a href="../../../%s%s">%s</a>' % (path, m.group(3) or "", label)
+    text = re.sub(r"\[([^\]]+)\]\(" + SITE.pattern + r"\)", site, text)
+
+    def rel(m):
+        target = m.group(1)
+        if re.match(r"https?://|mailto:|#", target):
+            return m.group(0)
+        parts = [q for q in re.split(r"/+", target.split("#")[0]) if q not in ("", ".")]
+        # ../other, ../other/view_Results.ipynb, ../../Global-examples/other/...
+        ups = [q for q in parts if q == ".."]
+        rest = [q for q in parts if q != ".." and q not in dict(GROUPS)]
+        if ups and rest and rest[0] in names:
+            if len(rest) == 1:
+                return "](../%s/index.md)" % rest[0]
+            if len(rest) == 2 and rest[1] in NOTEBOOKS:
+                return "](../%s/%s)" % (rest[0], rest[1])
+        return "](%s/%s)" % (url, target)
+    return re.sub(r"\]\(([^)\s]+)\)", rel, text)
+
+
 def build():
     src = _source()
     if os.path.isdir(GEN):
@@ -140,7 +189,7 @@ def build():
             ".. note::\n\n    The examples gallery is built from the goSPL-examples "
             "repository, which was not available for this build.\n")
         return
-    branch = _branch()
+    branch = _branch(RELEASE)
     pfile = os.path.join(PAPER, "paper_figures.json")
     paper = json.load(open(pfile)) if os.path.exists(pfile) else {}
     # one-line descriptions of the examples table of the repository README:
@@ -151,6 +200,9 @@ def build():
         for m in re.finditer(r"^\|\s*\[`([^`]+)`\]\([^)]*\)\s*\|\s*(.+?)\s*\|\s*$",
                              open(top).read(), re.M):
             index[m.group(1)] = re.sub(r"\s*Needs goSPL with .*$", "", m.group(2)).strip()
+    names = {n for g, _ in GROUPS if os.path.isdir(os.path.join(src, g))
+             for n in os.listdir(os.path.join(src, g))
+             if os.path.isdir(os.path.join(src, g, n)) and not n.startswith((".", "_"))}
     for group, gtitle in GROUPS:
         gdir = os.path.join(src, group)
         if not os.path.isdir(gdir):
@@ -165,14 +217,18 @@ def build():
             out = os.path.join(GEN, name)
             os.makedirs(out)
             nbs = [n for n in NOTEBOOKS if os.path.exists(os.path.join(edir, n))]
-            for n in nbs:
-                shutil.copy(os.path.join(edir, n), os.path.join(out, n))
-            title = _title(readme, name)
             url = "https://github.com/Geodels/goSPL-examples/tree/%s/%s/%s" % (branch, group, name)
+            for n in nbs:
+                nb = json.load(open(os.path.join(edir, n)))
+                for cell in nb.get("cells", []):
+                    if cell.get("cell_type") == "markdown":
+                        src_ = "".join(cell["source"]) if isinstance(cell["source"], list) else cell["source"]
+                        cell["source"] = _local_links(src_, names, url)
+                json.dump(nb, open(os.path.join(out, n), "w"), indent=1)
+            title = _title(readme, name)
             page = readme if readme else "# %s\n\n%s\n" % (
                 title, index.get(name, "This example does not have a description yet."))
-            # links in the README to other files of the example point to GitHub
-            page = re.sub(r"\]\((?!https?://|#)([^)]+)\)", lambda m: "](%s/%s)" % (url, m.group(1)), page)
+            page = _local_links(page, names, url)
             if name in paper:
                 page = _paper_figure(page, paper[name])
             page += "\n\n---\n\nSource, inputs and scripts: [%s on GitHub](%s).\n" % (name, url)

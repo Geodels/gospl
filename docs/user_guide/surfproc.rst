@@ -89,7 +89,7 @@ Hillslope and marine deposition parameters
         e. ``clinSlp`` is the maximum slope of clinoforms (needs to be positive), this slope is then used to estimate the top of the marine deposition based on distance to shore.
         f. ``channelQ`` (optional, m³/yr) is the discharge above which a land cell is a river: such cells are held fixed by the hillslope diffusion, and the material the hillslopes deliver to them joins the river load of the same step instead of filling the channel (with this option the hillslope step runs between the river incision and the sediment routing). With a rainfall ``P`` (m/yr), ``channelQ / P`` is a drainage area (for example ``channelQ: 1.e6`` with 1 m/yr of rain marks cells draining more than 1 km² as rivers). Recommended whenever ``hillslopeKa`` is not negligible, because it makes the channels independent of the mesh resolution (see below). Works with stratigraphy, dual lithology, provenance (the supply carries the fine fraction and source classes of the eroded hillslope material) and the soil model.
 
-            **Choosing** ``channelQ``. It is the discharge (the ``FA`` output, m³/yr) at a channel head, i.e. a channel-head drainage area times the rainfall: ``channelQ = A_c × P``. (1) Start from a channel-head area: natural channel heads drain about 10⁴ to 10⁶ m² depending on climate, lithology and vegetation; 1 km² with 1 m/yr of rain gives ``channelQ: 1.e6``. (2) Keep ``A_c`` at least about ten cell areas on the coarsest mesh you will use (``A_c ≥ 10 Δx²``; 0.4 km² at 200 m spacing), so every valley side keeps several hillslope cells; the same value then gives the same channels on every mesh. (3) Because the threshold is a discharge, channels start at smaller areas where it is wetter (and groundwater baseflow counts). (4) Check the mask on a first output: the cells with ``FA ≥ channelQ`` should outline the valley network you expect. Too small (close to one cell area) and nearly every cell is a river, leaving diffusion only on the ridges; too large and the smaller valleys are still filled by the hillslopes, so their steepness depends on the resolution again. (5) On a regular mesh with uniform rain the discharge only takes multiples of the cell area times the rain (2500 m³/yr for 50 m cells and 1 m/yr): do not set ``channelQ`` exactly on such a multiple, or round-off decides which cells are rivers and runs on different numbers of processors diverge (a value such as ``1.0133e5`` instead of ``1.e5`` avoids it). The `hillslope_channels <https://github.com/Geodels/goSPL-examples/tree/main/Local-examples/hillslope_channels>`_ example of goSPL-examples runs the uplifted-block test at 200, 100 and 50 m with and without ``channelQ`` (channel steepness 30.5, 40.3 and 65.1 m without it, 25.1, 25.2 and 25.4 m with it, for U/K = 25 m).
+            **Choosing** ``channelQ``. It is the discharge (the ``FA`` output, m³/yr) at a channel head, i.e. a channel-head drainage area times the rainfall: ``channelQ = A_c × P``. (1) Start from a channel-head area: natural channel heads drain about 10⁴ to 10⁶ m² depending on climate, lithology and vegetation; 1 km² with 1 m/yr of rain gives ``channelQ: 1.e6``. (2) Keep ``A_c`` at least about ten cell areas on the coarsest mesh you will use (``A_c ≥ 10 Δx²``; 0.4 km² at 200 m spacing), so every valley side keeps several hillslope cells; the same value then gives the same channels on every mesh. (3) Because the threshold is a discharge, channels start at smaller areas where it is wetter (and groundwater baseflow counts). (4) Check the mask on a first output: the cells with ``FA ≥ channelQ`` should outline the valley network you expect. Too small (close to one cell area) and nearly every cell is a river, leaving diffusion only on the ridges; too large and the smaller valleys are still filled by the hillslopes, so their steepness depends on the resolution again. (5) On a regular mesh with uniform rain the discharge only takes multiples of the cell area times the rain (2500 m³/yr for 50 m cells and 1 m/yr): do not set ``channelQ`` exactly on such a multiple, or round-off decides which cells are rivers and runs on different numbers of processors diverge (a value such as ``1.0133e5`` instead of ``1.e5`` avoids it). The :examples:`hillslope_channels <Local-examples/hillslope_channels>` example of goSPL-examples runs the uplifted-block test at 200, 100 and 50 m with and without ``channelQ`` (channel steepness 30.5, 40.3 and 65.1 m without it, 25.1, 25.2 and 25.4 m with it, for U/K = 25 m).
 
         The following parameters tune the **marine** non-linear diffusion solver:
 
@@ -570,7 +570,7 @@ Compaction & porosity variables definition
 
         .. note::
 
-            See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/strat.html>`_ for more information.
+            See the technical `documentation <../tech_guide/strat.html>`_ for more information.
 
 
 Dual-lithology (coarse/fine) variables definition
@@ -633,7 +633,7 @@ Dual-lithology (coarse/fine) variables definition
 
         .. note::
 
-            See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/strat.html>`_ (Dual lithology section) for the physics and current limitations.
+            See the technical `documentation <../tech_guide/strat.html>`_ (Dual lithology section) for the physics and current limitations.
 
 
 Sediment provenance tracers
@@ -687,7 +687,7 @@ Sediment provenance tracers
 
         .. note::
 
-            See the technical `documentation <https://gospl.readthedocs.io/en/latest/tech_guide/provenance.html>`_ (provenance section) for the algorithm, the standalone post-processing tool, and the copper-prospectivity scope.
+            See the technical `documentation <../tech_guide/provenance.html>`_ (provenance section) for the algorithm, the standalone post-processing tool, and the copper-prospectivity scope.
 
 
 Marine gravity currents
@@ -967,5 +967,5 @@ Extract the per-basin dissolved / species flux at river mouths with
     ``marine_coupling``). With several tracers every aggregate is **also written
     per species** (``solute_<name>``, ``soluteflux_<name>``, ``crust_<name>``,
     ``riverSolute_<name>``). See the technical
-    `groundwater documentation <https://gospl.readthedocs.io/en/latest/tech_guide/groundwater.html>`_
+    `groundwater documentation <../tech_guide/groundwater.html>`_
     for the formulation.

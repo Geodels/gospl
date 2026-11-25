@@ -7,7 +7,7 @@ User Guide
 This user guide explains the different parameters available in goSPL input file.
 
 .. note::
-    For examples using goSPL, the user is invited to download the **goSPL-examples** `repository <https://github.com/Geodels/goSPL-examples>`_ which covers some of the basic functionalities of the code: 
+    For examples using goSPL, the user is invited to download the **goSPL-examples** :examples:`repository <.>` which covers some of the basic functionalities of the code: 
 
     - data structure used in the gospl input file,
     - how to generate initial conditions like topography, precipitation and tectonic maps to force a simulation,
@@ -15,7 +15,7 @@ This user guide explains the different parameters available in goSPL input file.
 
     Those examples highlight just a small selection of functions as an illustration of principles. 
 
-    For a full overview of goSPL capabilities, head to the `API reference <https://gospl.readthedocs.io/en/latest/api_ref/index.html>`_. 
+    For a full overview of goSPL capabilities, head to the `API reference <../api_ref/index.html>`_. 
 
 
 Input file

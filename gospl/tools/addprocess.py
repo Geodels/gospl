@@ -782,7 +782,7 @@ class GridProcess(object):
         lists are complete); ghost rows are dropped at assembly.
 
         :arg u0, v0: uniform wind components (m/s)
-        :arg grazing: |cos| below which an edge counts as wind-parallel
+        :arg grazing: absolute cosine below which an edge counts as wind-parallel
 
         :return: local indices of the inflow border nodes
         """

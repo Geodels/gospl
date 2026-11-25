@@ -4,8 +4,8 @@
 Examples
 ========
 
-Ready-to-run models from the `goSPL-examples
-<https://github.com/Geodels/goSPL-examples>`_ repository, from small regional
+Ready-to-run models from the :examples:`goSPL-examples <.>`
+repository, from small regional
 set-ups to global runs. Each page gives the example's description (what it
 shows, the set-up block by block, how to run it) and its results notebook
 (``view_Results.ipynb``) as it was last run, with its figures.
