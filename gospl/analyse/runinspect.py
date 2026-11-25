@@ -262,8 +262,12 @@ def in_model_sources(rec):
     """Volume of sediment created in place during a step (m^3), from a
     `--summary` record: the carbonate produced (framework and loose) and the
     settled pelagic carbonate and clay (when resuspended, the same volume
-    reaches the seafloor through the marine diffusion)."""
+    reaches the seafloor through the marine diffusion), minus the rock the
+    karst dissolved (it leaves the model as solute)."""
     src = 0.0
+    karst = rec.get("karst")
+    if karst:
+        src -= float(karst.get("dissolved", 0.0))
     carb = rec.get("carbonate")
     if carb:
         src += float(carb.get("produced", 0.0))

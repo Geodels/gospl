@@ -46,6 +46,7 @@ agent.
 | Mass budget of a run | `python scripts/budget.py <output-dir>` |
 | Wall time per sub-stage (marine smoother, epsfill, cascades, sediment load, SPL), rank 0 vs max rank | `mpirun -n N python scripts/stage_profile.py <input.yml>` |
 | Per-rank memory by setup stage / step phase (rank 0 vs others) | `mpirun -n N python scripts/mem_profile.py <input.yml> [--json out.json]` |
+| Cost of each option (time per step, memory) against a base run | `python scripts/option_cost.py <input.yml> -n 4 --steps 10 --workdir DIR` (`--report DIR` for the table; results on `docs/user_guide/cost.rst`) |
 | Machine-readable per-step summary | `gospl -i input.yml --summary run.jsonl` |
 | Inspect / compare output | `gospl-inspect <output-dir> [--step N] [--compare <other-dir>] [--json]` (or `python -m gospl.analyse.runinspect` before a `pip install -e .` registers the command) |
 | Fortran bounds-checked suite | `scripts/fcheck.sh` |

@@ -228,6 +228,26 @@ Performance on HPC
 
             Learn more.
 
+.. grid:: 1
+    :padding: 3
+
+    .. grid-item-card::
+        :text-align: center
+
+        **Cost of the options**
+        ^^^
+
+        Time per step and memory of each process added to a basic run, to
+        plan a more complex model.
+
+        +++
+
+        .. button-ref:: option_cost
+            :color: secondary
+            :click-parent:
+
+            Learn more.
+
 .. toctree::
     :maxdepth: 3
     :hidden:
@@ -240,3 +260,4 @@ Performance on HPC
     running
     outputs
     hpc_scaling
+    cost

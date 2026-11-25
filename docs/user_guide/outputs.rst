@@ -216,6 +216,50 @@ accumulation — there is no ice-thickness time integration.
    walls. Increasing ``Kg`` deepens *more* but does **not** widen — widening is
    controlled by ``Kl``.
 
+Marine gravity currents, carbonates, waves and karst
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Written only when the corresponding block is set (see :ref:`gravity` and
+:ref:`carbonates`).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 52 30
+
+   * - Field
+     - Meaning
+     - When written
+   * - ``gravDep``
+     - Deposit (positive) or slope erosion (negative) of the marine gravity currents during the step (m).
+     - ``gravity:``
+   * - ``carbProd``
+     - Benthic **carbonate production** rate of the step, all factories (m/yr).
+     - ``carbonate:``
+   * - ``pelDep``
+     - Settled (or resuspended) **pelagic** thickness rate: carbonate preserved above the CCD plus hemipelagic clay (m/yr).
+     - ``pelagic:``
+   * - ``sst``
+     - **Sea-surface temperature** of the step (degC).
+     - ``sst:``
+   * - ``waveE``
+     - Relative **wave energy** (0 to 1), weighted over the wave climate; 0 on land and in wave shadows.
+     - ``waves:`` (when a factory or the coastal erosion uses it)
+   * - ``coastEro``
+     - Cumulative **coastal (wave) erosion** (m).
+     - ``coastal_erosion:``
+   * - ``karstDiss``
+     - Cumulative **karst dissolution** of the exposed carbonate (m).
+     - ``karst:``
+
+Some datasets are written to the HDF5 files for a **restart** only and have no
+XDMF entry: ``marineSolute`` (the marine reservoir of the geochemistry),
+``carbSedRate`` and ``turbRate`` (the previous step's clastic deposition rate
+and turbid plume read by the carbonate controls) and ``pelCarry`` (pelagic rain
+carried over below the deposit floor). The fields a restart reads (``elev``,
+``erodep``, ``EDrate``, ``sedLoad``, ``sedLoadF``, ``FA``, ``fillFA``,
+``iceH``, ``flexIso``, ``gravDep``, ``soilH``, ``wtable``, ``duricrust``,
+``coastEro``, ``karstDiss``) are stored in double precision.
+
 Stratigraphy
 ^^^^^^^^^^^^
 
@@ -225,7 +269,11 @@ separate ``h5/stratal.<step>.p<rank>.h5`` files. These are **per-layer** arrays
 thickness), ``phiS`` (porosity), ``stratK`` (erodibility multiplier), ``stratP``
 (per-layer provenance), and, under dual lithology, ``stratHf`` (fine-fraction
 thickness) and ``phiF`` (fine porosity). The per-layer fine fraction is
-``stratHf / stratH``.
+``stratHf / stratH``. With several lithologies (``strata: lithologies:``, or the
+carbonate lithologies ``reef``, ``carb_sand`` and ``carb_mud``) each one has its
+own pile, ``stratH_<name>`` and ``phi_<name>``; coarse clastic is the rest of
+``stratH``. ``gospl-strata-volume --field lithologies`` colours the volume by
+the dominant lithology.
 
 The stratal HDF5 files have no XDMF wrapper of their own. Several
 post-processing tools turn them into figures (all documented, with the exact

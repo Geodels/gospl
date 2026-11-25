@@ -124,3 +124,15 @@ def test_inspect_summary_in_model_sources(tmp_path):
     assert not any(i["issue"] == "volume_imbalance" for i in ri.inspect_summary(str(p))["issues"])
     p.write_text(json.dumps(step) + "\n")
     assert any(i["issue"] == "volume_imbalance" for i in ri.inspect_summary(str(p))["issues"])
+    # karst dissolution is a sink: a closed run losing exactly what it
+    # dissolved is clean
+    closed = tmp_path / "k.jsonl"
+    loss = dict(step, volume={"eroded": -1.0e9, "deposited": 1.0e9, "net": -0.2e9},
+                karst={"dissolved": 0.2e9, "solid": 0.14e9})
+    assert ri.in_model_sources(loss) == -0.2e9
+    closed.write_text(json.dumps({"start": True, "closed": True}) + "\n" + json.dumps(loss) + "\n")
+    assert not any(i["issue"] == "volume_imbalance"
+                   for i in ri.inspect_summary(str(closed))["issues"])
+    loss.pop("karst")
+    closed.write_text(json.dumps({"start": True, "closed": True}) + "\n" + json.dumps(loss) + "\n")
+    assert any(i["issue"] == "volume_imbalance" for i in ri.inspect_summary(str(closed))["issues"])
