@@ -4,6 +4,10 @@
 Stratigraphy and compaction
 ==============================================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 
 Stratigraphic record
 -----------------------
@@ -62,7 +66,6 @@ At a given time :math:`\mathrm{k}` after :math:`\mathrm{i}`, the layer centre de
 .. math::
 
     \mathrm{\bar{z}_i} = \mathrm{\sum_{j=i+1}^{k} \Delta z_j^{k} + \Delta z_i^{k} / 2}
-
 
 
 where the thickness of that layer :math:`\mathrm{\Delta z_i^{k}}` is related to the amount of solid material deposited in the layer :math:`\mathrm{\Delta h_{S,i}}` by the following relationship:

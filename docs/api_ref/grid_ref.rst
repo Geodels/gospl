@@ -33,6 +33,8 @@ Class GridProcess
       ~GridProcess._cmptFlexGlobal
       ~GridProcess._cmptFlexFEM
       ~GridProcess._buildFlexFEM
+      ~GridProcess._oroInflowBorders
+      ~GridProcess._windVector
 
 
 Public functions
@@ -54,3 +56,5 @@ Private functions
 .. automethod:: tools.addprocess.GridProcess._cmptFlexGlobal
 .. automethod:: tools.addprocess.GridProcess._cmptFlexFEM
 .. automethod:: tools.addprocess.GridProcess._buildFlexFEM
+.. automethod:: tools.addprocess.GridProcess._oroInflowBorders
+.. automethod:: tools.addprocess.GridProcess._windVector

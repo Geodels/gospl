@@ -37,6 +37,7 @@ Class SEDMesh
       ~SEDMesh._routeLithologies
       ~SEDMesh._setLitShare
       ~SEDMesh._setPitLitShare
+      ~SEDMesh._keepRoutingPond
 
 Public functions
 ---------------------
@@ -61,3 +62,4 @@ Private functions
 .. automethod:: sed.sedplex.SEDMesh._routeLithologies
 .. automethod:: sed.sedplex.SEDMesh._setLitShare
 .. automethod:: sed.sedplex.SEDMesh._setPitLitShare
+.. automethod:: sed.sedplex.SEDMesh._keepRoutingPond

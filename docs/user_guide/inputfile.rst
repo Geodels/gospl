@@ -4,6 +4,11 @@
 Required input file parameters
 ==============================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
+
 .. note::
 
   Input files for  goSPL are based on `YAML`_ syntax.

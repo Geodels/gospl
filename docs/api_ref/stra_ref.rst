@@ -23,6 +23,8 @@ Class StraMesh
       ~STRAMesh.elevStrat
       ~STRAMesh.getCompaction
       ~STRAMesh.stratalRecord
+      ~STRAMesh.logDualState
+      ~STRAMesh.logProvState
 
    .. rubric:: Private Methods
 
@@ -50,6 +52,11 @@ Class StraMesh
       ~STRAMesh._capLithologies
       ~STRAMesh._surfaceLithFractions
       ~STRAMesh._surfaceLithoBlend
+      ~STRAMesh._checkStrataFile
+      ~STRAMesh._logStratInit
+      ~STRAMesh._logProvInit
+      ~STRAMesh._deposeMarineProv
+      ~STRAMesh._netRoutedSource
 
 Public functions
 ---------------------
@@ -61,6 +68,8 @@ Public functions
 .. automethod:: sed.stratplex.STRAMesh.elevStrat
 .. automethod:: sed.stratplex.STRAMesh.getCompaction
 .. automethod:: sed.stratplex.STRAMesh.stratalRecord
+.. automethod:: sed.stratplex.STRAMesh.logDualState
+.. automethod:: sed.stratplex.STRAMesh.logProvState
 
 
 Private functions
@@ -88,3 +97,8 @@ Private functions
 .. automethod:: sed.stratplex.STRAMesh._capLithologies
 .. automethod:: sed.stratplex.STRAMesh._surfaceLithFractions
 .. automethod:: sed.stratplex.STRAMesh._surfaceLithoBlend
+.. automethod:: sed.stratplex.STRAMesh._checkStrataFile
+.. automethod:: sed.stratplex.STRAMesh._logStratInit
+.. automethod:: sed.stratplex.STRAMesh._logProvInit
+.. automethod:: sed.stratplex.STRAMesh._deposeMarineProv
+.. automethod:: sed.stratplex.STRAMesh._netRoutedSource

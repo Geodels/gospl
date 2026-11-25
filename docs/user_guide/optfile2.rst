@@ -5,6 +5,11 @@
 Tectonic related parameters
 ==============================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
+
 Tectonic forcing parameters
 ----------------------------
 

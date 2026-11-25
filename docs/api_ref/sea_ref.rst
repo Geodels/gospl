@@ -46,6 +46,12 @@ Class SEAMesh
       ~SEAMesh._tracerComp
       ~SEAMesh._marineLitShare
       ~SEAMesh._gravLitShare
+      ~SEAMesh._gravRelease
+      ~SEAMesh._gravSync
+      ~SEAMesh._gravLambda
+      ~SEAMesh._gravEps
+      ~SEAMesh._gravSolve
+      ~SEAMesh._conservingFineFraction
 
 Public functions
 ---------------------
@@ -79,3 +85,9 @@ Private functions
 .. automethod:: sed.seaplex.SEAMesh._tracerComp
 .. automethod:: sed.seaplex.SEAMesh._marineLitShare
 .. automethod:: sed.seaplex.SEAMesh._gravLitShare
+.. automethod:: sed.seaplex.SEAMesh._gravRelease
+.. automethod:: sed.seaplex.SEAMesh._gravSync
+.. automethod:: sed.seaplex.SEAMesh._gravLambda
+.. automethod:: sed.seaplex.SEAMesh._gravEps
+.. automethod:: sed.seaplex.SEAMesh._gravSolve
+.. automethod:: sed.seaplex.SEAMesh._conservingFineFraction

@@ -13,6 +13,10 @@ buried and re-exhumed duricrusts. The feature is enabled by a ``groundwater``
 section in the input file and is a strict no-op when absent. The full design
 (algorithm, invariants, caveats) is in ``docs/DESIGN_WATERTABLE_DURICRUST.md``.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 The whole update runs once per step, **after flow accumulation and before
 erosion**, so each process reads the previous process's state (soil → groundwater
 → duricrust → erosion). Every step of that loop is slow (:math:`10^4`–:math:`10^6`

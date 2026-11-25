@@ -35,6 +35,15 @@ Class FAMesh
       ~FAMesh._cascadeResetProgress
       ~FAMesh._cascadeStopReason
       ~FAMesh._losingStreamSolve
+      ~FAMesh._undrainedCap
+      ~FAMesh._pondRoutingRegion
+      ~FAMesh._reportRoutingRegion
+      ~FAMesh._takeRoutingPond
+      ~FAMesh._trueResidualOK
+      ~FAMesh._warmStartGuard
+      ~FAMesh._solveIDAExact
+      ~FAMesh._routingSurface
+      ~FAMesh._runoffWork
 
 Public functions
 ---------------------
@@ -57,3 +66,12 @@ Private functions
 .. automethod:: flow.flowplex.FAMesh._cascadeResetProgress
 .. automethod:: flow.flowplex.FAMesh._cascadeStopReason
 .. automethod:: flow.flowplex.FAMesh._losingStreamSolve
+.. automethod:: flow.flowplex.FAMesh._undrainedCap
+.. automethod:: flow.flowplex.FAMesh._pondRoutingRegion
+.. automethod:: flow.flowplex.FAMesh._reportRoutingRegion
+.. automethod:: flow.flowplex.FAMesh._takeRoutingPond
+.. automethod:: flow.flowplex.FAMesh._trueResidualOK
+.. automethod:: flow.flowplex.FAMesh._warmStartGuard
+.. automethod:: flow.flowplex.FAMesh._solveIDAExact
+.. automethod:: flow.flowplex.FAMesh._routingSurface
+.. automethod:: flow.flowplex.FAMesh._runoffWork

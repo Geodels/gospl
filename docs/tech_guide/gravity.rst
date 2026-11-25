@@ -8,6 +8,10 @@ With a ``gravity`` block, part of the river load reaching the sea travels as a g
 
 **Position in the time step.** The gravity supply is taken from the river load before the clinoform cascade; the cascade spreads the rest; the currents are routed on the seafloor as it was before the marine deposition of the step; the gravity deposit is added after the marine diffusion (it is not diffused in the step it forms), and elevation, cumulative erosion-deposition and stratigraphy then receive the combined marine deposit.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 Supply
 ------
 

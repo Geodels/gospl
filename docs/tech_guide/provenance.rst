@@ -12,6 +12,10 @@ as *"what fraction of the sediment in this basin came from each source
 province, and by what pathway?"* — the source-to-sink ingredient for, e.g.,
 detrital copper prospectivity.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 The full design (data model, algorithm, caveats, and the planned in-model
 variant) is in ``docs/DESIGN_PROVENANCE.md``.
 

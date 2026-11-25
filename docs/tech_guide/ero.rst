@@ -4,6 +4,10 @@
 Erosion and sediment flux
 ==============================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 
 Stream power law
 ------------------------------------
@@ -23,7 +27,6 @@ In both cases, the sediment erosion rate is expressed using a **stream power** f
 
   1. weathering tends to weaken bedrocks, increasing their erodibility.
   2. enhanced erosion rates exposes fresh rocks at the surface therefore contributing to increased weathering.
-
 
 
 Detachment-limited

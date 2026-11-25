@@ -8,6 +8,11 @@
 Tectonic forcing
 ==================================
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
+
 .. note::
 
   These forcing are user defined and could be either lithospheric or mantle induced but goSPL does not know which underlying process is inducing these changes and does not account for sediments and crust compression.

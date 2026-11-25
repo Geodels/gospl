@@ -46,6 +46,7 @@ button.btn.version-switcher__button, button.btn.version-switcher__button:hover {
 
 html[data-theme=dark] .sd-card img[src*='.svg'] {
   filter: invert(0.82) brightness(0.8) contrast(1.2);
+  background-color: transparent;
 }
 
 /* Legacy admonition */
@@ -131,11 +132,41 @@ div.empty + section>h1 {
 
 /* "goSPL" next to the logo, top left of every page */
 .navbar-brand .logo__title {
-  font-weight: 800;
-  font-size: 2.1rem;
+  font-weight: 700;
+  font-size: 1.7rem;
   letter-spacing: 0.01em;
-  -webkit-text-stroke: 0.4px currentColor;
 }
 .navbar-brand .logo__image {
   height: 3rem;
+  clip-path: circle(49%);
+}
+
+/* Technical guide cards: light grey, no icon */
+
+.sd-card.gospl-grey-card,
+.sd-card.gospl-grey-card .sd-card-header,
+.sd-card.gospl-grey-card .sd-card-body,
+.sd-card.gospl-grey-card .sd-card-footer {
+  background-color: #f3f3f1;
+  border-color: #e1e0d9;
+}
+
+html[data-theme=dark] .sd-card.gospl-grey-card,
+html[data-theme=dark] .sd-card.gospl-grey-card .sd-card-header,
+html[data-theme=dark] .sd-card.gospl-grey-card .sd-card-body,
+html[data-theme=dark] .sd-card.gospl-grey-card .sd-card-footer {
+  background-color: #2b2b2e;
+  border-color: #3b3b3f;
+}
+
+/* Colour-mode button: always the "System Settings" icon (half circle),
+   whatever mode is selected; the mode is chosen in the dropdown */
+
+.theme-switch-button .theme-switch[data-mode=light],
+.theme-switch-button .theme-switch[data-mode=dark] {
+  display: none !important;
+}
+
+.theme-switch-button .theme-switch[data-mode=auto] {
+  display: inline-block !important;
 }

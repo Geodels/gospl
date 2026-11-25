@@ -37,6 +37,8 @@ Class soilSPL
       ~soilSPL._evalFunctionSoil
       ~soilSPL._evalJacobianSoil
       ~soilSPL._evalSolutionSoil
+      ~soilSPL._subaqueousMask
+      ~soilSPL._iceFrozenMask
 
 Public functions
 ---------------------
@@ -61,3 +63,5 @@ Private functions
 .. automethod:: eroder.soilSPL.soilSPL._evalFunctionSoil
 .. automethod:: eroder.soilSPL.soilSPL._evalJacobianSoil
 .. automethod:: eroder.soilSPL.soilSPL._evalSolutionSoil
+.. automethod:: eroder.soilSPL.soilSPL._subaqueousMask
+.. automethod:: eroder.soilSPL.soilSPL._iceFrozenMask

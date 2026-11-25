@@ -44,6 +44,9 @@ Class UnstMesh
       ~UnstMesh._resolveIceField
       ~UnstMesh._updateEvap
       ~UnstMesh._updateEroFactor
+      ~UnstMesh._scatterFromRoot
+      ~UnstMesh._drainOpenEdges
+      ~UnstMesh._setRunoffSource
 
 Public functions
 ---------------------
@@ -75,3 +78,6 @@ Private functions
 .. automethod:: mesher.unstructuredmesh.UnstMesh._resolveIceField
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateEvap
 .. automethod:: mesher.unstructuredmesh.UnstMesh._updateEroFactor
+.. automethod:: mesher.unstructuredmesh.UnstMesh._scatterFromRoot
+.. automethod:: mesher.unstructuredmesh.UnstMesh._drainOpenEdges
+.. automethod:: mesher.unstructuredmesh.UnstMesh._setRunoffSource

@@ -47,6 +47,8 @@ Class hillSLP
       ~hillSLP._diffuseImplicitPicard
       ~hillSLP._litNodeShares
       ~hillSLP._litMix
+      ~hillSLP._hillslopeProvFraction
+      ~hillSLP._diffuseProvTracers
 
 Public functions
 ---------------------
@@ -81,3 +83,5 @@ Private functions
 .. automethod:: sed.hillslope.hillSLP._diffuseImplicitPicard
 .. automethod:: sed.hillslope.hillSLP._litNodeShares
 .. automethod:: sed.hillslope.hillSLP._litMix
+.. automethod:: sed.hillslope.hillSLP._hillslopeProvFraction
+.. automethod:: sed.hillslope.hillSLP._diffuseProvTracers

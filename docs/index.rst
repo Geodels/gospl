@@ -179,17 +179,6 @@ Salles et al. (2025) **Carbonate burial regimes, the Meso-Cenozoic climate, and 
 Hadler Boggiani et al. (2026) **Evolution and Provenance of the Polish Rotliegend in the Southern Permian Basin**, Journal of Geophysical Research: Earth Surface, 131:e2025JF008473, `doi: 10.1029/2025JF008473 <https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/2025JF008473>`_.
 
 
-Contributing to goSPL
---------------------------
-
-Contributions of any kind to goSPL are more than welcome. That does not mean new code only, but also improvements of documentation and user guide, additional tests (ideally filling the gaps in existing suite) or bug report or idea what could be added or done better.
-
-All contributions should go through our GitHub repository. Bug reports, ideas or even questions should be raised by opening an issue on the GitHub tracker. Suggestions for changes in code or documentation should be submitted as a pull request. However, if you are not sure what to do, feel free to open an issue. All discussion will then take place on GitHub to keep the development of goSPL transparent.
-
-If you decide to contribute to the codebase, ensure that you are using an up-to-date ``master`` branch. The latest stable version will always be there, including the documentation (powered by ``sphinx``).
-
-Details are available in the :doc:`contributing guide <contributing>`.
-
 .. toctree::
     :maxdepth: 3
     :hidden:
@@ -200,4 +189,3 @@ Details are available in the :doc:`contributing guide <contributing>`.
     user_guide/index
     examples/index
     api_ref/index
-    Contributing <contributing>

@@ -8,6 +8,10 @@ Once the :ref:`input file <inputfile>` is ready, a goSPL simulation can be
 launched either from the command line or from a Python script — both run the
 same forward model.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 Command line
 ------------
 

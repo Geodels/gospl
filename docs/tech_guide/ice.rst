@@ -11,6 +11,10 @@ abrasion, till/moraine deposition, meltwater and an ice load are derived — one
 linear solve, no time integration. The model is enabled by adding an ``ice``
 section to the input file.
 
+.. contents:: On this page
+   :local:
+   :depth: 1
+
 .. note::
 
    **Why a diagnostic, not full ice dynamics.** A true Shallow-Ice-Approximation
