@@ -338,6 +338,7 @@ def test_marine_ts_step_counter_resets(minimal_model):
     if getattr(m, "flatModel", False):
         pytest.skip("needs a marine domain (global sphere) to run _diffuseImplicit")
 
+    m.marineSolver = "ts"        # picard is the default since 2026-11-25
     orig = m._diffuseImplicit
     counts = []
 
