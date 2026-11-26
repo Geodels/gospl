@@ -15,19 +15,27 @@ This user guide explains the different parameters available in goSPL input file.
     usual ranges of every input key, and the meaning and units of every output field, are on
     the two reference pages.
 
-    .. grid:: 1 1 3 3
+    .. grid:: 1
         :gutter: 2
+        :class-row: gospl-center-row
 
         .. grid-item::
+            :columns: 12 12 6 6
 
             .. button-ref:: module_chooser
                 :ref-type: ref
-                :color: primary
+                :color: secondary
                 :expand:
+                :class: gospl-start-btn
 
                 Which modules do I need?
 
+    .. grid:: 1 1 2 2
+        :gutter: 2
+        :class-row: gospl-center-row
+
         .. grid-item::
+            :columns: 12 12 5 5
 
             .. button-ref:: input_reference
                 :ref-type: ref
@@ -38,6 +46,7 @@ This user guide explains the different parameters available in goSPL input file.
                 Input parameters: units and ranges
 
         .. grid-item::
+            :columns: 12 12 5 5
 
             .. button-ref:: output_reference
                 :ref-type: ref

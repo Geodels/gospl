@@ -350,3 +350,8 @@ html[data-theme=dark] .modchart-domain, html[data-theme=dark] .modchart-dom + .m
 /* the module chooser uses the full width of the page (its graph is wide) */
 .bd-main .bd-content .bd-article-container:has(.gospl-modchart) { max-width: 100%; }
 .modchart-skel:empty { display: none; }
+
+/* User Guide start buttons: rows centred */
+.gospl-center-row { justify-content: center; }
+/* the "Which modules do I need?" button: colour of the "Learn more" buttons (secondary), bold */
+.sd-btn.gospl-start-btn { font-weight: 600; }
