@@ -630,7 +630,7 @@
       function a(href, txt) { var x = el("a", {href: href}); x.textContent = txt; return x; }
       function t(x) { return document.createTextNode(x); }
       if (domain === "global") {
-        [t("Download a uniform global mesh (5, 10 or 20 km cells) from "),
+        [t("Download a uniform global mesh (5, 8, 10 or 20 km spacing) from "),
          a(ml.global_download, "the goSPL meshes folder"),
          t(", or build your own (any resolution, refined where you need it) with "),
          a(r + ml.global_build + ".html", "the continental_flux build_inputs notebook"),
