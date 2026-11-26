@@ -353,7 +353,7 @@ step **serially** — the old MPI fan-out is no longer needed. From a notebook:
 :func:`~gospl.analyse.catchment.catchment_flux` (batch → CSVs) and
 :func:`~gospl.analyse.catchment.basin_outflow` (one file → two DataFrames).
 
-When the run used the Level-B **geochemistry**, the gridded surface also carries
+When the run used the solute **geochemistry**, the gridded surface also carries
 the dissolved-solute flux (``riverSolute`` — the routed river dissolved load — and
 its per-species fields ``riverSolute_<name>``). ``gospl-catchment`` then also
 writes ``flowsed/solute{time}.csv`` — for each basin, the **solute outlet** (cell

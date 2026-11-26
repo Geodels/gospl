@@ -216,8 +216,8 @@ is the multi-cycle, stacked-duricrust / relief-inversion behaviour of cratonic
 compaction-neutral, and is written to / restored from the stratal output; it is
 exposed per layer as the ``induration`` field of ``gospl-strata-volume``.
 
-Conservative geochemistry (Level B, opt-in)
--------------------------------------------
+Conservative geochemistry (opt-in)
+----------------------------------
 
 By default the duricrust supply is a *local, non-conservative* rate (§ above).
 Adding a ``groundwater: geochem:`` block turns on a **conservative solute cycle**:

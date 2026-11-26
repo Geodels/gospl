@@ -121,13 +121,13 @@ Solute geochemistry
 -------------------
 
 A further optional ``geochem:`` sub-block turns on **conservative solute
-geochemistry** (Level B). One or more lumped **tracers** (a "species" = a solute
+geochemistry**. One or more lumped **tracers** (a "species" = a solute
 class such as carbonate, silica or iron) are, each step: **dissolved** on
 subaerial land, **transported** down the groundwater flux, **precipitated** where
 the water table sits in the capillary fringe (feeding the crust ``duriH``) and
 the remainder **exported** to the rivers, a closed mass budget
 (``dissolved = precipitated + exported``) with a dissolved flux to the ocean.
-When ``geochem:`` is on the transported precipitation **replaces** the Level-A
+When ``geochem:`` is on the transported precipitation **replaces** the local
 proxy/rate supply as the crust source, so the duricrust ``form_rate`` is **not
 used**; the per-species ``precip_rate`` (below) governs crust growth instead.
 Coupled multi-species aqueous equilibrium (speciation, pH, activity) is
@@ -203,7 +203,7 @@ declaration with sensible values:
       - tracer label; names the per-species outputs (e.g. ``solute_carbonate``).
       - ``solute<i>``
     * - ``weatherability``
-      - relative **dissolution** rate (scales the Level-A weathering supply for this tracer). A scalar, a per-vertex map ``[file, key]``, or a per-lithology ``weatherability_by_class`` list. ``0`` ⇒ this species does not weather here.
+      - relative **dissolution** rate (scales the local weathering supply for this tracer). A scalar, a per-vertex map ``[file, key]``, or a per-lithology ``weatherability_by_class`` list. ``0`` ⇒ this species does not weather here.
       - ``1.0``
     * - ``weatherability_by_class``
       - list of per-lithology weatherabilities gathered by the ``lithology`` map or the provenance class (see the three forms below).

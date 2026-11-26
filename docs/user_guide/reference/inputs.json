@@ -1172,7 +1172,7 @@
  {
   "block": "groundwater",
   "path": "groundwater",
-  "summary": "Implicit Dupuit-Boussinesq water table, with optional duricrust and Level-B solute geochemistry.",
+  "summary": "Implicit Dupuit-Boussinesq water table, with optional duricrust and solute geochemistry.",
   "keys": [
    {
     "key": "Ksat",
@@ -1490,7 +1490,7 @@
  {
   "block": "groundwater.geochem",
   "path": "groundwater.geochem",
-  "summary": "Level-B conservative multi-tracer solute geochemistry.",
+  "summary": "Conservative multi-tracer solute geochemistry.",
   "keys": [
    {
     "key": "species",
