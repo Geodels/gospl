@@ -461,6 +461,7 @@ def _modules(data):
     data["meshes"] = MESH_LINKS
     js = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     return "".join([
+        ":html_theme.sidebar_secondary.remove: true\n\n",
         ".. _module_chooser:\n\n", "=" * 26 + "\n", "Which modules do I need?\n", "=" * 26 + "\n\n",
         "Choose a regional (flat mesh) or global (sphere) model and tick the\n"
         "processes you want to simulate. The graph shows what each one needs (red\n"

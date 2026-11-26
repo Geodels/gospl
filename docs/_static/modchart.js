@@ -8,8 +8,8 @@
    The core is selected as soon as anything is. A selected module is green
    when everything it needs is selected too, red while something is missing;
    a missing requirement is drawn as a dashed "+ add" block (click it, or
-   its checkbox, to add it). The graph is laid out in columns (what is
-   needed on the left), ordered to limit crossings, and the links are curves
+   its checkbox, to add it). The graph is laid out in rows (what is
+   needed above), ordered to limit crossings, and the links are curves
    that pass between the blocks. */
 (function () {
   "use strict";
@@ -46,17 +46,19 @@
     // the core is selected as soon as anything is, with the climate rain
     // unless the orographic rain replaces it
     var rainId = mods.climate ? "climate" : null, oroId = mods.orography ? "orography" : null;
+    // the always-on modules (the core and the rain it needs) are always
+    // selected, even before anything is ticked
     function selected() {
       var s = {};
       Object.keys(picked).forEach(function (id) { s[id] = true; });
-      if (Object.keys(s).length && coreId) {
+      if (coreId) {
         s[coreId] = true;
         if (rainId && !(oroId && s[oroId])) s[rainId] = true;
       }
       return s;
     }
     function automatic(id) {
-      return id === coreId || (id === rainId && !picked[rainId] && Object.keys(picked).length > 0);
+      return id === coreId || (id === rainId && !picked[rainId]);
     }
 
     function fits(m) {
@@ -161,7 +163,7 @@
 
     function toggle(id, on) {
       if (id === coreId) return;
-      if (id === rainId && !on && !picked[rainId] && Object.keys(picked).length) {
+      if (id === rainId && !on && !picked[rainId]) {
         // the rain is automatic: tick the orographic rain to replace it
         var cb0 = root.querySelector("#mc-" + id);
         if (cb0) cb0.checked = true;
@@ -208,11 +210,12 @@
     function writeReport(st) {
       report.innerHTML = "";
       var ids = Object.keys(st.sel);
-      if (!ids.length) {
+      if (!Object.keys(picked).length) {
         report.appendChild(el("p", {"class": "modchart-hint",
-          text: "Tick the processes you want to use. A selected module turns green " +
-                "when everything it needs is selected, red while something is missing; " +
-                "click a dashed block to add it."}));
+          text: "The graph shows what every run has (the core and its rain). Tick the " +
+                "processes you want to use: a selected module turns green when everything " +
+                "it needs is selected, red while something is missing; click a dashed " +
+                "block to add it."}));
         return;
       }
       var miss = Object.keys(st.missing);
@@ -296,6 +299,16 @@
         });
       });
 
+      // the core underlies every module: link it to those with no other
+      // requirement shown (layout and the "what it makes possible" arrows)
+      if (coreId && shown[coreId]) {
+        nodes.forEach(function (id) {
+          if (id === coreId || id === rainId || !st.sel[id]) return;
+          var has = edges.some(function (e) { return e.from === id; });
+          if (!has) edges.push({from: id, to: coreId, ok: true, alt: false, core: true});
+        });
+      }
+
       // depth: longest chain of requirements below a node
       var depth = {};
       function d(id, stack) {
@@ -328,71 +341,199 @@
         chains.push({edge: e, ids: chain});
       });
 
-      // neighbours of every point, for the barycentre ordering
-      var nbr = {};
+      // neighbours of every point (one row up and one row down)
+      var nbr = {}, up = {}, down = {};
+      function push(m, k, v) { (m[k] = m[k] || []).push(v); }
       chains.forEach(function (ch) {
+        // ids[k] is one row below ids[k + 1]
         for (var k = 0; k + 1 < ch.ids.length; k++) {
-          (nbr[ch.ids[k]] = nbr[ch.ids[k]] || []).push(ch.ids[k + 1]);
-          (nbr[ch.ids[k + 1]] = nbr[ch.ids[k + 1]] || []).push(ch.ids[k]);
+          push(nbr, ch.ids[k], ch.ids[k + 1]); push(nbr, ch.ids[k + 1], ch.ids[k]);
+          push(up, ch.ids[k], ch.ids[k + 1]); push(down, ch.ids[k + 1], ch.ids[k]);
         }
       });
+
+      // order of every row: barycentre sweeps down and up, then swaps of
+      // neighbours, keeping the order with the fewest link crossings
       function index() {
         var idx = {};
-        cols.forEach(function (col) { col.forEach(function (n, i) { idx[n.id] = i / Math.max(1, col.length - 1); }); });
+        cols.forEach(function (row) { row.forEach(function (n, i) { idx[n.id] = i; }); });
         return idx;
       }
-      for (var it = 0; it < 6; it++) {
-        var idx = index();
-        cols.forEach(function (col) {
-          col.forEach(function (n) {
-            var ns = nbr[n.id] || [];
-            n.key = ns.length ? ns.reduce(function (s, x) { return s + idx[x]; }, 0) / ns.length : idx[n.id];
+      function crossings() {
+        var idx = index(), total = 0;
+        for (var k = 1; k < cols.length; k++) {
+          var segs = [];
+          cols[k].forEach(function (n) {
+            (up[n.id] || []).forEach(function (u) { segs.push([idx[u], idx[n.id]]); });
           });
-          col.sort(function (p, q) { return p.key - q.key; });
+          for (var i = 0; i < segs.length; i++) {
+            for (var j = i + 1; j < segs.length; j++) {
+              if ((segs[i][0] - segs[j][0]) * (segs[i][1] - segs[j][1]) < 0) total++;
+            }
+          }
+        }
+        return total;
+      }
+      function snapshot() { return cols.map(function (row) { return row.slice(); }); }
+      function sweep(k, nb) {
+        var idx = index(), row = cols[k];
+        row.forEach(function (n, i) {
+          var ns = nb[n.id] || [];
+          n.key = ns.length ? ns.reduce(function (t, x) { return t + idx[x]; }, 0) / ns.length : i;
+        });
+        row.sort(function (p, q) { return p.key - q.key; });
+      }
+      var best = snapshot(), bestC = crossings();
+      for (var it = 0; it < 24 && bestC > 0; it++) {
+        if (it % 2 === 0) { for (var k1 = 1; k1 < cols.length; k1++) sweep(k1, up); }
+        else { for (var k2 = cols.length - 2; k2 >= 0; k2--) sweep(k2, down); }
+        var cc = crossings();
+        if (cc < bestC) { bestC = cc; best = snapshot(); }
+      }
+      cols = best;
+      for (var improved = true, guard = 0; improved && bestC > 0 && guard < 50; guard++) {
+        improved = false;
+        cols.forEach(function (row) {
+          for (var i = 0; i + 1 < row.length; i++) {
+            var t = row[i]; row[i] = row[i + 1]; row[i + 1] = t;
+            var c2 = crossings();
+            if (c2 < bestC) { bestC = c2; improved = true; }
+            else { row[i + 1] = row[i]; row[i] = t; }
+          }
         });
       }
 
-      // geometry: required modules on the left, selected ones on the right
-      var W = 200, H = 36, GX = 90, ROW = 54, DH = 10;
-      var nrow = Math.max.apply(null, cols.map(function (col) { return col.length; }));
-      var width = ncol * W + (ncol - 1) * GX + 24, height = Math.max(nrow, 1) * ROW + 24;
+      // geometry: rows from top to bottom, what a module needs above it, the
+      // modules that need it below; a dummy point takes a narrow slot
+      var W = 230, H = 46, GX = 28, ROWH = 110, DW = 22;
+      function slot(n) { return n.dummy ? DW : W; }
+      // x of every point: start packed in the barycentre order, then move each
+      // point towards the mean of its neighbours (link points pulled harder, so
+      // long links run straight) and push apart the ones that overlap, keeping
+      // the order of every row
+      var cx = {};
+      cols.forEach(function (row) {
+        var x = 0;
+        row.forEach(function (n) { cx[n.id] = x + slot(n) / 2; x += slot(n) + GX; });
+      });
+      function separate(row) {
+        for (var i = 1; i < row.length; i++) {          // left to right
+          var a = row[i - 1], b = row[i], m = (slot(a) + slot(b)) / 2 + GX;
+          if (cx[b.id] < cx[a.id] + m) cx[b.id] = cx[a.id] + m;
+        }
+        var shift = 0;                                   // keep the row centred on its wish
+        row.forEach(function (n) { shift += n.want - cx[n.id]; });
+        shift /= row.length;
+        row.forEach(function (n) { cx[n.id] += shift; });
+        for (var j = row.length - 2; j >= 0; j--) {      // right to left
+          var c = row[j], e = row[j + 1], m2 = (slot(c) + slot(e)) / 2 + GX;
+          if (cx[c.id] > cx[e.id] - m2) cx[c.id] = cx[e.id] - m2;
+        }
+      }
+      for (var pass = 0; pass < 30; pass++) {
+        cols.forEach(function (row) {
+          row.forEach(function (n) {
+            var ns = nbr[n.id] || [];
+            if (!ns.length) { n.want = cx[n.id]; return; }
+            var sw = 0, sx = 0;
+            ns.forEach(function (x) { var w = x.charAt(0) === "_" ? 2 : 1; sw += w; sx += w * cx[x]; });
+            n.want = sx / sw;
+            cx[n.id] = n.dummy ? n.want : 0.5 * (cx[n.id] + n.want);
+          });
+          separate(row);
+        });
+      }
+      // close the empty vertical bands left between unconnected groups
+      var spans = [];
+      cols.forEach(function (row) {
+        row.forEach(function (n) { spans.push([cx[n.id] - slot(n) / 2, cx[n.id] + slot(n) / 2]); });
+      });
+      spans.sort(function (p, q) { return p[0] - q[0]; });
+      var cuts = [], reach = -Infinity;
+      spans.forEach(function (sp) {
+        if (reach > -Infinity && sp[0] - reach > 2 * GX) cuts.push([reach, sp[0] - reach - 2 * GX]);
+        reach = Math.max(reach, sp[1]);
+      });
+      cols.forEach(function (row) {
+        row.forEach(function (n) {
+          var x = cx[n.id], dx = 0;
+          cuts.forEach(function (c) { if (x > c[0]) dx += c[1]; });
+          cx[n.id] = x - dx;
+        });
+      });
+      var xmin = Infinity, xmax = -Infinity;
+      cols.forEach(function (row) {
+        row.forEach(function (n) {
+          xmin = Math.min(xmin, cx[n.id] - slot(n) / 2);
+          xmax = Math.max(xmax, cx[n.id] + slot(n) / 2);
+        });
+      });
+      var width = Math.max(xmax - xmin, W) + 24;
+      var height = ncol * ROWH - (ROWH - H) + 24;
       var pos = {};
-      cols.forEach(function (col, k) {
-        var x = 12 + k * (W + GX);
-        var top = 12 + (nrow - col.length) * ROW / 2;
-        col.forEach(function (n, i) {
-          pos[n.id] = {x: x, y: top + i * ROW + (ROW - H) / 2, dummy: !!n.dummy};
+      cols.forEach(function (row, k) {
+        var y = 12 + k * ROWH;
+        row.forEach(function (n) {
+          pos[n.id] = {x: 12 + cx[n.id] - slot(n) / 2 - xmin, y: y, w: slot(n), dummy: !!n.dummy};
         });
       });
 
-      var s = svg("svg", {viewBox: "0 0 " + width + " " + height, width: "100%",
+      // drawn at its natural size (never enlarged, never shrunk): the box
+      // scrolls sideways when the graph is wider than the page
+      var s = svg("svg", {viewBox: "0 0 " + width + " " + height, width: width, height: height,
                           "class": "modchart-svg", role: "img",
                           "aria-label": "Selected modules and what they need"});
       var defs = svg("defs");
       ["ok", "bad"].forEach(function (k) {
-        var mk = svg("marker", {id: "mc-arrow-" + k, viewBox: "0 0 10 10", refX: 9, refY: 5,
-                                markerWidth: 9, markerHeight: 9, markerUnits: "userSpaceOnUse",
+        var mk = svg("marker", {id: "mc-arrow-" + k, viewBox: "0 0 10 10", refX: 10, refY: 5,
+                                markerWidth: 11, markerHeight: 11, markerUnits: "userSpaceOnUse",
                                 orient: "auto"});
         mk.appendChild(svg("path", {d: "M0 0 L10 5 L0 10 z", fill: k === "ok" ? "#6b8f71" : "#c0392b"}));
         defs.appendChild(mk);
       });
       s.appendChild(defs);
 
-      // links: horizontal-tangent cubic curves through the dummy points, so
-      // they leave and enter the blocks sideways and run between them
-      chains.forEach(function (ch) {
-        // from the left side of the module to the right side of what it
-        // needs, through the centre of each dummy slot (free rows between
-        // the blocks of the columns it crosses), with horizontal tangents
-        var pts = ch.ids.map(function (id, k) {
+      // links: from the bottom of the needed module to the top of the one
+      // that needs it (the arrow shows what a module makes possible), straight
+      // down through the slots of the rows they cross. The links leave and
+      // reach a box at ports spread along its edge, in the order of the other
+      // ends, so they do not cross at the box, and end with a short vertical
+      // run so the arrow follows the line.
+      function ports(id, others) {
+        var o = others.slice().sort(function (p, q) { return p.x - q.x; });
+        var p = pos[id], m = o.length, res = {};
+        o.forEach(function (it, i) {
+          res[it.key] = p.dummy ? p.x + p.w / 2 : p.x + p.w * (0.5 + (m > 1 ? (i / (m - 1) - 0.5) * 0.6 : 0));
+        });
+        return res;
+      }
+      var topPort = {}, botPort = {};
+      chains.forEach(function (ch, c) {
+        var a = ch.ids[0], b = ch.ids[ch.ids.length - 1];
+        var na = pos[ch.ids[1]], nb = pos[ch.ids[ch.ids.length - 2]];
+        push(topPort, a, {key: c, x: nb.x + nb.w / 2});
+        push(botPort, b, {key: c, x: na.x + na.w / 2});
+      });
+      var tp = {}, bp = {};
+      Object.keys(topPort).forEach(function (id) { tp[id] = ports(id, topPort[id]); });
+      Object.keys(botPort).forEach(function (id) { bp[id] = ports(id, botPort[id]); });
+      var STUB = 10;
+      chains.forEach(function (ch, c) {
+        // from the needed module (top) to the one that needs it (bottom)
+        var ids = ch.ids.slice().reverse(), last = ids.length - 1;
+        var pts = [];
+        ids.forEach(function (id, k) {
           var p = pos[id];
-          if (p.dummy) return [p.x + W / 2, p.y + H / 2];
-          return [k === 0 ? p.x : p.x + W, p.y + H / 2];
+          if (k === 0) { var x0 = bp[id][c]; pts.push([x0, p.y + H], [x0, p.y + H + STUB]); }
+          else if (k === last) { var x1 = tp[id][c]; pts.push([x1, p.y - STUB], [x1, p.y]); }
+          else { var xd = p.x + p.w / 2; pts.push([xd, p.y], [xd, p.y + H]); }
         });
         var dpath = "M" + pts[0][0] + " " + pts[0][1];
         for (var k = 1; k < pts.length; k++) {
-          var a0 = pts[k - 1], b0 = pts[k], mx = (a0[0] + b0[0]) / 2;
-          dpath += " C" + mx + " " + a0[1] + " " + mx + " " + b0[1] + " " + b0[0] + " " + b0[1];
+          var a0 = pts[k - 1], b0 = pts[k];
+          if (k % 2 === 1) { dpath += " L" + b0[0] + " " + b0[1]; continue; }   // vertical run
+          var my = (a0[1] + b0[1]) / 2;
+          dpath += " C" + a0[0] + " " + my + " " + b0[0] + " " + my + " " + b0[0] + " " + b0[1];
         }
         var e = ch.edge, cls = "modchart-edge " + (e.ok ? "ok" : "bad") + (e.alt ? " alt" : "") +
           (e.core ? " core" : "");
@@ -405,9 +546,11 @@
         var cls = st.sel[id] ? (st.status[id] === "ok" ? "ok" : "bad") : "missing";
         var g = svg("g", {"class": "modchart-node " + cls + (id === coreId ? " core" : ""),
                           tabindex: 0, role: "button"});
-        g.appendChild(svg("rect", {x: p.x, y: p.y, width: W, height: H, rx: 7, ry: 7}));
-        var lab = (cls === "missing" ? "+ " : "") + m.label;
-        var t = svg("text", {x: p.x + W / 2, y: p.y + H / 2 + 4.5, "text-anchor": "middle"});
+        g.appendChild(svg("rect", {x: p.x, y: p.y, width: p.w, height: H, rx: 7, ry: 7}));
+        // short label in the box (no bracketed part); the full one in the tooltip
+        var lab = (cls === "missing" ? "+ " : "") + (id === coreId ? "Core: mesh, flow, rivers"
+          : m.label.replace(/\s*\([^)]*\)\s*/g, " ").trim());
+        var t = svg("text", {x: p.x + p.w / 2, y: p.y + H / 2 + 5.5, "text-anchor": "middle"});
         t.textContent = lab.length > 27 ? lab.slice(0, 26) + "…" : lab;
         var tt = svg("title");
         tt.textContent = m.label + (m.summary ? ": " + m.summary : "") +
@@ -429,7 +572,7 @@
         legend.appendChild(el("span", {"class": "modchart-key " + k[0]}));
         legend.appendChild(el("span", {text: " " + k[1] + "   "}));
       });
-      legend.appendChild(el("span", {text: "Arrows point to what a module needs; dashed: one of several options."}));
+      legend.appendChild(el("span", {text: "Arrows go down from a module to the modules that need it; dashed: one of several options."}));
       graph.appendChild(legend);
     }
 

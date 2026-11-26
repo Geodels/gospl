@@ -7,15 +7,50 @@ User Guide
 This user guide explains the different parameters available in goSPL input file.
 
 .. note::
-    For examples using goSPL, the user is invited to download the **goSPL-examples** :examples:`repository <.>` which covers some of the basic functionalities of the code: 
 
-    - data structure used in the gospl input file,
-    - how to generate initial conditions like topography, precipitation and tectonic maps to force a simulation,
-    - how to extract some of the output from the your results.
+    **Start here: which modules do I need?** Choose a regional or a global model and the
+    processes you want to simulate: the chooser shows what each one needs, the closest
+    example, the main parameters with their usual values, an estimate of the time and memory
+    of your run, and writes a skeleton input file you can download. The units, defaults and
+    usual ranges of every input key, and the meaning and units of every output field, are on
+    the two reference pages.
 
-    Those examples highlight just a small selection of functions as an illustration of principles. 
+    .. grid:: 1 1 3 3
+        :gutter: 2
 
-    For a full overview of goSPL capabilities, head to the `API reference <../api_ref/index.html>`_. 
+        .. grid-item::
+
+            .. button-ref:: module_chooser
+                :ref-type: ref
+                :color: primary
+                :expand:
+
+                Which modules do I need?
+
+        .. grid-item::
+
+            .. button-ref:: input_reference
+                :ref-type: ref
+                :color: primary
+                :outline:
+                :expand:
+
+                Input parameters: units and ranges
+
+        .. grid-item::
+
+            .. button-ref:: output_reference
+                :ref-type: ref
+                :color: primary
+                :outline:
+                :expand:
+
+                Output fields: units and ranges
+
+    Ready-to-run models, regional and global, are in the :ref:`examples gallery <examples>`
+    (from the goSPL-examples :examples:`repository <.>`): how to build the inputs (meshes,
+    rain, tectonic maps), run a model and look at the results. Every function of the code is
+    described in the :ref:`API reference <api_ref>`.
 
 
 Input file
@@ -205,63 +240,6 @@ Model outputs
 
             Learn more.
 
-Reference
-^^^^^^^^^
-
-.. grid:: 1 1 3 3
-    :gutter: 2
-
-    .. grid-item-card::
-        :text-align: center
-
-        **Which modules do I need?**
-        ^^^
-
-        Pick the processes you want: an interactive chart adds what they
-        require and flags what does not go together.
-
-        +++
-
-        .. button-ref:: module_chooser
-            :color: secondary
-            :click-parent:
-
-            Open the chooser.
-
-    .. grid-item-card::
-        :text-align: center
-
-        **Input parameters**
-        ^^^
-
-        Every input key with its unit, default, typical range and how it
-        depends on the resolution.
-
-        +++
-
-        .. button-ref:: input_reference
-            :color: secondary
-            :click-parent:
-
-            Learn more.
-
-    .. grid-item-card::
-        :text-align: center
-
-        **Output fields**
-        ^^^
-
-        Every output field with its unit, meaning, typical range and how it
-        depends on the resolution.
-
-        +++
-
-        .. button-ref:: output_reference
-            :color: secondary
-            :click-parent:
-
-            Learn more.
-
 
 Performance on HPC
 ^^^^^^^^^^^^^^^^^^^
@@ -289,6 +267,7 @@ Performance on HPC
     :maxdepth: 3
     :hidden:
 
+    reference/modules
     inputfile
     surfproc
     groundwater
@@ -296,7 +275,6 @@ Performance on HPC
     optfile2
     running
     outputs
-    reference/modules
     reference/inputs
     reference/outputs_ref
     hpc_scaling

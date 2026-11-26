@@ -226,11 +226,11 @@ html[data-theme=dark] .sd-card.gospl-grey-card .sd-card-footer {
 
 /* graph */
 .modchart-graph { margin: 1.2rem 0 0.5rem; overflow-x: auto; }
-.modchart-svg { max-width: 100%; height: auto; font-family: var(--pst-font-family-base); }
+.modchart-svg { max-width: none; font-family: var(--pst-font-family-base); display: block; margin: 0 auto; }
 .modchart-node { cursor: pointer; }
 .modchart-node.core { cursor: default; }
 .modchart-node rect { stroke-width: 2; }
-.modchart-node text { font-size: 13px; font-weight: 600; pointer-events: none; }
+.modchart-node text { font-size: 15px; font-weight: 600; pointer-events: none; }
 .modchart-node.ok rect { fill: var(--mc-ok); stroke: var(--mc-ok); }
 .modchart-node.ok text { fill: #ffffff; }
 .modchart-node.bad rect { fill: var(--mc-bad); stroke: var(--mc-bad); }
@@ -238,7 +238,7 @@ html[data-theme=dark] .sd-card.gospl-grey-card .sd-card-footer {
 .modchart-node.missing rect { fill: #fdecea; stroke: var(--mc-bad); stroke-dasharray: 5 4; }
 .modchart-node.missing text { fill: var(--mc-bad); }
 .modchart-node:hover rect, .modchart-node:focus rect { filter: brightness(1.12); }
-.modchart-edge { fill: none; stroke-width: 1.8; }
+.modchart-edge { fill: none; stroke-width: 2.2; }
 .modchart-edge.ok { stroke: #6b8f71; }
 .modchart-edge.bad { stroke: var(--mc-bad); }
 .modchart-edge.alt { stroke-dasharray: 6 4; }
@@ -346,3 +346,7 @@ html[data-theme=dark] .modchart-domain, html[data-theme=dark] .modchart-dom + .m
 .modchart-links td, .modchart-links th { padding: 0.2rem 0.5rem; border-bottom: 1px solid var(--pst-color-border); text-align: left; }
 .modchart-mesh { font-size: 0.88rem; margin: 0.2rem 0 0.6rem; padding: 0.4rem 0.7rem;
   border-left: 3px solid #2a78d6; background: var(--pst-color-background); }
+
+/* the module chooser uses the full width of the page (its graph is wide) */
+.bd-main .bd-content .bd-article-container:has(.gospl-modchart) { max-width: 100%; }
+.modchart-skel:empty { display: none; }
