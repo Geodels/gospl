@@ -46,7 +46,8 @@ goSPL documentation
         deposition on mantle convection, the location and abundance of natural
         resources, or the evolution of life.
 
-.. image:: images/global.png
+.. image:: images/gospl_figmain.jpg
+  :alt: goSPL: rivers, deltas, reefs and stratigraphy on a global mesh
   :align: center
 
 Quick links to the Doc
