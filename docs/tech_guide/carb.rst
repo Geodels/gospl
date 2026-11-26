@@ -323,13 +323,12 @@ runoff form
 
 .. math::
 
-    D = \alpha\, R\, \max\left(\frac{Q}{R A_0}, 1\right)^p f_T(T),
+    D = \alpha\, R\, \max\left(\frac{Q}{R A_0}, 1\right)^p,
 
 with :math:`\alpha = C_{eq}/\rho_r` the volume of rock dissolved per volume
 of water, :math:`R = \max(P - E, 0)` the runoff, :math:`Q` the discharge of
 the step's flow accumulation (so :math:`Q/R` is the contributing area under
-uniform rain), :math:`A_0` the reference area and :math:`f_T` an optional
-table on the sea-surface temperature field. :math:`D` is applied on
+uniform rain) and :math:`A_0` the reference area. :math:`D` is applied on
 subaerial land only, capped at ``max_dissolution`` per step, after the flow
 accumulation and before the groundwater step (whose river routing carries
 the same step's dissolved load).

@@ -580,7 +580,7 @@ lowered at
 
 .. math::
 
-    D = \alpha\, R\, \max\left(\frac{Q}{R A_0}, 1\right)^p f_T,
+    D = \alpha\, R\, \max\left(\frac{Q}{R A_0}, 1\right)^p,
 
 with :math:`R` the runoff (rain minus evaporation, m/yr), :math:`Q` the
 discharge through the cell, :math:`\alpha` the volume of rock one volume of
@@ -596,12 +596,13 @@ focusing exponent:
         focus_area: 1.e6      # m2, default the mean cell area
         cover: 0.5            # insoluble residue (m) that stops the dissolution
         max_dissolution: 5.   # cap per step (m)
-        temperature: {x: [0., 25.], f: [0.3, 1.]}  # optional, needs `sst`
         species: carbonate    # optional: into the river load of this species
         solute_per_m3: 1.     # units of solute per m3 of dissolved rock
 
 ``rate: 5.e-5`` with 1 m/yr of runoff lowers bare limestone by 50 m/Myr, the
-range of measured karst denudation (10 to 100 mm/kyr). Only the listed
+range of measured karst denudation (10 to 100 mm/kyr). The climate enters
+through the runoff and ``rate`` (warm, vegetated settings with a high soil
+CO2 dissolve more per m of water: use the upper end of the range). Only the listed
 lithologies dissolve, layer by layer from the top: the insoluble part of a
 layer stays as residue, and once the residue met from the surface exceeds
 ``cover`` the layers below are protected (a clastic cover over a platform).

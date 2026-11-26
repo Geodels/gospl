@@ -1918,13 +1918,12 @@ class ReadYaml(object):
                                      # cell area
                 cover: 0.5           # insoluble residue (m) that stops it
                 max_dissolution: 5.  # cap per step (m)
-                temperature: {x: [0., 25.], f: [0.3, 1.]}   # needs `sst:`
                 species: carbonate   # geochemistry species fed (river_load)
                 solute_per_m3: 1.    # units of solute per m3 of rock
 
         Sets ``karstOn`` and ``karst`` (dict: ``rate``, ``lit`` lithology
         indices, ``focus``, ``area`` (None: mean cell area), ``cover``,
-        ``max``, ``temp`` ((x, f) or None), ``species`` (name or None),
+        ``max``, ``species`` (name or None),
         ``solute``).
         """
         self.karstOn = False
@@ -1962,18 +1961,12 @@ class ReadYaml(object):
         area = kd.get("focus_area", None)
         if area is not None and float(area) <= 0.0:
             raise ValueError("karst: focus_area must be positive (m2).")
-        temp = None
         if kd.get("temperature", None) is not None:
-            t = kd["temperature"]
-            if not isinstance(t, dict) or "x" not in t or "f" not in t \
-                    or len(t["x"]) != len(t["f"]) or len(t["x"]) < 1 \
-                    or np.any(np.diff(np.asarray(t["x"], dtype=float)) <= 0.0):
-                raise ValueError("karst: temperature needs increasing `x` (deg C) and "
-                                 "`f` of the same length.")
-            if not getattr(self, "sstOn", False):
-                raise ValueError("karst: a temperature response needs an `sst:` block "
-                                 "(the temperature field of the model).")
-            temp = (np.asarray(t["x"], dtype=float), np.asarray(t["f"], dtype=float))
+            # Removed 2026-11-27: it read the sea-surface temperature over
+            # land; the climate regime is set by `rate` and the runoff.
+            raise ValueError("karst: the `temperature` response was removed (it read the "
+                             "sea-surface temperature on land); set the climate through "
+                             "`rate` and the runoff, and delete the key.")
         sol = float(kd.get("solute_per_m3", 1.0))
         if sol <= 0.0:
             raise ValueError("karst: solute_per_m3 must be positive.")
@@ -1984,7 +1977,6 @@ class ReadYaml(object):
             "area": None if area is None else float(area),
             "cover": float(kd.get("cover", 0.5)),
             "max": float(kd.get("max_dissolution", 5.0)),
-            "temp": temp,
             "species": None if kd.get("species", None) is None else str(kd["species"]),
             "solute": sol,
         }

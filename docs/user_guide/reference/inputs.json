@@ -1752,7 +1752,7 @@
  {
   "block": "sst",
   "path": "sst",
-  "summary": "Sea-surface temperature through time for the temperature responses (carbonate factories, pelagic rain, karst).",
+  "summary": "Sea-surface temperature through time for the temperature responses (carbonate factories, pelagic rain).",
   "keys": [
    {
     "key": "events",
@@ -2137,15 +2137,6 @@
     "notes": ""
    },
    {
-    "key": "temperature",
-    "unit": "{x: deg C, f: -}",
-    "default": "none",
-    "meaning": "Dissolution multiplier vs SST.",
-    "range": "e.g. x [0, 25], f [0.3, 1]",
-    "resolution": "none",
-    "notes": "Needs sst:."
-   },
-   {
     "key": "species",
     "unit": "text",
     "default": "none",
@@ -2168,7 +2159,7 @@
  {
   "block": "groundwater",
   "path": "groundwater",
-  "summary": "Implicit Dupuit-Boussinesq water table, with optional duricrust and Level-B solute geochemistry.",
+  "summary": "Implicit Dupuit-Boussinesq water table, with optional duricrust and solute geochemistry.",
   "keys": [
    {
     "key": "Ksat",
@@ -2486,7 +2477,7 @@
  {
   "block": "groundwater.geochem",
   "path": "groundwater.geochem",
-  "summary": "Level-B conservative multi-tracer solute geochemistry.",
+  "summary": "Conservative multi-tracer solute geochemistry.",
   "keys": [
    {
     "key": "species",

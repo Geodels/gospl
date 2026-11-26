@@ -820,7 +820,7 @@ class CarbMesh(object):
 
     def _karstRate(self):
         """Karst dissolution rate (m/yr of rock, bulk) per node,
-        ``rate * R * max(Q / (R A0), 1)^focus * f_T`` on subaerial land
+        ``rate * R * max(Q / (R A0), 1)^focus`` on subaerial land
         (not the sea, lakes or ice), ``R`` the runoff (rain minus
         evaporation) and ``Q`` the discharge of this step's
         ``flowAccumulation``. Rank-local."""
@@ -838,8 +838,6 @@ class CarbMesh(object):
             Q = np.maximum(self.FAL.getArray(), 0.0)
             ratio = np.divide(Q, R * k["area"], out=np.ones_like(Q), where=R > 0.0)
             D = D * np.maximum(ratio, 1.0) ** k["focus"]
-        if k["temp"] is not None:
-            D = D * np.interp(self._sst(), k["temp"][0], k["temp"][1])
         return np.where(land, D, 0.0)
 
     def karstDissolution(self):

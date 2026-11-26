@@ -428,11 +428,7 @@
      },
      {
       "id": "pelagic",
-      "why": "... a pelagic event `temperature` table (inputparser.py:2304) ..."
-     },
-     {
-      "id": "karst",
-      "why": "... or the karst `temperature` response (inputparser.py:1944)."
+      "why": "... or a pelagic event `temperature` table (inputparser.py:2304)."
      }
     ]
    ],

@@ -3,8 +3,8 @@
 Opt-in chemical denudation of exposed carbonate: runoff dissolves the
 carbonate lithologies of the stratigraphy, more where the flow concentrates,
 and the dissolved carbonate can join the river dissolved load of the
-groundwater geochemistry. Built on the carbonates (lithology piles,
-`sst:`, the carbonate/geochemistry link).
+groundwater geochemistry. Built on the carbonates (lithology piles, the
+carbonate/geochemistry link).
 
 ## 1. Physics
 
@@ -12,7 +12,7 @@ Dissolution of limestone is limited by the water that reaches equilibrium
 with it (White 1984; Kaufmann & Braun 2001). The denudation rate is the
 runoff times the equilibrium carbonate content per unit volume of rock:
 
-    D = alpha * R * F(A) * f_T          (m/yr of carbonate rock, bulk)
+    D = alpha * R * F(A)          (m/yr of carbonate rock, bulk)
 
 - `R = max(rain - evap, 0)` (m/yr), the local runoff;
 - `alpha` (`rate`), the dissolution coefficient: volume of rock dissolved per
@@ -24,9 +24,12 @@ runoff times the equilibrium carbonate content per unit volume of rock:
   `Q / R` its contributing area for uniform rain, `A0` a reference area
   (default the mean cell area). `p = 0` is uniform lowering (pure runoff
   control); `p > 0` concentrates the dissolution along the drainage
-  (dolines, karst valleys);
-- `f_T`, an optional response table on temperature (`temperature`, read from
-  the `sst:` field, the only temperature map of the model).
+  (dolines, karst valleys).
+
+A temperature factor `f_T` on the `sst:` field was removed on 2026-11-27: it
+read the SEA-surface temperature over land. The climate enters through the
+runoff and `alpha` (higher in warm, vegetated settings with a high soil CO2);
+a `karst: temperature` key now stops the run with a message.
 
 Only subaerial land dissolves: not the sea, not lakes (`_underLake`), not
 ice-covered cells.
@@ -65,7 +68,8 @@ load), before the erosion.
 
 ## 5. Phases
 
-- K1: runoff dissolution, lithology-selective, temperature factor; output
+- K1: runoff dissolution, lithology-selective (temperature factor removed
+  2026-11-27); output
   `karstDiss` (cumulative, float64, restart).
 - K2: focusing (`focus`, `focus_area`).
 - K3: geochemistry link (`species`, `solute_per_m3`).

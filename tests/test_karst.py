@@ -65,7 +65,7 @@ def test_karst_parse(tmp_path, monkeypatch):
         (dict(karst="karst:\n    lithologies: [chalk]\n\n"), "unknown lithologies"),
         (dict(karst="karst:\n    rate: -1.\n    lithologies: [carb]\n\n"), "positive"),
         (dict(karst="karst:\n    lithologies: [carb]\n    temperature: {x: [0.], "
-                    "f: [1.]}\n\n"), "sst"),
+                    "f: [1.]}\n\n"), "removed"),
         (dict(karst="karst:\n    lithologies: [carb]\n    species: carbonate\n\n"),
          "geochemistry"),
     ]
